@@ -37,6 +37,7 @@ pub mod encoding;
 pub mod index;
 pub mod ops;
 pub mod search;
+pub mod transform;
 
 pub use document::{Document, FileStat, Line, OpenOptions};
 pub use edit::{EditLine, EditSession, EditStats, SaveResult};
@@ -47,6 +48,9 @@ pub use ops::{
     SortOptions, SortResult, TopOptions,
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
+pub use transform::{
+    case_to_path, replace_to_path, CaseMode, CaseOptions, ReplaceOptions, TransformResult,
+};
 
 /// Errors surfaced by the engine.
 #[derive(Debug, thiserror::Error)]

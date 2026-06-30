@@ -14,13 +14,13 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 use ayame_core::{
-    DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow, OpenOptions,
-    OrderingReader, SearchOptions, SortOptions, TopOptions,
+    CaseMode, CaseOptions, DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow,
+    OpenOptions, OrderingReader, ReplaceOptions, SearchOptions, SortOptions, TopOptions,
 };
 use serde::Serialize;
 
 const HELP: &str = "\
-ayame — view, search and navigate text files of any size
+ayame — edit, transform, search and navigate text files of any size
 
 USAGE:
     ayame <COMMAND> [OPTIONS]
@@ -34,6 +34,9 @@ COMMANDS:
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, -w whole-word, --max N
     diff   <OLD> <NEW>            Line diff with bounded resync windows
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
+    sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
+    replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
+    case   <FILE> <upper|lower>   Streaming ASCII case conversion (--out FILE)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
@@ -58,6 +61,11 @@ FIELD OPTIONS (sort/group/top/distinct):
     --quote <C>        Quote char for --csv (default '\"')
     --numeric          Treat the key as a number (sort/top; sort also accepts -n)
 
+TRANSFORM OPTIONS:
+    --out <FILE>       Output file for sort/replace/case
+    -i, --ignore-case  Case-insensitive replace
+    -e, --regex        Regex replace pattern
+
 GROUP OPTIONS:
     --value <COL>      Numeric value column for sum/min/max/avg
     --out-groups <FILE>
@@ -79,6 +87,9 @@ EXAMPLES:
     ayame stat huge.csv
     ayame gen huge.csv --lines 100000000
     ayame search huge.log 'ERROR' -i --max 50
+    ayame replace huge.log ERROR WARN --out fixed.log
+    ayame case huge.csv lower --out lower.csv
+    ayame sortdiff old.csv new.csv -k 1 --summary
     ayame serve huge.csv --port 8777
 ";
 
@@ -120,6 +131,9 @@ fn run(args: Vec<String>) -> Result<()> {
         "search" => cmd_search(rest),
         "diff" => cmd_diff(rest),
         "sort" => cmd_sort(rest),
+        "sortdiff" | "sort-diff" => cmd_sortdiff(rest),
+        "replace" => cmd_replace(rest),
+        "case" => cmd_case(rest),
         "group" => cmd_group(rest),
         "top" => cmd_top(rest),
         "distinct" => cmd_distinct(rest),
@@ -302,6 +316,7 @@ fn cmd_sort(args: &[String]) -> Result<()> {
             "--quote",
             "--budget",
             "--out-order",
+            "--out",
             "--spill-dir",
         ],
     )?;
@@ -342,6 +357,10 @@ fn cmd_sort(args: &[String]) -> Result<()> {
             "ordering ({} u64 line numbers) -> {outp}",
             commas(res.line_count)
         );
+    } else if let Some(outp) = first_opt(&opts, &["--out"]) {
+        write_sorted_text(&doc, &res.ordering_path, Path::new(outp))
+            .with_context(|| format!("writing sorted output to '{outp}'"))?;
+        eprintln!("sorted text -> {outp}");
     } else {
         let stdout = std::io::stdout();
         let mut w = std::io::BufWriter::new(stdout.lock());
@@ -359,6 +378,193 @@ fn cmd_sort(args: &[String]) -> Result<()> {
     if custom_spill.is_none() {
         let _ = std::fs::remove_dir_all(&spill_dir);
     }
+    Ok(())
+}
+
+fn write_sorted_text(doc: &Document, ordering_path: &Path, out_path: &Path) -> Result<()> {
+    if out_path.exists() {
+        bail!(
+            "'{}' already exists; choose another output path",
+            out_path.display()
+        );
+    }
+    if let Some(parent) = out_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let tmp = temp_sibling_with_label(out_path, "sort");
+    let file =
+        std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+    let mut w = BufWriter::new(file);
+    write_ordered_lines_utf8(doc, ordering_path, &mut w)?;
+    w.flush()?;
+    drop(w);
+    std::fs::rename(&tmp, out_path)
+        .or_else(|_| std::fs::copy(&tmp, out_path).map(|_| ()))
+        .with_context(|| format!("writing {}", out_path.display()))?;
+    let _ = std::fs::remove_file(&tmp);
+    Ok(())
+}
+
+fn write_ordered_lines_utf8<W: Write>(
+    doc: &Document,
+    ordering_path: &Path,
+    w: &mut W,
+) -> Result<()> {
+    let mut rd = OrderingReader::open(ordering_path)?;
+    while let Some(ln) = rd.next_line()? {
+        if let Some(text) = doc.line(ln) {
+            writeln!(w, "{text}")?;
+        }
+    }
+    Ok(())
+}
+
+fn cmd_sortdiff(args: &[String]) -> Result<()> {
+    maybe_crash();
+    let (pos, opts, flags) = parse(
+        args,
+        &[
+            "--encoding",
+            "--stride",
+            "--cache-dir",
+            "--key",
+            "-k",
+            "--delim",
+            "-t",
+            "--quote",
+            "--budget",
+            "--spill-dir",
+            "--max-hunks",
+            "--max-lines",
+            "--window",
+        ],
+    );
+    let old_path = pos.first().context("expected OLD file")?;
+    let new_path = pos.get(1).context("expected NEW file")?;
+    let open = open_opts(&opts, &flags)?;
+    let old = Document::open(old_path, &open).with_context(|| format!("opening '{old_path}'"))?;
+    let new = Document::open(new_path, &open).with_context(|| format!("opening '{new_path}'"))?;
+    let max_hunks: usize = first_opt(&opts, &["--max-hunks"])
+        .unwrap_or("200")
+        .parse()
+        .context("--max-hunks must be a number")?;
+    let max_lines: u64 = first_opt(&opts, &["--max-lines"])
+        .unwrap_or("200")
+        .parse()
+        .context("--max-lines must be a number")?;
+    let window: u64 = first_opt(&opts, &["--window"])
+        .unwrap_or("128")
+        .parse()
+        .context("--window must be a number")?;
+
+    let root = first_opt(&opts, &["--spill-dir"])
+        .map(PathBuf::from)
+        .unwrap_or_else(|| temp_work_dir("sortdiff"));
+    let result = (|| -> Result<()> {
+        std::fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
+        let old_sorted = root.join("old.sorted.txt");
+        let new_sorted = root.join("new.sorted.txt");
+        sort_document_to_utf8_file(&old, &opts, &flags, root.join("old-spill"), &old_sorted)
+            .context("sorting OLD")?;
+        sort_document_to_utf8_file(&new, &opts, &flags, root.join("new-spill"), &new_sorted)
+            .context("sorting NEW")?;
+
+        let sorted_open = OpenOptions {
+            encoding: Some(Encoding::Utf8),
+            ..OpenOptions::default()
+        };
+        let old_doc = Document::open(&old_sorted, &sorted_open)
+            .with_context(|| format!("opening {}", old_sorted.display()))?;
+        let new_doc = Document::open(&new_sorted, &sorted_open)
+            .with_context(|| format!("opening {}", new_sorted.display()))?;
+        let result = diff_documents(&old_doc, &new_doc, max_hunks, window.max(1));
+        if has_flag(&flags, &["--json"]) {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
+        if has_flag(&flags, &["--summary"]) {
+            print_diff_summary(&result);
+            return Ok(());
+        }
+        for h in &result.hunks {
+            print_diff_hunk(&old_doc, &new_doc, h, max_lines)?;
+        }
+        print_diff_summary(&result);
+        Ok(())
+    })();
+    let _ = std::fs::remove_dir_all(&root);
+    result
+}
+
+fn sort_document_to_utf8_file(
+    doc: &Document,
+    opts: &HashMap<String, String>,
+    flags: &HashSet<String>,
+    spill_dir: PathBuf,
+    out_path: &Path,
+) -> Result<()> {
+    let budget_bytes = match first_opt(opts, &["--budget"]) {
+        Some(s) => parse_size(s)?,
+        None => 256 * 1024 * 1024,
+    };
+    let sopts = SortOptions {
+        key_column: parse_key(opts)?,
+        fields: field_spec(opts, flags),
+        numeric: has_flag(flags, &["--numeric", "-n"]),
+        reverse: has_flag(flags, &["--reverse", "-r"]),
+        budget_bytes,
+        spill_dir: spill_dir.clone(),
+    };
+    let res = ayame_core::ops::sort(doc, &sopts)?;
+    write_sorted_text(doc, &res.ordering_path, out_path)?;
+    let _ = std::fs::remove_dir_all(spill_dir);
+    Ok(())
+}
+
+fn cmd_replace(args: &[String]) -> Result<()> {
+    maybe_crash();
+    let (doc, pos, opts, flags) = open_doc(args, &["--out"])?;
+    let find = pos.get(1).context("expected FIND pattern")?.clone();
+    let replacement = pos.get(2).context("expected REPLACEMENT text")?.clone();
+    let out = first_opt(&opts, &["--out"]).context("replace requires --out <FILE>")?;
+    let res = ayame_core::replace_to_path(
+        &doc,
+        out,
+        &ReplaceOptions {
+            find,
+            replacement,
+            regex: has_flag(&flags, &["-e", "--regex"]),
+            case_sensitive: !has_flag(&flags, &["-i", "--ignore-case"]),
+        },
+    )?;
+    eprintln!(
+        "{} replacement(s), {} changed line(s), {} -> {}",
+        commas(res.replacements),
+        commas(res.changed_lines),
+        human_bytes(res.bytes),
+        res.path.display()
+    );
+    Ok(())
+}
+
+fn cmd_case(args: &[String]) -> Result<()> {
+    maybe_crash();
+    let (doc, pos, opts, _flags) = open_doc(args, &["--out"])?;
+    let mode = match pos.get(1).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("upper" | "uppercase" | "up") => CaseMode::Upper,
+        Some("lower" | "lowercase" | "down") => CaseMode::Lower,
+        Some(other) => bail!("unknown case mode '{other}' (expected upper|lower)"),
+        None => bail!("expected case mode upper|lower"),
+    };
+    let out = first_opt(&opts, &["--out"]).context("case requires --out <FILE>")?;
+    let res = ayame_core::case_to_path(&doc, out, &CaseOptions { mode })?;
+    eprintln!(
+        "{} changed line(s), {} -> {}",
+        commas(res.changed_lines),
+        human_bytes(res.bytes),
+        res.path.display()
+    );
     Ok(())
 }
 
@@ -478,13 +684,25 @@ fn write_group_artifact(
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
+    temp_sibling_with_label(path, "groups")
+}
+
+fn temp_sibling_with_label(path: &Path, label: &str) -> PathBuf {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy())
-        .unwrap_or_else(|| "groups.tsv".into());
+        .unwrap_or_else(|| label.into());
     let mut tmp = path.to_path_buf();
-    tmp.set_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    tmp.set_file_name(format!(".{name}.{label}.{}.tmp", std::process::id()));
     tmp
+}
+
+fn temp_work_dir(kind: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("ayame-{kind}-{}-{nanos}", std::process::id()))
 }
 
 fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std::io::Result<()> {

@@ -246,6 +246,31 @@ impl Document {
             .collect()
     }
 
+    /// Raw line text and original terminator bytes for up to `count` lines.
+    ///
+    /// Returned as `(line_number, text_bytes, terminator_bytes)`. The text slice
+    /// excludes LF and the CR in CRLF; the terminator slice is exactly the bytes
+    /// that appeared in the file for that line. This is the hot path for
+    /// streaming transforms that must preserve original line endings.
+    pub fn raw_line_ranges_with_terminator(
+        &self,
+        start: u64,
+        count: u64,
+    ) -> Vec<(u64, &[u8], &[u8])> {
+        let buf = self.buf();
+        self.index
+            .line_ranges_with_terminator(buf, start, count)
+            .into_iter()
+            .map(|(n, s, text_end, raw_end)| {
+                (
+                    n,
+                    &buf[s as usize..text_end as usize],
+                    &buf[text_end as usize..raw_end as usize],
+                )
+            })
+            .collect()
+    }
+
     /// Raw bytes of line `i`, including its original line terminator if present.
     pub fn raw_line_with_terminator(&self, i: u64) -> Option<&[u8]> {
         let buf = self.buf();

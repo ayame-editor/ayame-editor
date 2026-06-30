@@ -120,6 +120,9 @@ async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
         .route("/api/edit/delete", post(api_edit_delete))
         .route("/api/edit/save", post(api_edit_save))
         .route("/api/edit/revert", post(api_edit_revert))
+        .route("/api/sort/save", post(api_sort_save))
+        .route("/api/replace/save", post(api_replace_save))
+        .route("/api/case/save", post(api_case_save))
         .route("/api/search", get(api_search))
         .route("/api/find", get(api_find))
         .route("/api/linebyte", get(api_linebyte))
@@ -282,6 +285,13 @@ struct EditSaveRequest {
     path: Option<String>,
 }
 
+#[derive(Serialize)]
+struct ArtifactResponse {
+    path: PathBuf,
+    bytes: u64,
+    lines: u64,
+}
+
 async fn api_edit_save(
     State(state): State<SharedState>,
     Json(req): Json<EditSaveRequest>,
@@ -307,6 +317,115 @@ async fn api_edit_revert(State(state): State<SharedState>) -> Json<EditStats> {
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.clear();
     Json(edits.stats(&doc))
+}
+
+#[derive(Deserialize)]
+struct SortSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    key: Option<usize>,
+    #[serde(default)]
+    numeric: bool,
+    #[serde(default)]
+    reverse: bool,
+    #[serde(default)]
+    delim: Option<String>,
+}
+
+async fn api_sort_save(
+    State(state): State<SharedState>,
+    Json(req): Json<SortSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let doc = state.doc();
+    let target = requested_or_default(doc.path(), req.path.as_deref(), "sorted");
+    let exe = std::env::current_exe().map_err(internal)?;
+    let dir = spawn_dir("sort-save");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("sort").arg(doc.path()).arg("--out").arg(&target);
+    if let Some(k) = req.key {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if req.numeric {
+        cmd.arg("--numeric");
+    }
+    if req.reverse {
+        cmd.arg("--reverse");
+    }
+    if let Some(d) = req.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    cmd.arg("--spill-dir").arg(&dir);
+    let res = run_artifact_worker("sort", &mut cmd, &target, doc.line_count()).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    res.map(Json)
+}
+
+#[derive(Deserialize)]
+struct ReplaceSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    find: String,
+    replacement: String,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+}
+
+async fn api_replace_save(
+    State(state): State<SharedState>,
+    Json(req): Json<ReplaceSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let doc = state.doc();
+    let target = requested_or_default(doc.path(), req.path.as_deref(), "replaced");
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("replace")
+        .arg(doc.path())
+        .arg(req.find)
+        .arg(req.replacement)
+        .arg("--out")
+        .arg(&target);
+    if req.regex {
+        cmd.arg("--regex");
+    }
+    if req.ci {
+        cmd.arg("--ignore-case");
+    }
+    run_artifact_worker("replace", &mut cmd, &target, doc.line_count())
+        .await
+        .map(Json)
+}
+
+#[derive(Deserialize)]
+struct CaseSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    mode: String,
+}
+
+async fn api_case_save(
+    State(state): State<SharedState>,
+    Json(req): Json<CaseSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let doc = state.doc();
+    let mode = req.mode.trim().to_ascii_lowercase();
+    if !matches!(mode.as_str(), "upper" | "lower") {
+        return Err(bad_request("mode must be upper or lower"));
+    }
+    let target = requested_or_default(doc.path(), req.path.as_deref(), &mode);
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("case")
+        .arg(doc.path())
+        .arg(mode)
+        .arg("--out")
+        .arg(&target);
+    run_artifact_worker("case", &mut cmd, &target, doc.line_count())
+        .await
+        .map(Json)
 }
 
 #[derive(Deserialize)]
@@ -407,17 +526,34 @@ fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
 }
 
 fn default_save_copy_path(path: &Path) -> PathBuf {
-    let base = PathBuf::from(format!("{}.edited", path.display()));
+    default_suffix_path(path, "edited")
+}
+
+fn requested_or_default(path: &Path, requested: Option<&str>, suffix: &str) -> PathBuf {
+    requested
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_suffix_path(path, suffix))
+}
+
+fn default_suffix_path(path: &Path, suffix: &str) -> PathBuf {
+    let base = PathBuf::from(format!("{}.{}", path.display(), suffix));
     if !base.exists() {
         return base;
     }
     for n in 1..1000 {
-        let p = PathBuf::from(format!("{}.edited.{n}", path.display()));
+        let p = PathBuf::from(format!("{}.{}.{n}", path.display(), suffix));
         if !p.exists() {
             return p;
         }
     }
-    PathBuf::from(format!("{}.edited.{}", path.display(), std::process::id()))
+    PathBuf::from(format!(
+        "{}.{}.{}",
+        path.display(),
+        suffix,
+        std::process::id()
+    ))
 }
 
 // ---- isolated op workers (sort / group) -------------------------------------
@@ -428,6 +564,7 @@ fn default_save_copy_path(path: &Path) -> PathBuf {
 // boundary is the real "designed to crash" guarantee.
 
 static REQ_SEQ: AtomicU64 = AtomicU64::new(0);
+const ARTIFACT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn internal(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
@@ -436,6 +573,33 @@ fn internal(e: impl std::fmt::Display) -> (StatusCode, String) {
 fn spawn_dir(kind: &str) -> std::path::PathBuf {
     let n = REQ_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
     std::env::temp_dir().join(format!("ayame-srv-{kind}-{}-{}", std::process::id(), n))
+}
+
+async fn run_artifact_worker(
+    kind: &str,
+    cmd: &mut Command,
+    target: &Path,
+    lines: u64,
+) -> Result<ArtifactResponse, (StatusCode, String)> {
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let status = wait_worker_for(kind, cmd, ARTIFACT_TIMEOUT).await?;
+    if !status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "{kind} worker {} — the engine is unaffected",
+                describe_status(status)
+            ),
+        ));
+    }
+    let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
+    Ok(ArtifactResponse {
+        path: target.to_path_buf(),
+        bytes,
+        lines,
+    })
 }
 
 fn describe_status(s: std::process::ExitStatus) -> String {
@@ -615,8 +779,16 @@ async fn wait_worker(
     kind: &str,
     cmd: &mut Command,
 ) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+    wait_worker_for(kind, cmd, WORKER_TIMEOUT).await
+}
+
+async fn wait_worker_for(
+    kind: &str,
+    cmd: &mut Command,
+    timeout_after: Duration,
+) -> Result<std::process::ExitStatus, (StatusCode, String)> {
     let mut child = cmd.spawn().map_err(internal)?;
-    match timeout(WORKER_TIMEOUT, child.wait()).await {
+    match timeout(timeout_after, child.wait()).await {
         Ok(waited) => waited.map_err(internal),
         Err(_) => {
             let _ = child.kill().await;
@@ -624,7 +796,7 @@ async fn wait_worker(
                 StatusCode::GATEWAY_TIMEOUT,
                 format!(
                     "{kind} worker timed out after {}s — the engine is unaffected",
-                    WORKER_TIMEOUT.as_secs()
+                    timeout_after.as_secs()
                 ),
             ))
         }

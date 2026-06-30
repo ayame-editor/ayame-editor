@@ -575,6 +575,65 @@ async function revertEdits() {
   render();
 }
 
+async function sortSave() {
+  const base = state.stat?.path || "ayame";
+  const path = prompt("ソート保存先パス", `${base}.sorted`);
+  if (path == null) return;
+  const keyText = prompt("キー列 (空なら行全体)", "");
+  if (keyText == null) return;
+  const key = keyText.trim() === "" ? null : Number(keyText.trim());
+  if (keyText.trim() !== "" && (!Number.isInteger(key) || key < 1)) {
+    flashCount("キー列エラー");
+    return;
+  }
+  const numeric = confirm("数値ソートにしますか?");
+  const reverse = confirm("降順にしますか?");
+  try {
+    const res = await apiPost("/api/sort/save", { path, key, numeric, reverse });
+    flashCount(`ソート保存: ${res.path}`);
+  } catch (e) {
+    flashCount("ソートエラー");
+    alert(e.message);
+  }
+}
+
+async function replaceSave() {
+  const base = state.stat?.path || "ayame";
+  const find = prompt("置換前", $("find").value || state.query || "");
+  if (find == null || find === "") return;
+  const replacement = prompt("置換後", "");
+  if (replacement == null) return;
+  const path = prompt("置換保存先パス", `${base}.replaced`);
+  if (path == null) return;
+  try {
+    const res = await apiPost("/api/replace/save", {
+      path,
+      find,
+      replacement,
+      regex: state.regex,
+      ci: state.ci,
+    });
+    flashCount(`置換保存: ${res.path}`);
+  } catch (e) {
+    flashCount("置換エラー");
+    alert(e.message);
+  }
+}
+
+async function caseSave(mode) {
+  const base = state.stat?.path || "ayame";
+  const suffix = mode === "upper" ? "upper" : "lower";
+  const path = prompt(`${mode === "upper" ? "大文字" : "小文字"}保存先パス`, `${base}.${suffix}`);
+  if (path == null) return;
+  try {
+    const res = await apiPost("/api/case/save", { path, mode });
+    flashCount(`保存: ${res.path}`);
+  } catch (e) {
+    flashCount("変換エラー");
+    alert(e.message);
+  }
+}
+
 // ---- input wiring ----------------------------------------------------------
 
 function setQueryFromInput() {
@@ -643,6 +702,10 @@ function initEvents() {
   $("insert-line").addEventListener("click", insertLineBelow);
   $("delete-line").addEventListener("click", deleteActiveLine);
   $("revert-edit").addEventListener("click", revertEdits);
+  $("sort-save").addEventListener("click", sortSave);
+  $("replace-save").addEventListener("click", replaceSave);
+  $("upper-save").addEventListener("click", () => caseSave("upper"));
+  $("lower-save").addEventListener("click", () => caseSave("lower"));
 
   document.addEventListener("keydown", onGlobalKey);
   window.addEventListener("resize", scheduleRender);

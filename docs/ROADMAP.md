@@ -5,10 +5,11 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ。ユニットテスト34件。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。ユニットテスト37件。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
 - `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
 - `ayame serve`: 行単位編集（置換/挿入/削除）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
+- `ayame sort --out`、`sortdiff`、`replace --out`、`case upper|lower --out`。Web エディタからもソート/置換/ケース変換を別ファイル保存。
 - ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
 
 ## 🎯 v1 最小増分（次の4ステップ）
@@ -53,5 +54,5 @@
 
 ## 🚧 意図的に「やらない／後回し」
 
-- **巨大ファイル編集の高度化**。初期の行単位差分編集は実装済み。次は上書き保存、undo/redo、範囲選択、矩形選択、grep置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
+- **巨大ファイル編集の高度化**。初期の行単位差分編集、別ファイルへの全体置換/ケース変換は実装済み。次は上書き保存、undo/redo、範囲選択、矩形選択、選択範囲置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
 - v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

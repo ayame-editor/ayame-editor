@@ -247,6 +247,49 @@ impl LineIndex {
         out
     }
 
+    /// Byte ranges for up to `count` consecutive lines starting at `start`:
+    /// `(line, text_start, text_end, raw_end)`.
+    ///
+    /// This is the streaming counterpart of [`line_range_with_terminator`].
+    /// It resolves the first line once, then walks forward with `memchr`, which
+    /// keeps whole-file transforms and replace/save operations linear.
+    pub fn line_ranges_with_terminator(
+        &self,
+        buf: &[u8],
+        start: u64,
+        count: u64,
+    ) -> Vec<(u64, u64, u64, u64)> {
+        let mut out = Vec::new();
+        if start >= self.line_count || count == 0 {
+            return out;
+        }
+        let (mut off, _text_end, _raw_end) = match self.line_range_with_terminator(buf, start) {
+            Some(r) => r,
+            None => return out,
+        };
+        let end_limit = self.len;
+        let last = (start + count).min(self.line_count);
+        let mut line = start;
+        while line < last {
+            let raw_end = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
+                Some(rel) => off + rel as u64 + 1,
+                None => end_limit,
+            };
+            let mut text_end = if raw_end > off && buf[(raw_end - 1) as usize] == b'\n' {
+                raw_end - 1
+            } else {
+                raw_end
+            };
+            if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
+                text_end -= 1;
+            }
+            out.push((line, off, text_end, raw_end));
+            off = raw_end;
+            line += 1;
+        }
+        out
+    }
+
     /// Global line number containing byte offset `b` (clamped into content).
     pub fn line_of_byte(&self, buf: &[u8], b: u64) -> u64 {
         let b = b.clamp(self.base, self.len);

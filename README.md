@@ -24,7 +24,10 @@ ayame gen sample.csv --lines 200000
 ayame stat sample.csv                       # サイズ・行数・エンコーディング・改行・索引
 ayame search sample.csv 'error' -i          # 大小無視で検索
 ayame diff old.txt new.txt                  # 差分
-ayame sort sample.csv -k 5 -n -r | head     # 5列目を数値・降順で並べ替え
+ayame sort sample.csv -k 5 -n -r --out sorted.csv  # 5列目を数値・降順で並べ替え
+ayame sortdiff old.csv new.csv -k 1 --summary      # 並び順を無視して比較
+ayame replace sample.csv ERROR WARN --out fixed.csv
+ayame case sample.csv lower --out lower.csv
 ayame group sample.csv -k 4                 # 4列目（status）ごとに件数
 ayame serve sample.csv --port 8777          # 表示された URL をブラウザで開く
 ```
@@ -41,6 +44,9 @@ ayame serve sample.csv --port 8777          # 表示された URL をブラウ�
 | `search <FILE> <PATTERN>` | 検索（`-i` 大小無視, `-e` 正規表現, `--max N`, `--json`） |
 | `diff   <OLD> <NEW>` | 行単位 diff（`--summary`, `--json`, `--max-hunks N`） |
 | `sort   <FILE>` | 外部マージソート（メモリ予算＋ディスク spill） |
+| `sortdiff <OLD> <NEW>` | 同じ条件で両方をソートしてから比較 |
+| `replace <FILE> <FIND> <REPL>` | ストリーミング置換（`--out`, `-i`, `-e`） |
+| `case   <FILE> <upper\|lower>` | エンコーディング安全な ASCII ケース変換（`--out`） |
 | `group  <FILE> -k COL` | グループ集計（件数、`--value` で sum/min/max/avg） |
 | `top    <FILE> -k COL -n N` | 上位 N 行（`--min` で下位） |
 | `distinct <FILE> -k COL` | 近似ユニーク数（HyperLogLog） |
@@ -77,7 +83,9 @@ RAM を超える行数も、メモリ予算を超えた分だけディスクへ�
 
 ```sh
 ayame sort sample.csv -k 5 -n -r | head                 # 5列目を数値・降順
+ayame sort sample.csv -k 5 -n -r --out sorted.csv
 ayame sort huge.csv  -k 1 --budget 64MiB --out-order order.bin
+ayame sortdiff old.csv new.csv -k 1 --numeric --summary
 ```
 
 | オプション | 既定 | 説明 |
@@ -86,7 +94,21 @@ ayame sort huge.csv  -k 1 --budget 64MiB --out-order order.bin
 | `-r, --reverse` | off | 降順 |
 | `--budget <SIZE>` | `256MiB` | メモリ上限（`K`/`M`/`G` 可）。超過分は spill |
 | `--out-order <FILE>` | — | 行番号の順列を書き出し（巨大結果向け） |
+| `--out <FILE>` | — | ソート済みテキストを書き出し |
 | `--spill-dir <DIR>` | 一時 | spill 先ディレクトリ |
+
+### 置換・ケース変換
+
+```sh
+ayame replace huge.log ERROR WARN --out fixed.log       # literal は高速 byte path
+ayame replace huge.log 'error\\d+' WARN -e --out fixed.log
+ayame replace huge.log error WARN -i --out fixed.log
+ayame case huge.csv upper --out upper.csv
+ayame case sjis.csv lower --out lower.csv
+```
+
+`replace` / `case` は元ファイルを変更せず、新しいファイルへストリーミング保存します。
+通常の UTF-8/ASCII literal 置換は raw byte fast path、Shift_JIS では文字境界を壊さない安全経路を使います。
 
 ### 集計（group / top / distinct）
 
@@ -137,6 +159,7 @@ ayame serve huge.csv --port 8777            # http://127.0.0.1:8777 を開く
 | 行編集 | `Enter` / `F2` / ダブルクリック |
 | 行挿入 / 行削除 | `Insert` / `Delete` |
 | 編集内容を別ファイルへ保存 | `Ctrl+S` |
+| ソート / 置換 / 大文字小文字変換を別ファイルへ保存 | ツールバー |
 | 大小無視 / 正規表現の切替 | `Alt+C` / `Alt+R` |
 | 先頭 / 末尾へ | `Ctrl+Home` / `Ctrl+End` |
 | ページ送り | `PageUp` / `PageDown` / `Space` |
