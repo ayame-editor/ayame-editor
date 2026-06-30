@@ -3,8 +3,9 @@
 // Design rule: the browser never holds more than the visible window. Lines are
 // fetched on demand from the local server; vertical position is tracked as a
 // *line number* (not pixels), so navigation is exact for any file size — ten
-// lines or ten billion. A custom scrollbar maps line position to a thumb, side-
-// stepping the browser's ~33M-pixel element-height ceiling entirely.
+// lines or Ayame's minimum ten-billion-line scale. A custom scrollbar maps line
+// position to a thumb, side-stepping the browser's ~33M-pixel element-height
+// ceiling entirely.
 
 const $ = (id) => document.getElementById(id);
 const LINE_HEIGHT = 18;

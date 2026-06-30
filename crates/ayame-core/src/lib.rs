@@ -2,8 +2,8 @@
 //!
 //! The engine behind **Ayame**, an editor for text files that are too big to
 //! open anywhere else — log dumps, CSV/TSV/JSONL exports, data-migration
-//! artifacts measured in tens or hundreds of gigabytes, up to the project's
-//! north-star target of *ten billion lines*.
+//! artifacts measured in tens or hundreds of gigabytes. The minimum design
+//! contract is *ten billion lines*.
 //!
 //! ## Why this exists
 //!
@@ -42,7 +42,7 @@ pub mod transform;
 pub use document::{Document, FileStat, Line, OpenOptions};
 pub use edit::{EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
-pub use index::{LineIndex, DEFAULT_STRIDE};
+pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
 pub use ops::{
     DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats, OrderingReader,
     SortOptions, SortResult, TopOptions,

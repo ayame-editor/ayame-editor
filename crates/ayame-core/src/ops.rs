@@ -7,8 +7,8 @@
 //!
 //! Sorting produces an **ordering**: a file of `u64` line numbers in sorted
 //! order. The editor can page through that ordering via the existing sparse
-//! fetch path, so a sorted view of ten billion lines never materializes the
-//! lines themselves — only their order.
+//! fetch path, so a sorted view at Ayame's minimum ten-billion-line scale never
+//! materializes the lines themselves — only their order.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

@@ -14,7 +14,7 @@ scripts/crash-isolation-test.sh
 
 ```sh
 scripts/release-local.sh
-./dist/ayame-v0.1.2-$(rustc -Vv | awk '/^host:/ { print $2 }') --version
+./dist/ayame-v0.1.3-$(rustc -Vv | awk '/^host:/ { print $2 }') --version
 ```
 
 The binary embeds the web assets used by `ayame serve`; no `web/` directory is
@@ -23,8 +23,8 @@ needed next to the executable.
 ## GitHub Release
 
 ```sh
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 The release workflow uploads:

@@ -22,6 +22,13 @@ use rayon::prelude::*;
 /// Default number of lines between checkpoints.
 pub const DEFAULT_STRIDE: u64 = 4096;
 
+/// Non-negotiable minimum capacity target: Ayame must be designed around at
+/// least ten billion logical lines, not merely "large files".
+pub const MINIMUM_SUPPORTED_LINES: u64 = 10_000_000_000;
+
+/// Resident bytes for one sparse checkpoint (`line: u64`, `off: u64`).
+pub const CHECKPOINT_BYTES: u64 = 16;
+
 /// Minimum bytes per parallel scan chunk (keeps thread overhead amortized).
 const MIN_CHUNK: u64 = 16 * 1024 * 1024;
 
@@ -136,6 +143,21 @@ impl LineIndex {
     #[inline]
     pub fn memory_bytes(&self) -> usize {
         self.checkpoints.capacity() * std::mem::size_of::<Checkpoint>()
+    }
+
+    /// Number of checkpoints required for `line_count` lines at `stride`.
+    pub const fn checkpoint_count_for_lines(line_count: u64, stride: u64) -> u64 {
+        if line_count == 0 {
+            0
+        } else {
+            let stride = if stride == 0 { 1 } else { stride };
+            ((line_count - 1) / stride) + 1
+        }
+    }
+
+    /// Resident index bytes required for `line_count` lines at `stride`.
+    pub const fn memory_bytes_for_lines(line_count: u64, stride: u64) -> u64 {
+        Self::checkpoint_count_for_lines(line_count, stride) * CHECKPOINT_BYTES
     }
 
     /// Byte range `[start, end)` of line `i`, excluding the line terminator.
@@ -470,6 +492,23 @@ mod tests {
             let idx = LineIndex::build(buf, 0, 4096);
             assert_eq!(idx.line_count(), *want, "buf={:?}", buf);
         }
+    }
+
+    #[test]
+    fn minimum_capacity_is_ten_billion_lines() {
+        assert_eq!(MINIMUM_SUPPORTED_LINES, 10_000_000_000);
+        assert_eq!(
+            LineIndex::checkpoint_count_for_lines(MINIMUM_SUPPORTED_LINES, DEFAULT_STRIDE),
+            2_441_407
+        );
+        assert_eq!(
+            LineIndex::memory_bytes_for_lines(MINIMUM_SUPPORTED_LINES, DEFAULT_STRIDE),
+            39_062_512
+        );
+        assert!(
+            LineIndex::memory_bytes_for_lines(MINIMUM_SUPPORTED_LINES, DEFAULT_STRIDE)
+                < 40 * 1024 * 1024
+        );
     }
 
     #[test]
