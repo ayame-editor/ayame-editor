@@ -92,6 +92,8 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .route("/api/linebyte", get(api_linebyte))
         .route("/api/sort", get(api_sort))
         .route("/api/group", get(api_group))
+        .route("/api/top", get(api_top))
+        .route("/api/distinct", get(api_distinct))
         .layer(CatchPanicLayer::new())
         .with_state(doc);
 
@@ -368,13 +370,7 @@ async fn run_sort_worker(
     let mut buf = vec![0u8; want];
     let mut f = tokio::fs::File::open(order).await.map_err(internal)?;
     f.read_exact(&mut buf).await.map_err(internal)?;
-    let lines = buf
-        .chunks_exact(8)
-        .filter_map(|c| {
-            let ln = u64::from_le_bytes(c.try_into().unwrap());
-            doc.line(ln).map(|text| Line { number: ln, text })
-        })
-        .collect();
+    let lines = lines_from_ordering_prefix(doc, &buf);
     Ok(Json(SortResponse {
         total,
         lines,
@@ -492,5 +488,168 @@ async fn read_group_preview(
 fn trim_line_end(s: &mut String) {
     while matches!(s.as_bytes().last(), Some(b'\n' | b'\r')) {
         s.pop();
+    }
+}
+
+#[derive(Deserialize)]
+struct TopQuery {
+    #[serde(default)]
+    k: Option<usize>,
+    #[serde(default)]
+    numeric: bool,
+    #[serde(default)]
+    min: bool,
+    #[serde(default)]
+    delim: Option<String>,
+    #[serde(default = "top_limit")]
+    n: usize,
+}
+fn top_limit() -> usize {
+    10
+}
+
+#[derive(Serialize)]
+struct TopResponse {
+    lines: Vec<Line>,
+}
+
+async fn api_top(
+    State(doc): State<Shared>,
+    Query(q): Query<TopQuery>,
+) -> Result<Json<TopResponse>, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    let dir = spawn_dir("top");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let order = dir.join("top.bin");
+    let n = q.n.min(10_000);
+
+    let mut cmd = Command::new(&exe);
+    cmd.arg("top").arg(doc.path()).arg("-n").arg(n.to_string());
+    if let Some(k) = q.k {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if q.numeric {
+        cmd.arg("--numeric");
+    }
+    if q.min {
+        cmd.arg("--min");
+    }
+    if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    cmd.arg("--out-order").arg(&order);
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let result = match wait_worker("top", &mut cmd).await {
+        Ok(status) if status.success() => read_top_ordering(doc.as_ref(), &order, n as u64).await,
+        Ok(status) => Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "top worker {} — the engine is unaffected",
+                describe_status(status)
+            ),
+        )),
+        Err(e) => Err(e),
+    };
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    result.map(Json)
+}
+
+async fn read_top_ordering(
+    doc: &Document,
+    order: &std::path::Path,
+    limit: u64,
+) -> Result<TopResponse, (StatusCode, String)> {
+    let total = tokio::fs::metadata(order).await.map_err(internal)?.len() / 8;
+    let want = (limit.min(total) * 8) as usize;
+    let mut buf = vec![0u8; want];
+    let mut f = tokio::fs::File::open(order).await.map_err(internal)?;
+    f.read_exact(&mut buf).await.map_err(internal)?;
+    Ok(TopResponse {
+        lines: lines_from_ordering_prefix(doc, &buf),
+    })
+}
+
+fn lines_from_ordering_prefix(doc: &Document, buf: &[u8]) -> Vec<Line> {
+    buf.chunks_exact(8)
+        .filter_map(|c| {
+            let ln = u64::from_le_bytes(c.try_into().unwrap());
+            doc.line(ln).map(|text| Line { number: ln, text })
+        })
+        .collect()
+}
+
+#[derive(Deserialize)]
+struct DistinctQuery {
+    #[serde(default)]
+    k: Option<usize>,
+    #[serde(default)]
+    delim: Option<String>,
+    #[serde(default)]
+    precision: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct DistinctResponse {
+    estimate: u64,
+}
+
+async fn api_distinct(
+    State(doc): State<Shared>,
+    Query(q): Query<DistinctQuery>,
+) -> Result<Json<DistinctResponse>, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("distinct").arg(doc.path());
+    if let Some(k) = q.k {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    if let Some(p) = q.precision {
+        cmd.arg("--precision").arg(p.to_string());
+    }
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let out = wait_worker_output("distinct", &mut cmd).await?;
+    if !out.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "distinct worker {} — the engine is unaffected",
+                describe_status(out.status)
+            ),
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let estimate = text
+        .lines()
+        .next()
+        .unwrap_or("0")
+        .trim()
+        .parse::<u64>()
+        .map_err(bad_request)?;
+    Ok(Json(DistinctResponse { estimate }))
+}
+
+async fn wait_worker_output(
+    kind: &str,
+    cmd: &mut Command,
+) -> Result<std::process::Output, (StatusCode, String)> {
+    let child = cmd.spawn().map_err(internal)?;
+    match timeout(WORKER_TIMEOUT, child.wait_with_output()).await {
+        Ok(waited) => waited.map_err(internal),
+        Err(_) => Err((
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                "{kind} worker timed out after {}s — the engine is unaffected",
+                WORKER_TIMEOUT.as_secs()
+            ),
+        )),
     }
 }

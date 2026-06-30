@@ -37,9 +37,14 @@
   - TOP-N: 有界 O(N) ヒープ（上位/下位、数値/文字）。
   - DISTINCT: HyperLogLog（2^p レジスタ、既定 p=14＝16 KB・誤差 ~0.8%、基数に依らず一定メモリ）。
   - CSV欄モデル: `csv-core` で RFC-4180 クォート（区切りを含む `"a,b"`、`""` エスケープ）。`--csv` で有効化。
-  - **未了**: 引用フィールド内の**埋め込み改行**（1物理行=1レコード前提）、ホットパーティション再分割、per-group の distinct（HLL）、serve への top/distinct 露出。
+  - `serve`: `/api/top`・`/api/distinct` 露出済み（重い走査は worker 隔離）。
+  - **未了**: 引用フィールド内の**埋め込み改行**（1物理行=1レコード前提）、ホットパーティション再分割、per-group の distinct（HLL）、ブラウザ UI への操作パネル統合。
+- ✅ **初期 diff CLI** 実装済み（`ayame diff OLD NEW`）:
+  - 行単位 diff、bounded resync window、`--summary`、`--json`、出力 hunk/line 上限。
+  - **未了**: side-by-side UI、inline word diff、directory diff、巨大差分 artifact 化。
 - **OTP風 supervisor**（長命プールのハートビート/バックオフ）、`ayame-ipc`（bincode フレーミング）。
-- **キャッシュ GC の高度化**（LRU+TTL+上限、低ディスク時デグレード、`ayame cache {info,gc,clear}`）。
+- ✅ **キャッシュ GC** 実装済み（`ayame cache gc --max-size --max-age-days --dry-run`）。
+- **キャッシュ GC の高度化**（低ディスク時デグレード、artifact/job cache への拡張）。
 - **DuckDB 任意バックエンド**（feature-gated）: `read_csv_auto` で多キー GROUP BY・JOIN・SQL を pushdown。重い分析にコミットした時だけ列投影 DB を構築。
 - **日本語の言語的照合**（locale collation）、UTF-16 索引対応。
 - **メモリ上限のハードニング**（cgroup v2 / Job Object、または `MAP_NORESERVE`）。

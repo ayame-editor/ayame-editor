@@ -23,6 +23,7 @@ ayame gen sample.csv --lines 200000
 
 ayame stat sample.csv                       # サイズ・行数・エンコーディング・改行・索引
 ayame search sample.csv 'error' -i          # 大小無視で検索
+ayame diff old.txt new.txt                  # 差分
 ayame sort sample.csv -k 5 -n -r | head     # 5列目を数値・降順で並べ替え
 ayame group sample.csv -k 4                 # 4列目（status）ごとに件数
 ayame serve sample.csv --port 8777          # 表示された URL をブラウザで開く
@@ -38,6 +39,7 @@ ayame serve sample.csv --port 8777          # 表示された URL をブラウ�
 | `line   <FILE> <N>` | N 行目（1始まり） |
 | `lines  <FILE> <START> <COUNT>` | START から COUNT 行（`行番号<TAB>本文`） |
 | `search <FILE> <PATTERN>` | 検索（`-i` 大小無視, `-e` 正規表現, `--max N`, `--json`） |
+| `diff   <OLD> <NEW>` | 行単位 diff（`--summary`, `--json`, `--max-hunks N`） |
 | `sort   <FILE>` | 外部マージソート（メモリ予算＋ディスク spill） |
 | `group  <FILE> -k COL` | グループ集計（件数、`--value` で sum/min/max/avg） |
 | `top    <FILE> -k COL -n N` | 上位 N 行（`--min` で下位） |
@@ -57,6 +59,16 @@ ayame search huge.log 'failed' --json          # 機械可読出力
 ```
 
 出力は `行:桁: 本文`。`--max`（既定 1000）に達すると打ち切り表示します。
+
+### 差分（diff）
+
+```sh
+ayame diff old.txt new.txt
+ayame diff old.txt new.txt --summary
+ayame diff old.txt new.txt --json
+```
+
+行単位で比較し、近い範囲の挿入/削除は `--window`（既定 128 行）内で再同期します。
 
 ### 並べ替え（sort）
 
@@ -129,6 +141,8 @@ ayame serve huge.csv --port 8777            # http://127.0.0.1:8777 を開く
 
 ```sh
 ayame cache info                 # 保存先・件数・サイズ
+ayame cache gc --max-size 5GiB   # 古い/上限超過の索引だけ削除
+ayame cache gc --dry-run         # 削除せず確認
 ayame cache clear                # 消去
 ayame stat huge.csv --no-cache   # このコマンドだけキャッシュを使わない
 ```
@@ -145,7 +159,7 @@ ayame stat huge.csv --no-cache   # このコマンドだけキャッシュを使
 | `-t, --delim <C>` | `,` | 区切り文字 |
 | `--csv` | off | RFC-4180 解釈（クォート対応） |
 | `--quote <C>` | `"` | `--csv` の引用符 |
-| `-n, --numeric` | off | キーを数値扱い（`sort`/`top`） |
+| `--numeric` | off | キーを数値扱い（`sort`/`top`。`sort` は `-n` も可） |
 
 **共通**
 

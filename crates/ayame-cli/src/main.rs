@@ -10,12 +10,14 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 use ayame_core::{
     DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow, OpenOptions,
     OrderingReader, SearchOptions, SortOptions, TopOptions,
 };
+use serde::Serialize;
 
 const HELP: &str = "\
 ayame — view, search and navigate text files of any size
@@ -30,13 +32,14 @@ COMMANDS:
     line   <FILE> <N>             Print line N (1-based)
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
+    diff   <OLD> <NEW>            Line diff with bounded resync windows
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
-    cache  [path|info|clear]      Inspect or clear the on-disk index cache
+    cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
     version                       Show version
 
 COMMON OPTIONS:
@@ -53,12 +56,24 @@ FIELD OPTIONS (sort/group/top/distinct):
     -t, --delim <C>    Field delimiter (default ',')
     --csv              RFC-4180 parsing: quoted fields may contain the delimiter
     --quote <C>        Quote char for --csv (default '\"')
-    -n, --numeric      Treat the key as a number (sort/top)
+    --numeric          Treat the key as a number (sort/top; sort also accepts -n)
 
 GROUP OPTIONS:
     --value <COL>      Numeric value column for sum/min/max/avg
     --out-groups <FILE>
                        Write group rows to a TSV artifact instead of stdout
+    --out-order <FILE> Write top row numbers as u64 LE (top)
+
+CACHE OPTIONS:
+    --max-size <SIZE>     cache gc target size (default 5GiB)
+    --max-age-days <N>    cache gc age limit (default 30)
+    --dry-run             print what gc would remove
+
+DIFF OPTIONS:
+    --summary             print only counts
+    --max-hunks <N>       max hunks to print/store (default 200)
+    --max-lines <N>       max lines printed per side in one hunk (default 200)
+    --window <N>          resync search window in lines (default 128)
 
 EXAMPLES:
     ayame stat huge.csv
@@ -103,6 +118,7 @@ fn run(args: Vec<String>) -> Result<()> {
         "line" => cmd_line(rest),
         "lines" => cmd_lines(rest),
         "search" => cmd_search(rest),
+        "diff" => cmd_diff(rest),
         "sort" => cmd_sort(rest),
         "group" => cmd_group(rest),
         "top" => cmd_top(rest),
@@ -516,7 +532,16 @@ fn field_spec(opts: &HashMap<String, String>, flags: &HashSet<String>) -> FieldS
 fn cmd_top(args: &[String]) -> Result<()> {
     let (doc, _pos, opts, flags) = open_doc(
         args,
-        &["--key", "-k", "-n", "--top", "--delim", "-t", "--quote"],
+        &[
+            "--key",
+            "-k",
+            "-n",
+            "--top",
+            "--delim",
+            "-t",
+            "--quote",
+            "--out-order",
+        ],
     )?;
     let n: usize = first_opt(&opts, &["-n", "--top"])
         .unwrap_or("10")
@@ -529,9 +554,20 @@ fn cmd_top(args: &[String]) -> Result<()> {
         largest: !has_flag(&flags, &["--min", "--smallest", "--asc"]),
         n,
     };
+    let lines = ayame_core::ops::top_n(&doc, &topts);
+    if let Some(outp) = first_opt(&opts, &["--out-order"]) {
+        let file = std::fs::File::create(outp).with_context(|| format!("creating '{outp}'"))?;
+        let mut w = BufWriter::new(file);
+        for ln in lines {
+            w.write_all(&ln.to_le_bytes())?;
+        }
+        w.flush()?;
+        eprintln!("top ordering -> {outp}");
+        return Ok(());
+    }
     let stdout = std::io::stdout();
-    let mut w = std::io::BufWriter::new(stdout.lock());
-    for ln in ayame_core::ops::top_n(&doc, &topts) {
+    let mut w = BufWriter::new(stdout.lock());
+    for ln in lines {
         if let Some(text) = doc.line(ln) {
             writeln!(w, "{text}")?;
         }
@@ -609,7 +645,7 @@ fn parse_size(s: &str) -> Result<usize> {
 }
 
 fn cmd_cache(args: &[String]) -> Result<()> {
-    let (pos, _opts, _flags) = parse(args, &[]);
+    let (pos, opts, flags) = parse(args, &["--max-size", "--max-age-days"]);
     let sub = pos.first().map(|s| s.as_str()).unwrap_or("info");
     let dir = default_cache_dir()
         .context("no cache directory available (set HOME or AYAME_CACHE_DIR)")?;
@@ -622,6 +658,42 @@ fn cmd_cache(args: &[String]) -> Result<()> {
                     .with_context(|| format!("removing {}", vdir.display()))?;
             }
             println!("cleared {}", vdir.display());
+        }
+        "gc" => {
+            let max_size = first_opt(&opts, &["--max-size"])
+                .map(parse_size)
+                .transpose()?
+                .unwrap_or(5 * 1024 * 1024 * 1024) as u64;
+            let max_age_days: u64 = first_opt(&opts, &["--max-age-days"])
+                .unwrap_or("30")
+                .parse()
+                .context("--max-age-days must be a number")?;
+            let dry_run = has_flag(&flags, &["--dry-run"]);
+            let report = cache_gc(
+                &vdir,
+                max_size,
+                Duration::from_secs(max_age_days * 86_400),
+                dry_run,
+            )?;
+            println!("cache dir   {}", dir.display());
+            println!(
+                "before      {} blob(s), {}",
+                commas(report.before_count),
+                human_bytes(report.before_bytes)
+            );
+            println!(
+                "removed     {} blob(s), {}",
+                commas(report.removed_count),
+                human_bytes(report.removed_bytes)
+            );
+            println!(
+                "after       {} blob(s), {}",
+                commas(report.after_count),
+                human_bytes(report.after_bytes)
+            );
+            if dry_run {
+                println!("dry run     no files removed");
+            }
         }
         "info" => {
             let (mut count, mut bytes) = (0u64, 0u64);
@@ -639,9 +711,98 @@ fn cmd_cache(args: &[String]) -> Result<()> {
             println!("index blobs {}", commas(count));
             println!("total size  {}", human_bytes(bytes));
         }
-        other => bail!("unknown cache subcommand '{other}' (expected path|info|clear)"),
+        other => bail!("unknown cache subcommand '{other}' (expected path|info|gc|clear)"),
     }
     Ok(())
+}
+
+struct CacheEntry {
+    path: PathBuf,
+    bytes: u64,
+    modified: SystemTime,
+}
+
+#[derive(Default)]
+struct CacheGcReport {
+    before_count: u64,
+    before_bytes: u64,
+    removed_count: u64,
+    removed_bytes: u64,
+    after_count: u64,
+    after_bytes: u64,
+}
+
+fn cache_gc(vdir: &Path, max_size: u64, max_age: Duration, dry_run: bool) -> Result<CacheGcReport> {
+    let mut entries = cache_entries(vdir)?;
+    let before_count = entries.len() as u64;
+    let before_bytes = entries.iter().map(|e| e.bytes).sum::<u64>();
+    let now = SystemTime::now();
+
+    let mut remove = Vec::new();
+    let mut keep = Vec::new();
+    for e in entries.drain(..) {
+        let expired = now
+            .duration_since(e.modified)
+            .is_ok_and(|age| age > max_age);
+        if expired {
+            remove.push(e);
+        } else {
+            keep.push(e);
+        }
+    }
+
+    let mut kept_bytes = keep.iter().map(|e| e.bytes).sum::<u64>();
+    keep.sort_by_key(|e| e.modified);
+    while kept_bytes > max_size {
+        if keep.is_empty() {
+            break;
+        }
+        let e = keep.remove(0);
+        kept_bytes = kept_bytes.saturating_sub(e.bytes);
+        remove.push(e);
+    }
+
+    let removed_count = remove.len() as u64;
+    let removed_bytes = remove.iter().map(|e| e.bytes).sum::<u64>();
+    if !dry_run {
+        for e in &remove {
+            std::fs::remove_file(&e.path)
+                .with_context(|| format!("removing {}", e.path.display()))?;
+        }
+    }
+
+    Ok(CacheGcReport {
+        before_count,
+        before_bytes,
+        removed_count,
+        removed_bytes,
+        after_count: before_count.saturating_sub(removed_count),
+        after_bytes: before_bytes.saturating_sub(removed_bytes),
+    })
+}
+
+fn cache_entries(vdir: &Path) -> Result<Vec<CacheEntry>> {
+    let mut entries = Vec::new();
+    let Ok(rd) = std::fs::read_dir(vdir) else {
+        return Ok(entries);
+    };
+    for e in rd {
+        let e = e?;
+        let path = e.path();
+        if path.extension().is_none_or(|x| x != "idx") {
+            continue;
+        }
+        let meta = e.metadata()?;
+        if !meta.is_file() {
+            continue;
+        }
+        entries.push(CacheEntry {
+            path,
+            bytes: meta.len(),
+            modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        });
+    }
+    Ok(entries)
 }
 
 fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
@@ -730,6 +891,238 @@ fn cmd_search(args: &[String]) -> Result<()> {
         }
     );
     Ok(())
+}
+
+fn cmd_diff(args: &[String]) -> Result<()> {
+    let (pos, opts, flags) = parse(
+        args,
+        &[
+            "--encoding",
+            "--stride",
+            "--cache-dir",
+            "--max-hunks",
+            "--max-lines",
+            "--window",
+        ],
+    );
+    let old_path = pos.first().context("expected OLD file")?;
+    let new_path = pos.get(1).context("expected NEW file")?;
+    let open = open_opts(&opts, &flags)?;
+    let old = Document::open(old_path, &open).with_context(|| format!("opening '{old_path}'"))?;
+    let new = Document::open(new_path, &open).with_context(|| format!("opening '{new_path}'"))?;
+    let max_hunks: usize = first_opt(&opts, &["--max-hunks"])
+        .unwrap_or("200")
+        .parse()
+        .context("--max-hunks must be a number")?;
+    let max_lines: u64 = first_opt(&opts, &["--max-lines"])
+        .unwrap_or("200")
+        .parse()
+        .context("--max-lines must be a number")?;
+    let window: u64 = first_opt(&opts, &["--window"])
+        .unwrap_or("128")
+        .parse()
+        .context("--window must be a number")?;
+
+    let result = diff_documents(&old, &new, max_hunks, window.max(1));
+    if has_flag(&flags, &["--json"]) {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+    if has_flag(&flags, &["--summary"]) {
+        print_diff_summary(&result);
+        return Ok(());
+    }
+    for h in &result.hunks {
+        print_diff_hunk(&old, &new, h, max_lines)?;
+    }
+    print_diff_summary(&result);
+    Ok(())
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DiffResult {
+    old_lines: u64,
+    new_lines: u64,
+    hunks: Vec<DiffHunk>,
+    hunk_count: u64,
+    omitted_hunks: u64,
+    added: u64,
+    deleted: u64,
+    modified: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DiffHunk {
+    kind: DiffKind,
+    old_start: u64,
+    old_len: u64,
+    new_start: u64,
+    new_len: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DiffKind {
+    Insert,
+    Delete,
+    Replace,
+}
+
+fn diff_documents(old: &Document, new: &Document, max_hunks: usize, window: u64) -> DiffResult {
+    let old_total = old.line_count();
+    let new_total = new.line_count();
+    let mut i = 0u64;
+    let mut j = 0u64;
+    let mut result = DiffResult {
+        old_lines: old_total,
+        new_lines: new_total,
+        hunks: Vec::new(),
+        hunk_count: 0,
+        omitted_hunks: 0,
+        added: 0,
+        deleted: 0,
+        modified: 0,
+    };
+
+    while i < old_total || j < new_total {
+        if i < old_total && j < new_total && old.line(i) == new.line(j) {
+            i += 1;
+            j += 1;
+            continue;
+        }
+
+        let h = next_diff_hunk(old, new, i, j, window);
+        apply_diff_stats(&mut result, &h);
+        result.hunk_count += 1;
+        if result.hunks.len() < max_hunks {
+            result.hunks.push(h.clone());
+        } else {
+            result.omitted_hunks += 1;
+        }
+        i += h.old_len;
+        j += h.new_len;
+    }
+    result
+}
+
+fn next_diff_hunk(old: &Document, new: &Document, i: u64, j: u64, window: u64) -> DiffHunk {
+    let old_total = old.line_count();
+    let new_total = new.line_count();
+    if i >= old_total {
+        return DiffHunk {
+            kind: DiffKind::Insert,
+            old_start: i,
+            old_len: 0,
+            new_start: j,
+            new_len: new_total - j,
+        };
+    }
+    if j >= new_total {
+        return DiffHunk {
+            kind: DiffKind::Delete,
+            old_start: i,
+            old_len: old_total - i,
+            new_start: j,
+            new_len: 0,
+        };
+    }
+
+    let old_line = old.line(i).unwrap_or_default();
+    let new_line = new.line(j).unwrap_or_default();
+    let insertion_resync = find_line(new, &old_line, j + 1, (j + 1 + window).min(new_total));
+    let deletion_resync = find_line(old, &new_line, i + 1, (i + 1 + window).min(old_total));
+
+    match (insertion_resync, deletion_resync) {
+        (Some(rj), Some(li)) if rj - j <= li - i => insert_hunk(i, j, rj - j),
+        (Some(_rj), Some(li)) => delete_hunk(i, j, li - i),
+        (Some(rj), None) => insert_hunk(i, j, rj - j),
+        (None, Some(li)) => delete_hunk(i, j, li - i),
+        (None, None) => DiffHunk {
+            kind: DiffKind::Replace,
+            old_start: i,
+            old_len: 1,
+            new_start: j,
+            new_len: 1,
+        },
+    }
+}
+
+fn insert_hunk(old_start: u64, new_start: u64, new_len: u64) -> DiffHunk {
+    DiffHunk {
+        kind: DiffKind::Insert,
+        old_start,
+        old_len: 0,
+        new_start,
+        new_len,
+    }
+}
+
+fn delete_hunk(old_start: u64, new_start: u64, old_len: u64) -> DiffHunk {
+    DiffHunk {
+        kind: DiffKind::Delete,
+        old_start,
+        old_len,
+        new_start,
+        new_len: 0,
+    }
+}
+
+fn find_line(doc: &Document, target: &str, start: u64, end: u64) -> Option<u64> {
+    (start..end).find(|&n| doc.line(n).as_deref() == Some(target))
+}
+
+fn apply_diff_stats(result: &mut DiffResult, h: &DiffHunk) {
+    match h.kind {
+        DiffKind::Insert => result.added += h.new_len,
+        DiffKind::Delete => result.deleted += h.old_len,
+        DiffKind::Replace => {
+            let both = h.old_len.min(h.new_len);
+            result.modified += both;
+            result.deleted += h.old_len - both;
+            result.added += h.new_len - both;
+        }
+    }
+}
+
+fn print_diff_hunk(old: &Document, new: &Document, h: &DiffHunk, max_lines: u64) -> Result<()> {
+    println!(
+        "@@ -{},{} +{},{} {:?} @@",
+        h.old_start + 1,
+        h.old_len,
+        h.new_start + 1,
+        h.new_len,
+        h.kind
+    );
+    let old_shown = h.old_len.min(max_lines);
+    for n in h.old_start..h.old_start + old_shown {
+        println!("-{}", old.line(n).unwrap_or_default());
+    }
+    if h.old_len > old_shown {
+        println!("-... {} more line(s)", h.old_len - old_shown);
+    }
+    let new_shown = h.new_len.min(max_lines);
+    for n in h.new_start..h.new_start + new_shown {
+        println!("+{}", new.line(n).unwrap_or_default());
+    }
+    if h.new_len > new_shown {
+        println!("+... {} more line(s)", h.new_len - new_shown);
+    }
+    Ok(())
+}
+
+fn print_diff_summary(result: &DiffResult) {
+    eprintln!(
+        "{} hunk(s), {} added, {} deleted, {} modified{}",
+        commas(result.hunk_count),
+        commas(result.added),
+        commas(result.deleted),
+        commas(result.modified),
+        if result.omitted_hunks > 0 {
+            " (output truncated; raise --max-hunks)"
+        } else {
+            ""
+        }
+    );
 }
 
 // ---- formatting ---------------------------------------------------------------
