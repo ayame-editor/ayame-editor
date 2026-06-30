@@ -34,6 +34,7 @@
 pub mod document;
 pub mod edit;
 pub mod encoding;
+mod fields;
 pub mod index;
 pub mod ops;
 pub mod search;
