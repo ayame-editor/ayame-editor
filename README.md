@@ -14,7 +14,8 @@ DuckDB のような優れた分析基盤はありますが、「巨大ファイ�
 - **メモリマップ＋疎行インデックス**: 4096 行ごとに 16 バイトのチェックポイント。**100億行でも索引は約 40–70 MiB**。任意行へ sub-ms でジャンプ。
 - **エンコーディング自動判定**（BOM＋chardetng）: UTF-8 / Shift_JIS / EUC-JP / ASCII、CRLF/LF/CR 検出。
 - **ストリーミング検索**: リテラル（SIMD `memmem`）＋正規表現。ヒットを行・桁にマッピング。
-- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `gen`。
+- **永続インデックスキャッシュ**: 一度開いた巨大ファイルの索引をディスク保存（content-addressed＋checksum trailer＋単一ライタロック、ソース変更で自動失効）。**2回目以降は「構築」→「mmap＋検証」でほぼ瞬時**（実測: 構築 24ms → キャッシュ 0ms）。`--no-cache` / `ayame cache {path,info,clear}`。
+- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `gen` / `cache`。
 - **ローカル Web ビューア**（`ayame serve`）: Rust が配信する VSCode 風の仮想化ビューア。**実行時に Node 不要**、webview も不要（ブラウザで開く＝最も安定）。数十億行をスクロールできるカスタムスクロールバー、行ジャンプ（Ctrl+G）、検索（Ctrl+F / F3）、ステータスバー。
 
 実測（4 vCPU VM、**3億行 / 14.16 GiB**）: コールドで開く＋全索引 **2.3 秒**、索引メモリ **2.0 MiB**、ランダム1行 **0.61 ms**、全文スキャン **5.0 GiB/s**。詳細は [BENCHMARKS.md](BENCHMARKS.md)。

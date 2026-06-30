@@ -16,8 +16,8 @@
 
 1. **デスクトップシェル＋プロセス隔離（安定性の証明）**
    既存 axum をサイドカー子プロセス化し、Tauri window（または監督親）が前段に立つ。エンジンが落ちても**最後のビューポートを保持**して再 spawn。最初に **SIGKILL 注入テスト**を書く。
-2. **ディスクキャッシュ（オフロードの証明）**
-   `LineIndex::to_bytes/from_bytes` ＋ checksum trailer、content-addressed キャッシュ（`blake3(path)+size+mtime+encoding+stride`）、`O_EXCL` 単一ライタロック。再オープンが「構築」→「mmap＋検証」に。
+2. **ディスクキャッシュ（オフロードの証明）** — ✅ **実装済み**
+   `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
 3. **GREP を使い捨て子プロセスで**
    rayon 並列スキャン、結果＝行番号、spawn→wait→exit。ジョブ毎隔離と「結果を仮想順列として閲覧」を最低リスクで検証。
 4. **外部マージ SORT**

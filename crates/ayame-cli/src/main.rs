@@ -7,6 +7,7 @@ mod gen;
 mod serve;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
@@ -28,10 +29,13 @@ COMMANDS:
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
+    cache  [path|info|clear]      Inspect or clear the on-disk index cache
 
 COMMON OPTIONS:
     --encoding <ENC>   Force encoding: utf8 | shift_jis | euc-jp | ascii
     --stride <N>       Lines per index checkpoint (default 4096)
+    --no-cache         Do not read/write the persistent index cache
+    --cache-dir <DIR>  Override the index-cache directory
     --json             Machine-readable output (stat/search)
     -h, --help         Show this help
 
@@ -76,6 +80,7 @@ fn run(args: Vec<String>) -> Result<()> {
         "search" => cmd_search(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
+        "cache" => cmd_cache(rest),
         other => {
             print!("{HELP}");
             bail!("unknown command '{other}'");
@@ -119,9 +124,9 @@ fn has_flag(flags: &HashSet<String>, keys: &[&str]) -> bool {
     keys.iter().any(|k| flags.contains(*k))
 }
 
-fn open_opts(opts: &HashMap<String, String>) -> Result<OpenOptions> {
+pub fn open_opts(opts: &HashMap<String, String>, flags: &HashSet<String>) -> Result<OpenOptions> {
     let mut o = OpenOptions::default();
-    if let Some(enc) = first_opt(opts, &["--encoding", "-e"]) {
+    if let Some(enc) = first_opt(opts, &["--encoding"]) {
         o.encoding = Some(
             Encoding::parse(enc).with_context(|| format!("unknown encoding '{enc}'"))?,
         );
@@ -129,15 +134,44 @@ fn open_opts(opts: &HashMap<String, String>) -> Result<OpenOptions> {
     if let Some(s) = first_opt(opts, &["--stride"]) {
         o.stride = Some(s.parse().context("--stride must be a number")?);
     }
+    // Index caching is on by default (huge wins on reopen); --no-cache disables.
+    o.cache_dir = if has_flag(flags, &["--no-cache"]) {
+        None
+    } else if let Some(d) = first_opt(opts, &["--cache-dir"]) {
+        Some(PathBuf::from(d))
+    } else {
+        default_cache_dir()
+    };
     Ok(o)
 }
 
+/// Default index-cache directory: $AYAME_CACHE_DIR, else $XDG_CACHE_HOME/ayame,
+/// else $HOME/.cache/ayame. `None` if none can be determined (caching disabled).
+pub fn default_cache_dir() -> Option<PathBuf> {
+    if let Ok(d) = std::env::var("AYAME_CACHE_DIR") {
+        if !d.is_empty() {
+            return Some(PathBuf::from(d));
+        }
+    }
+    if let Ok(d) = std::env::var("XDG_CACHE_HOME") {
+        if !d.is_empty() {
+            return Some(PathBuf::from(d).join("ayame"));
+        }
+    }
+    if let Ok(h) = std::env::var("HOME") {
+        if !h.is_empty() {
+            return Some(PathBuf::from(h).join(".cache").join("ayame"));
+        }
+    }
+    None
+}
+
 fn open_doc(args: &[String], valued_extra: &[&str]) -> Result<(Document, Vec<String>, HashMap<String, String>, HashSet<String>)> {
-    let mut valued = vec!["--encoding", "--stride"];
+    let mut valued = vec!["--encoding", "--stride", "--cache-dir"];
     valued.extend_from_slice(valued_extra);
     let (pos, opts, flags) = parse(args, &valued);
     let path = pos.first().context("expected a FILE argument")?.clone();
-    let doc = Document::open(&path, &open_opts(&opts)?)
+    let doc = Document::open(&path, &open_opts(&opts, &flags)?)
         .with_context(|| format!("opening '{path}'"))?;
     Ok((doc, pos, opts, flags))
 }
@@ -157,8 +191,49 @@ fn cmd_stat(args: &[String]) -> Result<()> {
     println!("lines       {}", commas(s.lines));
     println!("encoding    {}{}", s.encoding.label(), if s.bom_bytes > 0 { " (BOM)" } else { "" });
     println!("line ending {}", s.eol.label());
-    println!("index       {} checkpoints, {} (stride {}), built in {} ms",
-        commas(s.checkpoints as u64), human_bytes(s.index_bytes as u64), commas(s.stride), s.index_ms);
+    let how = if s.from_cache {
+        format!("loaded from cache in {} ms", s.index_ms)
+    } else {
+        format!("built in {} ms", s.index_ms)
+    };
+    println!("index       {} checkpoints, {} (stride {}), {}",
+        commas(s.checkpoints as u64), human_bytes(s.index_bytes as u64), commas(s.stride), how);
+    Ok(())
+}
+
+fn cmd_cache(args: &[String]) -> Result<()> {
+    let (pos, _opts, _flags) = parse(args, &[]);
+    let sub = pos.first().map(|s| s.as_str()).unwrap_or("info");
+    let dir = default_cache_dir()
+        .context("no cache directory available (set HOME or AYAME_CACHE_DIR)")?;
+    let vdir = dir.join("v1");
+    match sub {
+        "path" => println!("{}", dir.display()),
+        "clear" => {
+            if vdir.exists() {
+                std::fs::remove_dir_all(&vdir)
+                    .with_context(|| format!("removing {}", vdir.display()))?;
+            }
+            println!("cleared {}", vdir.display());
+        }
+        "info" => {
+            let (mut count, mut bytes) = (0u64, 0u64);
+            if let Ok(rd) = std::fs::read_dir(&vdir) {
+                for e in rd.flatten() {
+                    if let Ok(m) = e.metadata() {
+                        if m.is_file() && e.path().extension().is_some_and(|x| x == "idx") {
+                            count += 1;
+                            bytes += m.len();
+                        }
+                    }
+                }
+            }
+            println!("cache dir   {}", dir.display());
+            println!("index blobs {}", commas(count));
+            println!("total size  {}", human_bytes(bytes));
+        }
+        other => bail!("unknown cache subcommand '{other}' (expected path|info|clear)"),
+    }
     Ok(())
 }
 

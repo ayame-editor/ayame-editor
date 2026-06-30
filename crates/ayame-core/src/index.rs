@@ -194,6 +194,92 @@ impl LineIndex {
         let extra = memchr_iter(b'\n', &buf[cp.off as usize..b as usize]).count() as u64;
         cp.line + extra
     }
+
+    // ---- persistence (for the on-disk index cache, DESIGN.md Step 2) --------
+
+    /// Serialize the index to a self-describing, self-checksummed byte blob.
+    ///
+    /// Layout (all little-endian): magic[8] `AYIDX\x01\0\0`, version u32, pad u32,
+    /// stride u64, base u64, len u64, line_count u64, checkpoint_count u64,
+    /// checkpoints (count × {line u64, off u64}), then an FNV-1a-64 checksum of
+    /// everything preceding it. The checksum trailer is what lets a reader reject
+    /// a truncated or partially-written cache blob before trusting it for random
+    /// access (a size check alone is not enough).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let n = self.checkpoints.len();
+        let mut v = Vec::with_capacity(56 + n * 16 + 8);
+        v.extend_from_slice(b"AYIDX\x01\0\0");
+        v.extend_from_slice(&1u32.to_le_bytes()); // version
+        v.extend_from_slice(&0u32.to_le_bytes()); // pad
+        v.extend_from_slice(&self.stride.to_le_bytes());
+        v.extend_from_slice(&self.base.to_le_bytes());
+        v.extend_from_slice(&self.len.to_le_bytes());
+        v.extend_from_slice(&self.line_count.to_le_bytes());
+        v.extend_from_slice(&(n as u64).to_le_bytes());
+        for c in &self.checkpoints {
+            v.extend_from_slice(&c.line.to_le_bytes());
+            v.extend_from_slice(&c.off.to_le_bytes());
+        }
+        let ck = fnv1a64(&v);
+        v.extend_from_slice(&ck.to_le_bytes());
+        v
+    }
+
+    /// Reconstruct an index from [`to_bytes`] output. Returns `None` on any
+    /// malformation (bad magic/version, wrong length, or checksum mismatch), so
+    /// the caller can simply treat a corrupt cache as a miss and rebuild.
+    pub fn from_bytes(b: &[u8]) -> Option<LineIndex> {
+        if b.len() < 56 + 8 || &b[0..8] != b"AYIDX\x01\0\0" {
+            return None;
+        }
+        let version = u32::from_le_bytes(b[8..12].try_into().ok()?);
+        if version != 1 {
+            return None;
+        }
+        let (body, trailer) = b.split_at(b.len() - 8);
+        if fnv1a64(body) != u64::from_le_bytes(trailer.try_into().ok()?) {
+            return None;
+        }
+        let rd = |o: usize| u64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+        let stride = rd(16);
+        let base = rd(24);
+        let len = rd(32);
+        let line_count = rd(40);
+        let n = rd(48) as usize;
+        if b.len() != 56 + n * 16 + 8 {
+            return None;
+        }
+        let mut checkpoints = Vec::with_capacity(n);
+        let mut o = 56;
+        for _ in 0..n {
+            checkpoints.push(Checkpoint { line: rd(o), off: rd(o + 8) });
+            o += 16;
+        }
+        Some(LineIndex { checkpoints, stride, line_count, base, len })
+    }
+
+    /// Content region length the index was built for (for cache validation).
+    #[inline]
+    pub fn source_len(&self) -> u64 {
+        self.len
+    }
+
+    /// BOM/content base offset the index was built for (for cache validation).
+    #[inline]
+    pub fn base(&self) -> u64 {
+        self.base
+    }
+}
+
+/// FNV-1a 64-bit — a small, dependency-free checksum for cache-integrity checks
+/// (not cryptographic; only needs to catch truncation/corruption).
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 /// Snap `pos` forward to the byte just after the next '\n', or to `clen` if none.
@@ -317,6 +403,29 @@ mod tests {
             let (s, _e) = idx.line_range(&buf, i).unwrap();
             assert_eq!(idx.line_of_byte(&buf, s), i);
         }
+    }
+
+    #[test]
+    fn serialize_roundtrip_is_equivalent() {
+        let mut buf = Vec::new();
+        for i in 0..5000u64 {
+            buf.extend_from_slice(format!("entry number {i} here\n").as_bytes());
+        }
+        let idx = LineIndex::build(&buf, 0, 17);
+        let bytes = idx.to_bytes();
+        let back = LineIndex::from_bytes(&bytes).expect("roundtrip");
+        assert_eq!(back.line_count(), idx.line_count());
+        assert_eq!(back.checkpoint_count(), idx.checkpoint_count());
+        // Random access must be identical through the deserialized index.
+        for i in [0u64, 1, 16, 17, 18, 2499, 2500, 4999] {
+            assert_eq!(back.line_range(&buf, i), idx.line_range(&buf, i));
+        }
+        // Corruption (flip a byte in the body) must be rejected.
+        let mut corrupt = bytes.clone();
+        corrupt[60] ^= 0xFF;
+        assert!(LineIndex::from_bytes(&corrupt).is_none());
+        // Truncation must be rejected.
+        assert!(LineIndex::from_bytes(&bytes[..bytes.len() - 4]).is_none());
     }
 
     #[test]

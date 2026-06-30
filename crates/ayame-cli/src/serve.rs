@@ -31,20 +31,22 @@ const MAX_VIEW: u64 = 20_000;
 type Shared = Arc<Document>;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
-    let (pos, opts, _flags) = parse(args, &["--encoding", "--stride", "--host", "--port"]);
+    let (pos, opts, flags) = parse(args, &["--encoding", "--stride", "--host", "--port", "--cache-dir"]);
     let path = pos.first().context("expected a FILE argument")?.clone();
     let host = first_opt(&opts, &["--host"]).unwrap_or("127.0.0.1").to_string();
     let port: u16 = first_opt(&opts, &["--port"]).unwrap_or("8777").parse().context("--port must be a number")?;
 
     eprintln!("ayame: opening and indexing '{path}' …");
-    let doc = Document::open(&path, &open_opts(&opts)?)
+    let doc = Document::open(&path, &open_opts(&opts, &flags)?)
         .with_context(|| format!("opening '{path}'"))?;
     let s = doc.stat();
+    let how = if s.from_cache { "loaded from cache" } else { "indexed" };
     eprintln!(
-        "ayame: {} lines, {} bytes, {} — indexed in {} ms ({} checkpoints, {} bytes resident)",
+        "ayame: {} lines, {} bytes, {} — {} in {} ms ({} checkpoints, {} bytes resident)",
         crate::commas(s.lines),
         crate::commas(s.bytes),
         s.encoding.label(),
+        how,
         s.index_ms,
         crate::commas(s.checkpoints as u64),
         crate::commas(s.index_bytes as u64),
