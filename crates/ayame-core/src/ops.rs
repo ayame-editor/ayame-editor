@@ -17,6 +17,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::document::Document;
 use crate::encoding::Encoding;
@@ -183,7 +184,8 @@ fn make_key(raw: &[u8], enc: Encoding, opts: &SortOptions, scratch: &mut Vec<u8>
 
 /// Build a byte key whose `Ord` matches the desired sort order: an
 /// order-preserving 8-byte encoding for numeric keys, else the field decoded to
-/// UTF-8 (byte order == code-point order). Shared by sort and top-n.
+/// NFC-normalized UTF-8 (byte order == code-point order). Shared by sort and
+/// top-n.
 fn comparable_key(
     raw: &[u8],
     enc: Encoding,
@@ -201,7 +203,16 @@ fn comparable_key(
             .unwrap_or(f64::INFINITY);
         f64_order_key(v).to_vec()
     } else {
-        enc.decode_line(field).into_bytes()
+        normalized_text_key(field, enc)
+    }
+}
+
+fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {
+    let decoded = enc.decode_line(field);
+    if decoded.is_ascii() {
+        decoded.into_bytes()
+    } else {
+        decoded.nfc().collect::<String>().into_bytes()
     }
 }
 
@@ -1141,6 +1152,22 @@ mod tests {
         let res = sort(&doc, &opts).unwrap();
         let lines = sorted_lines(&doc, &res);
         assert_eq!(lines, vec!["cherry", "banana", "apple", "apple"]);
+    }
+
+    #[test]
+    fn text_sort_normalizes_keys_to_nfc() {
+        let data = "f\ne\u{301}\n\u{00e9}\nd\n".as_bytes();
+        let spill = tempfile::tempdir().unwrap();
+        let (_f, doc) = doc_from(data);
+        let opts = SortOptions {
+            key_column: None,
+            budget_bytes: 1 << 20,
+            spill_dir: spill.path().to_path_buf(),
+            ..Default::default()
+        };
+        let res = sort(&doc, &opts).unwrap();
+        let lines = sorted_lines(&doc, &res);
+        assert_eq!(lines, vec!["d", "f", "e\u{301}", "\u{00e9}"]);
     }
 
     #[test]

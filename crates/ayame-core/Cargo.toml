@@ -15,6 +15,7 @@ regex.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
 serde = { workspace = true }
+unicode-normalization.workspace = true
 csv-core = "0.1"
 
 [dev-dependencies]
