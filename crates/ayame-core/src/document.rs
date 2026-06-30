@@ -253,12 +253,14 @@ impl Document {
         query: &str,
         regex: bool,
         case_sensitive: bool,
+        whole_word: bool,
         from_byte: u64,
     ) -> Result<Option<SearchHit>> {
         let opts = search::FindOptions {
             query: query.to_string(),
             regex,
             case_sensitive,
+            whole_word,
             byte: from_byte,
         };
         search::find_next(
@@ -276,12 +278,14 @@ impl Document {
         query: &str,
         regex: bool,
         case_sensitive: bool,
+        whole_word: bool,
         before_byte: u64,
     ) -> Result<Option<SearchHit>> {
         let opts = search::FindOptions {
             query: query.to_string(),
             regex,
             case_sensitive,
+            whole_word,
             byte: before_byte,
         };
         search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)
@@ -506,7 +510,10 @@ mod tests {
         data.extend_from_slice(b"id=1000 status=ERROR\n");
         let f = write_temp(&data);
         let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
-        let hit = doc.find_next("ERROR", false, true, 0).unwrap().unwrap();
+        let hit = doc
+            .find_next("ERROR", false, true, false, 0)
+            .unwrap()
+            .unwrap();
         assert_eq!(hit.line, 1000);
     }
 }

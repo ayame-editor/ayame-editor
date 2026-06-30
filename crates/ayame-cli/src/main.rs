@@ -31,7 +31,7 @@ COMMANDS:
     tail   <FILE> [-n N]          Print the last N lines (default 10)
     line   <FILE> <N>             Print line N (1-based)
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
-    search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
+    search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, -w whole-word, --max N
     diff   <OLD> <NEW>            Line diff with bounded resync windows
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
@@ -862,6 +862,7 @@ fn cmd_search(args: &[String]) -> Result<()> {
     let pattern = pos.get(1).context("expected a PATTERN")?.clone();
     let regex = has_flag(&flags, &["-e", "--regex"]);
     let ignore_case = has_flag(&flags, &["-i", "--ignore-case"]);
+    let whole_word = has_flag(&flags, &["-w", "--word", "--whole-word"]);
     let max: usize = first_opt(&opts, &["--max"])
         .unwrap_or("1000")
         .parse()
@@ -870,6 +871,7 @@ fn cmd_search(args: &[String]) -> Result<()> {
         query: pattern,
         regex,
         case_sensitive: !ignore_case,
+        whole_word,
         start_byte: 0,
         max_hits: max,
     })?;

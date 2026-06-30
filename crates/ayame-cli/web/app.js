@@ -10,6 +10,7 @@ const $ = (id) => document.getElementById(id);
 const LINE_HEIGHT = 18;
 const OVERSCAN = 6;
 const PAD = 400; // extra lines fetched around the viewport and cached
+const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 
 const state = {
   total: 0,
@@ -22,9 +23,15 @@ const state = {
   query: "",
   regex: false,
   ci: false,
+  word: false,
   matcher: null,
+  regexError: false,
   activeLine: -1,
   lastMatch: null, // { byte, len }
+  searchHits: null,
+  searchTruncated: false,
+  history: [],
+  historyIndex: -1,
 };
 
 const pool = [];
@@ -273,6 +280,8 @@ function updateStatusPos() {
 // ---- search ----------------------------------------------------------------
 
 function buildMatcher() {
+  state.regexError = false;
+  $("find").parentElement.classList.remove("error");
   if (!state.query) {
     state.matcher = null;
     return;
@@ -282,17 +291,24 @@ function buildMatcher() {
   try {
     state.matcher = new RegExp(src, flags);
   } catch {
+    state.regexError = true;
     state.matcher = null; // invalid regex while typing — just don't highlight
+    $("find").parentElement.classList.add("error");
   }
 }
 
 function qs() {
-  return `q=${encodeURIComponent(state.query)}&regex=${state.regex}&ci=${state.ci}`;
+  return `q=${encodeURIComponent(state.query)}&regex=${state.regex}&ci=${state.ci}&word=${state.word}`;
 }
 
 async function findStep(dir) {
   if (!state.query) return;
   buildMatcher();
+  if (state.regexError) {
+    flashCount("正規表現エラー");
+    return;
+  }
+  saveSearchHistory(state.query);
   let from;
   if (dir === "next") {
     from = state.lastMatch ? state.lastMatch.byte + Math.max(1, state.lastMatch.len) : await lineByte(state.first);
@@ -309,6 +325,7 @@ async function findStep(dir) {
     state.lastMatch = { byte: h.byte, len: h.byte_len };
     state.activeLine = h.line;
     revealLine(h.line);
+    updateCount();
   } catch (e) {
     flashCount("エラー");
     console.error(e);
@@ -318,20 +335,77 @@ async function findStep(dir) {
 async function updateCount() {
   if (!state.query) {
     $("find-count").textContent = "";
+    state.searchHits = null;
+    state.searchTruncated = false;
     return;
   }
   try {
     const res = await api(`/api/search?${qs()}&start=0&max=2000`);
-    const n = res.hits.length;
-    $("find-count").textContent = res.truncated ? `${commas(n)}+ 件` : `${commas(n)} 件`;
+    state.searchHits = res.hits;
+    state.searchTruncated = res.truncated;
+    updateFindCountLabel();
   } catch (e) {
     $("find-count").textContent = "正規表現エラー";
+    $("find").parentElement.classList.add("error");
   }
+}
+
+function updateFindCountLabel() {
+  const hits = state.searchHits;
+  if (!hits || !state.query) {
+    $("find-count").textContent = "";
+    return;
+  }
+  const total = state.searchTruncated ? `${commas(hits.length)}+` : commas(hits.length);
+  if (state.lastMatch) {
+    const idx = hits.findIndex((h) => h.byte === state.lastMatch.byte);
+    if (idx >= 0) {
+      $("find-count").textContent = `${commas(idx + 1)} / ${total}`;
+      return;
+    }
+  }
+  $("find-count").textContent = `${total} 件`;
 }
 
 function flashCount(msg) {
   const el = $("find-count");
   el.textContent = msg;
+}
+
+function loadSearchHistory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string").slice(0, 50) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSearchHistory(q) {
+  const value = q.trim();
+  if (!value) return;
+  state.history = [value, ...state.history.filter((x) => x !== value)].slice(0, 50);
+  state.historyIndex = -1;
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(state.history));
+  } catch {
+    // Ignore private-mode quota errors; search still works.
+  }
+}
+
+function showSearchHistory(delta) {
+  if (!state.history.length) return false;
+  if (state.historyIndex < 0) {
+    state.historyIndex = delta < 0 ? 0 : state.history.length - 1;
+  } else {
+    state.historyIndex = Math.min(
+      state.history.length - 1,
+      Math.max(0, state.historyIndex + delta)
+    );
+  }
+  $("find").value = state.history[state.historyIndex];
+  setQueryFromInput();
+  return true;
 }
 
 function revealLine(line) {
@@ -349,8 +423,10 @@ function revealLine(line) {
 function setQueryFromInput() {
   state.query = $("find").value;
   state.lastMatch = null;
+  state.searchHits = null;
+  state.searchTruncated = false;
   buildMatcher();
-  $("find-count").textContent = "";
+  $("find-count").textContent = state.regexError ? "正規表現エラー" : "";
   scheduleRender();
 }
 
@@ -392,6 +468,10 @@ function initEvents() {
       e.preventDefault();
       updateCount();
       findStep(e.shiftKey ? "prev" : "next");
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (showSearchHistory(e.key === "ArrowUp" ? -1 : 1)) {
+        e.preventDefault();
+      }
     } else if (e.key === "Escape") {
       $("viewport").focus();
     }
@@ -400,6 +480,7 @@ function initEvents() {
   $("find-next").addEventListener("click", () => findStep("next"));
   $("find-prev").addEventListener("click", () => findStep("prev"));
   $("opt-case").addEventListener("click", () => toggleOpt("ci", "opt-case"));
+  $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
 
   document.addEventListener("keydown", onGlobalKey);
@@ -410,6 +491,8 @@ function toggleOpt(key, id) {
   state[key] = !state[key];
   $(id).classList.toggle("on", state[key]);
   state.lastMatch = null;
+  state.searchHits = null;
+  state.searchTruncated = false;
   buildMatcher();
   scheduleRender();
   if (state.query) updateCount();
@@ -445,6 +528,10 @@ function onGlobalKey(e) {
     toggleOpt("regex", "opt-regex");
     return;
   }
+  if (e.altKey && e.key.toLowerCase() === "w") {
+    toggleOpt("word", "opt-word");
+    return;
+  }
   if (inInput) return; // leave normal text editing alone
 
   const vis = rowsVisible();
@@ -470,6 +557,7 @@ function onGlobalKey(e) {
 // ---- boot ------------------------------------------------------------------
 
 async function boot() {
+  state.history = loadSearchHistory();
   initScrollbar();
   initEvents();
   try {

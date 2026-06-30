@@ -17,6 +17,7 @@ pub struct SearchOptions {
     pub query: String,
     pub regex: bool,
     pub case_sensitive: bool,
+    pub whole_word: bool,
     /// Byte offset to begin scanning from (whole-buffer coordinates).
     pub start_byte: u64,
     /// Upper bound on hits returned in one call.
@@ -29,6 +30,7 @@ impl Default for SearchOptions {
             query: String::new(),
             regex: false,
             case_sensitive: true,
+            whole_word: false,
             start_byte: 0,
             max_hits: 1000,
         }
@@ -59,6 +61,7 @@ pub struct FindOptions {
     pub query: String,
     pub regex: bool,
     pub case_sensitive: bool,
+    pub whole_word: bool,
     /// Anchor byte: next searches at/after it, previous searches strictly before it.
     pub byte: u64,
 }
@@ -132,6 +135,10 @@ pub fn search(
     match matcher {
         Matcher::Literal(finder) => {
             for pos in finder.find_iter(hay) {
+                if opts.whole_word && !is_whole_word_match(buf, start + pos, finder.needle().len())
+                {
+                    continue;
+                }
                 if hits.len() >= opts.max_hits {
                     truncated = true;
                     break;
@@ -141,13 +148,18 @@ pub fn search(
         }
         Matcher::Regex(re) => {
             for m in re.find_iter(hay) {
-                if hits.len() >= opts.max_hits {
-                    truncated = true;
-                    break;
-                }
                 // Skip zero-width matches so we always make progress.
                 if m.end() == m.start() {
                     continue;
+                }
+                if opts.whole_word
+                    && !is_whole_word_match(buf, start + m.start(), m.end() - m.start())
+                {
+                    continue;
+                }
+                if hits.len() >= opts.max_hits {
+                    truncated = true;
+                    break;
                 }
                 push(start + m.start(), m.end() - m.start(), &mut hits);
             }
@@ -170,6 +182,7 @@ pub fn find_next(
         query: opts.query.clone(),
         regex: opts.regex,
         case_sensitive: opts.case_sensitive,
+        whole_word: opts.whole_word,
         start_byte: opts.byte,
         max_hits: 1,
     };
@@ -198,6 +211,7 @@ pub fn find_prev(
         query: opts.query.clone(),
         regex: opts.regex,
         case_sensitive: opts.case_sensitive,
+        whole_word: opts.whole_word,
         start_byte: base,
         max_hits: usize::MAX,
     };
@@ -208,13 +222,22 @@ pub fn find_prev(
     match matcher {
         Matcher::Literal(finder) => {
             for pos in finder.find_iter(hay) {
-                last = Some((base as usize + pos, finder.needle().len()));
+                let abs = base as usize + pos;
+                if opts.whole_word && !is_whole_word_match(buf, abs, finder.needle().len()) {
+                    continue;
+                }
+                last = Some((abs, finder.needle().len()));
             }
         }
         Matcher::Regex(re) => {
             for m in re.find_iter(hay) {
                 if m.end() != m.start() {
-                    last = Some((base as usize + m.start(), m.end() - m.start()));
+                    let abs = base as usize + m.start();
+                    let len = m.end() - m.start();
+                    if opts.whole_word && !is_whole_word_match(buf, abs, len) {
+                        continue;
+                    }
+                    last = Some((abs, len));
                 }
             }
         }
@@ -234,6 +257,18 @@ pub fn find_prev(
             byte_len: mlen as u64,
         }
     }))
+}
+
+#[inline]
+fn is_whole_word_match(buf: &[u8], start: usize, len: usize) -> bool {
+    let before = start.checked_sub(1).and_then(|i| buf.get(i).copied());
+    let after = buf.get(start.saturating_add(len)).copied();
+    !before.is_some_and(is_word_byte) && !after.is_some_and(is_word_byte)
+}
+
+#[inline]
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
@@ -304,6 +339,7 @@ mod tests {
                 query: "beta".into(),
                 regex: false,
                 case_sensitive: true,
+                whole_word: false,
                 byte: 0,
             },
         )
@@ -320,6 +356,7 @@ mod tests {
                 query: "beta".into(),
                 regex: false,
                 case_sensitive: true,
+                whole_word: false,
                 byte: first.byte + 1,
             },
         )
@@ -335,11 +372,30 @@ mod tests {
                 query: "beta".into(),
                 regex: false,
                 case_sensitive: true,
+                whole_word: false,
                 byte: next.byte,
             },
         )
         .unwrap()
         .unwrap();
         assert_eq!(prev.line, 0);
+    }
+
+    #[test]
+    fn whole_word_filters_substrings() {
+        let buf = b"error\nterror\nerror_code\nerror!\n".to_vec();
+        let idx = LineIndex::build(&buf, 0, 16);
+        let len = buf.len() as u64;
+        let opts = SearchOptions {
+            query: "error".into(),
+            whole_word: true,
+            max_hits: 10,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::Ascii, &opts).unwrap();
+        assert_eq!(
+            res.hits.iter().map(|h| h.line).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
     }
 }

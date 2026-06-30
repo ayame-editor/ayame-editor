@@ -54,6 +54,7 @@ ayame serve sample.csv --port 8777          # 表示された URL をブラウ�
 
 ```sh
 ayame search huge.log 'ERROR' -i --max 50     # 大小無視・最大50件
+ayame search huge.log 'error' -w              # 単語単位
 ayame search huge.log '\bWARN\b' -e            # 正規表現
 ayame search huge.log 'failed' --json          # 機械可読出力
 ```

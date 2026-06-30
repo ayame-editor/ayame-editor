@@ -173,6 +173,8 @@ struct SearchQuery {
     #[serde(default)]
     ci: bool,
     #[serde(default)]
+    word: bool,
+    #[serde(default)]
     start: u64,
     #[serde(default = "default_max")]
     max: usize,
@@ -191,6 +193,7 @@ async fn api_search(
             query: q.q,
             regex: q.regex,
             case_sensitive: !q.ci,
+            whole_word: q.word,
             start_byte: q.start,
             max_hits: q.max.min(100_000),
         })
@@ -205,6 +208,8 @@ struct FindQuery {
     regex: bool,
     #[serde(default)]
     ci: bool,
+    #[serde(default)]
+    word: bool,
     /// "next" or "prev".
     dir: String,
     /// Anchor byte: search starts at/after (next) or strictly before (prev).
@@ -222,10 +227,10 @@ async fn api_find(
     Query(q): Query<FindQuery>,
 ) -> Result<Json<FindResponse>, (StatusCode, String)> {
     let hit = if q.dir == "prev" {
-        doc.find_prev(&q.q, q.regex, !q.ci, q.from)
+        doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
             .map_err(bad_request)?
     } else {
-        doc.find_next(&q.q, q.regex, !q.ci, q.from)
+        doc.find_next(&q.q, q.regex, !q.ci, q.word, q.from)
             .map_err(bad_request)?
     };
     Ok(Json(FindResponse { hit }))
