@@ -7,12 +7,12 @@ mod gen;
 mod serve;
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
-use ayame_core::{Document, OpenOptions, SearchOptions};
-use ayame_core::Encoding;
+use ayame_core::{Document, Encoding, OpenOptions, OrderingReader, SearchOptions, SortOptions};
 
 const HELP: &str = "\
 ayame — view, search and navigate text files of any size
@@ -27,6 +27,7 @@ COMMANDS:
     line   <FILE> <N>             Print line N (1-based)
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
+    sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
     cache  [path|info|clear]      Inspect or clear the on-disk index cache
@@ -78,6 +79,7 @@ fn run(args: Vec<String>) -> Result<()> {
         "line" => cmd_line(rest),
         "lines" => cmd_lines(rest),
         "search" => cmd_search(rest),
+        "sort" => cmd_sort(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
         "cache" => cmd_cache(rest),
@@ -199,6 +201,87 @@ fn cmd_stat(args: &[String]) -> Result<()> {
     println!("index       {} checkpoints, {} (stride {}), {}",
         commas(s.checkpoints as u64), human_bytes(s.index_bytes as u64), commas(s.stride), how);
     Ok(())
+}
+
+fn cmd_sort(args: &[String]) -> Result<()> {
+    let (doc, _pos, opts, flags) =
+        open_doc(args, &["--key", "-k", "--delim", "-t", "--budget", "--out-order", "--spill-dir"])?;
+    let key_column = match first_opt(&opts, &["--key", "-k"]) {
+        Some(s) => Some(s.parse().context("--key must be a number")?),
+        None => None,
+    };
+    let delimiter = first_opt(&opts, &["--delim", "-t"])
+        .and_then(|s| s.as_bytes().first().copied())
+        .unwrap_or(b',');
+    let numeric = has_flag(&flags, &["--numeric", "-n"]);
+    let reverse = has_flag(&flags, &["--reverse", "-r"]);
+    let budget_bytes = match first_opt(&opts, &["--budget"]) {
+        Some(s) => parse_size(s)?,
+        None => 256 * 1024 * 1024,
+    };
+    let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
+    let spill_dir = custom_spill
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("ayame-sort-{}", std::process::id())));
+
+    let sopts = SortOptions {
+        key_column,
+        delimiter,
+        numeric,
+        reverse,
+        budget_bytes,
+        spill_dir: spill_dir.clone(),
+    };
+    let res = ayame_core::ops::sort(&doc, &sopts)?;
+    eprintln!(
+        "sorted {} lines via {} run(s), {} spilled to disk",
+        commas(res.line_count),
+        commas(res.runs as u64),
+        human_bytes(res.spill_bytes),
+    );
+
+    if let Some(outp) = first_opt(&opts, &["--out-order"]) {
+        // Move the ordering (u64 line numbers) out before the spill dir is cleaned.
+        std::fs::rename(&res.ordering_path, outp)
+            .or_else(|_| std::fs::copy(&res.ordering_path, outp).map(|_| ()))
+            .with_context(|| format!("writing ordering to '{outp}'"))?;
+        eprintln!("ordering ({} u64 line numbers) -> {outp}", commas(res.line_count));
+    } else {
+        let stdout = std::io::stdout();
+        let mut w = std::io::BufWriter::new(stdout.lock());
+        let mut rd = OrderingReader::open(&res.ordering_path)?;
+        while let Some(ln) = rd.next_line()? {
+            if let Some(text) = doc.line(ln) {
+                writeln!(w, "{text}")?;
+            }
+        }
+        w.flush()?;
+    }
+
+    // Clean up our spill scratch (gentle: one recursive remove), unless the user
+    // pointed us at their own directory.
+    if custom_spill.is_none() {
+        let _ = std::fs::remove_dir_all(&spill_dir);
+    }
+    Ok(())
+}
+
+/// Parse a byte size with an optional binary suffix (K/KiB, M/MiB, G/GiB).
+fn parse_size(s: &str) -> Result<usize> {
+    let lower = s.trim().to_ascii_lowercase();
+    let (num, mult): (&str, usize) = if let Some(n) = lower.strip_suffix("gib").or_else(|| lower.strip_suffix('g')) {
+        (n, 1 << 30)
+    } else if let Some(n) = lower.strip_suffix("mib").or_else(|| lower.strip_suffix('m')) {
+        (n, 1 << 20)
+    } else if let Some(n) = lower.strip_suffix("kib").or_else(|| lower.strip_suffix('k')) {
+        (n, 1 << 10)
+    } else if let Some(n) = lower.strip_suffix('b') {
+        (n, 1)
+    } else {
+        (lower.as_str(), 1)
+    };
+    let val: f64 = num.trim().parse().with_context(|| format!("invalid size '{s}'"))?;
+    Ok((val * mult as f64) as usize)
 }
 
 fn cmd_cache(args: &[String]) -> Result<()> {

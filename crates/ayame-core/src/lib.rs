@@ -32,11 +32,13 @@
 pub mod document;
 pub mod encoding;
 pub mod index;
+pub mod ops;
 pub mod search;
 
 pub use document::{Document, FileStat, Line, OpenOptions};
 pub use encoding::{Encoding, Eol};
 pub use index::{LineIndex, DEFAULT_STRIDE};
+pub use ops::{OrderingReader, SortOptions, SortResult};
 pub use search::{SearchHit, SearchOptions, SearchResult};
 
 /// Errors surfaced by the engine.

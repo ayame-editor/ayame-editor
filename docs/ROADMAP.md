@@ -20,8 +20,8 @@
    `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
 3. **GREP を使い捨て子プロセスで**
    rayon 並列スキャン、結果＝行番号、spawn→wait→exit。ジョブ毎隔離と「結果を仮想順列として閲覧」を最低リスクで検証。
-4. **外部マージ SORT**
-   明示メモリ予算＋≥1MiB 連続スピル、結果は `Vec<u64>` 順列（ゼロコピー閲覧）。v1 はデコード＋NFC キーで「コードポイント順」。
+4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
+   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・使い捨て子プロセス隔離（Step 3 後）・ビューア統合。
 
 ## 🔭 v2 以降（将来）
 

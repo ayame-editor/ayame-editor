@@ -207,6 +207,19 @@ impl Document {
         self.index.line_range(self.buf(), i).map(|(s, _)| s)
     }
 
+    /// Raw (un-decoded, terminator-stripped) bytes of up to `count` lines from
+    /// `start`, as `(line_number, &bytes)`. Borrows the mmap, so callers copy
+    /// out what they need to keep. Used by data ops that extract a sort/group key
+    /// from a field without decoding the whole line.
+    pub fn raw_line_ranges(&self, start: u64, count: u64) -> Vec<(u64, &[u8])> {
+        let buf = self.buf();
+        self.index
+            .line_ranges(buf, start, count)
+            .into_iter()
+            .map(|(n, s, e)| (n, &buf[s as usize..e as usize]))
+            .collect()
+    }
+
     pub fn search(&self, opts: &SearchOptions) -> Result<SearchResult> {
         search::search(self.buf(), self.base, self.len, &self.index, self.encoding, opts)
     }

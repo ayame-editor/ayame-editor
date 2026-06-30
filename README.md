@@ -15,7 +15,8 @@ DuckDB のような優れた分析基盤はありますが、「巨大ファイ�
 - **エンコーディング自動判定**（BOM＋chardetng）: UTF-8 / Shift_JIS / EUC-JP / ASCII、CRLF/LF/CR 検出。
 - **ストリーミング検索**: リテラル（SIMD `memmem`）＋正規表現。ヒットを行・桁にマッピング。
 - **永続インデックスキャッシュ**: 一度開いた巨大ファイルの索引をディスク保存（content-addressed＋checksum trailer＋単一ライタロック、ソース変更で自動失効）。**2回目以降は「構築」→「mmap＋検証」でほぼ瞬時**（実測: 構築 24ms → キャッシュ 0ms）。`--no-cache` / `ayame cache {path,info,clear}`。
-- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `gen` / `cache`。
+- **外部マージソート**（`ayame sort`）: **メモリ予算＋ディスク spill** で RAM を超える行数を安定ソート。数値（順序保存エンコード）／文字（**コードポイント順**＝Shift_JIS もデコードして正しい順序）、列指定（`-k`/`--delim`）、降順（`-r`）。結果は行番号の順列（将来ビューアでゼロコピー表示）。実測: **500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒**。
+- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `sort` / `gen` / `cache`。
 - **ローカル Web ビューア**（`ayame serve`）: Rust が配信する VSCode 風の仮想化ビューア。**実行時に Node 不要**、webview も不要（ブラウザで開く＝最も安定）。数十億行をスクロールできるカスタムスクロールバー、行ジャンプ（Ctrl+G）、検索（Ctrl+F / F3）、ステータスバー。
 
 実測（4 vCPU VM、**3億行 / 14.16 GiB**）: コールドで開く＋全索引 **2.3 秒**、索引メモリ **2.0 MiB**、ランダム1行 **0.61 ms**、全文スキャン **5.0 GiB/s**。詳細は [BENCHMARKS.md](BENCHMARKS.md)。
@@ -34,6 +35,11 @@ cargo build --release
 
 # 検索（-i 大小無視, -e 正規表現, --max 上限）
 ./target/release/ayame search sample.csv 'error' -i --max 50
+
+# 外部ソート（5列目を数値で降順、メモリは256MiB既定・超過分はディスクへ）
+./target/release/ayame sort sample.csv -k 5 -n -r | head
+# RAMより大きいデータも：予算を絞るとディスクにspillして安定ソート
+./target/release/ayame sort huge.csv -k 1 --budget 64MiB --out-order order.bin
 
 # GUI（ローカル Web ビューア）— 表示された URL をブラウザで開く
 ./target/release/ayame serve sample.csv --port 8777
