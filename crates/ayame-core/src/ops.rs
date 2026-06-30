@@ -81,7 +81,7 @@ pub struct SortResult {
     /// File of `u64` LE line numbers in sorted order.
     pub ordering_path: PathBuf,
     pub line_count: u64,
-    /// Number of spilled sorted runs the merge consumed.
+    /// Number of initial spilled sorted runs generated before any merge pass.
     pub runs: usize,
     /// Total bytes written to spill runs (a proxy for disk used).
     pub spill_bytes: u64,
@@ -91,8 +91,9 @@ pub struct SortResult {
 ///
 /// Phase 1 streams the document in line-aligned batches, building comparable
 /// byte keys, and spills sorted `(key, line_no)` runs whenever the in-memory
-/// buffer reaches `budget_bytes`. Phase 2 k-way-merges the runs with a heap,
-/// writing the sorted line numbers. Peak memory is `O(budget + runs)`.
+/// buffer reaches `budget_bytes`. Phase 2 k-way-merges the runs with a bounded
+/// fan-in heap, writing the sorted line numbers. Peak memory is
+/// `O(budget + fan-in)`, not `O(number_of_runs)`.
 pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
     fs::create_dir_all(&opts.spill_dir)?;
 
@@ -130,7 +131,8 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
 
     // ---- phase 2: k-way merge -------------------------------------------
     let ordering_path = opts.spill_dir.join("ordering.bin");
-    let merged = merge_runs(&runs, opts.reverse, &ordering_path)?;
+    let (merged, merge_spill_bytes) = merge_runs(&runs, opts.reverse, &ordering_path)?;
+    spill_bytes += merge_spill_bytes;
     // Runs are consumed; delete them so only the ordering remains.
     for r in &runs {
         let _ = fs::remove_file(r);
@@ -309,6 +311,8 @@ fn f64_order_key(x: f64) -> [u8; 8] {
 
 // ---- run generation / merge --------------------------------------------------
 
+const MERGE_FAN_IN: usize = 64;
+
 fn spill_run(
     records: &mut Vec<(Vec<u8>, u64)>,
     reverse: bool,
@@ -398,22 +402,78 @@ impl Ord for HeapItem {
     }
 }
 
-fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u64> {
+fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<(u64, u64)> {
+    if runs.is_empty() {
+        BufWriter::new(File::create(ordering_path)?).flush()?;
+        return Ok((0, 0));
+    }
+
+    let mut current = runs.to_vec();
+    let mut pass = 0usize;
+    let mut extra_spill_bytes = 0u64;
+    while current.len() > MERGE_FAN_IN {
+        pass += 1;
+        let mut next = Vec::new();
+        for (chunk_idx, chunk) in current.chunks(MERGE_FAN_IN).enumerate() {
+            let path = intermediate_run_path(ordering_path, pass, chunk_idx);
+            let (_count, bytes) = merge_run_records(chunk, reverse, &path)?;
+            extra_spill_bytes += bytes;
+            next.push(path);
+        }
+        for p in &current {
+            let _ = fs::remove_file(p);
+        }
+        current = next;
+    }
+
+    let count = merge_runs_to_ordering(&current, reverse, ordering_path)?;
+    for p in &current {
+        let _ = fs::remove_file(p);
+    }
+    Ok((count, extra_spill_bytes))
+}
+
+fn intermediate_run_path(ordering_path: &Path, pass: usize, chunk_idx: usize) -> PathBuf {
+    let dir = ordering_path.parent().unwrap_or_else(|| Path::new("."));
+    dir.join(format!("merge-pass{pass:03}-chunk{chunk_idx:05}.bin"))
+}
+
+fn merge_run_records(runs: &[PathBuf], reverse: bool, output_path: &Path) -> Result<(u64, u64)> {
     let mut readers: Vec<RunReader> = runs
         .iter()
         .map(|p| RunReader::open(p))
         .collect::<Result<_>>()?;
-    let mut heap: BinaryHeap<HeapItem> = BinaryHeap::with_capacity(readers.len());
-    for (i, rr) in readers.iter_mut().enumerate() {
-        if let Some((key, line_no)) = rr.next_record()? {
+    let mut heap = seed_merge_heap(&mut readers, reverse)?;
+
+    let mut out = BufWriter::new(File::create(output_path)?);
+    let mut count = 0u64;
+    let mut bytes = 0u64;
+    while let Some(item) = heap.pop() {
+        let key_len = item.key.len() as u32;
+        out.write_all(&key_len.to_le_bytes())?;
+        out.write_all(&item.key)?;
+        out.write_all(&item.line_no.to_le_bytes())?;
+        count += 1;
+        bytes += 4 + item.key.len() as u64 + 8;
+        if let Some((key, line_no)) = readers[item.run].next_record()? {
             heap.push(HeapItem {
                 key,
                 line_no,
-                run: i,
+                run: item.run,
                 reverse,
             });
         }
     }
+    out.flush()?;
+    Ok((count, bytes))
+}
+
+fn merge_runs_to_ordering(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u64> {
+    let mut readers: Vec<RunReader> = runs
+        .iter()
+        .map(|p| RunReader::open(p))
+        .collect::<Result<_>>()?;
+    let mut heap = seed_merge_heap(&mut readers, reverse)?;
 
     let mut out = BufWriter::new(File::create(ordering_path)?);
     let mut count = 0u64;
@@ -431,6 +491,21 @@ fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u
     }
     out.flush()?;
     Ok(count)
+}
+
+fn seed_merge_heap(readers: &mut [RunReader], reverse: bool) -> Result<BinaryHeap<HeapItem>> {
+    let mut heap = BinaryHeap::with_capacity(readers.len());
+    for (i, rr) in readers.iter_mut().enumerate() {
+        if let Some((key, line_no)) = rr.next_record()? {
+            heap.push(HeapItem {
+                key,
+                line_no,
+                run: i,
+                reverse,
+            });
+        }
+    }
+    Ok(heap)
 }
 
 // ======================= group-by (hash aggregation) =========================
@@ -1011,6 +1086,44 @@ mod tests {
         for (i, l) in lines.iter().enumerate() {
             assert_eq!(l, &format!("{i},row{i}"));
         }
+    }
+
+    #[test]
+    fn sort_uses_bounded_fan_in_multi_pass_merge() {
+        let mut data = Vec::new();
+        for i in (0..200u64).rev() {
+            data.extend_from_slice(format!("{i:03},row{i}\n").as_bytes());
+        }
+        let spill = tempfile::tempdir().unwrap();
+        let (_f, doc) = doc_from(&data);
+        let opts = SortOptions {
+            key_column: Some(1),
+            numeric: true,
+            budget_bytes: 1, // force one run per line, i.e. > MERGE_FAN_IN
+            spill_dir: spill.path().to_path_buf(),
+            ..Default::default()
+        };
+        let res = sort(&doc, &opts).unwrap();
+        assert!(
+            res.runs > MERGE_FAN_IN,
+            "test must force a multi-pass merge"
+        );
+        assert_eq!(res.line_count, 200);
+
+        let lines = sorted_lines(&doc, &res);
+        for (i, l) in lines.iter().enumerate() {
+            assert_eq!(l, &format!("{i:03},row{i}"));
+        }
+
+        let leftovers: Vec<_> = std::fs::read_dir(spill.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "ordering.bin")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "sort should clean spilled runs, left {leftovers:?}"
+        );
     }
 
     #[test]

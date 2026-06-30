@@ -6,7 +6,7 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト40件。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト41件。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
 - `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
 - `ayame serve`: 行単位編集（置換/挿入/削除/undo/redo）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
@@ -24,7 +24,7 @@
 3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（search/sort/group/top/distinct）**
    `/api/search`・`/api/sort`・`/api/group`・`/api/top`・`/api/distinct` は子プロセスを spawn→wait→exit、結果は JSON / artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
-   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・エディタでの仮想順列表示。
+   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → fan-in 64 の多段ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・エディタでの仮想順列表示。
 
 ## 📦 release readiness
 
