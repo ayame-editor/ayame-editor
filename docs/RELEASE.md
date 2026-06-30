@@ -38,3 +38,8 @@ The release workflow uploads:
 
 Manual release is also available from GitHub Actions → Release → Run workflow.
 
+After downloading release assets, verify them with:
+
+```sh
+sha256sum -c SHA256SUMS
+```

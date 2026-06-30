@@ -24,10 +24,12 @@ out="dist/ayame-v${version}-${target}${ext}"
 cp "$src" "$out"
 strip "$out" 2>/dev/null || true
 
+out_dir="$(dirname "$out")"
+out_name="$(basename "$out")"
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$out" > "$out.sha256"
+  (cd "$out_dir" && sha256sum "$out_name") > "$out.sha256"
 else
-  shasum -a 256 "$out" > "$out.sha256"
+  (cd "$out_dir" && shasum -a 256 "$out_name") > "$out.sha256"
 fi
 
 printf 'built %s\n' "$out"
