@@ -9,126 +9,32 @@ Shift_JIS / EUC-JP / UTF-8 を自動判定。CLI とローカル Web エディ�
 
 GitHub Releases の配布版は単体実行ファイルです。`web/` フォルダや追加ランタイムは不要です。
 
-最新版: https://github.com/hjosugi/ayame-editor/releases/tag/v0.1.7
-
-### Linux x86_64
+Linux / macOS / Git Bash / WSL はこれだけで入ります。
 
 ```sh
-set -eu
-VERSION=0.1.7
-INSTALL_DIR="$HOME/.local/bin"
-mkdir -p "$INSTALL_DIR"
-
-curl -fL \
-  "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-linux-x86_64-musl" \
-  -o /tmp/ayame
-install -m 0755 /tmp/ayame "$INSTALL_DIR/ayame"
-
-# ayame が見つからない場合は PATH を通す。
-case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile" ;;
-esac
-export PATH="$INSTALL_DIR:$PATH"
-
-ayame --version
+curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
-### macOS
+実行内容:
 
-Apple Silicon は `aarch64`、Intel Mac は `x86_64` を使います。
+- OS/CPU から配布ファイルを自動選択
+- 最新リリースをダウンロード
+- `.sha256` で検証
+- `~/.local/bin/ayame`（Windows系 sh では `~/bin/ayame.exe`）へ配置
+- PATH を shell profile に追記
+- `ayame --version` で起動確認
+
+バージョンや配置先を固定したい場合:
 
 ```sh
-set -eu
-VERSION=0.1.7
-INSTALL_DIR="$HOME/.local/bin"
-mkdir -p "$INSTALL_DIR"
-
-ARCH="$(uname -m)"
-case "$ARCH" in
-  arm64)  TARGET=macos-aarch64 ;;
-  x86_64) TARGET=macos-x86_64 ;;
-  *) echo "unsupported macOS arch: $ARCH" >&2; exit 1 ;;
-esac
-
-curl -fL \
-  "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-${TARGET}" \
-  -o /tmp/ayame
-install -m 0755 /tmp/ayame "$INSTALL_DIR/ayame"
-
-# ブラウザから落とした場合などに Gatekeeper で止まるときだけ実行。
-xattr -d com.apple.quarantine "$INSTALL_DIR/ayame" 2>/dev/null || true
-
-case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile" ;;
-esac
-export PATH="$INSTALL_DIR:$PATH"
-
-ayame --version
+curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
+  | AYAME_VERSION=0.1.7 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
-### Windows x86_64
-
-PowerShell で実行します。
-
-```powershell
-$Version = "0.1.7"
-$InstallDir = "$HOME\bin"
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-
-$Url = "https://github.com/hjosugi/ayame-editor/releases/download/v$Version/ayame-v$Version-windows-x86_64.exe"
-$Exe = "$InstallDir\ayame.exe"
-Invoke-WebRequest -Uri $Url -OutFile $Exe
-Unblock-File $Exe
-
-# 今の PowerShell セッションで使えるようにする。
-$env:Path = "$InstallDir;$env:Path"
-
-# 次回以降の PowerShell でも使えるようにユーザー PATH に追加する。
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (($UserPath -split ";") -notcontains $InstallDir) {
-  [Environment]::SetEnvironmentVariable("Path", "$InstallDir;$UserPath", "User")
-}
-
-ayame --version
-```
-
-### SHA256 を確認する場合
-
-Linux:
+ローカルに clone 済みなら:
 
 ```sh
-VERSION=0.1.7
-curl -fLO "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-linux-x86_64-musl"
-curl -fLO "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-linux-x86_64-musl.sha256"
-sha256sum -c "ayame-v${VERSION}-linux-x86_64-musl.sha256"
-```
-
-macOS:
-
-```sh
-VERSION=0.1.7
-ARCH="$(uname -m)"
-case "$ARCH" in
-  arm64)  TARGET=macos-aarch64 ;;
-  x86_64) TARGET=macos-x86_64 ;;
-  *) echo "unsupported macOS arch: $ARCH" >&2; exit 1 ;;
-esac
-curl -fLO "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-${TARGET}"
-curl -fLO "https://github.com/hjosugi/ayame-editor/releases/download/v${VERSION}/ayame-v${VERSION}-${TARGET}.sha256"
-shasum -a 256 -c "ayame-v${VERSION}-${TARGET}.sha256"
-```
-
-Windows PowerShell:
-
-```powershell
-$Version = "0.1.7"
-Invoke-WebRequest -Uri "https://github.com/hjosugi/ayame-editor/releases/download/v$Version/ayame-v$Version-windows-x86_64.exe" -OutFile "ayame.exe"
-Invoke-WebRequest -Uri "https://github.com/hjosugi/ayame-editor/releases/download/v$Version/ayame-v$Version-windows-x86_64.exe.sha256" -OutFile "ayame.exe.sha256"
-$Expected = (Get-Content .\ayame.exe.sha256).Split()[0].ToUpper()
-$Actual = (Get-FileHash .\ayame.exe -Algorithm SHA256).Hash
-if ($Actual -ne $Expected) { throw "SHA256 mismatch" }
+sh scripts/install.sh
 ```
 
 ### ソースからビルドする場合
