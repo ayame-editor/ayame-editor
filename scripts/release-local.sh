@@ -11,6 +11,9 @@ ext=""
 case "$target" in
   *windows*) ext=".exe" ;;
 esac
+case "$target" in
+  *windows-msvc*) export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-feature=+crt-static" ;;
+esac
 
 cargo build --release --locked --target "$target"
 

@@ -30,7 +30,7 @@ git push origin v0.1.0
 The release workflow uploads:
 
 - `ayame-<tag>-linux-x86_64-musl` (static Linux binary)
-- `ayame-<tag>-windows-x86_64.exe`
+- `ayame-<tag>-windows-x86_64.exe` (static CRT)
 - `ayame-<tag>-macos-x86_64`
 - `ayame-<tag>-macos-aarch64`
 - per-file `.sha256`
