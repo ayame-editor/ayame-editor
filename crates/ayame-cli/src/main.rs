@@ -205,7 +205,27 @@ fn cmd_stat(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Test/operational hook: when running as a spawned op worker, optionally crash
+/// in a specific way so the supervisor's isolation can be exercised
+/// deterministically. `AYAME_WORKER_CRASH = panic | abort | hang | exit<N>`.
+fn maybe_crash() {
+    let Ok(mode) = std::env::var("AYAME_WORKER_CRASH") else { return };
+    match mode.as_str() {
+        "panic" => panic!("AYAME_WORKER_CRASH=panic"),
+        "abort" => std::process::abort(), // SIGABRT: uncatchable, only a process boundary saves us
+        "hang" => loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        },
+        other => {
+            if let Some(code) = other.strip_prefix("exit").and_then(|c| c.parse::<i32>().ok()) {
+                std::process::exit(code);
+            }
+        }
+    }
+}
+
 fn cmd_sort(args: &[String]) -> Result<()> {
+    maybe_crash();
     let (doc, _pos, opts, flags) =
         open_doc(args, &["--key", "-k", "--delim", "-t", "--budget", "--out-order", "--spill-dir"])?;
     let key_column = match first_opt(&opts, &["--key", "-k"]) {
@@ -269,6 +289,7 @@ fn cmd_sort(args: &[String]) -> Result<()> {
 }
 
 fn cmd_group(args: &[String]) -> Result<()> {
+    maybe_crash();
     let (doc, _pos, opts, _flags) =
         open_doc(args, &["--key", "-k", "--value", "--delim", "-t", "--budget", "--spill-dir"])?;
     let key_column = match first_opt(&opts, &["--key", "-k"]) {

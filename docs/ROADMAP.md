@@ -14,12 +14,12 @@
 
 「目標アーキテクチャを一気に作らない」。各ステップは失敗時に v0.1 動作へ安全にフォールバックする。
 
-1. **デスクトップシェル＋プロセス隔離（安定性の証明）**
-   既存 axum をサイドカー子プロセス化し、Tauri window（または監督親）が前段に立つ。エンジンが落ちても**最後のビューポートを保持**して再 spawn。最初に **SIGKILL 注入テスト**を書く。
+1. **プロセス隔離（安定性の証明）** — ✅ **実装済み（op ワーカー版）**
+   `ayame serve` は重い op（sort/group）を `--worker` 相当の**使い捨て子プロセス**（`current_exe` を re-exec）で実行。ワーカーが**捕捉不能な SIGABRT でも**落ちると当該リクエストは 502、エンジンと `/api/lines`（ビューポート）は 200 を維持。`AYAME_WORKER_CRASH` フックで決定的に実証（`scripts/crash-isolation-test.sh`、8/8 PASS）。**未了**: Tauri window が axum ホスト自体を監督する案（ホストプロセス死＝DESIGN §4.1 の case 3）はこの環境では GUI 検証不可のため後続。
 2. **ディスクキャッシュ（オフロードの証明）** — ✅ **実装済み**
    `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
-3. **GREP を使い捨て子プロセスで**
-   rayon 並列スキャン、結果＝行番号、spawn→wait→exit。ジョブ毎隔離と「結果を仮想順列として閲覧」を最低リスクで検証。
+3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（sort/group）**
+   `/api/sort`・`/api/group` は子プロセスを spawn→wait→exit、結果はファイル/stdout でハンドオフ。ハートビートも IPC フレーミングも無しの最小形。GREP も同形に寄せるのは将来（現状はエンジン内蔵検索が高速・メモリ安全なので優先度低）。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
    明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・使い捨て子プロセス隔離（Step 3 後）・ビューア統合。
 

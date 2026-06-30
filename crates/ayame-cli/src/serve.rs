@@ -6,6 +6,8 @@
 //! 500 instead of taking the process down — stability is a feature here.
 
 use std::net::SocketAddr;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -14,8 +16,10 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use ayame_core::{Document, SearchOptions};
+use ayame_core::{Document, Line, SearchOptions};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{first_opt, open_opts, parse};
@@ -69,6 +73,8 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .route("/api/search", get(api_search))
         .route("/api/find", get(api_find))
         .route("/api/linebyte", get(api_linebyte))
+        .route("/api/sort", get(api_sort))
+        .route("/api/group", get(api_group))
         .layer(CatchPanicLayer::new())
         .with_state(doc);
 
@@ -217,4 +223,187 @@ async fn api_linebyte(
 
 fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, e.to_string())
+}
+
+// ---- isolated op workers (sort / group) -------------------------------------
+//
+// Heavy or risky operations run in a SEPARATE PROCESS spawned per request. If a
+// worker blows up — even an uncatchable SIGABRT/OOM — only that child dies; this
+// engine keeps serving the viewport and every other request. That process
+// boundary is the real "designed to crash" guarantee.
+
+static REQ_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn internal(e: impl std::fmt::Display) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+}
+
+fn spawn_dir(kind: &str) -> std::path::PathBuf {
+    let n = REQ_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
+    std::env::temp_dir().join(format!("ayame-srv-{kind}-{}-{}", std::process::id(), n))
+}
+
+fn describe_status(s: std::process::ExitStatus) -> String {
+    if let Some(c) = s.code() {
+        format!("failed (exit code {c})")
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = s.signal() {
+                return format!("crashed (signal {sig})");
+            }
+        }
+        "terminated abnormally".to_string()
+    }
+}
+
+#[derive(Deserialize)]
+struct SortQuery {
+    #[serde(default)]
+    k: Option<usize>,
+    #[serde(default)]
+    numeric: bool,
+    #[serde(default)]
+    reverse: bool,
+    #[serde(default)]
+    delim: Option<String>,
+    #[serde(default = "preview_limit")]
+    limit: u64,
+}
+fn preview_limit() -> u64 {
+    500
+}
+
+#[derive(Serialize)]
+struct SortResponse {
+    total: u64,
+    lines: Vec<Line>,
+    truncated: bool,
+}
+
+async fn api_sort(
+    State(doc): State<Shared>,
+    Query(q): Query<SortQuery>,
+) -> Result<Json<SortResponse>, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    let dir = spawn_dir("sort");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let order = dir.join("order.bin");
+
+    let mut cmd = Command::new(&exe);
+    cmd.arg("sort").arg(doc.path());
+    if let Some(k) = q.k {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if q.numeric {
+        cmd.arg("--numeric");
+    }
+    if q.reverse {
+        cmd.arg("--reverse");
+    }
+    if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    cmd.arg("--out-order").arg(&order).arg("--spill-dir").arg(&dir);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+
+    let outcome = run_sort_worker(cmd, doc.as_ref(), &order, q.limit).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await; // gentle cleanup, success or not
+    outcome
+}
+
+async fn run_sort_worker(
+    mut cmd: Command,
+    doc: &Document,
+    order: &std::path::Path,
+    limit: u64,
+) -> Result<Json<SortResponse>, (StatusCode, String)> {
+    let status = cmd.status().await.map_err(internal)?;
+    if !status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("sort worker {} — the engine is unaffected", describe_status(status)),
+        ));
+    }
+    let total = tokio::fs::metadata(order).await.map_err(internal)?.len() / 8;
+    // Only read the previewed prefix of the ordering, never the whole thing
+    // (which could be tens of GB for a ten-billion-line sort).
+    let want = (limit.min(total) * 8) as usize;
+    let mut buf = vec![0u8; want];
+    let mut f = tokio::fs::File::open(order).await.map_err(internal)?;
+    f.read_exact(&mut buf).await.map_err(internal)?;
+    let lines = buf
+        .chunks_exact(8)
+        .filter_map(|c| {
+            let ln = u64::from_le_bytes(c.try_into().unwrap());
+            doc.line(ln).map(|text| Line { number: ln, text })
+        })
+        .collect();
+    Ok(Json(SortResponse { total, lines, truncated: total > limit }))
+}
+
+#[derive(Deserialize)]
+struct GroupQuery {
+    #[serde(default)]
+    k: Option<usize>,
+    #[serde(default)]
+    value: Option<usize>,
+    #[serde(default)]
+    delim: Option<String>,
+    #[serde(default = "group_limit")]
+    limit: usize,
+}
+fn group_limit() -> usize {
+    1000
+}
+
+#[derive(Serialize)]
+struct GroupResponse {
+    rows: Vec<String>,
+    truncated: bool,
+}
+
+async fn api_group(
+    State(doc): State<Shared>,
+    Query(q): Query<GroupQuery>,
+) -> Result<Json<GroupResponse>, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    let dir = spawn_dir("group");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+
+    let mut cmd = Command::new(&exe);
+    cmd.arg("group").arg(doc.path());
+    if let Some(k) = q.k {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if let Some(v) = q.value {
+        cmd.arg("--value").arg(v.to_string());
+    }
+    if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    cmd.arg("--spill-dir").arg(&dir);
+    cmd.stderr(Stdio::null()).kill_on_drop(true);
+
+    let out = cmd.output().await.map_err(internal);
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    let out = out?;
+    if !out.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("group worker {} — the engine is unaffected", describe_status(out.status)),
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    for (i, l) in text.lines().enumerate() {
+        if i >= q.limit {
+            truncated = true;
+            break;
+        }
+        rows.push(l.to_string());
+    }
+    Ok(Json(GroupResponse { rows, truncated }))
 }

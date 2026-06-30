@@ -170,6 +170,12 @@ impl Document {
         self.from_cache
     }
 
+    /// Path this document was opened from (used to spawn isolated op workers).
+    #[inline]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Decoded text of line `i` (terminator stripped), or `None` if out of range.
     pub fn line(&self, i: u64) -> Option<String> {
         let buf = self.buf();
