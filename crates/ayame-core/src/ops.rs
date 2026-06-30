@@ -22,13 +22,32 @@ use crate::document::Document;
 use crate::encoding::Encoding;
 use crate::{Error, Result};
 
+/// How a key/value field is located within a line.
+#[derive(Clone, Copy, Debug)]
+pub struct FieldSpec {
+    /// Field delimiter (e.g. `,` or `\t`).
+    pub delimiter: u8,
+    /// Quote character for RFC-4180 parsing (only used when `csv` is true).
+    pub quote: u8,
+    /// When true, split with a real CSV parser (quoted fields may contain the
+    /// delimiter; `""` is an escaped quote). When false, split on raw delimiter
+    /// bytes (faster; correct for clean TSV/CSV without quoting).
+    pub csv: bool,
+}
+
+impl Default for FieldSpec {
+    fn default() -> Self {
+        FieldSpec { delimiter: b',', quote: b'"', csv: false }
+    }
+}
+
 /// How to sort.
 #[derive(Clone, Debug)]
 pub struct SortOptions {
     /// 1-based field index to sort on; `None` sorts on the whole line.
     pub key_column: Option<usize>,
-    /// Field delimiter used when `key_column` is set.
-    pub delimiter: u8,
+    /// How to locate the key field.
+    pub fields: FieldSpec,
     /// Parse the key as a number (order-preserving); else codepoint order.
     pub numeric: bool,
     /// Descending instead of ascending.
@@ -43,7 +62,7 @@ impl Default for SortOptions {
     fn default() -> Self {
         SortOptions {
             key_column: None,
-            delimiter: b',',
+            fields: FieldSpec::default(),
             numeric: false,
             reverse: false,
             budget_bytes: 256 * 1024 * 1024,
@@ -83,6 +102,7 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
 
     const BATCH: u64 = 8192;
     let mut start = 0u64;
+    let mut scratch = Vec::new();
     while start < total {
         let batch = doc.raw_line_ranges(start, BATCH);
         if batch.is_empty() {
@@ -90,7 +110,7 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
         }
         let advanced = batch.len() as u64;
         for (line_no, raw) in batch {
-            let key = make_key(raw, enc, opts);
+            let key = make_key(raw, enc, opts, &mut scratch);
             buffered_bytes += key.len() + 40; // key + Vec/tuple overhead estimate
             buffer.push((key, line_no));
             if buffered_bytes >= opts.budget_bytes {
@@ -142,24 +162,49 @@ impl OrderingReader {
 
 // ---- key construction --------------------------------------------------------
 
-fn make_key(raw: &[u8], enc: Encoding, opts: &SortOptions) -> Vec<u8> {
-    let field = match opts.key_column {
-        Some(col) => nth_field(raw, opts.delimiter, col),
-        None => raw,
-    };
-    if opts.numeric {
-        // Parse the decoded field; unparseable values sort last (ascending).
-        let s = enc.decode_line(field);
-        let v = s.trim().parse::<f64>().unwrap_or(f64::INFINITY);
+fn make_key(raw: &[u8], enc: Encoding, opts: &SortOptions, scratch: &mut Vec<u8>) -> Vec<u8> {
+    comparable_key(raw, enc, opts.key_column, &opts.fields, opts.numeric, scratch)
+}
+
+/// Build a byte key whose `Ord` matches the desired sort order: an
+/// order-preserving 8-byte encoding for numeric keys, else the field decoded to
+/// UTF-8 (byte order == code-point order). Shared by sort and top-n.
+fn comparable_key(
+    raw: &[u8],
+    enc: Encoding,
+    col: Option<usize>,
+    spec: &FieldSpec,
+    numeric: bool,
+    scratch: &mut Vec<u8>,
+) -> Vec<u8> {
+    let field = extract_field(raw, col, spec, scratch);
+    if numeric {
+        let v = enc.decode_line(field).trim().parse::<f64>().unwrap_or(f64::INFINITY);
         f64_order_key(v).to_vec()
     } else {
-        // Decode to UTF-8: byte order of UTF-8 == Unicode code-point order, so a
-        // Shift_JIS/EUC-JP file sorts in code-point order, not raw-byte order.
         enc.decode_line(field).into_bytes()
     }
 }
 
-/// 1-based field by delimiter, as a raw byte slice (empty if out of range).
+/// Extract the key/value field from a line. Returns a borrow of `raw` for the
+/// fast (whole-line or raw-split) paths, or of `scratch` after CSV parsing.
+fn extract_field<'a>(
+    raw: &'a [u8],
+    col: Option<usize>,
+    spec: &FieldSpec,
+    scratch: &'a mut Vec<u8>,
+) -> &'a [u8] {
+    match col {
+        None => raw,
+        Some(c) if spec.csv => {
+            csv_nth_field(raw, spec.delimiter, spec.quote, c, scratch);
+            &scratch[..]
+        }
+        Some(c) => nth_field(raw, spec.delimiter, c),
+    }
+}
+
+/// 1-based field by raw delimiter byte (no quote handling); empty if out of range.
 fn nth_field(raw: &[u8], delim: u8, col: usize) -> &[u8] {
     if col == 0 {
         return raw;
@@ -179,6 +224,54 @@ fn nth_field(raw: &[u8], delim: u8, col: usize) -> &[u8] {
         &raw[field_start..]
     } else {
         &[]
+    }
+}
+
+/// RFC-4180-aware extraction of the 1-based `col` field of a single record into
+/// `out` (cleared first), unescaping quotes. Uses `csv-core` (allocation-free).
+///
+/// NOTE: one physical line == one record. A quoted field with an *embedded
+/// newline* would have already been split by the line index, so embedded
+/// newlines in quoted fields are not supported (see DESIGN / ROADMAP). Quoted
+/// delimiters and `""` escapes within a line are handled correctly.
+fn csv_nth_field(raw: &[u8], delim: u8, quote: u8, col: usize, out: &mut Vec<u8>) {
+    out.clear();
+    if col == 0 {
+        out.extend_from_slice(raw);
+        return;
+    }
+    let mut rdr = csv_core::ReaderBuilder::new().delimiter(delim).quote(quote).build();
+    let mut input = raw;
+    let mut buf = [0u8; 512];
+    let mut idx = 1usize;
+    let mut flushed = false;
+    loop {
+        let (res, nin, nout) = rdr.read_field(input, &mut buf);
+        input = &input[nin..];
+        if idx == col {
+            out.extend_from_slice(&buf[..nout]);
+        }
+        match res {
+            csv_core::ReadFieldResult::InputEmpty => {
+                if input.is_empty() {
+                    if flushed {
+                        break;
+                    }
+                    flushed = true; // one more call with empty input flushes the final field
+                }
+            }
+            csv_core::ReadFieldResult::OutputFull => {} // same field continues into buf again
+            csv_core::ReadFieldResult::Field { record_end } => {
+                if idx == col {
+                    break;
+                }
+                idx += 1;
+                if record_end {
+                    break;
+                }
+            }
+            csv_core::ReadFieldResult::End => break,
+        }
     }
 }
 
@@ -311,7 +404,8 @@ pub struct GroupOptions {
     pub key_column: Option<usize>,
     /// 1-based numeric value field for sum/min/max/avg; `None` = count only.
     pub value_column: Option<usize>,
-    pub delimiter: u8,
+    /// How to locate key/value fields.
+    pub fields: FieldSpec,
     /// Memory budget for the in-memory aggregation map before spilling.
     pub budget_bytes: usize,
     pub spill_dir: PathBuf,
@@ -322,7 +416,7 @@ impl Default for GroupOptions {
         GroupOptions {
             key_column: None,
             value_column: None,
-            delimiter: b',',
+            fields: FieldSpec::default(),
             budget_bytes: 256 * 1024 * 1024,
             spill_dir: std::env::temp_dir().join("ayame-group"),
         }
@@ -407,6 +501,7 @@ pub fn group(doc: &Document, opts: &GroupOptions, mut emit: impl FnMut(&GroupRow
 
     const BATCH: u64 = 8192;
     let mut start = 0u64;
+    let mut scratch = Vec::new();
     while start < total {
         let batch = doc.raw_line_ranges(start, BATCH);
         if batch.is_empty() {
@@ -414,9 +509,10 @@ pub fn group(doc: &Document, opts: &GroupOptions, mut emit: impl FnMut(&GroupRow
         }
         let advanced = batch.len() as u64;
         for (_ln, raw) in batch {
-            let key = key_bytes(raw, enc, opts.key_column, opts.delimiter);
+            let key = key_bytes(raw, enc, opts.key_column, &opts.fields, &mut scratch);
             let value = opts.value_column.and_then(|c| {
-                enc.decode_line(nth_field(raw, opts.delimiter, c)).trim().parse::<f64>().ok()
+                let f = extract_field(raw, Some(c), &opts.fields, &mut scratch);
+                enc.decode_line(f).trim().parse::<f64>().ok()
             });
             match map.get_mut(&key) {
                 Some(acc) => acc.add(value),
@@ -468,11 +564,8 @@ fn group_row(key: Vec<u8>, acc: &Acc) -> GroupRow {
     }
 }
 
-fn key_bytes(raw: &[u8], enc: Encoding, col: Option<usize>, delim: u8) -> Vec<u8> {
-    let field = match col {
-        Some(c) => nth_field(raw, delim, c),
-        None => raw,
-    };
+fn key_bytes(raw: &[u8], enc: Encoding, col: Option<usize>, spec: &FieldSpec, scratch: &mut Vec<u8>) -> Vec<u8> {
+    let field = extract_field(raw, col, spec, scratch);
     enc.decode_line(field).into_bytes()
 }
 
@@ -582,6 +675,178 @@ fn merge_groups(runs: &[PathBuf], emit: &mut impl FnMut(&GroupRow)) -> Result<u6
         groups += 1;
     }
     Ok(groups)
+}
+
+// ============================ TOP-N ==========================================
+
+/// How to select the top rows.
+#[derive(Clone, Debug)]
+pub struct TopOptions {
+    pub key_column: Option<usize>,
+    pub fields: FieldSpec,
+    pub numeric: bool,
+    /// Keep the `n` largest keys (true) or `n` smallest (false).
+    pub largest: bool,
+    pub n: usize,
+}
+
+impl Default for TopOptions {
+    fn default() -> Self {
+        TopOptions { key_column: None, fields: FieldSpec::default(), numeric: false, largest: true, n: 10 }
+    }
+}
+
+/// Return the line numbers of the top `n` rows by key, in display order
+/// (largest-first for `largest`, smallest-first otherwise). Memory is `O(n)` —
+/// a bounded heap, no sort of the whole input.
+pub fn top_n(doc: &Document, opts: &TopOptions) -> Vec<u64> {
+    use std::cmp::Reverse;
+    if opts.n == 0 {
+        return Vec::new();
+    }
+    let enc = doc.encoding();
+    let total = doc.line_count();
+    let n = opts.n;
+    let mut scratch = Vec::new();
+    const BATCH: u64 = 8192;
+    let mut start = 0u64;
+
+    // `largest`: keep a min-heap of size n (evict the smallest kept key).
+    // `smallest`: keep a max-heap of size n (evict the largest kept key).
+    let mut min_heap: BinaryHeap<Reverse<(Vec<u8>, u64)>> = BinaryHeap::new();
+    let mut max_heap: BinaryHeap<(Vec<u8>, u64)> = BinaryHeap::new();
+
+    while start < total {
+        let batch = doc.raw_line_ranges(start, BATCH);
+        if batch.is_empty() {
+            break;
+        }
+        let advanced = batch.len() as u64;
+        for (ln, raw) in batch {
+            let key = comparable_key(raw, enc, opts.key_column, &opts.fields, opts.numeric, &mut scratch);
+            if opts.largest {
+                if min_heap.len() < n {
+                    min_heap.push(Reverse((key, ln)));
+                } else if matches!(min_heap.peek(), Some(Reverse((mk, _))) if key > *mk) {
+                    min_heap.pop();
+                    min_heap.push(Reverse((key, ln)));
+                }
+            } else if max_heap.len() < n {
+                max_heap.push((key, ln));
+            } else if matches!(max_heap.peek(), Some((mk, _)) if key < *mk) {
+                max_heap.pop();
+                max_heap.push((key, ln));
+            }
+        }
+        start += advanced;
+    }
+
+    if opts.largest {
+        let mut v: Vec<(Vec<u8>, u64)> = min_heap.into_iter().map(|Reverse(x)| x).collect();
+        v.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))); // largest key first
+        v.into_iter().map(|(_, ln)| ln).collect()
+    } else {
+        let mut v: Vec<(Vec<u8>, u64)> = max_heap.into_iter().collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))); // smallest key first
+        v.into_iter().map(|(_, ln)| ln).collect()
+    }
+}
+
+// ===================== DISTINCT (HyperLogLog) ================================
+
+/// Options for [`distinct`].
+#[derive(Clone, Debug)]
+pub struct DistinctOptions {
+    pub key_column: Option<usize>,
+    pub fields: FieldSpec,
+    /// HLL precision `p` (registers = 2^p). Clamped to [4, 18]. 14 ≈ 0.8% error.
+    pub precision: u32,
+}
+
+impl Default for DistinctOptions {
+    fn default() -> Self {
+        DistinctOptions { key_column: None, fields: FieldSpec::default(), precision: 14 }
+    }
+}
+
+/// Approximate distinct-value count of a field.
+#[derive(Clone, Copy, Debug)]
+pub struct DistinctResult {
+    pub estimate: u64,
+    pub registers: usize,
+    pub memory_bytes: usize,
+}
+
+/// HyperLogLog: estimate cardinality in fixed memory (2^p bytes), independent of
+/// how many distinct values there are.
+struct Hll {
+    reg: Vec<u8>,
+    p: u32,
+}
+
+impl Hll {
+    fn new(p: u32) -> Hll {
+        Hll { reg: vec![0u8; 1usize << p], p }
+    }
+    fn add(&mut self, h: u64) {
+        let idx = (h >> (64 - self.p)) as usize; // top p bits select the register
+        // Remaining bits shifted to the top; a guard bit bounds rho.
+        let w = (h << self.p) | (1u64 << (self.p - 1));
+        let rho = w.leading_zeros() as u8 + 1;
+        if rho > self.reg[idx] {
+            self.reg[idx] = rho;
+        }
+    }
+    fn estimate(&self) -> f64 {
+        let m = self.reg.len() as f64;
+        let alpha = match self.reg.len() {
+            16 => 0.673,
+            32 => 0.697,
+            64 => 0.709,
+            _ => 0.7213 / (1.0 + 1.079 / m),
+        };
+        let sum: f64 = self.reg.iter().map(|&r| 2f64.powi(-(r as i32))).sum();
+        let raw = alpha * m * m / sum;
+        if raw <= 2.5 * m {
+            // Small-range correction: linear counting over empty registers.
+            let zeros = self.reg.iter().filter(|&&r| r == 0).count() as f64;
+            if zeros > 0.0 {
+                return m * (m / zeros).ln();
+            }
+        }
+        raw // 64-bit hash => no large-range (2^32) correction needed
+    }
+}
+
+/// Estimate the number of distinct values of the configured field.
+pub fn distinct(doc: &Document, opts: &DistinctOptions) -> DistinctResult {
+    use std::hash::{Hash, Hasher};
+    let total = doc.line_count();
+    let mut hll = Hll::new(opts.precision.clamp(4, 18));
+    let mut scratch = Vec::new();
+    const BATCH: u64 = 8192;
+    let mut start = 0u64;
+    while start < total {
+        let batch = doc.raw_line_ranges(start, BATCH);
+        if batch.is_empty() {
+            break;
+        }
+        let advanced = batch.len() as u64;
+        for (_ln, raw) in batch {
+            // Distinctness is over the (unescaped) field bytes; identical bytes
+            // hash identically, so no decode is needed here.
+            let field = extract_field(raw, opts.key_column, &opts.fields, &mut scratch);
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            field.hash(&mut h);
+            hll.add(h.finish());
+        }
+        start += advanced;
+    }
+    DistinctResult {
+        estimate: hll.estimate().round() as u64,
+        registers: hll.reg.len(),
+        memory_bytes: hll.reg.len(),
+    }
 }
 
 /// Read exactly `buf.len()` bytes; `Ok(false)` if EOF before any byte was read,
@@ -703,6 +968,69 @@ mod tests {
         // Sum of i for key "a" = i in {0,3,6,...,2997}.
         let want_a: f64 = (0..3000u64).filter(|i| i % 3 == 0).map(|i| i as f64).sum();
         assert_eq!(rows[0].2, want_a);
+    }
+
+    #[test]
+    fn csv_field_handles_quotes_and_escapes() {
+        let line = br#"a,"x,y ""z""",c"#; // field 2 = x,y "z"  (quoted delim + "" escape)
+        let mut out = Vec::new();
+        csv_nth_field(line, b',', b'"', 1, &mut out);
+        assert_eq!(out, b"a");
+        csv_nth_field(line, b',', b'"', 2, &mut out);
+        assert_eq!(out, &b"x,y \"z\""[..]);
+        csv_nth_field(line, b',', b'"', 3, &mut out);
+        assert_eq!(out, b"c");
+        csv_nth_field(line, b',', b'"', 4, &mut out); // out of range
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn csv_group_respects_quoted_delimiters() {
+        // Without CSV mode, the comma inside quotes would split the key wrongly.
+        let data = b"\"a,b\",1\n\"a,b\",2\nc,3\n";
+        let spill = tempfile::tempdir().unwrap();
+        let (_f, doc) = doc_from(data);
+        let opts = GroupOptions {
+            key_column: Some(1),
+            value_column: Some(2),
+            fields: FieldSpec { delimiter: b',', quote: b'"', csv: true },
+            budget_bytes: 1 << 20,
+            spill_dir: spill.path().to_path_buf(),
+        };
+        let mut rows = Vec::new();
+        group(&doc, &opts, |r| rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count))).unwrap();
+        // "a,b" is one key with 2 rows; "c" has 1.
+        assert_eq!(rows, vec![("a,b".into(), 2), ("c".into(), 1)]);
+    }
+
+    #[test]
+    fn top_n_largest_and_smallest() {
+        // (i*7) % 1000 is a permutation of 0..1000 (7 coprime to 1000).
+        let mut data = Vec::new();
+        for i in 0..1000u64 {
+            data.extend_from_slice(format!("{},x\n", (i * 7) % 1000).as_bytes());
+        }
+        let (_f, doc) = doc_from(&data);
+        let val = |ln: u64| doc.line(ln).unwrap().split(',').next().unwrap().to_string();
+
+        let top = top_n(&doc, &TopOptions { key_column: Some(1), numeric: true, largest: true, n: 3, ..Default::default() });
+        assert_eq!(top.iter().map(|&l| val(l)).collect::<Vec<_>>(), vec!["999", "998", "997"]);
+
+        let bot = top_n(&doc, &TopOptions { key_column: Some(1), numeric: true, largest: false, n: 2, ..Default::default() });
+        assert_eq!(bot.iter().map(|&l| val(l)).collect::<Vec<_>>(), vec!["0", "1"]);
+    }
+
+    #[test]
+    fn distinct_estimate_is_close() {
+        // 50,000 rows over exactly 5,000 distinct keys.
+        let mut data = Vec::new();
+        for i in 0..50_000u64 {
+            data.extend_from_slice(format!("key{},v\n", i % 5000).as_bytes());
+        }
+        let (_f, doc) = doc_from(&data);
+        let res = distinct(&doc, &DistinctOptions { key_column: Some(1), ..Default::default() });
+        let err = (res.estimate as f64 - 5000.0).abs() / 5000.0;
+        assert!(err < 0.05, "HLL estimate {} too far from 5000 (rel err {:.3})", res.estimate, err);
     }
 
     #[test]

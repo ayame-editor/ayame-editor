@@ -17,8 +17,9 @@ DuckDB のような優れた分析基盤はありますが、「巨大ファイ�
 - **永続インデックスキャッシュ**: 一度開いた巨大ファイルの索引をディスク保存（content-addressed＋checksum trailer＋単一ライタロック、ソース変更で自動失効）。**2回目以降は「構築」→「mmap＋検証」でほぼ瞬時**（実測: 構築 24ms → キャッシュ 0ms）。`--no-cache` / `ayame cache {path,info,clear}`。
 - **外部マージソート**（`ayame sort`）: **メモリ予算＋ディスク spill** で RAM を超える行数を安定ソート。数値（順序保存エンコード）／文字（**コードポイント順**＝Shift_JIS もデコードして正しい順序）、列指定（`-k`/`--delim`）、降順（`-r`）。結果は行番号の順列（将来ビューアでゼロコピー表示）。実測: **500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒**。
 - **group-by / 集計**（`ayame group`）: キー列でグループ化して count（`--value` 指定で sum/min/max/avg）。**少数グループはメモリ内（ディスク不使用）**、高カーディナリティは予算超過時に部分集計を spill→マージ。
+- **TOP-N / DISTINCT / CSV欄モデル**: `ayame top -k COL -n N`（**有界メモリ O(N)** の上位N、`--min` で下位）、`ayame distinct -k COL`（**HyperLogLog** 近似ユニーク数、16 KB 固定・誤差 ~0.8%、TB級でも一定メモリ）。`--csv` で **RFC-4180 クォート**（区切りを含む `"a,b"`、`""` エスケープ）を正しく解釈。
 - **クラッシュ隔離（落ちる前提の設計）**: `ayame serve` は重い op（sort/group）を**使い捨て子プロセス**で実行。ワーカーが落ちても——**捕捉不能な SIGABRT/OOM でも**——エンジンと画面（ビューポート）は生存し、当該リクエストのみ 502 を返す。プロセス境界が真の安全網。`scripts/crash-isolation-test.sh` で実証（**8/8 PASS**）。
-- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `sort` / `group` / `gen` / `cache`。
+- **CLI**: `stat` / `head` / `tail` / `line` / `lines` / `search` / `sort` / `group` / `top` / `distinct` / `gen` / `cache`。
 - **ローカル Web ビューア**（`ayame serve`）: Rust が配信する VSCode 風の仮想化ビューア。**実行時に Node 不要**、webview も不要（ブラウザで開く＝最も安定）。数十億行をスクロールできるカスタムスクロールバー、行ジャンプ（Ctrl+G）、検索（Ctrl+F / F3）、ステータスバー。
 
 実測（4 vCPU VM、**3億行 / 14.16 GiB**）: コールドで開く＋全索引 **2.3 秒**、索引メモリ **2.0 MiB**、ランダム1行 **0.61 ms**、全文スキャン **5.0 GiB/s**。詳細は [BENCHMARKS.md](BENCHMARKS.md)。
@@ -42,6 +43,13 @@ cargo build --release
 ./target/release/ayame sort sample.csv -k 5 -n -r | head
 # RAMより大きいデータも：予算を絞るとディスクにspillして安定ソート
 ./target/release/ayame sort huge.csv -k 1 --budget 64MiB --out-order order.bin
+
+# 集計・上位N・近似ユニーク数
+./target/release/ayame group sample.csv -k 4 --value 5     # status別に count/sum/min/max/avg
+./target/release/ayame top   sample.csv -k 5 -n 10 --numeric  # 値の大きい上位10（O(N)メモリ）
+./target/release/ayame distinct sample.csv -k 1            # 近似ユニーク数（HyperLogLog, 16KB固定）
+# クォート付きCSV（区切りを含むフィールド "a,b" を正しく扱う）
+./target/release/ayame group data.csv -k 1 --csv
 
 # GUI（ローカル Web ビューア）— 表示された URL をブラウザで開く
 ./target/release/ayame serve sample.csv --port 8777

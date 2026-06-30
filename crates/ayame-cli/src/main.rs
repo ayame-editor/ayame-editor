@@ -12,7 +12,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
-use ayame_core::{Document, Encoding, GroupOptions, OpenOptions, OrderingReader, SearchOptions, SortOptions};
+use ayame_core::{
+    DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, OpenOptions, OrderingReader,
+    SearchOptions, SortOptions, TopOptions,
+};
 
 const HELP: &str = "\
 ayame — view, search and navigate text files of any size
@@ -29,6 +32,8 @@ COMMANDS:
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
+    top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
+    distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
     cache  [path|info|clear]      Inspect or clear the on-disk index cache
@@ -40,6 +45,13 @@ COMMON OPTIONS:
     --cache-dir <DIR>  Override the index-cache directory
     --json             Machine-readable output (stat/search)
     -h, --help         Show this help
+
+FIELD OPTIONS (sort/group/top/distinct):
+    -k, --key <COL>    1-based key column (omit = whole line)
+    -t, --delim <C>    Field delimiter (default ',')
+    --csv              RFC-4180 parsing: quoted fields may contain the delimiter
+    --quote <C>        Quote char for --csv (default '\"')
+    -n, --numeric      Treat the key as a number (sort/top)
 
 EXAMPLES:
     ayame stat huge.csv
@@ -82,6 +94,8 @@ fn run(args: Vec<String>) -> Result<()> {
         "search" => cmd_search(rest),
         "sort" => cmd_sort(rest),
         "group" => cmd_group(rest),
+        "top" => cmd_top(rest),
+        "distinct" => cmd_distinct(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
         "cache" => cmd_cache(rest),
@@ -226,15 +240,11 @@ fn maybe_crash() {
 
 fn cmd_sort(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) =
-        open_doc(args, &["--key", "-k", "--delim", "-t", "--budget", "--out-order", "--spill-dir"])?;
-    let key_column = match first_opt(&opts, &["--key", "-k"]) {
-        Some(s) => Some(s.parse().context("--key must be a number")?),
-        None => None,
-    };
-    let delimiter = first_opt(&opts, &["--delim", "-t"])
-        .and_then(|s| s.as_bytes().first().copied())
-        .unwrap_or(b',');
+    let (doc, _pos, opts, flags) = open_doc(
+        args,
+        &["--key", "-k", "--delim", "-t", "--quote", "--budget", "--out-order", "--spill-dir"],
+    )?;
+    let key_column = parse_key(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
     let reverse = has_flag(&flags, &["--reverse", "-r"]);
     let budget_bytes = match first_opt(&opts, &["--budget"]) {
@@ -248,7 +258,7 @@ fn cmd_sort(args: &[String]) -> Result<()> {
 
     let sopts = SortOptions {
         key_column,
-        delimiter,
+        fields: field_spec(&opts, &flags),
         numeric,
         reverse,
         budget_bytes,
@@ -290,19 +300,15 @@ fn cmd_sort(args: &[String]) -> Result<()> {
 
 fn cmd_group(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, _flags) =
-        open_doc(args, &["--key", "-k", "--value", "--delim", "-t", "--budget", "--spill-dir"])?;
-    let key_column = match first_opt(&opts, &["--key", "-k"]) {
-        Some(s) => Some(s.parse().context("--key must be a number")?),
-        None => None,
-    };
+    let (doc, _pos, opts, flags) = open_doc(
+        args,
+        &["--key", "-k", "--value", "--delim", "-t", "--quote", "--budget", "--spill-dir"],
+    )?;
+    let key_column = parse_key(&opts)?;
     let value_column = match first_opt(&opts, &["--value"]) {
         Some(s) => Some(s.parse().context("--value must be a number")?),
         None => None,
     };
-    let delimiter = first_opt(&opts, &["--delim", "-t"])
-        .and_then(|s| s.as_bytes().first().copied())
-        .unwrap_or(b',');
     let budget_bytes = match first_opt(&opts, &["--budget"]) {
         Some(s) => parse_size(s)?,
         None => 256 * 1024 * 1024,
@@ -315,7 +321,7 @@ fn cmd_group(args: &[String]) -> Result<()> {
     let gopts = GroupOptions {
         key_column,
         value_column,
-        delimiter,
+        fields: field_spec(&opts, &flags),
         budget_bytes,
         spill_dir: spill_dir.clone(),
     };
@@ -348,6 +354,69 @@ fn cmd_group(args: &[String]) -> Result<()> {
     if custom_spill.is_none() {
         let _ = std::fs::remove_dir_all(&spill_dir);
     }
+    Ok(())
+}
+
+fn parse_key(opts: &HashMap<String, String>) -> Result<Option<usize>> {
+    match first_opt(opts, &["--key", "-k"]) {
+        Some(s) => Ok(Some(s.parse().context("--key must be a number")?)),
+        None => Ok(None),
+    }
+}
+
+fn field_spec(opts: &HashMap<String, String>, flags: &HashSet<String>) -> FieldSpec {
+    let delimiter = first_opt(opts, &["--delim", "-t"])
+        .and_then(|s| s.as_bytes().first().copied())
+        .unwrap_or(b',');
+    let quote = first_opt(opts, &["--quote"])
+        .and_then(|s| s.as_bytes().first().copied())
+        .unwrap_or(b'"');
+    FieldSpec { delimiter, quote, csv: has_flag(flags, &["--csv"]) }
+}
+
+fn cmd_top(args: &[String]) -> Result<()> {
+    let (doc, _pos, opts, flags) =
+        open_doc(args, &["--key", "-k", "-n", "--top", "--delim", "-t", "--quote"])?;
+    let n: usize = first_opt(&opts, &["-n", "--top"]).unwrap_or("10").parse().context("-n must be a number")?;
+    let topts = TopOptions {
+        key_column: parse_key(&opts)?,
+        fields: field_spec(&opts, &flags),
+        numeric: has_flag(&flags, &["--numeric"]),
+        largest: !has_flag(&flags, &["--min", "--smallest", "--asc"]),
+        n,
+    };
+    let stdout = std::io::stdout();
+    let mut w = std::io::BufWriter::new(stdout.lock());
+    for ln in ayame_core::ops::top_n(&doc, &topts) {
+        if let Some(text) = doc.line(ln) {
+            writeln!(w, "{text}")?;
+        }
+    }
+    w.flush()?;
+    Ok(())
+}
+
+fn cmd_distinct(args: &[String]) -> Result<()> {
+    let (doc, _pos, opts, flags) =
+        open_doc(args, &["--key", "-k", "--delim", "-t", "--quote", "--precision", "-p"])?;
+    let precision: u32 = first_opt(&opts, &["--precision", "-p"])
+        .map(|s| s.parse::<u32>())
+        .transpose()
+        .context("--precision must be a number")?
+        .unwrap_or(14);
+    let res = ayame_core::ops::distinct(
+        &doc,
+        &DistinctOptions { key_column: parse_key(&opts)?, fields: field_spec(&opts, &flags), precision },
+    );
+    println!("{}", res.estimate); // pipeable count on stdout
+    let err_pct = 104.0 / (res.registers as f64).sqrt();
+    eprintln!(
+        "≈{} distinct values (HyperLogLog: {} registers, {}, ~{:.1}% std. error)",
+        commas(res.estimate),
+        commas(res.registers as u64),
+        human_bytes(res.memory_bytes as u64),
+        err_pct,
+    );
     Ok(())
 }
 

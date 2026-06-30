@@ -25,7 +25,12 @@
 
 ## 🔭 v2 以降（将来）
 
-- ✅ **GROUP-BY** 実装済み（`ayame-core::ops::group` ＋ `ayame group`）: メモリ内ハッシュ集計＋予算超過で部分集計 spill→k-way マージ。count/sum/min/max/avg。**未了**: TOP-N / DISTINCT（HLL）、CSV/TSV フィールドモデル（`csv-core` でのクォート対応）、ホットパーティション再分割。
+- ✅ **GROUP-BY / TOP-N / DISTINCT / CSV欄モデル** 実装済み（`ayame-core::ops` ＋ `ayame group|top|distinct`）:
+  - GROUP-BY: メモリ内ハッシュ集計＋予算超過で部分集計 spill→k-way マージ。count/sum/min/max/avg。
+  - TOP-N: 有界 O(N) ヒープ（上位/下位、数値/文字）。
+  - DISTINCT: HyperLogLog（2^p レジスタ、既定 p=14＝16 KB・誤差 ~0.8%、基数に依らず一定メモリ）。
+  - CSV欄モデル: `csv-core` で RFC-4180 クォート（区切りを含む `"a,b"`、`""` エスケープ）。`--csv` で有効化。
+  - **未了**: 引用フィールド内の**埋め込み改行**（1物理行=1レコード前提）、ホットパーティション再分割、per-group の distinct（HLL）、serve への top/distinct 露出。
 - **OTP風 supervisor**（長命プールのハートビート/バックオフ）、`ayame-ipc`（bincode フレーミング）。
 - **キャッシュ GC の高度化**（LRU+TTL+上限、低ディスク時デグレード、`ayame cache {info,gc,clear}`）。
 - **DuckDB 任意バックエンド**（feature-gated）: `read_csv_auto` で多キー GROUP BY・JOIN・SQL を pushdown。重い分析にコミットした時だけ列投影 DB を構築。

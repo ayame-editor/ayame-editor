@@ -38,7 +38,10 @@ pub mod search;
 pub use document::{Document, FileStat, Line, OpenOptions};
 pub use encoding::{Encoding, Eol};
 pub use index::{LineIndex, DEFAULT_STRIDE};
-pub use ops::{GroupOptions, GroupRow, GroupStats, OrderingReader, SortOptions, SortResult};
+pub use ops::{
+    DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats, OrderingReader,
+    SortOptions, SortResult, TopOptions,
+};
 pub use search::{SearchHit, SearchOptions, SearchResult};
 
 /// Errors surfaced by the engine.
