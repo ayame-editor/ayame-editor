@@ -1,0 +1,39 @@
+# Ayame ロードマップ
+
+優先順位は常に **安定性 ＞ 簡潔強力 ＞ VSCode風UX ＞ Shift_JIS ＞ 巨大ファイル**。
+詳細な根拠は [DESIGN.md](DESIGN.md)。
+
+## ✅ v0.1（実装済み）
+
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索。ユニットテスト17件。
+- `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
+- `ayame serve`: ローカル Web ビューア（仮想化、行ジャンプ、検索、ステータスバー）。
+- ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
+
+## 🎯 v1 最小増分（次の4ステップ）
+
+「目標アーキテクチャを一気に作らない」。各ステップは失敗時に v0.1 動作へ安全にフォールバックする。
+
+1. **デスクトップシェル＋プロセス隔離（安定性の証明）**
+   既存 axum をサイドカー子プロセス化し、Tauri window（または監督親）が前段に立つ。エンジンが落ちても**最後のビューポートを保持**して再 spawn。最初に **SIGKILL 注入テスト**を書く。
+2. **ディスクキャッシュ（オフロードの証明）**
+   `LineIndex::to_bytes/from_bytes` ＋ checksum trailer、content-addressed キャッシュ（`blake3(path)+size+mtime+encoding+stride`）、`O_EXCL` 単一ライタロック。再オープンが「構築」→「mmap＋検証」に。
+3. **GREP を使い捨て子プロセスで**
+   rayon 並列スキャン、結果＝行番号、spawn→wait→exit。ジョブ毎隔離と「結果を仮想順列として閲覧」を最低リスクで検証。
+4. **外部マージ SORT**
+   明示メモリ予算＋≥1MiB 連続スピル、結果は `Vec<u64>` 順列（ゼロコピー閲覧）。v1 はデコード＋NFC キーで「コードポイント順」。
+
+## 🔭 v2 以降（将来）
+
+- **GROUP-BY（分割ハッシュ）/ TOP-N / DISTINCT**。CSV/TSV フィールドモデル（`csv-core`）。
+- **OTP風 supervisor**（長命プールのハートビート/バックオフ）、`ayame-ipc`（bincode フレーミング）。
+- **キャッシュ GC の高度化**（LRU+TTL+上限、低ディスク時デグレード、`ayame cache {info,gc,clear}`）。
+- **DuckDB 任意バックエンド**（feature-gated）: `read_csv_auto` で多キー GROUP BY・JOIN・SQL を pushdown。重い分析にコミットした時だけ列投影 DB を構築。
+- **日本語の言語的照合**（locale collation）、UTF-16 索引対応。
+- **メモリ上限のハードニング**（cgroup v2 / Job Object、または `MAP_NORESERVE`）。
+- **インクリメンタル索引**（構築中の先頭から閲覧開始）、巨大ファイルの **tail -f 追従**。
+
+## 🚧 意図的に「やらない／後回し」
+
+- **インプレース編集**（巨大ファイルの編集）。今のスコープは**ビューア＋データ操作**。編集を入れる時も**フルインメモリ rope は作らず** mmap＋append-only 編集 WAL で行う方針（Zed を沈めた構造を避ける）。
+- v1 段階での cgroup RSS 上限、HyperLogLog、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

@@ -162,8 +162,11 @@ pub fn find_next(
 /// Last match strictly before `before_byte`.
 ///
 /// Implemented as a forward scan over `[base, before_byte)` keeping the final
-/// hit. This is O(region); fine for interactive "previous" near the viewport,
-/// and bounded by where the user currently is rather than the whole file.
+/// hit, so its cost is O(before_byte - base) — i.e. worst-case O(file) when the
+/// cursor is near EOF. This is acceptable for interactive "previous" in v1; a
+/// chunk-backward scan (fixed windows from `before_byte` downward, stopping at
+/// the first window that contains a hit) is the planned improvement to make
+/// reverse search genuinely viewport-bounded.
 pub fn find_prev(
     buf: &[u8],
     base: u64,
