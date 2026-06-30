@@ -52,5 +52,5 @@
 
 ## 🚧 意図的に「やらない／後回し」
 
-- **インプレース編集**（巨大ファイルの編集）。今のスコープは**ビューア＋データ操作**。編集を入れる時も**フルインメモリ rope は作らず** mmap＋append-only 編集 WAL で行う方針（Zed を沈めた構造を避ける）。
+- **巨大ファイル編集**。read-only mmap は「閲覧用の元ファイル base を不変に扱う」という意味で、編集不能という意味ではない。編集を入れる時も**フルインメモリ rope は作らず** mmap base＋append-only 編集 WAL / piece table で行う方針（Zed を沈めた構造を避ける）。
 - v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

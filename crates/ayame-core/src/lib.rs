@@ -27,7 +27,9 @@
 //! * [`index`] — the sparse, parallel-built line index.
 //! * [`encoding`] — encoding (UTF-8 / Shift_JIS / EUC-JP) and EOL detection.
 //! * [`search`] — streaming literal/regex search.
-//! * [`document`] — [`Document`], the public read-only handle that ties it together.
+//! * [`document`] — [`Document`], the immutable mmap-backed base handle.
+//!   Editing can be layered above it with a patch/WAL model without copying the
+//!   whole file into memory.
 
 pub mod document;
 pub mod encoding;

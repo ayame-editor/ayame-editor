@@ -1,4 +1,8 @@
-//! A read-only view over one large file: mmap + encoding + sparse index.
+//! An immutable mmap-backed base view over one large file: encoding + sparse index.
+//!
+//! "Immutable" here describes the base file mapping. It does not rule out
+//! editor features; edits should be represented as a patch/WAL layer above this
+//! base rather than by mutable-mmapping the original file.
 //!
 //! `Document::open` is the only place the whole file is "touched", and even
 //! that is a memory map plus a single newline-scan to build the index — never a
