@@ -52,7 +52,13 @@ impl LineIndex {
         let stride = stride.max(1);
         let len = buf.len() as u64;
         if base >= len {
-            return LineIndex { checkpoints: Vec::new(), stride, line_count: 0, base, len };
+            return LineIndex {
+                checkpoints: Vec::new(),
+                stride,
+                line_count: 0,
+                base,
+                len,
+            };
         }
         let content = &buf[base as usize..];
         let clen = content.len() as u64;
@@ -91,12 +97,21 @@ impl LineIndex {
         let mut g = 0u64;
         for cr in &per {
             for &(local, off) in &cr.samples {
-                checkpoints.push(Checkpoint { line: g + local, off: off + base });
+                checkpoints.push(Checkpoint {
+                    line: g + local,
+                    off: off + base,
+                });
             }
             g += cr.count;
         }
 
-        LineIndex { checkpoints, stride, line_count: g, base, len }
+        LineIndex {
+            checkpoints,
+            stride,
+            line_count: g,
+            base,
+            len,
+        }
     }
 
     /// Total number of lines. A file ending in a newline does *not* count a
@@ -129,7 +144,10 @@ impl LineIndex {
         if i >= self.line_count {
             return None;
         }
-        let k = self.checkpoints.partition_point(|c| c.line <= i).saturating_sub(1);
+        let k = self
+            .checkpoints
+            .partition_point(|c| c.line <= i)
+            .saturating_sub(1);
         let cp = self.checkpoints[k];
         let mut off = cp.off;
         let mut cur = cp.line;
@@ -189,7 +207,10 @@ impl LineIndex {
     /// Global line number containing byte offset `b` (clamped into content).
     pub fn line_of_byte(&self, buf: &[u8], b: u64) -> u64 {
         let b = b.clamp(self.base, self.len);
-        let k = self.checkpoints.partition_point(|c| c.off <= b).saturating_sub(1);
+        let k = self
+            .checkpoints
+            .partition_point(|c| c.off <= b)
+            .saturating_sub(1);
         let cp = self.checkpoints[k];
         let extra = memchr_iter(b'\n', &buf[cp.off as usize..b as usize]).count() as u64;
         cp.line + extra
@@ -252,10 +273,19 @@ impl LineIndex {
         let mut checkpoints = Vec::with_capacity(n);
         let mut o = 56;
         for _ in 0..n {
-            checkpoints.push(Checkpoint { line: rd(o), off: rd(o + 8) });
+            checkpoints.push(Checkpoint {
+                line: rd(o),
+                off: rd(o + 8),
+            });
             o += 16;
         }
-        Some(LineIndex { checkpoints, stride, line_count, base, len })
+        Some(LineIndex {
+            checkpoints,
+            stride,
+            line_count,
+            base,
+            len,
+        })
     }
 
     /// Content region length the index was built for (for cache validation).
@@ -315,12 +345,15 @@ fn scan_chunk(content: &[u8], s: u64, e: u64, clen: u64, stride: u64) -> ChunkRe
         // the next chunk's start; a final newline (nxt == clen) opens no line.
         if nxt < e && nxt < clen {
             local += 1;
-            if local % stride == 0 {
+            if local.is_multiple_of(stride) {
                 samples.push((local, nxt));
             }
         }
     }
-    ChunkResult { count: local + 1, samples }
+    ChunkResult {
+        count: local + 1,
+        samples,
+    }
 }
 
 #[cfg(test)]

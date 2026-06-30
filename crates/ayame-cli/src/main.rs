@@ -7,14 +7,14 @@ mod gen;
 mod serve;
 
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
 use ayame_core::{
-    DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, OpenOptions, OrderingReader,
-    SearchOptions, SortOptions, TopOptions,
+    DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow, OpenOptions,
+    OrderingReader, SearchOptions, SortOptions, TopOptions,
 };
 
 const HELP: &str = "\
@@ -37,6 +37,7 @@ COMMANDS:
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
     cache  [path|info|clear]      Inspect or clear the on-disk index cache
+    version                       Show version
 
 COMMON OPTIONS:
     --encoding <ENC>   Force encoding: utf8 | shift_jis | euc-jp | ascii
@@ -44,6 +45,7 @@ COMMON OPTIONS:
     --no-cache         Do not read/write the persistent index cache
     --cache-dir <DIR>  Override the index-cache directory
     --json             Machine-readable output (stat/search)
+    -V, --version      Show version
     -h, --help         Show this help
 
 FIELD OPTIONS (sort/group/top/distinct):
@@ -52,6 +54,11 @@ FIELD OPTIONS (sort/group/top/distinct):
     --csv              RFC-4180 parsing: quoted fields may contain the delimiter
     --quote <C>        Quote char for --csv (default '\"')
     -n, --numeric      Treat the key as a number (sort/top)
+
+GROUP OPTIONS:
+    --value <COL>      Numeric value column for sum/min/max/avg
+    --out-groups <FILE>
+                       Write group rows to a TSV artifact instead of stdout
 
 EXAMPLES:
     ayame stat huge.csv
@@ -83,6 +90,10 @@ fn run(args: Vec<String>) -> Result<()> {
         print!("{HELP}");
         return Ok(());
     }
+    if cmd == "-V" || cmd == "--version" || cmd == "version" {
+        println!("ayame {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
 
     let rest = &args[1..];
     match cmd.as_str() {
@@ -108,9 +119,17 @@ fn run(args: Vec<String>) -> Result<()> {
 
 // ---- argument parsing helpers -------------------------------------------------
 
+type ParsedArgs = (Vec<String>, HashMap<String, String>, HashSet<String>);
+type OpenedDoc = (
+    Document,
+    Vec<String>,
+    HashMap<String, String>,
+    HashSet<String>,
+);
+
 /// Split argv into positionals, valued options, and boolean flags.
 /// `valued` lists the option names (incl. aliases) that consume the next token.
-fn parse(args: &[String], valued: &[&str]) -> (Vec<String>, HashMap<String, String>, HashSet<String>) {
+fn parse(args: &[String], valued: &[&str]) -> ParsedArgs {
     let mut pos = Vec::new();
     let mut opts = HashMap::new();
     let mut flags = HashSet::new();
@@ -145,9 +164,8 @@ fn has_flag(flags: &HashSet<String>, keys: &[&str]) -> bool {
 pub fn open_opts(opts: &HashMap<String, String>, flags: &HashSet<String>) -> Result<OpenOptions> {
     let mut o = OpenOptions::default();
     if let Some(enc) = first_opt(opts, &["--encoding"]) {
-        o.encoding = Some(
-            Encoding::parse(enc).with_context(|| format!("unknown encoding '{enc}'"))?,
-        );
+        o.encoding =
+            Some(Encoding::parse(enc).with_context(|| format!("unknown encoding '{enc}'"))?);
     }
     if let Some(s) = first_opt(opts, &["--stride"]) {
         o.stride = Some(s.parse().context("--stride must be a number")?);
@@ -184,7 +202,7 @@ pub fn default_cache_dir() -> Option<PathBuf> {
     None
 }
 
-fn open_doc(args: &[String], valued_extra: &[&str]) -> Result<(Document, Vec<String>, HashMap<String, String>, HashSet<String>)> {
+fn open_doc(args: &[String], valued_extra: &[&str]) -> Result<OpenedDoc> {
     let mut valued = vec!["--encoding", "--stride", "--cache-dir"];
     valued.extend_from_slice(valued_extra);
     let (pos, opts, flags) = parse(args, &valued);
@@ -205,17 +223,30 @@ fn cmd_stat(args: &[String]) -> Result<()> {
     }
     let _ = opts;
     println!("path        {}", s.path);
-    println!("size        {} ({} bytes)", human_bytes(s.bytes), commas(s.bytes));
+    println!(
+        "size        {} ({} bytes)",
+        human_bytes(s.bytes),
+        commas(s.bytes)
+    );
     println!("lines       {}", commas(s.lines));
-    println!("encoding    {}{}", s.encoding.label(), if s.bom_bytes > 0 { " (BOM)" } else { "" });
+    println!(
+        "encoding    {}{}",
+        s.encoding.label(),
+        if s.bom_bytes > 0 { " (BOM)" } else { "" }
+    );
     println!("line ending {}", s.eol.label());
     let how = if s.from_cache {
         format!("loaded from cache in {} ms", s.index_ms)
     } else {
         format!("built in {} ms", s.index_ms)
     };
-    println!("index       {} checkpoints, {} (stride {}), {}",
-        commas(s.checkpoints as u64), human_bytes(s.index_bytes as u64), commas(s.stride), how);
+    println!(
+        "index       {} checkpoints, {} (stride {}), {}",
+        commas(s.checkpoints as u64),
+        human_bytes(s.index_bytes as u64),
+        commas(s.stride),
+        how
+    );
     Ok(())
 }
 
@@ -223,7 +254,9 @@ fn cmd_stat(args: &[String]) -> Result<()> {
 /// in a specific way so the supervisor's isolation can be exercised
 /// deterministically. `AYAME_WORKER_CRASH = panic | abort | hang | exit<N>`.
 fn maybe_crash() {
-    let Ok(mode) = std::env::var("AYAME_WORKER_CRASH") else { return };
+    let Ok(mode) = std::env::var("AYAME_WORKER_CRASH") else {
+        return;
+    };
     match mode.as_str() {
         "panic" => panic!("AYAME_WORKER_CRASH=panic"),
         "abort" => std::process::abort(), // SIGABRT: uncatchable, only a process boundary saves us
@@ -231,7 +264,10 @@ fn maybe_crash() {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         },
         other => {
-            if let Some(code) = other.strip_prefix("exit").and_then(|c| c.parse::<i32>().ok()) {
+            if let Some(code) = other
+                .strip_prefix("exit")
+                .and_then(|c| c.parse::<i32>().ok())
+            {
                 std::process::exit(code);
             }
         }
@@ -242,7 +278,16 @@ fn cmd_sort(args: &[String]) -> Result<()> {
     maybe_crash();
     let (doc, _pos, opts, flags) = open_doc(
         args,
-        &["--key", "-k", "--delim", "-t", "--quote", "--budget", "--out-order", "--spill-dir"],
+        &[
+            "--key",
+            "-k",
+            "--delim",
+            "-t",
+            "--quote",
+            "--budget",
+            "--out-order",
+            "--spill-dir",
+        ],
     )?;
     let key_column = parse_key(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
@@ -277,7 +322,10 @@ fn cmd_sort(args: &[String]) -> Result<()> {
         std::fs::rename(&res.ordering_path, outp)
             .or_else(|_| std::fs::copy(&res.ordering_path, outp).map(|_| ()))
             .with_context(|| format!("writing ordering to '{outp}'"))?;
-        eprintln!("ordering ({} u64 line numbers) -> {outp}", commas(res.line_count));
+        eprintln!(
+            "ordering ({} u64 line numbers) -> {outp}",
+            commas(res.line_count)
+        );
     } else {
         let stdout = std::io::stdout();
         let mut w = std::io::BufWriter::new(stdout.lock());
@@ -302,7 +350,17 @@ fn cmd_group(args: &[String]) -> Result<()> {
     maybe_crash();
     let (doc, _pos, opts, flags) = open_doc(
         args,
-        &["--key", "-k", "--value", "--delim", "-t", "--quote", "--budget", "--spill-dir"],
+        &[
+            "--key",
+            "-k",
+            "--value",
+            "--delim",
+            "-t",
+            "--quote",
+            "--budget",
+            "--spill-dir",
+            "--out-groups",
+        ],
     )?;
     let key_column = parse_key(&opts)?;
     let value_column = match first_opt(&opts, &["--value"]) {
@@ -314,9 +372,9 @@ fn cmd_group(args: &[String]) -> Result<()> {
         None => 256 * 1024 * 1024,
     };
     let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
-    let spill_dir = custom_spill
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("ayame-group-{}", std::process::id())));
+    let spill_dir = custom_spill.clone().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!("ayame-group-{}", std::process::id()))
+    });
 
     let gopts = GroupOptions {
         key_column,
@@ -327,23 +385,13 @@ fn cmd_group(args: &[String]) -> Result<()> {
     };
     let has_value = value_column.is_some();
 
-    let stats = {
+    let out_groups = first_opt(&opts, &["--out-groups"]).map(PathBuf::from);
+    let stats = if let Some(out_path) = out_groups.as_deref() {
+        write_group_artifact(&doc, &gopts, has_value, out_path)?
+    } else {
         let stdout = std::io::stdout();
-        let mut w = std::io::BufWriter::new(stdout.lock());
-        let stats = ayame_core::ops::group(&doc, &gopts, |row| {
-            let key = String::from_utf8_lossy(&row.key);
-            let _ = if has_value {
-                if row.numeric_count > 0 {
-                    writeln!(w, "{key}\t{}\t{}\t{}\t{}\t{}", row.count, row.sum, row.min, row.max, row.avg().unwrap())
-                } else {
-                    writeln!(w, "{key}\t{}\t\t\t\t", row.count)
-                }
-            } else {
-                writeln!(w, "{key}\t{}", row.count)
-            };
-        })?;
-        let _ = w.flush();
-        stats
+        let mut w = BufWriter::new(stdout.lock());
+        group_to_writer(&doc, &gopts, has_value, &mut w)?
     };
     eprintln!(
         "{} groups, {} run(s), {} spilled to disk",
@@ -351,10 +399,97 @@ fn cmd_group(args: &[String]) -> Result<()> {
         commas(stats.runs as u64),
         human_bytes(stats.spill_bytes),
     );
+    if let Some(out_path) = out_groups {
+        eprintln!("groups -> {}", out_path.display());
+    }
     if custom_spill.is_none() {
         let _ = std::fs::remove_dir_all(&spill_dir);
     }
     Ok(())
+}
+
+fn group_to_writer<W: Write>(
+    doc: &Document,
+    opts: &GroupOptions,
+    has_value: bool,
+    w: &mut W,
+) -> Result<ayame_core::ops::GroupStats> {
+    let mut write_err: Option<std::io::Error> = None;
+    let stats = ayame_core::ops::group(doc, opts, |row| {
+        if write_err.is_some() {
+            return;
+        }
+        if let Err(e) = write_group_row(w, row, has_value) {
+            write_err = Some(e);
+        }
+    })?;
+    if let Some(e) = write_err {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(stats)
+}
+
+fn write_group_artifact(
+    doc: &Document,
+    opts: &GroupOptions,
+    has_value: bool,
+    out_path: &Path,
+) -> Result<ayame_core::ops::GroupStats> {
+    if let Some(parent) = out_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let tmp = temp_sibling(out_path);
+    let file =
+        std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+    let mut w = BufWriter::new(file);
+    let result = group_to_writer(doc, opts, has_value, &mut w);
+    drop(w);
+    match result {
+        Ok(stats) => {
+            std::fs::rename(&tmp, out_path)
+                .or_else(|_| std::fs::copy(&tmp, out_path).map(|_| ()))
+                .with_context(|| format!("writing {}", out_path.display()))?;
+            let _ = std::fs::remove_file(&tmp);
+            Ok(stats)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+fn temp_sibling(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_else(|| "groups.tsv".into());
+    let mut tmp = path.to_path_buf();
+    tmp.set_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    tmp
+}
+
+fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std::io::Result<()> {
+    let key = String::from_utf8_lossy(&row.key);
+    if has_value {
+        if row.numeric_count > 0 {
+            writeln!(
+                w,
+                "{key}\t{}\t{}\t{}\t{}\t{}",
+                row.count,
+                row.sum,
+                row.min,
+                row.max,
+                row.avg().unwrap()
+            )
+        } else {
+            writeln!(w, "{key}\t{}\t\t\t\t", row.count)
+        }
+    } else {
+        writeln!(w, "{key}\t{}", row.count)
+    }
 }
 
 fn parse_key(opts: &HashMap<String, String>) -> Result<Option<usize>> {
@@ -371,13 +506,22 @@ fn field_spec(opts: &HashMap<String, String>, flags: &HashSet<String>) -> FieldS
     let quote = first_opt(opts, &["--quote"])
         .and_then(|s| s.as_bytes().first().copied())
         .unwrap_or(b'"');
-    FieldSpec { delimiter, quote, csv: has_flag(flags, &["--csv"]) }
+    FieldSpec {
+        delimiter,
+        quote,
+        csv: has_flag(flags, &["--csv"]),
+    }
 }
 
 fn cmd_top(args: &[String]) -> Result<()> {
-    let (doc, _pos, opts, flags) =
-        open_doc(args, &["--key", "-k", "-n", "--top", "--delim", "-t", "--quote"])?;
-    let n: usize = first_opt(&opts, &["-n", "--top"]).unwrap_or("10").parse().context("-n must be a number")?;
+    let (doc, _pos, opts, flags) = open_doc(
+        args,
+        &["--key", "-k", "-n", "--top", "--delim", "-t", "--quote"],
+    )?;
+    let n: usize = first_opt(&opts, &["-n", "--top"])
+        .unwrap_or("10")
+        .parse()
+        .context("-n must be a number")?;
     let topts = TopOptions {
         key_column: parse_key(&opts)?,
         fields: field_spec(&opts, &flags),
@@ -397,8 +541,18 @@ fn cmd_top(args: &[String]) -> Result<()> {
 }
 
 fn cmd_distinct(args: &[String]) -> Result<()> {
-    let (doc, _pos, opts, flags) =
-        open_doc(args, &["--key", "-k", "--delim", "-t", "--quote", "--precision", "-p"])?;
+    let (doc, _pos, opts, flags) = open_doc(
+        args,
+        &[
+            "--key",
+            "-k",
+            "--delim",
+            "-t",
+            "--quote",
+            "--precision",
+            "-p",
+        ],
+    )?;
     let precision: u32 = first_opt(&opts, &["--precision", "-p"])
         .map(|s| s.parse::<u32>())
         .transpose()
@@ -406,7 +560,11 @@ fn cmd_distinct(args: &[String]) -> Result<()> {
         .unwrap_or(14);
     let res = ayame_core::ops::distinct(
         &doc,
-        &DistinctOptions { key_column: parse_key(&opts)?, fields: field_spec(&opts, &flags), precision },
+        &DistinctOptions {
+            key_column: parse_key(&opts)?,
+            fields: field_spec(&opts, &flags),
+            precision,
+        },
     );
     println!("{}", res.estimate); // pipeable count on stdout
     let err_pct = 104.0 / (res.registers as f64).sqrt();
@@ -423,18 +581,30 @@ fn cmd_distinct(args: &[String]) -> Result<()> {
 /// Parse a byte size with an optional binary suffix (K/KiB, M/MiB, G/GiB).
 fn parse_size(s: &str) -> Result<usize> {
     let lower = s.trim().to_ascii_lowercase();
-    let (num, mult): (&str, usize) = if let Some(n) = lower.strip_suffix("gib").or_else(|| lower.strip_suffix('g')) {
+    let (num, mult): (&str, usize) = if let Some(n) = lower
+        .strip_suffix("gib")
+        .or_else(|| lower.strip_suffix('g'))
+    {
         (n, 1 << 30)
-    } else if let Some(n) = lower.strip_suffix("mib").or_else(|| lower.strip_suffix('m')) {
+    } else if let Some(n) = lower
+        .strip_suffix("mib")
+        .or_else(|| lower.strip_suffix('m'))
+    {
         (n, 1 << 20)
-    } else if let Some(n) = lower.strip_suffix("kib").or_else(|| lower.strip_suffix('k')) {
+    } else if let Some(n) = lower
+        .strip_suffix("kib")
+        .or_else(|| lower.strip_suffix('k'))
+    {
         (n, 1 << 10)
     } else if let Some(n) = lower.strip_suffix('b') {
         (n, 1)
     } else {
         (lower.as_str(), 1)
     };
-    let val: f64 = num.trim().parse().with_context(|| format!("invalid size '{s}'"))?;
+    let val: f64 = num
+        .trim()
+        .parse()
+        .with_context(|| format!("invalid size '{s}'"))?;
     Ok((val * mult as f64) as usize)
 }
 
@@ -476,7 +646,10 @@ fn cmd_cache(args: &[String]) -> Result<()> {
 
 fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
     let (doc, _pos, opts, _flags) = open_doc(args, &["-n", "--lines"])?;
-    let n: u64 = first_opt(&opts, &["-n", "--lines"]).unwrap_or("10").parse().context("-n must be a number")?;
+    let n: u64 = first_opt(&opts, &["-n", "--lines"])
+        .unwrap_or("10")
+        .parse()
+        .context("-n must be a number")?;
     let lines = if tail { doc.tail(n) } else { doc.head(n) };
     for l in lines {
         println!("{}", l.text);
@@ -486,21 +659,36 @@ fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
 
 fn cmd_line(args: &[String]) -> Result<()> {
     let (doc, pos, _opts, _flags) = open_doc(args, &[])?;
-    let n: u64 = pos.get(1).context("expected line number")?.parse().context("line number must be a number")?;
+    let n: u64 = pos
+        .get(1)
+        .context("expected line number")?
+        .parse()
+        .context("line number must be a number")?;
     if n == 0 {
         bail!("line numbers are 1-based");
     }
     match doc.line(n - 1) {
         Some(t) => println!("{t}"),
-        None => bail!("line {n} out of range (file has {} lines)", commas(doc.line_count())),
+        None => bail!(
+            "line {n} out of range (file has {} lines)",
+            commas(doc.line_count())
+        ),
     }
     Ok(())
 }
 
 fn cmd_lines(args: &[String]) -> Result<()> {
     let (doc, pos, _opts, _flags) = open_doc(args, &[])?;
-    let start: u64 = pos.get(1).context("expected START")?.parse().context("START must be a number")?;
-    let count: u64 = pos.get(2).context("expected COUNT")?.parse().context("COUNT must be a number")?;
+    let start: u64 = pos
+        .get(1)
+        .context("expected START")?
+        .parse()
+        .context("START must be a number")?;
+    let count: u64 = pos
+        .get(2)
+        .context("expected COUNT")?
+        .parse()
+        .context("COUNT must be a number")?;
     let start0 = start.saturating_sub(1);
     for l in doc.lines(start0, count) {
         println!("{}\t{}", l.number + 1, l.text);
@@ -513,7 +701,10 @@ fn cmd_search(args: &[String]) -> Result<()> {
     let pattern = pos.get(1).context("expected a PATTERN")?.clone();
     let regex = has_flag(&flags, &["-e", "--regex"]);
     let ignore_case = has_flag(&flags, &["-i", "--ignore-case"]);
-    let max: usize = first_opt(&opts, &["--max"]).unwrap_or("1000").parse().context("--max must be a number")?;
+    let max: usize = first_opt(&opts, &["--max"])
+        .unwrap_or("1000")
+        .parse()
+        .context("--max must be a number")?;
     let res = doc.search(&SearchOptions {
         query: pattern,
         regex,
@@ -529,7 +720,15 @@ fn cmd_search(args: &[String]) -> Result<()> {
         let text = doc.line(h.line).unwrap_or_default();
         println!("{}:{}: {}", h.line + 1, h.column + 1, text);
     }
-    eprintln!("{} match(es){}", commas(res.hits.len() as u64), if res.truncated { " (truncated; raise --max)" } else { "" });
+    eprintln!(
+        "{} match(es){}",
+        commas(res.hits.len() as u64),
+        if res.truncated {
+            " (truncated; raise --max)"
+        } else {
+            ""
+        }
+    );
     Ok(())
 }
 
@@ -540,7 +739,7 @@ pub fn commas(n: u64) -> String {
     let len = s.len();
     let mut out = String::with_capacity(len + len / 3);
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);

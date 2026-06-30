@@ -6,6 +6,9 @@ Shift_JIS / EUC-JP / UTF-8 を自動判定。CLI とローカル Web ビュー�
 ## インストール
 
 ```sh
+# GitHub Releases の配布版は単体実行ファイルです。
+# Windows: ayame.exe / Linux: ayame / macOS: ayame
+
 cargo build --release          # Rust 安定版
 ./target/release/ayame --help
 ```
@@ -77,6 +80,7 @@ ayame sort huge.csv  -k 1 --budget 64MiB --out-order order.bin
 ```sh
 ayame group sample.csv -k 4                 # status別の件数
 ayame group sample.csv -k 3 --value 5       # word別の count/sum/min/max/avg
+ayame group huge.csv -k 1 --out-groups groups.tsv
 ayame top   sample.csv -k 5 -n 10 --numeric # 値の大きい上位10
 ayame top   sample.csv -k 5 -n 10 --numeric --min   # 下位10
 ayame distinct sample.csv -k 1              # 近似ユニーク数（既定 16KB・誤差 ~0.8%）

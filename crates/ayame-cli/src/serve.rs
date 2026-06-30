@@ -18,8 +18,10 @@ use axum::routing::get;
 use axum::{Json, Router};
 use ayame_core::{Document, Line, SearchOptions};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{first_opt, open_opts, parse};
@@ -32,20 +34,33 @@ const FAVICON_SVG: &str = include_str!("../web/favicon.svg");
 /// Hard cap on lines returned in one viewport request, so a hostile/buggy
 /// client can never ask us to materialize the whole file.
 const MAX_VIEW: u64 = 20_000;
+const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
 type Shared = Arc<Document>;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse(args, &["--encoding", "--stride", "--host", "--port", "--cache-dir"]);
+    let (pos, opts, flags) = parse(
+        args,
+        &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
+    );
     let path = pos.first().context("expected a FILE argument")?.clone();
-    let host = first_opt(&opts, &["--host"]).unwrap_or("127.0.0.1").to_string();
-    let port: u16 = first_opt(&opts, &["--port"]).unwrap_or("8777").parse().context("--port must be a number")?;
+    let host = first_opt(&opts, &["--host"])
+        .unwrap_or("127.0.0.1")
+        .to_string();
+    let port: u16 = first_opt(&opts, &["--port"])
+        .unwrap_or("8777")
+        .parse()
+        .context("--port must be a number")?;
 
     eprintln!("ayame: opening and indexing '{path}' …");
     let doc = Document::open(&path, &open_opts(&opts, &flags)?)
         .with_context(|| format!("opening '{path}'"))?;
     let s = doc.stat();
-    let how = if s.from_cache { "loaded from cache" } else { "indexed" };
+    let how = if s.from_cache {
+        "loaded from cache"
+    } else {
+        "indexed"
+    };
     eprintln!(
         "ayame: {} lines, {} bytes, {} — {} in {} ms ({} checkpoints, {} bytes resident)",
         crate::commas(s.lines),
@@ -80,7 +95,9 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .layer(CatchPanicLayer::new())
         .with_state(doc);
 
-    let addr: SocketAddr = format!("{host}:{port}").parse().context("invalid host/port")?;
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .context("invalid host/port")?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
@@ -203,9 +220,11 @@ async fn api_find(
     Query(q): Query<FindQuery>,
 ) -> Result<Json<FindResponse>, (StatusCode, String)> {
     let hit = if q.dir == "prev" {
-        doc.find_prev(&q.q, q.regex, !q.ci, q.from).map_err(bad_request)?
+        doc.find_prev(&q.q, q.regex, !q.ci, q.from)
+            .map_err(bad_request)?
     } else {
-        doc.find_next(&q.q, q.regex, !q.ci, q.from).map_err(bad_request)?
+        doc.find_next(&q.q, q.regex, !q.ci, q.from)
+            .map_err(bad_request)?
     };
     Ok(Json(FindResponse { hit }))
 }
@@ -224,7 +243,9 @@ async fn api_linebyte(
     State(doc): State<Shared>,
     Query(q): Query<LineByteQuery>,
 ) -> Json<LineByteResponse> {
-    Json(LineByteResponse { byte: doc.line_start_byte(q.line) })
+    Json(LineByteResponse {
+        byte: doc.line_start_byte(q.line),
+    })
 }
 
 fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
@@ -311,8 +332,13 @@ async fn api_sort(
     if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
         cmd.arg("--delim").arg(d);
     }
-    cmd.arg("--out-order").arg(&order).arg("--spill-dir").arg(&dir);
-    cmd.stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+    cmd.arg("--out-order")
+        .arg(&order)
+        .arg("--spill-dir")
+        .arg(&dir);
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
 
     let outcome = run_sort_worker(cmd, doc.as_ref(), &order, q.limit).await;
     let _ = tokio::fs::remove_dir_all(&dir).await; // gentle cleanup, success or not
@@ -325,11 +351,14 @@ async fn run_sort_worker(
     order: &std::path::Path,
     limit: u64,
 ) -> Result<Json<SortResponse>, (StatusCode, String)> {
-    let status = cmd.status().await.map_err(internal)?;
+    let status = wait_worker("sort", &mut cmd).await?;
     if !status.success() {
         return Err((
             StatusCode::BAD_GATEWAY,
-            format!("sort worker {} — the engine is unaffected", describe_status(status)),
+            format!(
+                "sort worker {} — the engine is unaffected",
+                describe_status(status)
+            ),
         ));
     }
     let total = tokio::fs::metadata(order).await.map_err(internal)?.len() / 8;
@@ -346,7 +375,11 @@ async fn run_sort_worker(
             doc.line(ln).map(|text| Line { number: ln, text })
         })
         .collect();
-    Ok(Json(SortResponse { total, lines, truncated: total > limit }))
+    Ok(Json(SortResponse {
+        total,
+        lines,
+        truncated: total > limit,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -377,6 +410,7 @@ async fn api_group(
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("group");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let groups = dir.join("groups.tsv");
 
     let mut cmd = Command::new(&exe);
     cmd.arg("group").arg(doc.path());
@@ -389,27 +423,74 @@ async fn api_group(
     if let Some(d) = q.delim.as_deref().filter(|d| !d.is_empty()) {
         cmd.arg("--delim").arg(d);
     }
-    cmd.arg("--spill-dir").arg(&dir);
-    cmd.stderr(Stdio::null()).kill_on_drop(true);
+    cmd.arg("--spill-dir")
+        .arg(&dir)
+        .arg("--out-groups")
+        .arg(&groups);
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
 
-    let out = cmd.output().await.map_err(internal);
-    let _ = tokio::fs::remove_dir_all(&dir).await;
-    let out = out?;
-    if !out.status.success() {
-        return Err((
+    let status = wait_worker("group", &mut cmd).await;
+    let rows = match status {
+        Ok(status) if status.success() => read_group_preview(&groups, q.limit).await,
+        Ok(status) => Err((
             StatusCode::BAD_GATEWAY,
-            format!("group worker {} — the engine is unaffected", describe_status(out.status)),
-        ));
+            format!(
+                "group worker {} — the engine is unaffected",
+                describe_status(status)
+            ),
+        )),
+        Err(e) => Err(e),
+    };
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    rows.map(Json)
+}
+
+async fn wait_worker(
+    kind: &str,
+    cmd: &mut Command,
+) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+    let mut child = cmd.spawn().map_err(internal)?;
+    match timeout(WORKER_TIMEOUT, child.wait()).await {
+        Ok(waited) => waited.map_err(internal),
+        Err(_) => {
+            let _ = child.kill().await;
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                format!(
+                    "{kind} worker timed out after {}s — the engine is unaffected",
+                    WORKER_TIMEOUT.as_secs()
+                ),
+            ))
+        }
     }
-    let text = String::from_utf8_lossy(&out.stdout);
+}
+
+async fn read_group_preview(
+    path: &std::path::Path,
+    limit: usize,
+) -> Result<GroupResponse, (StatusCode, String)> {
+    let file = tokio::fs::File::open(path).await.map_err(internal)?;
+    let mut reader = tokio::io::BufReader::new(file);
     let mut rows = Vec::new();
-    let mut truncated = false;
-    for (i, l) in text.lines().enumerate() {
-        if i >= q.limit {
-            truncated = true;
+    let mut line = String::new();
+    while rows.len() < limit {
+        line.clear();
+        let n = reader.read_line(&mut line).await.map_err(internal)?;
+        if n == 0 {
             break;
         }
-        rows.push(l.to_string());
+        trim_line_end(&mut line);
+        rows.push(line.clone());
     }
-    Ok(Json(GroupResponse { rows, truncated }))
+    line.clear();
+    let truncated = reader.read_line(&mut line).await.map_err(internal)? > 0;
+    Ok(GroupResponse { rows, truncated })
+}
+
+fn trim_line_end(s: &mut String) {
+    while matches!(s.as_bytes().last(), Some(b'\n' | b'\r')) {
+        s.pop();
+    }
 }

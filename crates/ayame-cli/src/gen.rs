@@ -14,17 +14,28 @@ use ayame_core::Encoding;
 use crate::{commas, first_opt, has_flag, human_bytes, parse};
 
 const WORDS: [&str; 16] = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
+    "kilo", "lima", "mike", "november", "oscar", "papa",
 ];
 const JP_WORDS: [&str; 10] = [
-    "東京", "大阪", "名古屋", "札幌", "福岡", "成功", "失敗", "再試行", "出荷", "注文",
+    "東京",
+    "大阪",
+    "名古屋",
+    "札幌",
+    "福岡",
+    "成功",
+    "失敗",
+    "再試行",
+    "出荷",
+    "注文",
 ];
 const STATUS: [&str; 3] = ["ok", "warn", "error"];
 
 #[inline]
 fn lcg(state: &mut u64) -> u64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     *state
 }
 
@@ -35,7 +46,10 @@ pub fn cmd_gen(args: &[String]) -> Result<()> {
         .context("--lines N is required")?
         .parse()
         .context("--lines must be a number")?;
-    let cols: usize = first_opt(&opts, &["--cols"]).unwrap_or("5").parse().context("--cols must be a number")?;
+    let cols: usize = first_opt(&opts, &["--cols"])
+        .unwrap_or("5")
+        .parse()
+        .context("--cols must be a number")?;
     let enc = match first_opt(&opts, &["--encoding"]) {
         Some(e) => Encoding::parse(e).with_context(|| format!("unknown encoding '{e}'"))?,
         None => Encoding::Utf8,

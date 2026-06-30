@@ -74,7 +74,10 @@ impl Encoding {
 
     /// Parse a user-supplied encoding name (CLI / API override).
     pub fn parse(name: &str) -> Option<Encoding> {
-        let n = name.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+        let n = name
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', '_', ' '], "");
         Some(match n.as_str() {
             "utf8" => Encoding::Utf8,
             "ascii" | "usascii" => Encoding::Ascii,
@@ -253,6 +256,9 @@ mod tests {
     fn override_wins_but_keeps_bom() {
         let mut v = vec![0xEF, 0xBB, 0xBF];
         v.extend_from_slice(b"abc\n");
-        assert_eq!(detect(&v, Some(Encoding::ShiftJis)), (Encoding::ShiftJis, 3));
+        assert_eq!(
+            detect(&v, Some(Encoding::ShiftJis)),
+            (Encoding::ShiftJis, 3)
+        );
     }
 }

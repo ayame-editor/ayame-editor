@@ -125,7 +125,18 @@ impl Document {
             (encoding, base, index, eol, index_ms, from_cache)
         };
 
-        Ok(Document { path, _file: file, mmap, len, base, encoding, eol, index, index_ms, from_cache })
+        Ok(Document {
+            path,
+            _file: file,
+            mmap,
+            len,
+            base,
+            encoding,
+            eol,
+            index,
+            index_ms,
+            from_cache,
+        })
     }
 
     #[inline]
@@ -227,7 +238,14 @@ impl Document {
     }
 
     pub fn search(&self, opts: &SearchOptions) -> Result<SearchResult> {
-        search::search(self.buf(), self.base, self.len, &self.index, self.encoding, opts)
+        search::search(
+            self.buf(),
+            self.base,
+            self.len,
+            &self.index,
+            self.encoding,
+            opts,
+        )
     }
 
     pub fn find_next(
@@ -237,16 +255,19 @@ impl Document {
         case_sensitive: bool,
         from_byte: u64,
     ) -> Result<Option<SearchHit>> {
+        let opts = search::FindOptions {
+            query: query.to_string(),
+            regex,
+            case_sensitive,
+            byte: from_byte,
+        };
         search::find_next(
             self.buf(),
             self.base,
             self.len,
             &self.index,
             self.encoding,
-            query,
-            regex,
-            case_sensitive,
-            from_byte,
+            &opts,
         )
     }
 
@@ -257,16 +278,13 @@ impl Document {
         case_sensitive: bool,
         before_byte: u64,
     ) -> Result<Option<SearchHit>> {
-        search::find_prev(
-            self.buf(),
-            self.base,
-            before_byte,
-            &self.index,
-            self.encoding,
-            query,
+        let opts = search::FindOptions {
+            query: query.to_string(),
             regex,
             case_sensitive,
-        )
+            byte: before_byte,
+        };
+        search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)
     }
 }
 
@@ -277,7 +295,11 @@ const CACHE_MIN_BYTES: u64 = 4 * 1024 * 1024;
 /// Source modification time as `(seconds, nanos)` since the Unix epoch, or
 /// `(0, 0)` if the platform/filesystem does not report one.
 fn mtime_of(meta: &std::fs::Metadata) -> (u64, u32) {
-    match meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()) {
+    match meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+    {
         Some(d) => (d.as_secs(), d.subsec_nanos()),
         None => (0, 0),
     }
@@ -310,9 +332,20 @@ mod cache {
     /// 128-bit content-addressed key over canonical path + size + mtime + stride.
     pub fn key(path: &Path, len: u64, mtime: (u64, u32), stride: u64) -> String {
         let canon = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let s = format!("{}|{}|{}|{}|{}", canon.display(), len, mtime.0, mtime.1, stride);
+        let s = format!(
+            "{}|{}|{}|{}|{}",
+            canon.display(),
+            len,
+            mtime.0,
+            mtime.1,
+            stride
+        );
         let b = s.as_bytes();
-        format!("{:016x}{:016x}", fnv(b, 0xcbf29ce484222325), fnv(b, 0x84222325cbf29ce4))
+        format!(
+            "{:016x}{:016x}",
+            fnv(b, 0xcbf29ce484222325),
+            fnv(b, 0x84222325cbf29ce4)
+        )
     }
 
     fn cache_file(dir: &Path, key: &str) -> PathBuf {
@@ -340,13 +373,24 @@ mod cache {
         let _ = store_inner(dir, key, len, mtime, idx); // best-effort; never fails open()
     }
 
-    fn store_inner(dir: &Path, key: &str, len: u64, mtime: (u64, u32), idx: &LineIndex) -> std::io::Result<()> {
+    fn store_inner(
+        dir: &Path,
+        key: &str,
+        len: u64,
+        mtime: (u64, u32),
+        idx: &LineIndex,
+    ) -> std::io::Result<()> {
         let vdir = dir.join("v1");
         fs::create_dir_all(&vdir)?;
         // Single-writer lock: if another process holds it, skip writing (we
         // already built the index in RAM; the cache is optional).
         let lock = vdir.join(format!("{key}.building"));
-        if fs::OpenOptions::new().write(true).create_new(true).open(&lock).is_err() {
+        if fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+            .is_err()
+        {
             return Ok(());
         }
         let result = (|| -> std::io::Result<()> {
@@ -434,7 +478,11 @@ mod tests {
         let d2 = Document::open(&path, &opts).unwrap();
         assert!(d2.from_cache(), "second open should hit the cache");
         assert_eq!(d2.line_count(), n);
-        assert_eq!(d2.line(n / 2).unwrap(), probe, "cached index resolves identically");
+        assert_eq!(
+            d2.line(n / 2).unwrap(),
+            probe,
+            "cached index resolves identically"
+        );
         drop(d2);
 
         // Change the file: a different size yields a different key and the stale
@@ -442,7 +490,10 @@ mod tests {
         data.extend_from_slice(b"a brand new appended line\n");
         std::fs::write(&path, &data).unwrap();
         let d3 = Document::open(&path, &opts).unwrap();
-        assert!(!d3.from_cache(), "changed file must not be served from cache");
+        assert!(
+            !d3.from_cache(),
+            "changed file must not be served from cache"
+        );
         assert_eq!(d3.line_count(), n + 1);
     }
 

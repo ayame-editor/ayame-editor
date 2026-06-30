@@ -7,7 +7,10 @@
 #   AYAME_WORKER_CRASH = panic | abort | hang | exit<N>   (honored by op workers)
 set -u
 
-B=${B:-./target/release/ayame}
+if [ -z "${B:-}" ]; then
+  TD=$(cargo metadata --format-version=1 --no-deps 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+  B="${TD:-target}/release/ayame"
+fi
 SP=$(mktemp -d)
 F="$SP/data.csv"
 P1=8810

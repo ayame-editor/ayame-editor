@@ -53,8 +53,18 @@ pub struct SearchResult {
     pub truncated: bool,
 }
 
+/// Options for interactive next/previous search.
+#[derive(Clone, Debug)]
+pub struct FindOptions {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    /// Anchor byte: next searches at/after it, previous searches strictly before it.
+    pub byte: u64,
+}
+
 enum Matcher {
-    Literal(memmem::Finder<'static>),
+    Literal(Box<memmem::Finder<'static>>),
     Regex(regex::bytes::Regex),
 }
 
@@ -68,7 +78,9 @@ impl Matcher {
             let needle = enc
                 .encode_query(&opts.query)
                 .ok_or_else(|| Error::Search("query not representable in file encoding".into()))?;
-            Ok(Matcher::Literal(memmem::Finder::new(&needle).into_owned()))
+            Ok(Matcher::Literal(Box::new(
+                memmem::Finder::new(&needle).into_owned(),
+            )))
         } else {
             // Case-insensitive or regex -> compile a byte regex. A non-regex query
             // is escaped so it stays literal but gains the `i` flag.
@@ -105,8 +117,16 @@ pub fn search(
         let byte = abs as u64;
         let line = index.line_of_byte(buf, byte);
         let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-        let column = enc.decode_line(&buf[ls as usize..byte as usize]).chars().count() as u64;
-        hits.push(SearchHit { line, column, byte, byte_len: mlen as u64 });
+        let column = enc
+            .decode_line(&buf[ls as usize..byte as usize])
+            .chars()
+            .count() as u64;
+        hits.push(SearchHit {
+            line,
+            column,
+            byte,
+            byte_len: mlen as u64,
+        });
     };
 
     match matcher {
@@ -144,19 +164,19 @@ pub fn find_next(
     len: u64,
     index: &LineIndex,
     enc: Encoding,
-    query: &str,
-    regex: bool,
-    case_sensitive: bool,
-    from_byte: u64,
+    opts: &FindOptions,
 ) -> Result<Option<SearchHit>> {
-    let opts = SearchOptions {
-        query: query.to_string(),
-        regex,
-        case_sensitive,
-        start_byte: from_byte,
+    let search_opts = SearchOptions {
+        query: opts.query.clone(),
+        regex: opts.regex,
+        case_sensitive: opts.case_sensitive,
+        start_byte: opts.byte,
         max_hits: 1,
     };
-    Ok(search(buf, base, len, index, enc, &opts)?.hits.into_iter().next())
+    Ok(search(buf, base, len, index, enc, &search_opts)?
+        .hits
+        .into_iter()
+        .next())
 }
 
 /// Last match strictly before `before_byte`.
@@ -170,22 +190,20 @@ pub fn find_next(
 pub fn find_prev(
     buf: &[u8],
     base: u64,
-    before_byte: u64,
     index: &LineIndex,
     enc: Encoding,
-    query: &str,
-    regex: bool,
-    case_sensitive: bool,
+    opts: &FindOptions,
 ) -> Result<Option<SearchHit>> {
-    let opts = SearchOptions {
-        query: query.to_string(),
-        regex,
-        case_sensitive,
+    let search_opts = SearchOptions {
+        query: opts.query.clone(),
+        regex: opts.regex,
+        case_sensitive: opts.case_sensitive,
         start_byte: base,
         max_hits: usize::MAX,
     };
-    let matcher = Matcher::build(&opts, enc)?;
-    let hay = &buf[base as usize..before_byte.clamp(base, before_byte) as usize];
+    let matcher = Matcher::build(&search_opts, enc)?;
+    let before_byte = opts.byte.clamp(base, buf.len() as u64);
+    let hay = &buf[base as usize..before_byte as usize];
     let mut last: Option<(usize, usize)> = None;
     match matcher {
         Matcher::Literal(finder) => {
@@ -205,8 +223,16 @@ pub fn find_prev(
         let byte = abs as u64;
         let line = index.line_of_byte(buf, byte);
         let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-        let column = enc.decode_line(&buf[ls as usize..byte as usize]).chars().count() as u64;
-        SearchHit { line, column, byte, byte_len: mlen as u64 }
+        let column = enc
+            .decode_line(&buf[ls as usize..byte as usize])
+            .chars()
+            .count() as u64;
+        SearchHit {
+            line,
+            column,
+            byte,
+            byte_len: mlen as u64,
+        }
     }))
 }
 
@@ -228,7 +254,11 @@ mod tests {
     fn literal_search_maps_line_and_column() {
         let (buf, idx) = fixture();
         let len = buf.len() as u64;
-        let opts = SearchOptions { query: "alpha".into(), max_hits: 1000, ..Default::default() };
+        let opts = SearchOptions {
+            query: "alpha".into(),
+            max_hits: 1000,
+            ..Default::default()
+        };
         let res = search(&buf, 0, len, &idx, Encoding::Ascii, &opts).unwrap();
         assert_eq!(res.hits.len(), 200);
         // "row 0: value " is 13 chars, so column 13 on line 0.
@@ -250,7 +280,12 @@ mod tests {
         assert_eq!(res.hits.len(), 10);
         assert!(res.truncated);
 
-        let rx = SearchOptions { query: r"row \d+:".into(), regex: true, max_hits: 1000, ..Default::default() };
+        let rx = SearchOptions {
+            query: r"row \d+:".into(),
+            regex: true,
+            max_hits: 1000,
+            ..Default::default()
+        };
         let res = search(&buf, 0, len, &idx, Encoding::Ascii, &rx).unwrap();
         assert_eq!(res.hits.len(), 200);
     }
@@ -259,17 +294,52 @@ mod tests {
     fn next_and_prev() {
         let (buf, idx) = fixture();
         let len = buf.len() as u64;
-        let first = find_next(&buf, 0, len, &idx, Encoding::Ascii, "beta", false, true, 0)
-            .unwrap()
-            .unwrap();
+        let first = find_next(
+            &buf,
+            0,
+            len,
+            &idx,
+            Encoding::Ascii,
+            &FindOptions {
+                query: "beta".into(),
+                regex: false,
+                case_sensitive: true,
+                byte: 0,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(first.line, 0);
-        let next = find_next(&buf, 0, len, &idx, Encoding::Ascii, "beta", false, true, first.byte + 1)
-            .unwrap()
-            .unwrap();
+        let next = find_next(
+            &buf,
+            0,
+            len,
+            &idx,
+            Encoding::Ascii,
+            &FindOptions {
+                query: "beta".into(),
+                regex: false,
+                case_sensitive: true,
+                byte: first.byte + 1,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(next.line, 1);
-        let prev = find_prev(&buf, 0, next.byte, &idx, Encoding::Ascii, "beta", false, true)
-            .unwrap()
-            .unwrap();
+        let prev = find_prev(
+            &buf,
+            0,
+            &idx,
+            Encoding::Ascii,
+            &FindOptions {
+                query: "beta".into(),
+                regex: false,
+                case_sensitive: true,
+                byte: next.byte,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(prev.line, 0);
     }
 }

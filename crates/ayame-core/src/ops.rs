@@ -37,7 +37,11 @@ pub struct FieldSpec {
 
 impl Default for FieldSpec {
     fn default() -> Self {
-        FieldSpec { delimiter: b',', quote: b'"', csv: false }
+        FieldSpec {
+            delimiter: b',',
+            quote: b'"',
+            csv: false,
+        }
     }
 }
 
@@ -147,7 +151,9 @@ pub struct OrderingReader {
 
 impl OrderingReader {
     pub fn open(path: &Path) -> Result<OrderingReader> {
-        Ok(OrderingReader { r: BufReader::new(File::open(path)?) })
+        Ok(OrderingReader {
+            r: BufReader::new(File::open(path)?),
+        })
     }
 
     /// Next line number, or `None` at end of file.
@@ -163,7 +169,14 @@ impl OrderingReader {
 // ---- key construction --------------------------------------------------------
 
 fn make_key(raw: &[u8], enc: Encoding, opts: &SortOptions, scratch: &mut Vec<u8>) -> Vec<u8> {
-    comparable_key(raw, enc, opts.key_column, &opts.fields, opts.numeric, scratch)
+    comparable_key(
+        raw,
+        enc,
+        opts.key_column,
+        &opts.fields,
+        opts.numeric,
+        scratch,
+    )
 }
 
 /// Build a byte key whose `Ord` matches the desired sort order: an
@@ -179,7 +192,11 @@ fn comparable_key(
 ) -> Vec<u8> {
     let field = extract_field(raw, col, spec, scratch);
     if numeric {
-        let v = enc.decode_line(field).trim().parse::<f64>().unwrap_or(f64::INFINITY);
+        let v = enc
+            .decode_line(field)
+            .trim()
+            .parse::<f64>()
+            .unwrap_or(f64::INFINITY);
         f64_order_key(v).to_vec()
     } else {
         enc.decode_line(field).into_bytes()
@@ -240,7 +257,10 @@ fn csv_nth_field(raw: &[u8], delim: u8, quote: u8, col: usize, out: &mut Vec<u8>
         out.extend_from_slice(raw);
         return;
     }
-    let mut rdr = csv_core::ReaderBuilder::new().delimiter(delim).quote(quote).build();
+    let mut rdr = csv_core::ReaderBuilder::new()
+        .delimiter(delim)
+        .quote(quote)
+        .build();
     let mut input = raw;
     let mut buf = [0u8; 512];
     let mut idx = 1usize;
@@ -325,7 +345,9 @@ struct RunReader {
 
 impl RunReader {
     fn open(path: &Path) -> Result<RunReader> {
-        Ok(RunReader { r: BufReader::new(File::open(path)?) })
+        Ok(RunReader {
+            r: BufReader::new(File::open(path)?),
+        })
     }
 
     fn next_record(&mut self) -> Result<Option<(Vec<u8>, u64)>> {
@@ -366,19 +388,30 @@ impl Ord for HeapItem {
     fn cmp(&self, o: &Self) -> Ordering {
         let key_ord = self.key.cmp(&o.key);
         // Ascending: the smaller key must be "greater" so the max-heap pops it.
-        let primary = if self.reverse { key_ord } else { key_ord.reverse() };
+        let primary = if self.reverse {
+            key_ord
+        } else {
+            key_ord.reverse()
+        };
         // Tie-break: smaller line number emitted first => it must be "greater".
         primary.then_with(|| o.line_no.cmp(&self.line_no))
     }
 }
 
 fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u64> {
-    let mut readers: Vec<RunReader> =
-        runs.iter().map(|p| RunReader::open(p)).collect::<Result<_>>()?;
+    let mut readers: Vec<RunReader> = runs
+        .iter()
+        .map(|p| RunReader::open(p))
+        .collect::<Result<_>>()?;
     let mut heap: BinaryHeap<HeapItem> = BinaryHeap::with_capacity(readers.len());
     for (i, rr) in readers.iter_mut().enumerate() {
         if let Some((key, line_no)) = rr.next_record()? {
-            heap.push(HeapItem { key, line_no, run: i, reverse });
+            heap.push(HeapItem {
+                key,
+                line_no,
+                run: i,
+                reverse,
+            });
         }
     }
 
@@ -388,7 +421,12 @@ fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u
         out.write_all(&item.line_no.to_le_bytes())?;
         count += 1;
         if let Some((key, line_no)) = readers[item.run].next_record()? {
-            heap.push(HeapItem { key, line_no, run: item.run, reverse });
+            heap.push(HeapItem {
+                key,
+                line_no,
+                run: item.run,
+                reverse,
+            });
         }
     }
     out.flush()?;
@@ -463,7 +501,13 @@ struct Acc {
 
 impl Acc {
     fn new() -> Acc {
-        Acc { count: 0, ncount: 0, sum: 0.0, min: f64::INFINITY, max: f64::NEG_INFINITY }
+        Acc {
+            count: 0,
+            ncount: 0,
+            sum: 0.0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+        }
     }
     fn add(&mut self, v: Option<f64>) {
         self.count += 1;
@@ -488,7 +532,11 @@ impl Acc {
 /// overflows it spills a sorted partial-aggregate run and continues, then
 /// k-way-merges the runs combining equal keys. The common case (few groups)
 /// never touches disk; unbounded cardinality stays within budget.
-pub fn group(doc: &Document, opts: &GroupOptions, mut emit: impl FnMut(&GroupRow)) -> Result<GroupStats> {
+pub fn group(
+    doc: &Document,
+    opts: &GroupOptions,
+    mut emit: impl FnMut(&GroupRow),
+) -> Result<GroupStats> {
     use std::collections::HashMap;
     fs::create_dir_all(&opts.spill_dir)?;
     let enc = doc.encoding();
@@ -550,7 +598,11 @@ pub fn group(doc: &Document, opts: &GroupOptions, mut emit: impl FnMut(&GroupRow
         }
     }
 
-    Ok(GroupStats { groups, runs: runs.len(), spill_bytes })
+    Ok(GroupStats {
+        groups,
+        runs: runs.len(),
+        spill_bytes,
+    })
 }
 
 fn group_row(key: Vec<u8>, acc: &Acc) -> GroupRow {
@@ -564,7 +616,13 @@ fn group_row(key: Vec<u8>, acc: &Acc) -> GroupRow {
     }
 }
 
-fn key_bytes(raw: &[u8], enc: Encoding, col: Option<usize>, spec: &FieldSpec, scratch: &mut Vec<u8>) -> Vec<u8> {
+fn key_bytes(
+    raw: &[u8],
+    enc: Encoding,
+    col: Option<usize>,
+    spec: &FieldSpec,
+    scratch: &mut Vec<u8>,
+) -> Vec<u8> {
     let field = extract_field(raw, col, spec, scratch);
     enc.decode_line(field).into_bytes()
 }
@@ -600,7 +658,9 @@ struct GroupRunReader {
 
 impl GroupRunReader {
     fn open(path: &PathBuf) -> Result<GroupRunReader> {
-        Ok(GroupRunReader { r: BufReader::new(File::open(path)?) })
+        Ok(GroupRunReader {
+            r: BufReader::new(File::open(path)?),
+        })
     }
     fn next_record(&mut self) -> Result<Option<(Vec<u8>, Acc)>> {
         let mut len_b = [0u8; 4];
@@ -647,8 +707,10 @@ impl Ord for GroupHeapItem {
 }
 
 fn merge_groups(runs: &[PathBuf], emit: &mut impl FnMut(&GroupRow)) -> Result<u64> {
-    let mut readers: Vec<GroupRunReader> =
-        runs.iter().map(GroupRunReader::open).collect::<Result<_>>()?;
+    let mut readers: Vec<GroupRunReader> = runs
+        .iter()
+        .map(GroupRunReader::open)
+        .collect::<Result<_>>()?;
     let mut heap: BinaryHeap<GroupHeapItem> = BinaryHeap::with_capacity(readers.len());
     for (i, rr) in readers.iter_mut().enumerate() {
         if let Some((key, acc)) = rr.next_record()? {
@@ -661,14 +723,22 @@ fn merge_groups(runs: &[PathBuf], emit: &mut impl FnMut(&GroupRow)) -> Result<u6
         let key = first.key;
         let mut acc = first.acc;
         if let Some((k, a)) = readers[first.run].next_record()? {
-            heap.push(GroupHeapItem { key: k, run: first.run, acc: a });
+            heap.push(GroupHeapItem {
+                key: k,
+                run: first.run,
+                acc: a,
+            });
         }
         // Fold in the same key wherever it appears across the other runs.
         while heap.peek().is_some_and(|t| t.key == key) {
             let it = heap.pop().unwrap();
             acc.combine(&it.acc);
             if let Some((k, a)) = readers[it.run].next_record()? {
-                heap.push(GroupHeapItem { key: k, run: it.run, acc: a });
+                heap.push(GroupHeapItem {
+                    key: k,
+                    run: it.run,
+                    acc: a,
+                });
             }
         }
         emit(&group_row(key, &acc));
@@ -692,7 +762,13 @@ pub struct TopOptions {
 
 impl Default for TopOptions {
     fn default() -> Self {
-        TopOptions { key_column: None, fields: FieldSpec::default(), numeric: false, largest: true, n: 10 }
+        TopOptions {
+            key_column: None,
+            fields: FieldSpec::default(),
+            numeric: false,
+            largest: true,
+            n: 10,
+        }
     }
 }
 
@@ -723,7 +799,14 @@ pub fn top_n(doc: &Document, opts: &TopOptions) -> Vec<u64> {
         }
         let advanced = batch.len() as u64;
         for (ln, raw) in batch {
-            let key = comparable_key(raw, enc, opts.key_column, &opts.fields, opts.numeric, &mut scratch);
+            let key = comparable_key(
+                raw,
+                enc,
+                opts.key_column,
+                &opts.fields,
+                opts.numeric,
+                &mut scratch,
+            );
             if opts.largest {
                 if min_heap.len() < n {
                     min_heap.push(Reverse((key, ln)));
@@ -765,7 +848,11 @@ pub struct DistinctOptions {
 
 impl Default for DistinctOptions {
     fn default() -> Self {
-        DistinctOptions { key_column: None, fields: FieldSpec::default(), precision: 14 }
+        DistinctOptions {
+            key_column: None,
+            fields: FieldSpec::default(),
+            precision: 14,
+        }
     }
 }
 
@@ -786,11 +873,14 @@ struct Hll {
 
 impl Hll {
     fn new(p: u32) -> Hll {
-        Hll { reg: vec![0u8; 1usize << p], p }
+        Hll {
+            reg: vec![0u8; 1usize << p],
+            p,
+        }
     }
     fn add(&mut self, h: u64) {
         let idx = (h >> (64 - self.p)) as usize; // top p bits select the register
-        // Remaining bits shifted to the top; a guard bit bounds rho.
+                                                 // Remaining bits shifted to the top; a guard bit bounds rho.
         let w = (h << self.p) | (1u64 << (self.p - 1));
         let rho = w.leading_zeros() as u8 + 1;
         if rho > self.reg[idx] {
@@ -908,7 +998,11 @@ mod tests {
             ..Default::default()
         };
         let res = sort(&doc, &opts).unwrap();
-        assert!(res.runs > 1, "tiny budget should produce multiple runs, got {}", res.runs);
+        assert!(
+            res.runs > 1,
+            "tiny budget should produce multiple runs, got {}",
+            res.runs
+        );
         assert_eq!(res.line_count, 5000);
         let lines = sorted_lines(&doc, &res);
         assert_eq!(lines.first().unwrap(), "0,row0");
@@ -959,7 +1053,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(stats.groups, 3);
-        assert!(stats.runs > 1, "tiny budget should spill, got {} runs", stats.runs);
+        assert!(
+            stats.runs > 1,
+            "tiny budget should spill, got {} runs",
+            stats.runs
+        );
         // Ascending key order; each key has 1000 rows.
         assert_eq!(rows[0].0, "a");
         assert_eq!(rows[1].0, "b");
@@ -993,12 +1091,19 @@ mod tests {
         let opts = GroupOptions {
             key_column: Some(1),
             value_column: Some(2),
-            fields: FieldSpec { delimiter: b',', quote: b'"', csv: true },
+            fields: FieldSpec {
+                delimiter: b',',
+                quote: b'"',
+                csv: true,
+            },
             budget_bytes: 1 << 20,
             spill_dir: spill.path().to_path_buf(),
         };
         let mut rows = Vec::new();
-        group(&doc, &opts, |r| rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count))).unwrap();
+        group(&doc, &opts, |r| {
+            rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count))
+        })
+        .unwrap();
         // "a,b" is one key with 2 rows; "c" has 1.
         assert_eq!(rows, vec![("a,b".into(), 2), ("c".into(), 1)]);
     }
@@ -1013,11 +1118,35 @@ mod tests {
         let (_f, doc) = doc_from(&data);
         let val = |ln: u64| doc.line(ln).unwrap().split(',').next().unwrap().to_string();
 
-        let top = top_n(&doc, &TopOptions { key_column: Some(1), numeric: true, largest: true, n: 3, ..Default::default() });
-        assert_eq!(top.iter().map(|&l| val(l)).collect::<Vec<_>>(), vec!["999", "998", "997"]);
+        let top = top_n(
+            &doc,
+            &TopOptions {
+                key_column: Some(1),
+                numeric: true,
+                largest: true,
+                n: 3,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            top.iter().map(|&l| val(l)).collect::<Vec<_>>(),
+            vec!["999", "998", "997"]
+        );
 
-        let bot = top_n(&doc, &TopOptions { key_column: Some(1), numeric: true, largest: false, n: 2, ..Default::default() });
-        assert_eq!(bot.iter().map(|&l| val(l)).collect::<Vec<_>>(), vec!["0", "1"]);
+        let bot = top_n(
+            &doc,
+            &TopOptions {
+                key_column: Some(1),
+                numeric: true,
+                largest: false,
+                n: 2,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            bot.iter().map(|&l| val(l)).collect::<Vec<_>>(),
+            vec!["0", "1"]
+        );
     }
 
     #[test]
@@ -1028,9 +1157,20 @@ mod tests {
             data.extend_from_slice(format!("key{},v\n", i % 5000).as_bytes());
         }
         let (_f, doc) = doc_from(&data);
-        let res = distinct(&doc, &DistinctOptions { key_column: Some(1), ..Default::default() });
+        let res = distinct(
+            &doc,
+            &DistinctOptions {
+                key_column: Some(1),
+                ..Default::default()
+            },
+        );
         let err = (res.estimate as f64 - 5000.0).abs() / 5000.0;
-        assert!(err < 0.05, "HLL estimate {} too far from 5000 (rel err {:.3})", res.estimate, err);
+        assert!(
+            err < 0.05,
+            "HLL estimate {} too far from 5000 (rel err {:.3})",
+            res.estimate,
+            err
+        );
     }
 
     #[test]
@@ -1046,12 +1186,23 @@ mod tests {
             ..Default::default()
         };
         let mut rows = Vec::new();
-        let stats = group(&doc, &opts, |r| rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count, r.sum, r.avg()))).unwrap();
+        let stats = group(&doc, &opts, |r| {
+            rows.push((
+                String::from_utf8_lossy(&r.key).into_owned(),
+                r.count,
+                r.sum,
+                r.avg(),
+            ))
+        })
+        .unwrap();
         assert_eq!(stats.runs, 0, "small input should not spill");
-        assert_eq!(rows, vec![
-            ("x".into(), 3, 9.0, Some(3.0)),
-            ("y".into(), 2, 6.0, Some(3.0)),
-        ]);
+        assert_eq!(
+            rows,
+            vec![
+                ("x".into(), 3, 9.0, Some(3.0)),
+                ("y".into(), 2, 6.0, Some(3.0)),
+            ]
+        );
     }
 
     #[test]

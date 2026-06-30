@@ -19,9 +19,16 @@
 2. **ディスクキャッシュ（オフロードの証明）** — ✅ **実装済み**
    `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
 3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（sort/group）**
-   `/api/sort`・`/api/group` は子プロセスを spawn→wait→exit、結果はファイル/stdout でハンドオフ。ハートビートも IPC フレーミングも無しの最小形。GREP も同形に寄せるのは将来（現状はエンジン内蔵検索が高速・メモリ安全なので優先度低）。
+   `/api/sort`・`/api/group` は子プロセスを spawn→wait→exit、結果は artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。GREP も同形に寄せるのは将来（現状はエンジン内蔵検索が高速・メモリ安全なので優先度低）。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
-   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・使い捨て子プロセス隔離（Step 3 後）・ビューア統合。
+   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・ビューアの仮想順列表示。
+
+## 📦 release readiness
+
+- ✅ CI: fmt / clippy `-D warnings` / tests / release build。
+- ✅ GitHub Releases: タグ push で Linux / Windows / macOS の単体バイナリと sha256 を生成。
+- ✅ Local package: `scripts/release-local.sh` で `dist/ayame-v<version>-<target>` を生成。
+- ✅ 単体バイナリ検証: `--version`、`gen/stat/group --out-groups/distinct`、checksum、crash isolation。
 
 ## 🔭 v2 以降（将来）
 
@@ -41,4 +48,4 @@
 ## 🚧 意図的に「やらない／後回し」
 
 - **インプレース編集**（巨大ファイルの編集）。今のスコープは**ビューア＋データ操作**。編集を入れる時も**フルインメモリ rope は作らず** mmap＋append-only 編集 WAL で行う方針（Zed を沈めた構造を避ける）。
-- v1 段階での cgroup RSS 上限、HyperLogLog、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。
+- v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。
