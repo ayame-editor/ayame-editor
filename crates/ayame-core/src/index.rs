@@ -173,6 +173,49 @@ impl LineIndex {
         Some((off, end))
     }
 
+    /// Byte ranges for line `i`: `(text_start, text_end, raw_end)`.
+    ///
+    /// `text_end` excludes the terminator and trims the `\r` in CRLF. `raw_end`
+    /// includes the original line terminator, if one exists. This is used by the
+    /// edit/save layer so untouched lines can be streamed out byte-for-byte.
+    pub fn line_range_with_terminator(&self, buf: &[u8], i: u64) -> Option<(u64, u64, u64)> {
+        if i >= self.line_count {
+            return None;
+        }
+        let k = self
+            .checkpoints
+            .partition_point(|c| c.line <= i)
+            .saturating_sub(1);
+        let cp = self.checkpoints[k];
+        let mut off = cp.off;
+        let mut cur = cp.line;
+        let end_limit = self.len;
+
+        while cur < i {
+            match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
+                Some(rel) => {
+                    off += rel as u64 + 1;
+                    cur += 1;
+                }
+                None => return None,
+            }
+        }
+
+        let raw_end = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
+            Some(rel) => off + rel as u64 + 1,
+            None => end_limit,
+        };
+        let mut text_end = if raw_end > off && buf[(raw_end - 1) as usize] == b'\n' {
+            raw_end - 1
+        } else {
+            raw_end
+        };
+        if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
+            text_end -= 1;
+        }
+        Some((off, text_end, raw_end))
+    }
+
     /// Byte ranges for up to `count` consecutive lines starting at `start`.
     /// Resolves the first line via a checkpoint, then walks newlines forward —
     /// so a viewport fetch is one binary search plus a tight `memchr` loop.

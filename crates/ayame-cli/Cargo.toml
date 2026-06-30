@@ -1,6 +1,6 @@
 [package]
 name = "ayame-cli"
-description = "Ayame command-line tool and local web viewer for very large files."
+description = "Ayame command-line tool and local web editor for very large files."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

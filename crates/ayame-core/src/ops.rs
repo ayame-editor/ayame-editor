@@ -6,7 +6,7 @@
 //! follow the same shape.
 //!
 //! Sorting produces an **ordering**: a file of `u64` line numbers in sorted
-//! order. The viewer can page through that ordering via the existing sparse
+//! order. The editor can page through that ordering via the existing sparse
 //! fetch path, so a sorted view of ten billion lines never materializes the
 //! lines themselves — only their order.
 

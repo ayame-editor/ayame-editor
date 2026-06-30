@@ -5,9 +5,10 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索。ユニットテスト17件。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ。ユニットテスト34件。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
-- `ayame serve`: ローカル Web ビューア（仮想化、行ジャンプ、検索、ステータスバー）。
+- `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
+- `ayame serve`: 行単位編集（置換/挿入/削除）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
 - ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
 
 ## 🎯 v1 最小増分（次の4ステップ）
@@ -21,7 +22,7 @@
 3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（sort/group）**
    `/api/sort`・`/api/group` は子プロセスを spawn→wait→exit、結果は artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。GREP も同形に寄せるのは将来（現状はエンジン内蔵検索が高速・メモリ安全なので優先度低）。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
-   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・ビューアの仮想順列表示。
+   明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・エディタでの仮想順列表示。
 
 ## 📦 release readiness
 
@@ -52,5 +53,5 @@
 
 ## 🚧 意図的に「やらない／後回し」
 
-- **巨大ファイル編集**。read-only mmap は「閲覧用の元ファイル base を不変に扱う」という意味で、編集不能という意味ではない。編集を入れる時も**フルインメモリ rope は作らず** mmap base＋append-only 編集 WAL / piece table で行う方針（Zed を沈めた構造を避ける）。
+- **巨大ファイル編集の高度化**。初期の行単位差分編集は実装済み。次は上書き保存、undo/redo、範囲選択、矩形選択、grep置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
 - v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

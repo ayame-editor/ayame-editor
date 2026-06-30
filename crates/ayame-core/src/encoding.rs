@@ -8,7 +8,7 @@
 
 use serde::Serialize;
 
-/// Encodings Ayame understands for *indexed* viewing.
+/// Encodings Ayame understands for indexed display and edit-save round trips.
 ///
 /// All of these are ASCII-transparent for `0x0A`, which is what lets the line
 /// index scan raw bytes for newlines. UTF-16/UTF-32 are detected (see
@@ -70,6 +70,15 @@ impl Encoding {
         } else {
             Some(cow.into_owned())
         }
+    }
+
+    /// Encode edited text into this encoding's bytes.
+    ///
+    /// Edits are kept as UTF-8 strings in the UI/session layer. When saving, we
+    /// convert only those edited fragments back to the source encoding; untouched
+    /// mmap-backed lines are copied as their original bytes.
+    pub fn encode_text(self, text: &str) -> Option<Vec<u8>> {
+        self.encode_query(text)
     }
 
     /// Parse a user-supplied encoding name (CLI / API override).
@@ -145,7 +154,7 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
         Encoding::Utf16Be
     } else {
         // chardetng may suggest western single-byte encodings; for a byte-oriented
-        // viewer UTF-8 (lossy) is the safest universal fallback.
+        // editor UTF-8 (lossy) is the safest universal fallback.
         Encoding::Utf8
     };
     (enc, 0)
@@ -171,6 +180,16 @@ impl Eol {
             Eol::Cr => "CR",
             Eol::Mixed => "Mixed",
             Eol::None => "None",
+        }
+    }
+
+    /// Preferred line terminator for newly inserted lines. Mixed or no-EOL
+    /// files use LF for new text while untouched lines keep their original bytes.
+    pub fn bytes(self) -> &'static [u8] {
+        match self {
+            Eol::Crlf => b"\r\n",
+            Eol::Cr => b"\r",
+            Eol::Lf | Eol::Mixed | Eol::None => b"\n",
         }
     }
 }

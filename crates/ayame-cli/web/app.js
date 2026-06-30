@@ -1,4 +1,4 @@
-// Ayame viewer front-end.
+// Ayame editor front-end.
 //
 // Design rule: the browser never holds more than the visible window. Lines are
 // fetched on demand from the local server; vertical position is tracked as a
@@ -32,6 +32,7 @@ const state = {
   searchTruncated: false,
   history: [],
   historyIndex: -1,
+  editingLine: -1,
 };
 
 const pool = [];
@@ -41,6 +42,16 @@ let renderQueued = false;
 
 async function api(path) {
   const r = await fetch(path);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+
+async function apiPost(path, body = {}) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!r.ok) throw new Error((await r.text()) || r.statusText);
   return r.json();
 }
@@ -121,6 +132,17 @@ function ensurePool(count) {
     const tx = document.createElement("span");
     tx.className = "tx";
     row.append(ln, tx);
+    row.addEventListener("click", () => {
+      const line = Number(row.dataset.line);
+      if (Number.isFinite(line)) {
+        state.activeLine = line;
+        scheduleRender();
+      }
+    });
+    row.addEventListener("dblclick", () => {
+      const line = Number(row.dataset.line);
+      if (Number.isFinite(line)) beginEdit(line);
+    });
     content.append(row);
     pool.push(row);
   }
@@ -129,18 +151,52 @@ function ensurePool(count) {
 function fillRow(row, line, rec, gutterWidth) {
   const ln = row.firstChild;
   const tx = row.lastChild;
+  row.dataset.line = String(line);
   ln.textContent = String(line + 1).padStart(gutterWidth, " ");
   tx.textContent = "";
-  tx.classList.remove("pending");
+  tx.classList.remove("pending", "edited");
+  row.classList.toggle("dirty", !!rec?.edited);
+  row.classList.toggle("inserted", !!rec?.inserted);
   if (rec == null) {
     tx.classList.add("pending");
     tx.textContent = "⋯";
+  } else if (state.editingLine === line) {
+    renderLineEditor(tx, line, rec.text);
   } else if (state.matcher) {
     appendHighlighted(tx, rec.text);
   } else {
     tx.textContent = rec.text;
   }
+  if (rec?.edited) tx.classList.add("edited");
   row.classList.toggle("active", line === state.activeLine);
+}
+
+function renderLineEditor(container, line, text) {
+  const input = document.createElement("input");
+  input.className = "line-edit";
+  input.value = text;
+  input.spellcheck = false;
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("dblclick", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitEdit(line, input.value);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      state.editingLine = -1;
+      scheduleRender();
+      $("viewport").focus();
+    }
+  });
+  input.addEventListener("blur", () => {
+    if (state.editingLine === line) commitEdit(line, input.value);
+  });
+  container.append(input);
+  queueMicrotask(() => {
+    input.focus();
+    input.select();
+  });
 }
 
 function appendHighlighted(container, text) {
@@ -252,12 +308,16 @@ function initScrollbar() {
 function updateStatusMeta() {
   const s = state.stat;
   if (!s) return;
-  $("filename").textContent = s.path;
+  $("filename").textContent = `${s.dirty ? "* " : ""}${s.path}`;
   $("filename").title = s.path;
-  $("st-lines").textContent = `${commas(s.lines)} 行`;
+  const lines = s.view_lines ?? s.lines;
+  $("st-lines").textContent = `${commas(lines)} 行`;
   $("st-size").textContent = humanBytes(s.bytes);
   $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
   $("st-eol").textContent = eol(s.eol);
+  $("st-edit").textContent = s.dirty
+    ? `編集 +${commas(s.inserted_lines)} ~${commas(s.replaced_lines)} -${commas(s.deleted_lines)}`
+    : "未編集";
   $("st-index").textContent =
     `索引 ${commas(s.checkpoints)} 点 / ${humanBytes(s.index_bytes)} / ${s.index_ms} ms`;
 }
@@ -273,6 +333,10 @@ function eol(e) {
 }
 
 function updateStatusPos() {
+  if (state.total === 0) {
+    $("st-pos").textContent = "行 0";
+    return;
+  }
   const cur = state.activeLine >= 0 ? state.activeLine : state.first;
   $("st-pos").textContent = `行 ${commas(cur + 1)}`;
 }
@@ -418,6 +482,99 @@ function revealLine(line) {
   updateStatusPos();
 }
 
+async function refreshStat() {
+  state.stat = await api("/api/stat");
+  state.total = state.stat.view_lines ?? state.stat.lines;
+  updateStatusMeta();
+}
+
+function clearLineCache() {
+  state.cache = { start: 0, lines: [] };
+  state.loadToken++;
+}
+
+function beginEdit(line) {
+  if (line < 0 || line >= state.total) return;
+  state.activeLine = line;
+  state.editingLine = line;
+  scheduleRender();
+}
+
+async function commitEdit(line, text) {
+  state.editingLine = -1;
+  try {
+    await apiPost("/api/edit/line", { line, text });
+    clearLineCache();
+    state.activeLine = line;
+    await refreshStat();
+    render();
+  } catch (e) {
+    flashCount("編集エラー");
+    console.error(e);
+  }
+  $("viewport").focus();
+}
+
+async function insertLineBelow() {
+  const base = state.activeLine >= 0 ? state.activeLine : state.first;
+  const line = Math.min(state.total, base + 1);
+  try {
+    await apiPost("/api/edit/insert", { line, text: "" });
+    clearLineCache();
+    await refreshStat();
+    state.activeLine = line;
+    state.editingLine = line;
+    revealLine(line);
+  } catch (e) {
+    flashCount("挿入エラー");
+    console.error(e);
+  }
+}
+
+async function deleteActiveLine() {
+  const line = state.activeLine >= 0 ? state.activeLine : state.first;
+  if (line < 0 || line >= state.total) return;
+  try {
+    await apiPost("/api/edit/delete", { line });
+    clearLineCache();
+    await refreshStat();
+    if (state.total === 0) {
+      state.activeLine = -1;
+      state.editingLine = -1;
+      render();
+    } else {
+      state.activeLine = Math.min(line, state.total - 1);
+      revealLine(state.activeLine);
+    }
+  } catch (e) {
+    flashCount("削除エラー");
+    console.error(e);
+  }
+}
+
+async function saveCopy() {
+  const suggested = `${state.stat?.path || "ayame"}.edited`;
+  const path = prompt("保存先パス", suggested);
+  if (path == null) return;
+  try {
+    const res = await apiPost("/api/edit/save", { path });
+    flashCount(`保存: ${res.path}`);
+  } catch (e) {
+    flashCount("保存エラー");
+    alert(e.message);
+  }
+}
+
+async function revertEdits() {
+  if (!state.stat?.dirty) return;
+  if (!confirm("未保存の編集を破棄しますか?")) return;
+  await apiPost("/api/edit/revert", {});
+  clearLineCache();
+  state.editingLine = -1;
+  await refreshStat();
+  render();
+}
+
 // ---- input wiring ----------------------------------------------------------
 
 function setQueryFromInput() {
@@ -482,6 +639,10 @@ function initEvents() {
   $("opt-case").addEventListener("click", () => toggleOpt("ci", "opt-case"));
   $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
+  $("save-copy").addEventListener("click", saveCopy);
+  $("insert-line").addEventListener("click", insertLineBelow);
+  $("delete-line").addEventListener("click", deleteActiveLine);
+  $("revert-edit").addEventListener("click", revertEdits);
 
   document.addEventListener("keydown", onGlobalKey);
   window.addEventListener("resize", scheduleRender);
@@ -513,6 +674,11 @@ function onGlobalKey(e) {
     const f = $("find");
     f.focus();
     f.select();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    saveCopy();
     return;
   }
   if (e.key === "F3") {
@@ -547,8 +713,22 @@ function onGlobalKey(e) {
     case "End":
       if (e.ctrlKey || e.metaKey) { setFirst(maxFirst()); e.preventDefault(); }
       break;
+    case "F2":
+    case "Enter":
+      beginEdit(state.activeLine >= 0 ? state.activeLine : state.first);
+      e.preventDefault();
+      break;
+    case "Insert":
+      insertLineBelow();
+      e.preventDefault();
+      break;
+    case "Delete":
+      deleteActiveLine();
+      e.preventDefault();
+      break;
     case "Escape":
       state.activeLine = -1;
+      state.editingLine = -1;
       scheduleRender();
       break;
   }
@@ -561,8 +741,7 @@ async function boot() {
   initScrollbar();
   initEvents();
   try {
-    state.stat = await api("/api/stat");
-    state.total = state.stat.lines;
+    await refreshStat();
   } catch (e) {
     $("overlay").classList.remove("hidden");
     $("overlay").textContent = "サーバに接続できません: " + e.message;

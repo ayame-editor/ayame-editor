@@ -1,6 +1,6 @@
 //! # ayame-core
 //!
-//! The engine behind **Ayame**, a viewer for text files that are too big to
+//! The engine behind **Ayame**, an editor for text files that are too big to
 //! open anywhere else — log dumps, CSV/TSV/JSONL exports, data-migration
 //! artifacts measured in tens or hundreds of gigabytes, up to the project's
 //! north-star target of *ten billion lines*.
@@ -32,12 +32,14 @@
 //!   whole file into memory.
 
 pub mod document;
+pub mod edit;
 pub mod encoding;
 pub mod index;
 pub mod ops;
 pub mod search;
 
 pub use document::{Document, FileStat, Line, OpenOptions};
+pub use edit::{EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use index::{LineIndex, DEFAULT_STRIDE};
 pub use ops::{

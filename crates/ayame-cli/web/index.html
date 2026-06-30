@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#25265f" />
-    <title>Ayame — 大容量テキストビューア</title>
+    <title>Ayame — 大容量テキストエディタ</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
   </head>
@@ -16,6 +16,10 @@
           菖蒲<span class="brand-sub">Ayame</span>
         </div>
         <div class="file" id="filename" title="">—</div>
+        <button id="save-copy" class="cmd" title="編集内容を別ファイルへ保存 (Ctrl+S)">保存</button>
+        <button id="insert-line" title="現在行の下に行を挿入 (Insert)">＋</button>
+        <button id="delete-line" title="現在行を削除 (Delete)">−</button>
+        <button id="revert-edit" title="未保存の編集を破棄">↺</button>
         <div class="spacer"></div>
 
         <div class="field goto">
@@ -47,6 +51,7 @@
         <span id="st-size" class="seg">—</span>
         <span id="st-enc" class="seg">—</span>
         <span id="st-eol" class="seg">—</span>
+        <span id="st-edit" class="seg">—</span>
         <div class="spacer"></div>
         <span id="st-index" class="seg dim">—</span>
       </footer>

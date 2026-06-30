@@ -1,4 +1,4 @@
-//! `ayame serve` — a local web viewer for one large file.
+//! `ayame serve` — a local web editor for one large file.
 //!
 //! The browser only ever holds the visible viewport; everything else is fetched
 //! on demand from these endpoints, which are thin wrappers over `ayame-core`.
@@ -6,17 +6,20 @@
 //! 500 instead of taking the process down — stability is a feature here.
 
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use ayame_core::{Document, Line, SearchOptions};
+use ayame_core::{
+    Document, EditLine, EditSession, EditStats, FileStat, Line, SaveResult, SearchOptions,
+};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
@@ -37,6 +40,30 @@ const MAX_VIEW: u64 = 20_000;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
 type Shared = Arc<Document>;
+
+struct AppState {
+    doc: RwLock<Shared>,
+    edits: RwLock<EditSession>,
+}
+
+impl AppState {
+    fn new(doc: Document) -> AppState {
+        AppState {
+            doc: RwLock::new(Arc::new(doc)),
+            edits: RwLock::new(EditSession::default()),
+        }
+    }
+
+    fn doc(&self) -> Shared {
+        self.doc.read().expect("document lock poisoned").clone()
+    }
+
+    fn edits(&self) -> EditSession {
+        self.edits.read().expect("edit lock poisoned").clone()
+    }
+}
+
+type SharedState = Arc<AppState>;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse(
@@ -76,10 +103,10 @@ pub fn cmd_serve(args: &[String]) -> Result<()> {
         .enable_all()
         .build()
         .context("building tokio runtime")?;
-    rt.block_on(serve(Arc::new(doc), host, port))
+    rt.block_on(serve(Arc::new(AppState::new(doc)), host, port))
 }
 
-async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
+async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/app.js", get(app_js))
@@ -87,6 +114,12 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .route("/favicon.svg", get(favicon_svg))
         .route("/api/stat", get(api_stat))
         .route("/api/lines", get(api_lines))
+        .route("/api/edit/status", get(api_edit_status))
+        .route("/api/edit/line", post(api_edit_line))
+        .route("/api/edit/insert", post(api_edit_insert))
+        .route("/api/edit/delete", post(api_edit_delete))
+        .route("/api/edit/save", post(api_edit_save))
+        .route("/api/edit/revert", post(api_edit_revert))
         .route("/api/search", get(api_search))
         .route("/api/find", get(api_find))
         .route("/api/linebyte", get(api_linebyte))
@@ -95,7 +128,7 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .route("/api/top", get(api_top))
         .route("/api/distinct", get(api_distinct))
         .layer(CatchPanicLayer::new())
-        .with_state(doc);
+        .with_state(state);
 
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -103,7 +136,7 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
-    eprintln!("ayame: viewer ready at http://{addr}/  (Ctrl+C to stop)");
+    eprintln!("ayame: editor ready at http://{addr}/  (Ctrl+C to stop)");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -139,8 +172,31 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
 
 // ---- API ----------------------------------------------------------------------
 
-async fn api_stat(State(doc): State<Shared>) -> Json<ayame_core::FileStat> {
-    Json(doc.stat())
+#[derive(Serialize)]
+struct StatResponse {
+    #[serde(flatten)]
+    file: FileStat,
+    view_lines: u64,
+    dirty: bool,
+    revision: u64,
+    inserted_lines: u64,
+    replaced_lines: u64,
+    deleted_lines: u64,
+}
+
+async fn api_stat(State(state): State<SharedState>) -> Json<StatResponse> {
+    let doc = state.doc();
+    let edits = state.edits();
+    let edit = edits.stats(&doc);
+    Json(StatResponse {
+        file: doc.stat(),
+        view_lines: edit.total_lines,
+        dirty: edit.dirty,
+        revision: edit.revision,
+        inserted_lines: edit.inserted_lines,
+        replaced_lines: edit.replaced_lines,
+        deleted_lines: edit.deleted_lines,
+    })
 }
 
 #[derive(Deserialize)]
@@ -153,16 +209,104 @@ struct LinesQuery {
 struct LinesResponse {
     start: u64,
     total: u64,
-    lines: Vec<ayame_core::Line>,
+    lines: Vec<EditLine>,
 }
 
-async fn api_lines(State(doc): State<Shared>, Query(q): Query<LinesQuery>) -> Json<LinesResponse> {
+async fn api_lines(
+    State(state): State<SharedState>,
+    Query(q): Query<LinesQuery>,
+) -> Json<LinesResponse> {
+    let doc = state.doc();
+    let edits = state.edits();
     let count = q.count.min(MAX_VIEW);
     Json(LinesResponse {
         start: q.start,
-        total: doc.line_count(),
-        lines: doc.lines(q.start, count),
+        total: edits.total_lines(&doc),
+        lines: edits.lines(&doc, q.start, count),
     })
+}
+
+async fn api_edit_status(State(state): State<SharedState>) -> Json<EditStats> {
+    let doc = state.doc();
+    Json(state.edits().stats(&doc))
+}
+
+#[derive(Deserialize)]
+struct EditLineRequest {
+    line: u64,
+    text: String,
+}
+
+async fn api_edit_line(
+    State(state): State<SharedState>,
+    Json(req): Json<EditLineRequest>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits
+        .replace_line(&doc, req.line, req.text)
+        .map_err(bad_request)?;
+    Ok(Json(edits.stats(&doc)))
+}
+
+async fn api_edit_insert(
+    State(state): State<SharedState>,
+    Json(req): Json<EditLineRequest>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits
+        .insert_line_before(&doc, req.line, req.text)
+        .map_err(bad_request)?;
+    Ok(Json(edits.stats(&doc)))
+}
+
+#[derive(Deserialize)]
+struct EditDeleteRequest {
+    line: u64,
+}
+
+async fn api_edit_delete(
+    State(state): State<SharedState>,
+    Json(req): Json<EditDeleteRequest>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits.delete_line(&doc, req.line).map_err(bad_request)?;
+    Ok(Json(edits.stats(&doc)))
+}
+
+#[derive(Deserialize)]
+struct EditSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+}
+
+async fn api_edit_save(
+    State(state): State<SharedState>,
+    Json(req): Json<EditSaveRequest>,
+) -> Result<Json<SaveResult>, (StatusCode, String)> {
+    let doc = state.doc();
+    let edits = state.edits();
+    let target = req
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_save_copy_path(doc.path()));
+    let res = tokio::task::spawn_blocking(move || edits.save_to_path(&doc, target))
+        .await
+        .map_err(internal)?
+        .map_err(bad_request)?;
+    Ok(Json(res))
+}
+
+async fn api_edit_revert(State(state): State<SharedState>) -> Json<EditStats> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits.clear();
+    Json(edits.stats(&doc))
 }
 
 #[derive(Deserialize)]
@@ -185,9 +329,10 @@ fn default_max() -> usize {
 }
 
 async fn api_search(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
+    let doc = state.doc();
     let res = doc
         .search(&SearchOptions {
             query: q.q,
@@ -223,9 +368,10 @@ struct FindResponse {
 }
 
 async fn api_find(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<FindQuery>,
 ) -> Result<Json<FindResponse>, (StatusCode, String)> {
+    let doc = state.doc();
     let hit = if q.dir == "prev" {
         doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
             .map_err(bad_request)?
@@ -247,9 +393,10 @@ struct LineByteResponse {
 }
 
 async fn api_linebyte(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<LineByteQuery>,
 ) -> Json<LineByteResponse> {
+    let doc = state.doc();
     Json(LineByteResponse {
         byte: doc.line_start_byte(q.line),
     })
@@ -257,6 +404,20 @@ async fn api_linebyte(
 
 fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, e.to_string())
+}
+
+fn default_save_copy_path(path: &Path) -> PathBuf {
+    let base = PathBuf::from(format!("{}.edited", path.display()));
+    if !base.exists() {
+        return base;
+    }
+    for n in 1..1000 {
+        let p = PathBuf::from(format!("{}.edited.{n}", path.display()));
+        if !p.exists() {
+            return p;
+        }
+    }
+    PathBuf::from(format!("{}.edited.{}", path.display(), std::process::id()))
 }
 
 // ---- isolated op workers (sort / group) -------------------------------------
@@ -317,9 +478,10 @@ struct SortResponse {
 }
 
 async fn api_sort(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<SortQuery>,
 ) -> Result<Json<SortResponse>, (StatusCode, String)> {
+    let doc = state.doc();
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("sort");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -405,9 +567,10 @@ struct GroupResponse {
 }
 
 async fn api_group(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<GroupQuery>,
 ) -> Result<Json<GroupResponse>, (StatusCode, String)> {
+    let doc = state.doc();
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("group");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -519,9 +682,10 @@ struct TopResponse {
 }
 
 async fn api_top(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<TopQuery>,
 ) -> Result<Json<TopResponse>, (StatusCode, String)> {
+    let doc = state.doc();
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("top");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -602,9 +766,10 @@ struct DistinctResponse {
 }
 
 async fn api_distinct(
-    State(doc): State<Shared>,
+    State(state): State<SharedState>,
     Query(q): Query<DistinctQuery>,
 ) -> Result<Json<DistinctResponse>, (StatusCode, String)> {
+    let doc = state.doc();
     let exe = std::env::current_exe().map_err(internal)?;
     let mut cmd = Command::new(&exe);
     cmd.arg("distinct").arg(doc.path());

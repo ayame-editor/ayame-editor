@@ -1,6 +1,6 @@
 [package]
 name = "ayame-core"
-description = "Memory-mapped, sparsely-indexed engine for viewing extremely large text files."
+description = "Memory-mapped, sparsely-indexed engine for editing extremely large text files."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

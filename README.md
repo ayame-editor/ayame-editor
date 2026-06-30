@@ -1,7 +1,7 @@
 # Ayame（菖蒲）
 
-100億行クラスのテキストでも、メモリを溢れさせず・落ちずに、開く／検索する／並べ替える／集計するローカルツール。
-Shift_JIS / EUC-JP / UTF-8 を自動判定。CLI とローカル Web ビューアで使えます。
+100億行クラスのテキストでも、メモリを溢れさせず・落ちずに、開く／編集する／検索する／並べ替える／集計するローカルツール。
+Shift_JIS / EUC-JP / UTF-8 を自動判定。CLI とローカル Web エディタで使えます。
 
 ## インストール
 
@@ -45,7 +45,7 @@ ayame serve sample.csv --port 8777          # 表示された URL をブラウ�
 | `top    <FILE> -k COL -n N` | 上位 N 行（`--min` で下位） |
 | `distinct <FILE> -k COL` | 近似ユニーク数（HyperLogLog） |
 | `gen    <FILE> --lines N` | 合成テストデータ生成（`--cols`, `--encoding`） |
-| `serve  <FILE>` | ローカル Web ビューアを起動（`--host`, `--port`） |
+| `serve  <FILE>` | ローカル Web エディタを起動（`--host`, `--port`） |
 | `cache  [path\|info\|clear]` | 索引キャッシュの確認・消去 |
 
 ## 使い方
@@ -116,22 +116,27 @@ ayame group data.csv -k 1 --csv             # "Tokyo, JP" を1キーとして集
 ```sh
 ayame gen sjis.csv --lines 100000 --encoding shift_jis
 ayame stat sjis.csv                         # encoding: Shift_JIS
-ayame serve sjis.csv                         # ビューアは UTF-8 にデコードして表示
+ayame serve sjis.csv                         # Web エディタは UTF-8 にデコードして表示
 ```
 
-### Web ビューア（serve）
+### Web エディタ（serve）
 
 ```sh
 ayame serve huge.csv --port 8777            # http://127.0.0.1:8777 を開く
 ```
 
-数十億行をスクロールできる VSCode 風の仮想化ビューア。実行に Node も webview も不要。
+数十億行をスクロールできる VSCode 風の仮想化エディタ。実行に Node も webview も不要。
+編集は元ファイルを丸ごと rope 化せず、mmap base の上に差分レイヤを持ちます。
+未編集行は元 bytes のまま保存コピーへストリームし、編集行だけ元 encoding に再エンコードします。
 
 | 操作 | キー |
 |---|---|
 | 行へ移動 | `Ctrl+G` |
 | 検索 | `Ctrl+F` |
 | 次 / 前の一致 | `F3` / `Shift+F3` |
+| 行編集 | `Enter` / `F2` / ダブルクリック |
+| 行挿入 / 行削除 | `Insert` / `Delete` |
+| 編集内容を別ファイルへ保存 | `Ctrl+S` |
 | 大小無視 / 正規表現の切替 | `Alt+C` / `Alt+R` |
 | 先頭 / 末尾へ | `Ctrl+Home` / `Ctrl+End` |
 | ページ送り | `PageUp` / `PageDown` / `Space` |

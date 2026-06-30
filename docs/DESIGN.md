@@ -1,10 +1,10 @@
-# Ayame(菖蒲)設計ドキュメント — 巨大テキスト閲覧・検査ツール
+# Ayame(菖蒲)設計ドキュメント — 巨大テキスト編集・検査ツール
 
 - ステータス: ドラフト（設計合意用 / v0.1 実装済みコアの上に積む計画）
 - 対象規模: 〜10^10 行 / 数百GB〜TB のログ・CSV/TSV/JSONL・データ移行ダンプ
 - 最優先要件（この順序が全判断を貫く）:
   **安定性（クラッシュ前提で設計）** ＞ 簡潔かつ強力 ＞ VSCode風UX ＞ Sakura系譜（Shift_JIS）＞ 巨大ファイルを快適に開く
-- 既存資産: `ayame-core`（mmap + 疎行インデックス + 検索）, `ayame-cli`（CLI + axum Web ビューア、現状 READ-ONLY）— **書き直さず、上に積む**
+- 既存資産: `ayame-core`（mmap + 疎行インデックス + 検索 + 差分編集）, `ayame-cli`（CLI + axum Web エディタ）— **書き直さず、上に積む**
 
 > このドキュメントは、6本の独立分析を並列実行し、敵対的レビュー（adversarial critique）で検証・是正したうえでまとめたものです。レビューで削った/直した項目は §10・§11 に明記しています。
 
@@ -14,7 +14,7 @@
 
 | 論点 | 決定 | 一言理由 |
 |---|---|---|
-| 既存ツールで足りるか | **足りない。作る価値あり。スコープは「ビューア＋オフロード型データ操作」に限定** | OSS＋クロスPF＋VSCode風GUI＋TB級O(index)メモリ＋並列ops＋クラッシュ隔離＋Shift_JIS の交差点を満たす単一ツールは存在しない |
+| 既存ツールで足りるか | **足りない。作る価値あり。スコープは「巨大ファイルエディタ＋オフロード型データ操作」に限定** | OSS＋クロスPF＋VSCode風GUI＋TB級O(index)メモリ＋並列ops＋クラッシュ隔離＋Shift_JIS の交差点を満たす単一ツールは存在しない |
 | 言語 | **Rust 継続**（Go 不採用） | GoのGCがメモリ北極星と衝突。コアは既にRustで動作・テスト済み |
 | GUI | **Tauri 2 ＋ 既存Web UI再利用** | OS webviewでChromium非同梱、Rustコア直リンク、クロスPF |
 | 安定性 | **プロセス隔離＋有界予算のops** が本丸。落ちたら**画面は残し**、ワーカーだけ再起動 | プロセス境界がOOM/暴走/パニックの真の安全網 |
@@ -42,7 +42,7 @@
 
 **差別化の核:** どのツールも「**計算/ワーカーが落ちてもビューポートが残り、閲覧を継続できる**」プロセス隔離耐障害を持たない。これが Ayame 最大の差別化で、OSS＋クロスPF＋GUI＋Shift_JIS と並ぶ。
 
-**正直なトレードオフ:** 各軸は既存ツールが個別に解決済み。Ayame の価値は**統合・パッケージング**にある（技術的moatは薄い）。v0.1.0 のスコープは「ビューア＋データ操作」に置くが、これは編集不能という意味ではない。巨大ファイル編集は read-only mmap base の上に差分レイヤを載せる別フェーズとして扱う。
+**正直なトレードオフ:** 各軸は既存ツールが個別に解決済み。Ayame の価値は**統合・パッケージング**にある（技術的moatは薄い）。巨大ファイル編集は immutable mmap base（元ファイルを直接 mutable mmap しない土台）の上に差分レイヤを載せる。初期実装は行単位の置換/挿入/削除と保存コピーで、以降は undo/redo・範囲編集・上書き保存へ広げる。
 
 一行ポジショニング: **「クラッシュしないUIを持つ、オープンソースのクロスプラットフォーム版 EmEditor（将来はDuckDBエンジン同梱）」**。
 
@@ -128,7 +128,7 @@ v1 の方針:
 
 ### 5.2 結果は「仮想順列」として閲覧（ゼロコピー）
 
-各 op 結果は **ordering（スピルした `Vec<u64>` の行番号列）**として実体化。ビューアは既存の `index.line_ranges`（[`index.rs`](../crates/ayame-core/src/index.rs)）経由でその順列を見るので、**10億行のソート結果もデータコピーなし**で同じ疎フェッチ経路から閲覧できる。
+各 op 結果は **ordering（スピルした `Vec<u64>` の行番号列）**として実体化。UI は既存の `index.line_ranges`（[`index.rs`](../crates/ayame-core/src/index.rs)）経由でその順列を見るので、**10億行のソート結果もデータコピーなし**で同じ疎フェッチ経路から表示できる。
 
 ### 5.3 CSV/TSV フィールドモデル（レビューで補完）
 
@@ -206,13 +206,13 @@ v1 の方針:
    既存 axum を**そのまま**サイドカー子プロセスとして起動し、前段に薄いホスト（Tauri window、または監督する親プロセス）を置く。エンジン子が落ちたら**最後のビューポートを保持**して「エンジン再起動中・表示は保持」を出し、再 spawn。**最初に書くテスト = SIGKILL 注入**（リクエスト中にエンジンを kill → window が最後の表示を保つことを assert）。これ一本が「designed to crash」命題の証明で、supervisor/IPC/spool は不要。
 
 2. **Step 2 — ディスクオフロードを安全に証明**
-   `LineIndex::to_bytes/from_bytes`（16B POD 配列で自明）＋ `line_count`＋checksum trailer を追加。`Document::open` を content-addressed キャッシュ（`blake3(path)+size+mtime+encoding+stride`）対応に。キー毎 `O_EXCL` ロックで二重ビルド回避。再オープンが「数秒ビルド」から「mmap＋検証」へ。**ミス/破損は単に `LineIndex::build` へフォールバック**＝走るビューアにゼロリスク。
+   `LineIndex::to_bytes/from_bytes`（16B POD 配列で自明）＋ `line_count`＋checksum trailer を追加。`Document::open` を content-addressed キャッシュ（`blake3(path)+size+mtime+encoding+stride`）対応に。キー毎 `O_EXCL` ロックで二重ビルド回避。再オープンが「数秒ビルド」から「mmap＋検証」へ。**ミス/破損は単に `LineIndex::build` へフォールバック**＝動作中エディタにゼロリスク。
 
 3. **Step 3 — ワーカー動物園なしで op を1つ**
-   **GREP を使い捨て子プロセス**として実装: argv 入力（query, regex/ci, 出力パス）→ mmap を rayon 並列スキャン（`search::Matcher` 流用）→ ヒットを結果ファイルへ（line,byte）→ 親がストリーム。heartbeat も IPC フレーミングも無し（spawn→wait→exit code、落ちたらトースト→再試行）。「ジョブ毎隔離」「結果=行番号順列を既存疎フェッチで閲覧」を最低リスクで検証。
+   **GREP を使い捨て子プロセス**として実装: argv 入力（query, regex/ci, 出力パス）→ mmap を rayon 並列スキャン（`search::Matcher` 流用）→ ヒットを結果ファイルへ（line,byte）→ 親がストリーム。heartbeat も IPC フレーミングも無し（spawn→wait→exit code、落ちたらトースト→再試行）。「ジョブ毎隔離」「結果=行番号順列を既存疎フェッチで表示」を最低リスクで検証。
 
 4. **Step 4 —（1-3 が固まってから）外部マージ SORT**
-   同じ使い捨て子プロセス形で、明示予算 B＋≥1MiB 連続スピル、結果は `Vec<u64>` 順列（ビューアは `index.line_ranges` で閲覧＝ゼロコピー仮想順列）。v1 は **デコード＋NFC 正規化キー**でソートし「コードポイント順（言語的照合ではない）」と明記。
+   同じ使い捨て子プロセス形で、明示予算 B＋≥1MiB 連続スピル、結果は `Vec<u64>` 順列（エディタは `index.line_ranges` で表示＝ゼロコピー仮想順列）。v1 は **デコード＋NFC 正規化キー**でソートし「コードポイント順（言語的照合ではない）」と明記。
 
 ---
 
@@ -226,7 +226,7 @@ v1 の方針:
 - HyperLogLog・ホットパーティション再帰再分割・`posix_fadvise/madvise`・`fallocate`/スパースファイル等の syscall チューニング（各々が安定性面=未実証）。
 - DuckDB バックエンド（大きな C++ 依存＋独自メモリマネージャ＝「有界・予測可能・隔離可能」と相反）。自作 grep/sort/group を先に。
 - 「Supervisor 死も透過」という durable-spool 物語（§4.1 のとおり Tauri 分離が担う）。
-- **編集UIと保存エンジン**。今回のリリーススコープは明示的に**ビューア＋ops**で、編集UIはまだ入れない。ただし read-only mmap は「元ファイルを直接 mutable mmap しない」という意味であり、編集は mmap base＋差分WAL/piece table で成立させる。
+- **編集エンジン高度化**。初期の行単位編集は入った。v1では最小の差分レイヤに留め、undo/redo、矩形選択、grep置換、上書き保存、永続 WAL は段階的に入れる。immutable mmap base は「元ファイルを直接 mutable mmap しない」という意味であり、編集は mmap base＋差分WAL/piece table で成立させる。
 
 ---
 

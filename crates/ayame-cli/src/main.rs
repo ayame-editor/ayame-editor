@@ -1,4 +1,4 @@
-//! `ayame` — command-line tool and local web viewer for very large text files.
+//! `ayame` — command-line tool and local web editor for very large text files.
 //!
 //! The CLI is intentionally small and `grep`/`sed`-flavored so it composes with
 //! the rest of a data engineer's toolbox; `ayame serve` launches the GUI.
@@ -38,7 +38,7 @@ COMMANDS:
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
-    serve  <FILE>                 Launch the local web viewer (--host, --port)
+    serve  <FILE>                 Launch the local web editor (--host, --port)
     cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
     version                       Show version
 

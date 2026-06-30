@@ -191,6 +191,11 @@ impl Document {
         &self.path
     }
 
+    /// Raw bytes before the indexed content, currently just a BOM if present.
+    pub fn prefix_bytes(&self) -> &[u8] {
+        &self.buf()[..self.base as usize]
+    }
+
     /// Decoded text of line `i` (terminator stripped), or `None` if out of range.
     pub fn line(&self, i: u64) -> Option<String> {
         let buf = self.buf();
@@ -239,6 +244,25 @@ impl Document {
             .into_iter()
             .map(|(n, s, e)| (n, &buf[s as usize..e as usize]))
             .collect()
+    }
+
+    /// Raw bytes of line `i`, including its original line terminator if present.
+    pub fn raw_line_with_terminator(&self, i: u64) -> Option<&[u8]> {
+        let buf = self.buf();
+        let (s, _text_end, raw_end) = self.index.line_range_with_terminator(buf, i)?;
+        Some(&buf[s as usize..raw_end as usize])
+    }
+
+    /// Original terminator bytes for line `i`, if the line has one.
+    pub fn line_terminator(&self, i: u64) -> Option<&[u8]> {
+        let buf = self.buf();
+        let (_s, text_end, raw_end) = self.index.line_range_with_terminator(buf, i)?;
+        Some(&buf[text_end as usize..raw_end as usize])
+    }
+
+    /// Preferred terminator for newly inserted text.
+    pub fn default_terminator(&self) -> &'static [u8] {
+        self.eol.bytes()
     }
 
     pub fn search(&self, opts: &SearchOptions) -> Result<SearchResult> {
