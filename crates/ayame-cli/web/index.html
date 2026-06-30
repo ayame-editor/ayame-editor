@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayame — 大容量テキストビューア</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <div class="brand" title="菖蒲 / Ayame">菖蒲<span class="brand-sub">Ayame</span></div>
+        <div class="file" id="filename" title="">—</div>
+        <div class="spacer"></div>
+
+        <div class="field goto">
+          <span class="label">移動</span>
+          <input id="goto" type="text" inputmode="numeric" autocomplete="off"
+                 placeholder="行番号 (Ctrl+G)" />
+        </div>
+
+        <div class="field find">
+          <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
+          <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
+          <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
+          <button id="find-prev" title="前の一致 (Shift+F3)">▲</button>
+          <button id="find-next" title="次の一致 (F3)">▼</button>
+          <span id="find-count" class="find-count"></span>
+        </div>
+      </header>
+
+      <main id="viewport" tabindex="0">
+        <div id="content"></div>
+        <div id="vscrollbar"><div id="vthumb"></div></div>
+        <div id="overlay" class="overlay hidden"></div>
+      </main>
+
+      <footer id="statusbar">
+        <span id="st-pos" class="seg">—</span>
+        <span id="st-lines" class="seg">—</span>
+        <span id="st-size" class="seg">—</span>
+        <span id="st-enc" class="seg">—</span>
+        <span id="st-eol" class="seg">—</span>
+        <div class="spacer"></div>
+        <span id="st-index" class="seg dim">—</span>
+      </footer>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

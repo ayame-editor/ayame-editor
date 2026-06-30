@@ -1,0 +1,252 @@
+//! `ayame` — command-line tool and local web viewer for very large text files.
+//!
+//! The CLI is intentionally small and `grep`/`sed`-flavored so it composes with
+//! the rest of a data engineer's toolbox; `ayame serve` launches the GUI.
+
+mod gen;
+mod serve;
+
+use std::collections::{HashMap, HashSet};
+use std::process::ExitCode;
+
+use anyhow::{bail, Context, Result};
+use ayame_core::{Document, OpenOptions, SearchOptions};
+use ayame_core::Encoding;
+
+const HELP: &str = "\
+ayame — view, search and navigate text files of any size
+
+USAGE:
+    ayame <COMMAND> [OPTIONS]
+
+COMMANDS:
+    stat   <FILE>                 Show size, line count, encoding, EOL, index stats
+    head   <FILE> [-n N]          Print the first N lines (default 10)
+    tail   <FILE> [-n N]          Print the last N lines (default 10)
+    line   <FILE> <N>             Print line N (1-based)
+    lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
+    search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
+    gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
+    serve  <FILE>                 Launch the local web viewer (--host, --port)
+
+COMMON OPTIONS:
+    --encoding <ENC>   Force encoding: utf8 | shift_jis | euc-jp | ascii
+    --stride <N>       Lines per index checkpoint (default 4096)
+    --json             Machine-readable output (stat/search)
+    -h, --help         Show this help
+
+EXAMPLES:
+    ayame stat huge.csv
+    ayame gen huge.csv --lines 100000000
+    ayame search huge.log 'ERROR' -i --max 50
+    ayame serve huge.csv --port 8777
+";
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match run(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ayame: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(args: Vec<String>) -> Result<()> {
+    let cmd = match args.first() {
+        Some(c) => c.clone(),
+        None => {
+            print!("{HELP}");
+            return Ok(());
+        }
+    };
+    if cmd == "-h" || cmd == "--help" || cmd == "help" {
+        print!("{HELP}");
+        return Ok(());
+    }
+
+    let rest = &args[1..];
+    match cmd.as_str() {
+        "stat" => cmd_stat(rest),
+        "head" => cmd_head_tail(rest, false),
+        "tail" => cmd_head_tail(rest, true),
+        "line" => cmd_line(rest),
+        "lines" => cmd_lines(rest),
+        "search" => cmd_search(rest),
+        "gen" => gen::cmd_gen(rest),
+        "serve" => serve::cmd_serve(rest),
+        other => {
+            print!("{HELP}");
+            bail!("unknown command '{other}'");
+        }
+    }
+}
+
+// ---- argument parsing helpers -------------------------------------------------
+
+/// Split argv into positionals, valued options, and boolean flags.
+/// `valued` lists the option names (incl. aliases) that consume the next token.
+fn parse(args: &[String], valued: &[&str]) -> (Vec<String>, HashMap<String, String>, HashSet<String>) {
+    let mut pos = Vec::new();
+    let mut opts = HashMap::new();
+    let mut flags = HashSet::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a.starts_with('-') && a != "-" {
+            if valued.contains(&a.as_str()) {
+                if let Some(v) = args.get(i + 1) {
+                    opts.insert(a.clone(), v.clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            flags.insert(a.clone());
+        } else {
+            pos.push(a.clone());
+        }
+        i += 1;
+    }
+    (pos, opts, flags)
+}
+
+fn first_opt<'a>(opts: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|k| opts.get(*k).map(|s| s.as_str()))
+}
+
+fn has_flag(flags: &HashSet<String>, keys: &[&str]) -> bool {
+    keys.iter().any(|k| flags.contains(*k))
+}
+
+fn open_opts(opts: &HashMap<String, String>) -> Result<OpenOptions> {
+    let mut o = OpenOptions::default();
+    if let Some(enc) = first_opt(opts, &["--encoding", "-e"]) {
+        o.encoding = Some(
+            Encoding::parse(enc).with_context(|| format!("unknown encoding '{enc}'"))?,
+        );
+    }
+    if let Some(s) = first_opt(opts, &["--stride"]) {
+        o.stride = Some(s.parse().context("--stride must be a number")?);
+    }
+    Ok(o)
+}
+
+fn open_doc(args: &[String], valued_extra: &[&str]) -> Result<(Document, Vec<String>, HashMap<String, String>, HashSet<String>)> {
+    let mut valued = vec!["--encoding", "--stride"];
+    valued.extend_from_slice(valued_extra);
+    let (pos, opts, flags) = parse(args, &valued);
+    let path = pos.first().context("expected a FILE argument")?.clone();
+    let doc = Document::open(&path, &open_opts(&opts)?)
+        .with_context(|| format!("opening '{path}'"))?;
+    Ok((doc, pos, opts, flags))
+}
+
+// ---- commands -----------------------------------------------------------------
+
+fn cmd_stat(args: &[String]) -> Result<()> {
+    let (doc, _pos, opts, flags) = open_doc(args, &[])?;
+    let s = doc.stat();
+    if has_flag(&flags, &["--json"]) {
+        println!("{}", serde_json::to_string_pretty(&s)?);
+        return Ok(());
+    }
+    let _ = opts;
+    println!("path        {}", s.path);
+    println!("size        {} ({} bytes)", human_bytes(s.bytes), commas(s.bytes));
+    println!("lines       {}", commas(s.lines));
+    println!("encoding    {}{}", s.encoding.label(), if s.bom_bytes > 0 { " (BOM)" } else { "" });
+    println!("line ending {}", s.eol.label());
+    println!("index       {} checkpoints, {} (stride {}), built in {} ms",
+        commas(s.checkpoints as u64), human_bytes(s.index_bytes as u64), commas(s.stride), s.index_ms);
+    Ok(())
+}
+
+fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
+    let (doc, _pos, opts, _flags) = open_doc(args, &["-n", "--lines"])?;
+    let n: u64 = first_opt(&opts, &["-n", "--lines"]).unwrap_or("10").parse().context("-n must be a number")?;
+    let lines = if tail { doc.tail(n) } else { doc.head(n) };
+    for l in lines {
+        println!("{}", l.text);
+    }
+    Ok(())
+}
+
+fn cmd_line(args: &[String]) -> Result<()> {
+    let (doc, pos, _opts, _flags) = open_doc(args, &[])?;
+    let n: u64 = pos.get(1).context("expected line number")?.parse().context("line number must be a number")?;
+    if n == 0 {
+        bail!("line numbers are 1-based");
+    }
+    match doc.line(n - 1) {
+        Some(t) => println!("{t}"),
+        None => bail!("line {n} out of range (file has {} lines)", commas(doc.line_count())),
+    }
+    Ok(())
+}
+
+fn cmd_lines(args: &[String]) -> Result<()> {
+    let (doc, pos, _opts, _flags) = open_doc(args, &[])?;
+    let start: u64 = pos.get(1).context("expected START")?.parse().context("START must be a number")?;
+    let count: u64 = pos.get(2).context("expected COUNT")?.parse().context("COUNT must be a number")?;
+    let start0 = start.saturating_sub(1);
+    for l in doc.lines(start0, count) {
+        println!("{}\t{}", l.number + 1, l.text);
+    }
+    Ok(())
+}
+
+fn cmd_search(args: &[String]) -> Result<()> {
+    let (doc, pos, opts, flags) = open_doc(args, &["--max"])?;
+    let pattern = pos.get(1).context("expected a PATTERN")?.clone();
+    let regex = has_flag(&flags, &["-e", "--regex"]);
+    let ignore_case = has_flag(&flags, &["-i", "--ignore-case"]);
+    let max: usize = first_opt(&opts, &["--max"]).unwrap_or("1000").parse().context("--max must be a number")?;
+    let res = doc.search(&SearchOptions {
+        query: pattern,
+        regex,
+        case_sensitive: !ignore_case,
+        start_byte: 0,
+        max_hits: max,
+    })?;
+    if has_flag(&flags, &["--json"]) {
+        println!("{}", serde_json::to_string(&res)?);
+        return Ok(());
+    }
+    for h in &res.hits {
+        let text = doc.line(h.line).unwrap_or_default();
+        println!("{}:{}: {}", h.line + 1, h.column + 1, text);
+    }
+    eprintln!("{} match(es){}", commas(res.hits.len() as u64), if res.truncated { " (truncated; raise --max)" } else { "" });
+    Ok(())
+}
+
+// ---- formatting ---------------------------------------------------------------
+
+pub fn commas(n: u64) -> String {
+    let s = n.to_string();
+    let len = s.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+pub fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let mut v = n as f64;
+    let mut u = 0;
+    while v >= 1024.0 && u < UNITS.len() - 1 {
+        v /= 1024.0;
+        u += 1;
+    }
+    if u == 0 {
+        format!("{n} {}", UNITS[0])
+    } else {
+        format!("{v:.2} {}", UNITS[u])
+    }
+}

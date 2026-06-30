@@ -1,0 +1,17 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Generated / scratch test data
+*.bigdata
+/samples
+/bench-data
+
+# Node (frontend tooling, optional)
+node_modules
+dist
+
+# OS / editor
+.DS_Store
+*.swp
