@@ -46,7 +46,7 @@ jobs:
             bin: ayame
             rustflags: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Rust stable
         shell: bash
         run: |
@@ -86,7 +86,7 @@ jobs:
           else
             (cd "$out_dir" && shasum -a 256 "$out_name") > "$out.sha256"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ayame-${{ matrix.suffix }}
           path: dist/*
@@ -97,7 +97,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
