@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
-use ayame_core::{Document, Encoding, OpenOptions, OrderingReader, SearchOptions, SortOptions};
+use ayame_core::{Document, Encoding, GroupOptions, OpenOptions, OrderingReader, SearchOptions, SortOptions};
 
 const HELP: &str = "\
 ayame — view, search and navigate text files of any size
@@ -28,6 +28,7 @@ COMMANDS:
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, --max N
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
+    group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web viewer (--host, --port)
     cache  [path|info|clear]      Inspect or clear the on-disk index cache
@@ -80,6 +81,7 @@ fn run(args: Vec<String>) -> Result<()> {
         "lines" => cmd_lines(rest),
         "search" => cmd_search(rest),
         "sort" => cmd_sort(rest),
+        "group" => cmd_group(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
         "cache" => cmd_cache(rest),
@@ -260,6 +262,68 @@ fn cmd_sort(args: &[String]) -> Result<()> {
 
     // Clean up our spill scratch (gentle: one recursive remove), unless the user
     // pointed us at their own directory.
+    if custom_spill.is_none() {
+        let _ = std::fs::remove_dir_all(&spill_dir);
+    }
+    Ok(())
+}
+
+fn cmd_group(args: &[String]) -> Result<()> {
+    let (doc, _pos, opts, _flags) =
+        open_doc(args, &["--key", "-k", "--value", "--delim", "-t", "--budget", "--spill-dir"])?;
+    let key_column = match first_opt(&opts, &["--key", "-k"]) {
+        Some(s) => Some(s.parse().context("--key must be a number")?),
+        None => None,
+    };
+    let value_column = match first_opt(&opts, &["--value"]) {
+        Some(s) => Some(s.parse().context("--value must be a number")?),
+        None => None,
+    };
+    let delimiter = first_opt(&opts, &["--delim", "-t"])
+        .and_then(|s| s.as_bytes().first().copied())
+        .unwrap_or(b',');
+    let budget_bytes = match first_opt(&opts, &["--budget"]) {
+        Some(s) => parse_size(s)?,
+        None => 256 * 1024 * 1024,
+    };
+    let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
+    let spill_dir = custom_spill
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("ayame-group-{}", std::process::id())));
+
+    let gopts = GroupOptions {
+        key_column,
+        value_column,
+        delimiter,
+        budget_bytes,
+        spill_dir: spill_dir.clone(),
+    };
+    let has_value = value_column.is_some();
+
+    let stats = {
+        let stdout = std::io::stdout();
+        let mut w = std::io::BufWriter::new(stdout.lock());
+        let stats = ayame_core::ops::group(&doc, &gopts, |row| {
+            let key = String::from_utf8_lossy(&row.key);
+            let _ = if has_value {
+                if row.numeric_count > 0 {
+                    writeln!(w, "{key}\t{}\t{}\t{}\t{}\t{}", row.count, row.sum, row.min, row.max, row.avg().unwrap())
+                } else {
+                    writeln!(w, "{key}\t{}\t\t\t\t", row.count)
+                }
+            } else {
+                writeln!(w, "{key}\t{}", row.count)
+            };
+        })?;
+        let _ = w.flush();
+        stats
+    };
+    eprintln!(
+        "{} groups, {} run(s), {} spilled to disk",
+        commas(stats.groups),
+        commas(stats.runs as u64),
+        human_bytes(stats.spill_bytes),
+    );
     if custom_spill.is_none() {
         let _ = std::fs::remove_dir_all(&spill_dir);
     }

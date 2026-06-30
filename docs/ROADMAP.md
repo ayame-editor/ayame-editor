@@ -25,7 +25,7 @@
 
 ## 🔭 v2 以降（将来）
 
-- **GROUP-BY（分割ハッシュ）/ TOP-N / DISTINCT**。CSV/TSV フィールドモデル（`csv-core`）。
+- ✅ **GROUP-BY** 実装済み（`ayame-core::ops::group` ＋ `ayame group`）: メモリ内ハッシュ集計＋予算超過で部分集計 spill→k-way マージ。count/sum/min/max/avg。**未了**: TOP-N / DISTINCT（HLL）、CSV/TSV フィールドモデル（`csv-core` でのクォート対応）、ホットパーティション再分割。
 - **OTP風 supervisor**（長命プールのハートビート/バックオフ）、`ayame-ipc`（bincode フレーミング）。
 - **キャッシュ GC の高度化**（LRU+TTL+上限、低ディスク時デグレード、`ayame cache {info,gc,clear}`）。
 - **DuckDB 任意バックエンド**（feature-gated）: `read_csv_auto` で多キー GROUP BY・JOIN・SQL を pushdown。重い分析にコミットした時だけ列投影 DB を構築。
