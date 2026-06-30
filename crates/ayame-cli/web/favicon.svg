@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Ayame iris icon</title>
+  <desc id="desc">A compact iris flower mark inspired by ayame and kakitsubata.</desc>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#343a7c"/>
+      <stop offset="0.58" stop-color="#25265f"/>
+      <stop offset="1" stop-color="#171a34"/>
+    </radialGradient>
+    <linearGradient id="petal" x1="19" x2="45" y1="8" y2="54">
+      <stop offset="0" stop-color="#c8b7ff"/>
+      <stop offset="0.42" stop-color="#836fe8"/>
+      <stop offset="1" stop-color="#3f4fb4"/>
+    </linearGradient>
+    <linearGradient id="fall" x1="17" x2="47" y1="27" y2="58">
+      <stop offset="0" stop-color="#aa96ff"/>
+      <stop offset="0.56" stop-color="#6375dd"/>
+      <stop offset="1" stop-color="#2d72a7"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="18" x2="43" y1="58" y2="34">
+      <stop offset="0" stop-color="#3f8f72"/>
+      <stop offset="1" stop-color="#9ac77c"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="32" cy="32" r="30" fill="url(#bg)"/>
+  <path d="M14 56c8-15 15-22 21-26-1 14-8 22-21 26Z" fill="url(#leaf)" opacity=".95"/>
+  <path d="M50 56c-8-15-15-22-21-26 1 14 8 22 21 26Z" fill="url(#leaf)" opacity=".9"/>
+
+  <path d="M32 7c-7 8-10 17-8 27 3-2 6-3 8-3s5 1 8 3c2-10-1-19-8-27Z" fill="url(#petal)"/>
+  <path d="M17 17c-2 12 1 21 10 29 1-9-1-17-10-29Z" fill="url(#petal)" opacity=".92"/>
+  <path d="M47 17c2 12-1 21-10 29-1-9 1-17 10-29Z" fill="url(#petal)" opacity=".92"/>
+  <path d="M12 32c5 1 12 4 18 12-7 4-14 4-21-1 0-4 1-7 3-11Z" fill="url(#fall)"/>
+  <path d="M52 32c-5 1-12 4-18 12 7 4 14 4 21-1 0-4-1-7-3-11Z" fill="url(#fall)"/>
+  <path d="M32 30c5 4 8 9 9 17-6 3-12 3-18 0 1-8 4-13 9-17Z" fill="url(#fall)"/>
+
+  <path d="M32 29c-4 6-5 12-5 18 3 1 7 1 10 0 0-6-1-12-5-18Z" fill="#f6f2d7" opacity=".92"/>
+  <path d="M32 31c-2 4-3 9-3 15 2 .4 4 .4 6 0 0-6-1-11-3-15Z" fill="#f3c943"/>
+  <circle cx="32" cy="31" r="4" fill="#ffe58a"/>
+  <path d="M17 43c5 3 9 3 13 1M47 43c-5 3-9 3-13 1" fill="none" stroke="#d8ecff" stroke-linecap="round" stroke-width="2" opacity=".78"/>
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#80d7e8" stroke-opacity=".55" stroke-width="2"/>
+</svg>

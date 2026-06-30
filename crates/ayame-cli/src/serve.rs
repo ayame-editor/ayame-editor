@@ -27,6 +27,7 @@ use crate::{first_opt, open_opts, parse};
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
 const STYLE_CSS: &str = include_str!("../web/style.css");
+const FAVICON_SVG: &str = include_str!("../web/favicon.svg");
 
 /// Hard cap on lines returned in one viewport request, so a hostile/buggy
 /// client can never ask us to materialize the whole file.
@@ -68,6 +69,7 @@ async fn serve(doc: Shared, host: String, port: u16) -> Result<()> {
         .route("/", get(index))
         .route("/app.js", get(app_js))
         .route("/style.css", get(style_css))
+        .route("/favicon.svg", get(favicon_svg))
         .route("/api/stat", get(api_stat))
         .route("/api/lines", get(api_lines))
         .route("/api/search", get(api_search))
@@ -106,6 +108,10 @@ async fn app_js() -> Response {
 
 async fn style_css() -> Response {
     asset("text/css; charset=utf-8", STYLE_CSS)
+}
+
+async fn favicon_svg() -> Response {
+    asset("image/svg+xml; charset=utf-8", FAVICON_SVG)
 }
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {

@@ -61,8 +61,14 @@ html, body {
   letter-spacing: 0.5px;
   color: #e8a0bf;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
+}
+.brand-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 .brand-sub {
   font-size: 11px;
