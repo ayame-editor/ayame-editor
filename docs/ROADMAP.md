@@ -6,10 +6,10 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト38件。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト40件。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
 - `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
-- `ayame serve`: 行単位編集（置換/挿入/削除）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
+- `ayame serve`: 行単位編集（置換/挿入/削除/undo/redo）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
 - `ayame sort --out`、`sortdiff`、`replace --out`、`case upper|lower --out`。Web エディタからもソート/置換/ケース変換を別ファイル保存。
 - ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
 
@@ -18,11 +18,11 @@
 「目標アーキテクチャを一気に作らない」。各ステップは失敗時に v0.1 動作へ安全にフォールバックする。
 
 1. **プロセス隔離（安定性の証明）** — ✅ **実装済み（op ワーカー版）**
-   `ayame serve` は重い op（sort/group）を `--worker` 相当の**使い捨て子プロセス**（`current_exe` を re-exec）で実行。ワーカーが**捕捉不能な SIGABRT でも**落ちると当該リクエストは 502、エンジンと `/api/lines`（ビューポート）は 200 を維持。`AYAME_WORKER_CRASH` フックで決定的に実証（`scripts/crash-isolation-test.sh`、8/8 PASS）。**未了**: Tauri window が axum ホスト自体を監督する案（ホストプロセス死＝DESIGN §4.1 の case 3）はこの環境では GUI 検証不可のため後続。
+   `ayame serve` は重い op（search/sort/group）を `--worker` 相当の**使い捨て子プロセス**（`current_exe` を re-exec）で実行。ワーカーが**捕捉不能な SIGABRT でも**落ちると当該リクエストは 502、エンジンと `/api/lines`（ビューポート）は 200 を維持。`AYAME_WORKER_CRASH` フックで決定的に実証（`scripts/crash-isolation-test.sh`、10/10 PASS）。**未了**: Tauri window が axum ホスト自体を監督する案（ホストプロセス死＝DESIGN §4.1 の case 3）はこの環境では GUI 検証不可のため後続。
 2. **ディスクキャッシュ（オフロードの証明）** — ✅ **実装済み**
    `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
-3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（sort/group）**
-   `/api/sort`・`/api/group` は子プロセスを spawn→wait→exit、結果は artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。GREP も同形に寄せるのは将来（現状はエンジン内蔵検索が高速・メモリ安全なので優先度低）。
+3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（search/sort/group/top/distinct）**
+   `/api/search`・`/api/sort`・`/api/group`・`/api/top`・`/api/distinct` は子プロセスを spawn→wait→exit、結果は JSON / artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
    明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして**コードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: NFC 正規化・多段マージ（ラン数が fan-in 上限超のとき）・エディタでの仮想順列表示。
 
@@ -55,5 +55,5 @@
 
 ## 🚧 意図的に「やらない／後回し」
 
-- **巨大ファイル編集の高度化**。初期の行単位差分編集、別ファイルへの全体置換/ケース変換は実装済み。次は上書き保存、undo/redo、範囲選択、矩形選択、選択範囲置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
+- **巨大ファイル編集の高度化**。初期の行単位差分編集、undo/redo、別ファイルへの全体置換/ケース変換は実装済み。次は上書き保存、範囲選択、矩形選択、選択範囲置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
 - v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

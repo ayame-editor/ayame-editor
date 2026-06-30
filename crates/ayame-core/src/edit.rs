@@ -16,10 +16,14 @@ use crate::{Document, Error, Result};
 #[derive(Clone, Debug, Default)]
 pub struct EditSession {
     events: BTreeMap<u64, EditEvent>,
+    undo: Vec<BTreeMap<u64, EditEvent>>,
+    redo: Vec<BTreeMap<u64, EditEvent>>,
     revision: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+const HISTORY_LIMIT: usize = 256;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct EditEvent {
     /// Lines inserted before this original line. The special anchor
     /// `original_line_count` means "append after the original file".
@@ -45,6 +49,8 @@ pub struct EditStats {
     pub inserted_lines: u64,
     pub replaced_lines: u64,
     pub deleted_lines: u64,
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -69,9 +75,39 @@ impl EditSession {
         self.revision
     }
 
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.events, previous);
+        push_history(&mut self.redo, current);
+        self.bump();
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.events, next);
+        push_history(&mut self.undo, current);
+        self.bump();
+        true
+    }
+
     pub fn clear(&mut self) {
-        if !self.events.is_empty() {
+        if !self.events.is_empty() || !self.undo.is_empty() || !self.redo.is_empty() {
             self.events.clear();
+            self.undo.clear();
+            self.redo.clear();
             self.bump();
         }
     }
@@ -98,6 +134,8 @@ impl EditSession {
             inserted_lines: inserted,
             replaced_lines: replaced,
             deleted_lines: deleted,
+            can_undo: self.can_undo(),
+            can_redo: self.can_redo(),
         }
     }
 
@@ -150,6 +188,7 @@ impl EditSession {
     }
 
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
+        let before = self.events.clone();
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
@@ -175,7 +214,7 @@ impl EditSession {
                 self.clean_anchor(anchor);
             }
         }
-        self.bump();
+        self.finish_change(before);
         Ok(())
     }
 
@@ -189,13 +228,14 @@ impl EditSession {
                 logical + 1
             )));
         }
+        let before = self.events.clone();
         if logical == total {
             self.events
                 .entry(doc.line_count())
                 .or_default()
                 .inserts
                 .push(text);
-            self.bump();
+            self.finish_change(before);
             return Ok(());
         }
 
@@ -211,11 +251,12 @@ impl EditSession {
                     .insert(index, text);
             }
         }
-        self.bump();
+        self.finish_change(before);
         Ok(())
     }
 
     pub fn delete_line(&mut self, doc: &Document, logical: u64) -> Result<()> {
+        let before = self.events.clone();
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
@@ -235,7 +276,7 @@ impl EditSession {
                 self.clean_anchor(anchor);
             }
         }
-        self.bump();
+        self.finish_change(before);
         Ok(())
     }
 
@@ -373,6 +414,22 @@ impl EditSession {
     fn bump(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
+
+    fn finish_change(&mut self, before: BTreeMap<u64, EditEvent>) {
+        if before == self.events {
+            return;
+        }
+        push_history(&mut self.undo, before);
+        self.redo.clear();
+        self.bump();
+    }
+}
+
+fn push_history(stack: &mut Vec<BTreeMap<u64, EditEvent>>, snapshot: BTreeMap<u64, EditEvent>) {
+    if stack.len() == HISTORY_LIMIT {
+        stack.remove(0);
+    }
+    stack.push(snapshot);
 }
 
 fn write_edited_line(
@@ -480,6 +537,52 @@ mod tests {
         edits.save_to_path(&doc, &out).unwrap();
         assert_eq!(std::fs::read(&out).unwrap(), b"a\nb\n");
         let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn undo_redo_restore_sparse_overlay() {
+        let (_f, doc) = doc_from(b"a\nb\nc\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "B".into()).unwrap();
+        edits.insert_line_before(&doc, 2, "x".into()).unwrap();
+
+        let texts = |edits: &EditSession| -> Vec<String> {
+            edits
+                .lines(&doc, 0, 10)
+                .into_iter()
+                .map(|l| l.text)
+                .collect()
+        };
+
+        assert_eq!(texts(&edits), vec!["a", "B", "x", "c"]);
+        assert!(edits.can_undo());
+        assert!(!edits.can_redo());
+
+        assert!(edits.undo());
+        assert_eq!(texts(&edits), vec!["a", "B", "c"]);
+        assert!(edits.can_redo());
+
+        assert!(edits.redo());
+        assert_eq!(texts(&edits), vec!["a", "B", "x", "c"]);
+    }
+
+    #[test]
+    fn new_edit_after_undo_discards_redo() {
+        let (_f, doc) = doc_from(b"a\nb\nc\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "B".into()).unwrap();
+        edits.insert_line_before(&doc, 2, "x".into()).unwrap();
+        assert!(edits.undo());
+        assert!(edits.can_redo());
+
+        edits.replace_line(&doc, 1, "bee".into()).unwrap();
+        assert!(!edits.can_redo());
+        let lines: Vec<_> = edits
+            .lines(&doc, 0, 10)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(lines, vec!["a", "bee", "c"]);
     }
 
     #[test]

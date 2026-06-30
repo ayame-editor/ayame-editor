@@ -66,6 +66,9 @@ TRANSFORM OPTIONS:
     -i, --ignore-case  Case-insensitive replace
     -e, --regex        Regex replace pattern
 
+SEARCH OPTIONS:
+    --start-byte <N>   Begin search at a byte offset (for worker/API resume)
+
 GROUP OPTIONS:
     --value <COL>      Numeric value column for sum/min/max/avg
     --out-groups <FILE>
@@ -166,6 +169,10 @@ fn parse(args: &[String], valued: &[&str]) -> ParsedArgs {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
+        if a == "--" {
+            pos.extend(args[i + 1..].iter().cloned());
+            break;
+        }
         if a.starts_with('-') && a != "-" {
             if valued.contains(&a.as_str()) {
                 if let Some(v) = args.get(i + 1) {
@@ -1076,7 +1083,8 @@ fn cmd_lines(args: &[String]) -> Result<()> {
 }
 
 fn cmd_search(args: &[String]) -> Result<()> {
-    let (doc, pos, opts, flags) = open_doc(args, &["--max"])?;
+    maybe_crash();
+    let (doc, pos, opts, flags) = open_doc(args, &["--max", "--start-byte"])?;
     let pattern = pos.get(1).context("expected a PATTERN")?.clone();
     let regex = has_flag(&flags, &["-e", "--regex"]);
     let ignore_case = has_flag(&flags, &["-i", "--ignore-case"]);
@@ -1085,12 +1093,16 @@ fn cmd_search(args: &[String]) -> Result<()> {
         .unwrap_or("1000")
         .parse()
         .context("--max must be a number")?;
+    let start_byte: u64 = first_opt(&opts, &["--start-byte"])
+        .unwrap_or("0")
+        .parse()
+        .context("--start-byte must be a number")?;
     let res = doc.search(&SearchOptions {
         query: pattern,
         regex,
         case_sensitive: !ignore_case,
         whole_word,
-        start_byte: 0,
+        start_byte,
         max_hits: max,
     })?;
     if has_flag(&flags, &["--json"]) {

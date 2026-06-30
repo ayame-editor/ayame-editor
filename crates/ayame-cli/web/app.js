@@ -319,6 +319,8 @@ function updateStatusMeta() {
   $("st-edit").textContent = s.dirty
     ? `編集 +${commas(s.inserted_lines)} ~${commas(s.replaced_lines)} -${commas(s.deleted_lines)}`
     : "未編集";
+  $("undo-edit").disabled = !s.can_undo;
+  $("redo-edit").disabled = !s.can_redo;
   $("st-index").textContent =
     `索引 ${commas(s.checkpoints)} 点 / ${humanBytes(s.index_bytes)} / ${s.index_ms} ms`;
 }
@@ -576,6 +578,30 @@ async function revertEdits() {
   render();
 }
 
+async function undoEdit() {
+  try {
+    await apiPost("/api/edit/undo", {});
+    clearLineCache();
+    await refreshStat();
+    render();
+  } catch (e) {
+    flashCount("Undo エラー");
+    console.error(e);
+  }
+}
+
+async function redoEdit() {
+  try {
+    await apiPost("/api/edit/redo", {});
+    clearLineCache();
+    await refreshStat();
+    render();
+  } catch (e) {
+    flashCount("Redo エラー");
+    console.error(e);
+  }
+}
+
 async function sortSave() {
   const base = state.stat?.path || "ayame";
   const path = prompt("ソート保存先パス", `${base}.sorted`);
@@ -700,6 +726,8 @@ function initEvents() {
   $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
   $("save-copy").addEventListener("click", saveCopy);
+  $("undo-edit").addEventListener("click", undoEdit);
+  $("redo-edit").addEventListener("click", redoEdit);
   $("insert-line").addEventListener("click", insertLineBelow);
   $("delete-line").addEventListener("click", deleteActiveLine);
   $("revert-edit").addEventListener("click", revertEdits);
@@ -725,6 +753,7 @@ function toggleOpt(key, id) {
 
 function onGlobalKey(e) {
   const inInput = e.target.tagName === "INPUT";
+  const inLineEditor = inInput && e.target.classList.contains("line-edit");
   // Shortcuts that work even from inputs:
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
     e.preventDefault();
@@ -743,6 +772,17 @@ function onGlobalKey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     saveCopy();
+    return;
+  }
+  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    if (e.shiftKey) redoEdit();
+    else undoEdit();
+    return;
+  }
+  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+    e.preventDefault();
+    redoEdit();
     return;
   }
   if (e.key === "F3") {

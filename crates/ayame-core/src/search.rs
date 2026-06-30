@@ -9,7 +9,7 @@ use crate::encoding::Encoding;
 use crate::index::LineIndex;
 use crate::{Error, Result};
 use memchr::memmem;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What and how to search for.
 #[derive(Clone, Debug)]
@@ -38,7 +38,7 @@ impl Default for SearchOptions {
 }
 
 /// One match: location in both byte and (line, column) space.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct SearchHit {
     pub line: u64,
     /// 0-based character column (decoded), not byte column.
@@ -48,7 +48,7 @@ pub struct SearchHit {
 }
 
 /// Result of a bounded search pass.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SearchResult {
     pub hits: Vec<SearchHit>,
     /// True if `max_hits` was reached and more matches may exist past the last hit.

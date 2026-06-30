@@ -210,8 +210,8 @@ v1 の方針:
 2. **Step 2 — ディスクオフロードを安全に証明**
    `LineIndex::to_bytes/from_bytes`（16B POD 配列で自明）＋ `line_count`＋checksum trailer を追加。`Document::open` を content-addressed キャッシュ（`blake3(path)+size+mtime+encoding+stride`）対応に。キー毎 `O_EXCL` ロックで二重ビルド回避。再オープンが「数秒ビルド」から「mmap＋検証」へ。**ミス/破損は単に `LineIndex::build` へフォールバック**＝動作中エディタにゼロリスク。
 
-3. **Step 3 — ワーカー動物園なしで op を1つ**
-   **GREP を使い捨て子プロセス**として実装: argv 入力（query, regex/ci, 出力パス）→ mmap を rayon 並列スキャン（`search::Matcher` 流用）→ ヒットを結果ファイルへ（line,byte）→ 親がストリーム。heartbeat も IPC フレーミングも無し（spawn→wait→exit code、落ちたらトースト→再試行）。「ジョブ毎隔離」「結果=行番号順列を既存疎フェッチで表示」を最低リスクで検証。
+3. **Step 3 — ワーカー動物園なしで op を1つ** — 実装済み
+   `/api/search` は `ayame search --json --start-byte` を使い捨て子プロセスとして起動し、JSON でヒットを受け取る。heartbeat も IPC フレーミングも無し（spawn→wait→exit code、落ちたらトースト→再試行）。同じ形を sort/group/top/distinct に展開済み。
 
 4. **Step 4 —（1-3 が固まってから）外部マージ SORT**
    同じ使い捨て子プロセス形で、明示予算 B＋≥1MiB 連続スピル、結果は `Vec<u64>` 順列（エディタは `index.line_ranges` で表示＝ゼロコピー仮想順列）。v1 は **デコード＋NFC 正規化キー**でソートし「コードポイント順（言語的照合ではない）」と明記。

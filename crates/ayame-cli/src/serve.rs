@@ -17,9 +17,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use ayame_core::{
-    Document, EditLine, EditSession, EditStats, FileStat, Line, SaveResult, SearchOptions,
-};
+use ayame_core::{Document, EditLine, EditSession, EditStats, FileStat, Line, SaveResult};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
@@ -119,6 +117,8 @@ async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
         .route("/api/edit/insert", post(api_edit_insert))
         .route("/api/edit/delete", post(api_edit_delete))
         .route("/api/edit/save", post(api_edit_save))
+        .route("/api/edit/undo", post(api_edit_undo))
+        .route("/api/edit/redo", post(api_edit_redo))
         .route("/api/edit/revert", post(api_edit_revert))
         .route("/api/sort/save", post(api_sort_save))
         .route("/api/replace/save", post(api_replace_save))
@@ -319,6 +319,20 @@ async fn api_edit_revert(State(state): State<SharedState>) -> Json<EditStats> {
     Json(edits.stats(&doc))
 }
 
+async fn api_edit_undo(State(state): State<SharedState>) -> Json<EditStats> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits.undo();
+    Json(edits.stats(&doc))
+}
+
+async fn api_edit_redo(State(state): State<SharedState>) -> Json<EditStats> {
+    let doc = state.doc();
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    edits.redo();
+    Json(edits.stats(&doc))
+}
+
 #[derive(Deserialize)]
 struct SortSaveRequest {
     #[serde(default)]
@@ -452,16 +466,40 @@ async fn api_search(
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
     let doc = state.doc();
-    let res = doc
-        .search(&SearchOptions {
-            query: q.q,
-            regex: q.regex,
-            case_sensitive: !q.ci,
-            whole_word: q.word,
-            start_byte: q.start,
-            max_hits: q.max.min(100_000),
-        })
-        .map_err(bad_request)?;
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("search")
+        .arg(doc.path())
+        .arg("--json")
+        .arg("--max")
+        .arg(q.max.min(100_000).to_string())
+        .arg("--start-byte")
+        .arg(q.start.to_string());
+    if q.regex {
+        cmd.arg("--regex");
+    }
+    if q.ci {
+        cmd.arg("--ignore-case");
+    }
+    if q.word {
+        cmd.arg("--whole-word");
+    }
+    cmd.arg("--").arg(q.q);
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let out = wait_worker_output("search", &mut cmd).await?;
+    if !out.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "search worker {} — the engine is unaffected",
+                describe_status(out.status)
+            ),
+        ));
+    }
+    let res: ayame_core::SearchResult = serde_json::from_slice(&out.stdout).map_err(internal)?;
     Ok(Json(res))
 }
 

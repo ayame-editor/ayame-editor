@@ -134,6 +134,12 @@ button.cmd {
   font-family: var(--ui);
 }
 button:hover { background: #ffffff14; color: var(--fg); }
+button:disabled {
+  color: var(--fg-faint);
+  opacity: 0.45;
+  cursor: default;
+}
+button:disabled:hover { background: transparent; color: var(--fg-faint); }
 button.toggle.on {
   background: var(--accent);
   border-color: var(--accent-bright);

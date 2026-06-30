@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves Ayame's "designed to crash" thesis: heavy ops (sort/group) run in
+# Proves Ayame's "designed to crash" thesis: heavy ops (search/sort/group) run in
 # disposable child processes, so a worker crash — even an uncatchable SIGABRT —
 # returns an error but leaves the engine and the on-screen viewport fully alive.
 #
@@ -29,6 +29,7 @@ echo "== 1) healthy engine: ops succeed in child workers =="
 S1=$!
 wait_up "http://127.0.0.1:$P1/api/stat"
 check "$(code "http://127.0.0.1:$P1/api/stat")" 200 "/api/stat"
+check "$(code "http://127.0.0.1:$P1/api/search?q=error&max=5")" 200 "/api/search"
 check "$(code "http://127.0.0.1:$P1/api/sort?k=5&numeric=true")" 200 "/api/sort"
 check "$(code "http://127.0.0.1:$P1/api/group?k=4")" 200 "/api/group"
 echo "  group by col4 (status):"
@@ -39,6 +40,7 @@ echo "== 2) workers crash with SIGABRT — engine must survive =="
 AYAME_WORKER_CRASH=abort "$B" serve "$F" --port $P2 >/dev/null 2>&1 &
 S2=$!
 wait_up "http://127.0.0.1:$P2/api/stat"
+check "$(code "http://127.0.0.1:$P2/api/search?q=error&max=5")" 502 "search worker SIGABRT -> 502"
 check "$(code "http://127.0.0.1:$P2/api/sort?k=5&numeric=true")" 502 "sort worker SIGABRT -> 502"
 check "$(code "http://127.0.0.1:$P2/api/stat")"                 200 "*** engine ALIVE after worker crash ***"
 check "$(code "http://127.0.0.1:$P2/api/lines?start=0&count=5")" 200 "*** viewport ALIVE after worker crash ***"
