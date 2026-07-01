@@ -36,16 +36,19 @@ detect_target() {
   os="$(uname -s)"
   arch="$(uname -m)"
   exe_name="ayame"
+  kind="bin" # "bin" (Linux/Windows binary) or "app" (macOS .app bundle)
 
   case "$os:$arch" in
     Linux:x86_64|Linux:amd64)
-      target="linux-x86_64-musl"
+      target="linux-x86_64"
       ;;
     Darwin:arm64|Darwin:aarch64)
-      target="macos-aarch64"
+      target="macos-aarch64.zip"
+      kind="app"
       ;;
     Darwin:x86_64)
-      target="macos-x86_64"
+      target="macos-x86_64.zip"
+      kind="app"
       ;;
     MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
       target="windows-x86_64.exe"
@@ -61,8 +64,9 @@ default_install_dir() {
   if [ -n "$install_dir" ]; then
     return
   fi
-  case "$target" in
-    windows-*) install_dir="$HOME/bin" ;;
+  case "$kind:$target" in
+    app:*) install_dir="$HOME/Applications" ;;
+    *:windows-*) install_dir="$HOME/bin" ;;
     *) install_dir="$HOME/.local/bin" ;;
   esac
 }
@@ -92,8 +96,23 @@ verify_sha256() {
   fi
 }
 
-install_binary() {
+install_artifact() {
   mkdir -p "$install_dir"
+
+  if [ "$kind" = "app" ]; then
+    need unzip
+    rm -rf "$tmp/extract"
+    mkdir -p "$tmp/extract"
+    (cd "$tmp/extract" && unzip -oq "$tmp/$asset")
+    app="$(cd "$tmp/extract" && ls -d ./*.app 2>/dev/null | head -n1 | sed 's|^\./||')"
+    [ -n "$app" ] || die "no .app bundle found inside $asset"
+    dest="$install_dir/$app"
+    rm -rf "$dest"
+    cp -R "$tmp/extract/$app" "$dest"
+    xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
+    return
+  fi
+
   dest="$install_dir/$exe_name"
   if command -v install >/dev/null 2>&1; then
     install -m 0755 "$tmp/$asset" "$dest"
@@ -159,10 +178,20 @@ main() {
   default_install_dir
   download
   verify_sha256
-  install_binary
-  ensure_path
+  install_artifact
 
+  # macOS: an .app bundle you launch from Finder, not a PATH binary.
+  if [ "$kind" = "app" ]; then
+    say "installed: $dest"
+    say "Launch Ayame from Finder, or run: open \"$dest\""
+    return
+  fi
+
+  ensure_path
   say "installed: $dest"
+  if [ "$(uname -s)" = "Linux" ]; then
+    say "note: the Linux app needs WebKitGTK at runtime (e.g. Debian/Ubuntu: libwebkit2gtk-4.1-0)."
+  fi
   "$dest" --version
   if command -v "$exe_name" >/dev/null 2>&1; then
     "$exe_name" --version >/dev/null

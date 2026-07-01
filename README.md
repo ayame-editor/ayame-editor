@@ -1,52 +1,47 @@
 # Ayame（菖蒲）
 
-最低100億行クラスのテキストでも、メモリを溢れさせず・落ちずに、開く／編集する／検索する／並べ替える／集計するローカルツール。
-Shift_JIS / EUC-JP / UTF-8 を自動判定。CLI とローカル Web エディタで使えます。
+最低100億行クラスのテキストでも、メモリを溢れさせず・落ちずに、開く／編集する／検索する／並べ替える／集計する**ネイティブのデスクトップエディタ**。
+Shift_JIS / EUC-JP / UTF-8 を自動判定。ウィンドウは OS 標準の webview（macOS=WKWebView / Windows=WebView2 / Linux=WebKitGTK）で、Chromium を同梱しないため軽量です。
 
 100億行は「いつかの目標」ではなく最低設計ラインです。既定 stride 4096 の疎行インデックスでは、100億行の索引は約39 MiBです。
 
+> 同じ実行ファイルには CLI エンジン（`search` / `sort` / `group` など）も内蔵していますが、配布は**デスクトップアプリのみ**です（CLI 単体版は配布していません）。
+
 ## インストール
 
-GitHub Releases の配布版は単体実行ファイルです。`web/` フォルダや追加ランタイムは不要です。
+[GitHub Releases](https://github.com/hjosugi/ayame-editor/releases/latest) から各 OS 向けのアプリをダウンロードして起動します（**ダブルクリック**で起動）。
 
-Linux / macOS / Git Bash / WSL はこれだけで入ります。
+- **Windows**: `ayame-*-windows-x86_64.exe`
+- **macOS**: `ayame-*-macos-<arch>.zip`（展開すると `Ayame.app`）。初回は右クリック→「開く」で Gatekeeper を許可
+- **Linux**: `ayame-*-linux-x86_64`（実行時に **WebKitGTK** が必要。例: Debian/Ubuntu `libwebkit2gtk-4.1-0`）
+
+インストーラ経由でも入れられます（Windows/Linux は実行ファイルを PATH へ、macOS は `Ayame.app` を `~/Applications` へ配置）:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
-実行内容:
-
-- OS/CPU から配布ファイルを自動選択
-- 最新リリースをダウンロード
-- `.sha256` で検証
-- `~/.local/bin/ayame`（Windows系 sh では `~/bin/ayame.exe`）へ配置
-- PATH を shell profile に追記
-- `ayame --version` で起動確認
-
 バージョンや配置先を固定したい場合:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
-  | AYAME_VERSION=0.1.14 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
-```
-
-ローカルに clone 済みなら:
-
-```sh
-sh scripts/install.sh
+  | AYAME_VERSION=0.1.15 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ### ソースからビルドする場合
 
+デスクトップアプリ（webview 同梱ではなく OS の webview を利用）:
+
 ```sh
-cargo build --release
-./target/release/ayame --version
+cargo build --release --features gui
+./target/release/ayame            # ダブルクリック相当（引数なしでウィンドウ起動）
 ```
 
-以降の例では、`ayame` が PATH 上にある前提です。
+Linux でのビルドには `libwebkit2gtk-4.1-dev` と `libgtk-3-dev` が必要です。feature を付けずにビルドすると、内蔵 CLI エンジンのみ（webview 非依存）で動作します。
 
-## クイックスタート
+## 内蔵 CLI エンジン（上級者向け）
+
+デスクトップアプリと同じ実行ファイルは、`search` / `sort` / `group` などのコマンドも実行できます（アプリ内部の処理にも使われています）。ターミナルから直接使う場合の例です。以降は `ayame` が PATH 上にある前提です（macOS の `.app` 内なら `Ayame.app/Contents/MacOS/ayame`）。
 
 ```sh
 # 試しに大きな合成データを作る（約9.5 MiB / 20万行・CSV）

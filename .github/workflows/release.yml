@@ -18,85 +18,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Ayame ships as a native desktop app only (feature = "gui"): the editor +
+  # the OS webview (WKWebView / WebView2 / WebKitGTK). The binary still contains
+  # the full CLI engine (used internally by the app's workers), but we no longer
+  # publish a separate CLI-only build. macOS ships an .app bundle; Linux needs
+  # WebKitGTK at runtime; Windows/macOS use the built-in system webview.
   build:
-    name: build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            suffix: linux-x86_64-musl
-            bin: ayame
-            rustflags: ""
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            suffix: windows-x86_64
-            bin: ayame.exe
-            rustflags: "-C target-feature=+crt-static"
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            suffix: macos-x86_64
-            bin: ayame
-            rustflags: ""
-          - os: macos-14
-            target: aarch64-apple-darwin
-            suffix: macos-aarch64
-            bin: ayame
-            rustflags: ""
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install Rust stable
-        shell: bash
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add "${{ matrix.target }}"
-      - name: Install musl toolchain
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-      - name: Build
-        shell: bash
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked --target "${{ matrix.target }}"
-      - name: Prepare artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          fi
-          mkdir -p dist
-          src="target/${{ matrix.target }}/release/${{ matrix.bin }}"
-          out="dist/ayame-${tag}-${{ matrix.suffix }}"
-          if [[ "${{ matrix.bin }}" == *.exe ]]; then
-            out="${out}.exe"
-          fi
-          cp "$src" "$out"
-          strip "$out" 2>/dev/null || true
-          out_dir="$(dirname "$out")"
-          out_name="$(basename "$out")"
-          if command -v sha256sum >/dev/null 2>&1; then
-            (cd "$out_dir" && sha256sum "$out_name") > "$out.sha256"
-          else
-            (cd "$out_dir" && shasum -a 256 "$out_name") > "$out.sha256"
-          fi
-      - uses: actions/upload-artifact@v6
-        with:
-          name: ayame-${{ matrix.suffix }}
-          path: dist/*
-          if-no-files-found: error
-
-  # Native desktop app (feature = "gui"): the same binary + OS webview, packaged
-  # for double-click. Kept as a SEPARATE set of artifacts so the static CLI above
-  # stays dependency-free. macOS ships an .app bundle; Linux needs WebKitGTK.
-  build-gui:
-    name: gui ${{ matrix.suffix }}
+    name: build ${{ matrix.suffix }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -175,16 +103,16 @@ jobs:
                 '  <key>NSHighResolutionCapable</key><true/>' \
                 '</dict>' \
                 '</plist>' > "$app/Contents/Info.plist"
-              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}.zip"
+              out="dist/ayame-${tag}-${{ matrix.suffix }}.zip"
               ditto -c -k --keepParent "$app" "$out"
               rm -rf "$app"
               ;;
             windows-*)
-              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}.exe"
+              out="dist/ayame-${tag}-${{ matrix.suffix }}.exe"
               cp "$src" "$out"
               ;;
             *)
-              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}"
+              out="dist/ayame-${tag}-${{ matrix.suffix }}"
               cp "$src" "$out"
               ;;
           esac
@@ -197,13 +125,13 @@ jobs:
           fi
       - uses: actions/upload-artifact@v6
         with:
-          name: ayame-gui-${{ matrix.suffix }}
+          name: ayame-${{ matrix.suffix }}
           path: dist/*
           if-no-files-found: error
 
   publish:
     name: publish GitHub Release
-    needs: [build, build-gui]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
@@ -226,7 +154,7 @@ jobs:
             gh release create "$tag" dist/* \
               --title "$tag" \
               --target "$GITHUB_SHA" \
-              --notes "Ayame ${tag}: standalone CLI binaries (ayame-*) plus native desktop apps (ayame-gui-*, macOS .app), all with embedded web assets."
+              --notes "Ayame ${tag}: native desktop app (Windows .exe, macOS .app, Linux binary). Linux needs WebKitGTK at runtime; Windows/macOS use the built-in system webview."
           else
             gh release upload "$tag" dist/* --clobber
           fi
