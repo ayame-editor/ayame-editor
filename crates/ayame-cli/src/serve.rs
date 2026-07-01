@@ -1,9 +1,15 @@
-//! `ayame serve` — a local web editor for one large file.
+//! `ayame serve` — a local web editor for large files.
 //!
 //! The browser only ever holds the visible viewport; everything else is fetched
 //! on demand from these endpoints, which are thin wrappers over `ayame-core`.
 //! A `CatchPanicLayer` turns any unexpected panic in a single request into a
 //! 500 instead of taking the process down — stability is a feature here.
+//!
+//! A file may be passed on the command line, or the server can start empty and
+//! open one later: `/api/browse` walks the server's filesystem, `/api/open`
+//! opens a file by path, and `/api/upload` streams a dropped file to disk and
+//! opens it. The active document lives behind an `RwLock<Option<_>>` and can be
+//! swapped at runtime.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -12,15 +18,19 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use ayame_core::{Document, EditLine, EditSession, EditStats, FileStat, Line, SaveResult};
+use ayame_core::{
+    Document, EditLine, EditSession, EditStats, FileStat, Line, OpenOptions, SaveResult,
+};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tower_http::catch_panic::CatchPanicLayer;
@@ -40,24 +50,60 @@ const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 type Shared = Arc<Document>;
 
 struct AppState {
-    doc: RwLock<Shared>,
+    /// The currently open document, or `None` before any file is loaded. A file
+    /// can be opened, swapped, or closed at runtime — the workspace no longer
+    /// requires a file on the command line.
+    doc: RwLock<Option<Shared>>,
     edits: RwLock<EditSession>,
+    /// The open options (encoding/stride/cache) picked on the command line,
+    /// reused whenever a new file is opened from the browser.
+    open_opts: OpenOptions,
 }
 
 impl AppState {
-    fn new(doc: Document) -> AppState {
+    fn new(doc: Option<Document>, open_opts: OpenOptions) -> AppState {
         AppState {
-            doc: RwLock::new(Arc::new(doc)),
+            doc: RwLock::new(doc.map(Arc::new)),
             edits: RwLock::new(EditSession::default()),
+            open_opts,
         }
     }
 
-    fn doc(&self) -> Shared {
+    /// The open document, if any.
+    fn doc_opt(&self) -> Option<Shared> {
         self.doc.read().expect("document lock poisoned").clone()
+    }
+
+    /// The open document, or a 409 if the workspace is empty. Handlers that
+    /// need a file use this so an empty workspace answers cleanly instead of
+    /// panicking.
+    fn require_doc(&self) -> Result<Shared, (StatusCode, String)> {
+        self.doc_opt().ok_or((
+            StatusCode::CONFLICT,
+            "no file is open — open one first".to_string(),
+        ))
     }
 
     fn edits(&self) -> EditSession {
         self.edits.read().expect("edit lock poisoned").clone()
+    }
+
+    /// Open `path` with the workspace's options and make it the active document,
+    /// resetting any pending edits. The blocking open/index runs off the async
+    /// runtime.
+    async fn open_path(&self, path: String) -> Result<(), (StatusCode, String)> {
+        let opts = self.open_opts.clone();
+        let p = path.clone();
+        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
+            .await
+            .map_err(internal)?
+            .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
+        {
+            let mut slot = self.doc.write().expect("document lock poisoned");
+            *slot = Some(Arc::new(doc));
+        }
+        self.edits.write().expect("edit lock poisoned").clear();
+        Ok(())
     }
 }
 
@@ -68,7 +114,7 @@ pub fn cmd_serve(args: &[String]) -> Result<()> {
         args,
         &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
     );
-    let path = pos.first().context("expected a FILE argument")?.clone();
+    let path = pos.first().cloned();
     let host = first_opt(&opts, &["--host"])
         .unwrap_or("127.0.0.1")
         .to_string();
@@ -77,31 +123,45 @@ pub fn cmd_serve(args: &[String]) -> Result<()> {
         .parse()
         .context("--port must be a number")?;
 
-    eprintln!("ayame: opening and indexing '{path}' …");
-    let doc = Document::open(&path, &open_opts(&opts, &flags)?)
-        .with_context(|| format!("opening '{path}'"))?;
-    let s = doc.stat();
-    let how = if s.from_cache {
-        "loaded from cache"
-    } else {
-        "indexed"
+    let open_options = open_opts(&opts, &flags)?;
+    let doc = match &path {
+        Some(path) => {
+            eprintln!("ayame: opening and indexing '{path}' …");
+            let doc =
+                Document::open(path, &open_options).with_context(|| format!("opening '{path}'"))?;
+            let s = doc.stat();
+            let how = if s.from_cache {
+                "loaded from cache"
+            } else {
+                "indexed"
+            };
+            eprintln!(
+                "ayame: {} lines, {} bytes, {} — {} in {} ms ({} checkpoints, {} bytes resident)",
+                crate::commas(s.lines),
+                crate::commas(s.bytes),
+                s.encoding.label(),
+                how,
+                s.index_ms,
+                crate::commas(s.checkpoints as u64),
+                crate::commas(s.index_bytes as u64),
+            );
+            Some(doc)
+        }
+        None => {
+            eprintln!("ayame: no file given — open one from the browser (drag & drop or 開く)");
+            None
+        }
     };
-    eprintln!(
-        "ayame: {} lines, {} bytes, {} — {} in {} ms ({} checkpoints, {} bytes resident)",
-        crate::commas(s.lines),
-        crate::commas(s.bytes),
-        s.encoding.label(),
-        how,
-        s.index_ms,
-        crate::commas(s.checkpoints as u64),
-        crate::commas(s.index_bytes as u64),
-    );
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("building tokio runtime")?;
-    rt.block_on(serve(Arc::new(AppState::new(doc)), host, port))
+    rt.block_on(serve(
+        Arc::new(AppState::new(doc, open_options)),
+        host,
+        port,
+    ))
 }
 
 async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
@@ -111,6 +171,12 @@ async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
         .route("/style.css", get(style_css))
         .route("/favicon.svg", get(favicon_svg))
         .route("/api/stat", get(api_stat))
+        .route("/api/open", post(api_open))
+        .route("/api/browse", get(api_browse))
+        .route(
+            "/api/upload",
+            post(api_upload).layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/lines", get(api_lines))
         .route("/api/edit/status", get(api_edit_status))
         .route("/api/edit/line", post(api_edit_line))
@@ -177,29 +243,240 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
 
 #[derive(Serialize)]
 struct StatResponse {
+    /// Whether a file is currently open. When false, every `file` field is
+    /// absent and the front-end shows its open/welcome screen.
+    open: bool,
     #[serde(flatten)]
-    file: FileStat,
+    file: Option<FileStat>,
     view_lines: u64,
     dirty: bool,
     revision: u64,
     inserted_lines: u64,
     replaced_lines: u64,
     deleted_lines: u64,
+    can_undo: bool,
+    can_redo: bool,
+}
+
+fn stat_response(state: &AppState) -> StatResponse {
+    match state.doc_opt() {
+        Some(doc) => {
+            let edit = state.edits().stats(&doc);
+            StatResponse {
+                open: true,
+                file: Some(doc.stat()),
+                view_lines: edit.total_lines,
+                dirty: edit.dirty,
+                revision: edit.revision,
+                inserted_lines: edit.inserted_lines,
+                replaced_lines: edit.replaced_lines,
+                deleted_lines: edit.deleted_lines,
+                can_undo: edit.can_undo,
+                can_redo: edit.can_redo,
+            }
+        }
+        None => StatResponse {
+            open: false,
+            file: None,
+            view_lines: 0,
+            dirty: false,
+            revision: 0,
+            inserted_lines: 0,
+            replaced_lines: 0,
+            deleted_lines: 0,
+            can_undo: false,
+            can_redo: false,
+        },
+    }
 }
 
 async fn api_stat(State(state): State<SharedState>) -> Json<StatResponse> {
-    let doc = state.doc();
-    let edits = state.edits();
-    let edit = edits.stats(&doc);
-    Json(StatResponse {
-        file: doc.stat(),
-        view_lines: edit.total_lines,
-        dirty: edit.dirty,
-        revision: edit.revision,
-        inserted_lines: edit.inserted_lines,
-        replaced_lines: edit.replaced_lines,
-        deleted_lines: edit.deleted_lines,
-    })
+    Json(stat_response(&state))
+}
+
+// ---- workspace: open / browse / upload --------------------------------------
+
+#[derive(Deserialize)]
+struct OpenRequest {
+    path: String,
+}
+
+/// Open a file that already lives on the server's filesystem, by path.
+async fn api_open(
+    State(state): State<SharedState>,
+    Json(req): Json<OpenRequest>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let path = req.path.trim().to_string();
+    if path.is_empty() {
+        return Err(bad_request("path is empty"));
+    }
+    state.open_path(path).await?;
+    Ok(Json(stat_response(&state)))
+}
+
+#[derive(Deserialize)]
+struct BrowseQuery {
+    #[serde(default)]
+    dir: Option<String>,
+}
+
+#[derive(Serialize)]
+struct BrowseEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+}
+
+#[derive(Serialize)]
+struct BrowseResponse {
+    dir: String,
+    parent: Option<String>,
+    entries: Vec<BrowseEntry>,
+}
+
+/// List a directory on the server so the browser can navigate to a file and
+/// open it — a minimal, server-side file picker for the workspace.
+async fn api_browse(
+    State(state): State<SharedState>,
+    Query(q): Query<BrowseQuery>,
+) -> Result<Json<BrowseResponse>, (StatusCode, String)> {
+    let requested = q
+        .dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_browse_dir(&state));
+    // Resolve `..`/symlinks to a real path where possible; fall back to the raw
+    // path so a still-listable directory isn't rejected over a canonicalize quirk.
+    let dir = tokio::fs::canonicalize(&requested)
+        .await
+        .unwrap_or(requested);
+
+    let mut rd = tokio::fs::read_dir(&dir)
+        .await
+        .map_err(|e| bad_request(format!("{}: {e}", dir.display())))?;
+    let mut entries = Vec::new();
+    while let Some(ent) = rd.next_entry().await.map_err(internal)? {
+        let name = ent.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue; // hide dotfiles to keep the picker readable
+        }
+        let meta = match ent.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue, // skip entries we can't stat (broken symlink, perms)
+        };
+        let is_dir = meta.is_dir();
+        entries.push(BrowseEntry {
+            name,
+            path: ent.path().to_string_lossy().to_string(),
+            is_dir,
+            size: if is_dir { 0 } else { meta.len() },
+        });
+        if entries.len() >= 10_000 {
+            break; // cap huge directories; the picker is not a file manager
+        }
+    }
+    // Directories first, then case-insensitive by name.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    let parent = dir.parent().map(|p| p.to_string_lossy().to_string());
+    Ok(Json(BrowseResponse {
+        dir: dir.to_string_lossy().to_string(),
+        parent,
+        entries,
+    }))
+}
+
+fn default_browse_dir(state: &AppState) -> PathBuf {
+    if let Some(doc) = state.doc_opt() {
+        if let Some(parent) = doc.path().parent() {
+            if !parent.as_os_str().is_empty() {
+                return parent.to_path_buf();
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[derive(Deserialize)]
+struct UploadQuery {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Accept a file dropped into the browser: stream its bytes to a temp file
+/// (bounded memory, matching Ayame's design) and open it. Intended for pulling
+/// in convenience files; on-disk giants are better opened by path.
+async fn api_upload(
+    State(state): State<SharedState>,
+    Query(q): Query<UploadQuery>,
+    request: Request,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let name = sanitize_filename(q.name.as_deref().unwrap_or("dropped.txt"));
+    let dir = std::env::temp_dir().join(format!("ayame-uploads-{}", std::process::id()));
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let target = unique_upload_path(&dir, &name);
+
+    let mut file = tokio::fs::File::create(&target).await.map_err(internal)?;
+    let mut stream = request.into_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| bad_request(format!("upload stream error: {e}")))?;
+        file.write_all(&chunk).await.map_err(internal)?;
+    }
+    file.flush().await.map_err(internal)?;
+    drop(file);
+
+    state
+        .open_path(target.to_string_lossy().to_string())
+        .await?;
+    Ok(Json(stat_response(&state)))
+}
+
+/// Reduce an untrusted upload name to a bare, separator-free file name so a
+/// dropped file can never escape the uploads directory.
+fn sanitize_filename(raw: &str) -> String {
+    let base = Path::new(raw)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        "dropped.txt".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+fn unique_upload_path(dir: &Path, name: &str) -> PathBuf {
+    let base = dir.join(name);
+    if !base.exists() {
+        return base;
+    }
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.to_string());
+    let ext = Path::new(name)
+        .extension()
+        .map(|s| format!(".{}", s.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 1..10_000 {
+        let p = dir.join(format!("{stem}-{n}{ext}"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    base
 }
 
 #[derive(Deserialize)]
@@ -219,7 +496,15 @@ async fn api_lines(
     State(state): State<SharedState>,
     Query(q): Query<LinesQuery>,
 ) -> Json<LinesResponse> {
-    let doc = state.doc();
+    // An empty workspace has no lines; answer with an empty page rather than an
+    // error so the viewport can render nothing gracefully.
+    let Some(doc) = state.doc_opt() else {
+        return Json(LinesResponse {
+            start: q.start,
+            total: 0,
+            lines: Vec::new(),
+        });
+    };
     let edits = state.edits();
     let count = q.count.min(MAX_VIEW);
     Json(LinesResponse {
@@ -229,9 +514,11 @@ async fn api_lines(
     })
 }
 
-async fn api_edit_status(State(state): State<SharedState>) -> Json<EditStats> {
-    let doc = state.doc();
-    Json(state.edits().stats(&doc))
+async fn api_edit_status(
+    State(state): State<SharedState>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
+    Ok(Json(state.edits().stats(&doc)))
 }
 
 #[derive(Deserialize)]
@@ -244,7 +531,7 @@ async fn api_edit_line(
     State(state): State<SharedState>,
     Json(req): Json<EditLineRequest>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits
         .replace_line(&doc, req.line, req.text)
@@ -256,7 +543,7 @@ async fn api_edit_insert(
     State(state): State<SharedState>,
     Json(req): Json<EditLineRequest>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits
         .insert_line_before(&doc, req.line, req.text)
@@ -273,7 +560,7 @@ async fn api_edit_delete(
     State(state): State<SharedState>,
     Json(req): Json<EditDeleteRequest>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.delete_line(&doc, req.line).map_err(bad_request)?;
     Ok(Json(edits.stats(&doc)))
@@ -296,7 +583,7 @@ async fn api_edit_save(
     State(state): State<SharedState>,
     Json(req): Json<EditSaveRequest>,
 ) -> Result<Json<SaveResult>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let edits = state.edits();
     let target = req
         .path
@@ -312,25 +599,31 @@ async fn api_edit_save(
     Ok(Json(res))
 }
 
-async fn api_edit_revert(State(state): State<SharedState>) -> Json<EditStats> {
-    let doc = state.doc();
+async fn api_edit_revert(
+    State(state): State<SharedState>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.clear();
-    Json(edits.stats(&doc))
+    Ok(Json(edits.stats(&doc)))
 }
 
-async fn api_edit_undo(State(state): State<SharedState>) -> Json<EditStats> {
-    let doc = state.doc();
+async fn api_edit_undo(
+    State(state): State<SharedState>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.undo();
-    Json(edits.stats(&doc))
+    Ok(Json(edits.stats(&doc)))
 }
 
-async fn api_edit_redo(State(state): State<SharedState>) -> Json<EditStats> {
-    let doc = state.doc();
+async fn api_edit_redo(
+    State(state): State<SharedState>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.redo();
-    Json(edits.stats(&doc))
+    Ok(Json(edits.stats(&doc)))
 }
 
 #[derive(Deserialize)]
@@ -351,7 +644,7 @@ async fn api_sort_save(
     State(state): State<SharedState>,
     Json(req): Json<SortSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let target = requested_or_default(doc.path(), req.path.as_deref(), "sorted");
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("sort-save");
@@ -392,7 +685,7 @@ async fn api_replace_save(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let target = requested_or_default(doc.path(), req.path.as_deref(), "replaced");
     let exe = std::env::current_exe().map_err(internal)?;
     let mut cmd = Command::new(&exe);
@@ -424,7 +717,7 @@ async fn api_case_save(
     State(state): State<SharedState>,
     Json(req): Json<CaseSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let mode = req.mode.trim().to_ascii_lowercase();
     if !matches!(mode.as_str(), "upper" | "lower") {
         return Err(bad_request("mode must be upper or lower"));
@@ -465,7 +758,7 @@ async fn api_search(
     State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let exe = std::env::current_exe().map_err(internal)?;
     let mut cmd = Command::new(&exe);
     cmd.arg("search")
@@ -528,7 +821,7 @@ async fn api_find(
     State(state): State<SharedState>,
     Query(q): Query<FindQuery>,
 ) -> Result<Json<FindResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let hit = if q.dir == "prev" {
         doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
             .map_err(bad_request)?
@@ -553,10 +846,8 @@ async fn api_linebyte(
     State(state): State<SharedState>,
     Query(q): Query<LineByteQuery>,
 ) -> Json<LineByteResponse> {
-    let doc = state.doc();
-    Json(LineByteResponse {
-        byte: doc.line_start_byte(q.line),
-    })
+    let byte = state.doc_opt().and_then(|doc| doc.line_start_byte(q.line));
+    Json(LineByteResponse { byte })
 }
 
 fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
@@ -683,7 +974,7 @@ async fn api_sort(
     State(state): State<SharedState>,
     Query(q): Query<SortQuery>,
 ) -> Result<Json<SortResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("sort");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -772,7 +1063,7 @@ async fn api_group(
     State(state): State<SharedState>,
     Query(q): Query<GroupQuery>,
 ) -> Result<Json<GroupResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("group");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -895,7 +1186,7 @@ async fn api_top(
     State(state): State<SharedState>,
     Query(q): Query<TopQuery>,
 ) -> Result<Json<TopResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("top");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -979,7 +1270,7 @@ async fn api_distinct(
     State(state): State<SharedState>,
     Query(q): Query<DistinctQuery>,
 ) -> Result<Json<DistinctResponse>, (StatusCode, String)> {
-    let doc = state.doc();
+    let doc = state.require_doc()?;
     let exe = std::env::current_exe().map_err(internal)?;
     let mut cmd = Command::new(&exe);
     cmd.arg("distinct").arg(doc.path());

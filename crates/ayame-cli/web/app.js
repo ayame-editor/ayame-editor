@@ -309,6 +309,17 @@ function initScrollbar() {
 function updateStatusMeta() {
   const s = state.stat;
   if (!s) return;
+  if (!s.open) {
+    $("filename").textContent = "ファイル未選択";
+    $("filename").title = "";
+    for (const id of ["st-lines", "st-size", "st-enc", "st-eol", "st-edit", "st-index"]) {
+      $(id).textContent = "—";
+    }
+    $("st-pos").textContent = "行 0";
+    $("undo-edit").disabled = true;
+    $("redo-edit").disabled = true;
+    return;
+  }
   $("filename").textContent = `${s.dirty ? "* " : ""}${s.path}`;
   $("filename").title = s.path;
   const lines = s.view_lines ?? s.lines;
@@ -754,7 +765,18 @@ function toggleOpt(key, id) {
 function onGlobalKey(e) {
   const inInput = e.target.tagName === "INPUT";
   const inLineEditor = inInput && e.target.classList.contains("line-edit");
+  // The open dialog owns Escape while it's up.
+  if (e.key === "Escape" && openerVisible()) {
+    e.preventDefault();
+    hideOpener();
+    return;
+  }
   // Shortcuts that work even from inputs:
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    showOpener();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
     e.preventDefault();
     const g = $("goto");
@@ -838,12 +860,211 @@ function onGlobalKey(e) {
   }
 }
 
+// ---- workspace: open / browse / drag&drop ----------------------------------
+
+function openerVisible() {
+  return !$("opener").classList.contains("hidden");
+}
+
+function showOpener() {
+  const m = $("opener");
+  m.classList.remove("hidden");
+  m.setAttribute("aria-hidden", "false");
+  browse(null);
+  const inp = $("opener-input");
+  inp.value = "";
+  queueMicrotask(() => inp.focus());
+}
+
+function hideOpener() {
+  // The opener doubles as the welcome screen: don't let it close while there is
+  // no document to fall back to.
+  if (!state.stat?.open) return;
+  const m = $("opener");
+  m.classList.add("hidden");
+  m.setAttribute("aria-hidden", "true");
+  $("viewport").focus();
+}
+
+function openerMsg(text, busy = false) {
+  const el = $("opener-msg");
+  el.textContent = text || "";
+  el.classList.toggle("busy", !!text && busy);
+}
+
+async function browse(dir) {
+  openerMsg("読み込み中…", true);
+  try {
+    const q = dir == null ? "" : `?dir=${encodeURIComponent(dir)}`;
+    const res = await api(`/api/browse${q}`);
+    renderBrowse(res);
+    openerMsg("");
+  } catch (e) {
+    openerMsg("ディレクトリを開けません: " + e.message);
+  }
+}
+
+function renderBrowse(res) {
+  $("opener-cwd").textContent = res.dir;
+  $("opener-cwd").title = res.dir;
+  const list = $("opener-list");
+  list.textContent = "";
+  if (res.parent) {
+    list.append(browseRow({ name: "..", path: res.parent, is_dir: true }, true));
+  }
+  for (const ent of res.entries) list.append(browseRow(ent, false));
+  list.scrollTop = 0;
+}
+
+function browseRow(ent, isUp) {
+  const row = document.createElement("button");
+  row.className = "opener-row" + (ent.is_dir ? " dir" : "");
+  const ic = document.createElement("span");
+  ic.className = "ic";
+  ic.textContent = ent.is_dir ? (isUp ? "↰" : "▸") : "·";
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = isUp ? ".. (親フォルダ)" : ent.name;
+  const sz = document.createElement("span");
+  sz.className = "sz";
+  sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
+  row.append(ic, nm, sz);
+  row.addEventListener("click", () => {
+    if (ent.is_dir) browse(ent.path);
+    else openPath(ent.path);
+  });
+  return row;
+}
+
+function confirmDiscardIfDirty() {
+  if (!state.stat?.dirty) return true;
+  return confirm("未保存の編集があります。別のファイルを開くと破棄されます。開きますか?");
+}
+
+async function openPath(path) {
+  const p = (path || "").trim();
+  if (!p) return;
+  if (!confirmDiscardIfDirty()) return;
+  openerMsg("開いています…", true);
+  try {
+    const stat = await apiPost("/api/open", { path: p });
+    onDocumentOpened(stat);
+  } catch (e) {
+    reportOpenError("開けません: " + e.message);
+  }
+}
+
+async function uploadFile(file) {
+  if (!confirmDiscardIfDirty()) return;
+  openerMsg(`読み込み中… (${file.name})`, true);
+  flashCount(`読み込み中: ${file.name}`);
+  try {
+    const r = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body: file,
+    });
+    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    onDocumentOpened(await r.json());
+  } catch (e) {
+    reportOpenError("読み込みエラー: " + e.message);
+  }
+}
+
+// Surface an open/upload failure where the user is looking: inside the opener if
+// it's up, otherwise in the toolbar (and an alert if a doc is already open).
+function reportOpenError(msg) {
+  if (openerVisible()) {
+    openerMsg(msg);
+  } else if (state.stat?.open) {
+    flashCount("読み込みエラー");
+    alert(msg);
+  } else {
+    showOpener();
+    openerMsg(msg);
+  }
+}
+
+function onDocumentOpened(stat) {
+  state.stat = stat;
+  state.total = stat.view_lines ?? stat.lines ?? 0;
+  // Fresh document: reset navigation, search, and edit view state.
+  state.first = 0;
+  state.activeLine = -1;
+  state.editingLine = -1;
+  state.lastMatch = null;
+  state.searchHits = null;
+  state.searchTruncated = false;
+  $("find-count").textContent = "";
+  clearLineCache();
+  const m = $("opener");
+  m.classList.add("hidden");
+  m.setAttribute("aria-hidden", "true");
+  updateStatusMeta();
+  render();
+  $("viewport").focus();
+}
+
+function hasFiles(e) {
+  const t = e.dataTransfer;
+  return !!t && Array.from(t.types || []).includes("Files");
+}
+
+function initDropZone() {
+  const dz = $("dropzone");
+  let depth = 0;
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    dz.classList.remove("hidden");
+  });
+  window.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!hasFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) dz.classList.add("hidden");
+  });
+  window.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    dz.classList.add("hidden");
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  });
+}
+
+function initWorkspace() {
+  $("open-file").addEventListener("click", showOpener);
+  $("opener-close").addEventListener("click", hideOpener);
+  $("opener-open").addEventListener("click", () => openPath($("opener-input").value));
+  $("opener-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      openPath($("opener-input").value);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hideOpener();
+    }
+  });
+  // Click on the dim backdrop (outside the panel) closes the dialog.
+  $("opener").addEventListener("click", (e) => {
+    if (e.target === $("opener")) hideOpener();
+  });
+  initDropZone();
+}
+
 // ---- boot ------------------------------------------------------------------
 
 async function boot() {
   state.history = loadSearchHistory();
   initScrollbar();
   initEvents();
+  initWorkspace();
   try {
     await refreshStat();
   } catch (e) {
@@ -852,8 +1073,12 @@ async function boot() {
     return;
   }
   updateStatusMeta();
-  $("viewport").focus();
-  render();
+  if (!state.stat.open) {
+    showOpener();
+  } else {
+    $("viewport").focus();
+    render();
+  }
 }
 
 boot();

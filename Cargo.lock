@@ -82,6 +82,7 @@ dependencies = [
  "anyhow",
  "axum",
  "ayame-core",
+ "futures-util",
  "serde",
  "serde_json",
  "tokio",
