@@ -320,6 +320,23 @@ impl EditSession {
         text: &str,
     ) -> Result<(u64, usize)> {
         let total = self.total_lines(doc);
+        // An empty document has no lines at all; the only valid edit is an
+        // insertion at the very start, which seeds the first line(s).
+        if total == 0 {
+            if l0 != 0 || c0 != 0 || l1 != 0 || c1 != 0 {
+                return Err(Error::Unsupported(
+                    "the document is empty; only an insertion at line 1 is valid".into(),
+                ));
+            }
+            let before = self.events.clone();
+            let parts: Vec<String> = text.split('\n').map(String::from).collect();
+            for (k, p) in parts.iter().enumerate() {
+                self.insert_line_before_inner(doc, k as u64, p.clone())?;
+            }
+            self.finish_change(before);
+            let last = parts.len() - 1;
+            return Ok((last as u64, parts[last].chars().count()));
+        }
         if l0 > l1 || l1 >= total {
             return Err(Error::Unsupported(format!(
                 "range spans lines {}..{} outside the document",
@@ -780,6 +797,27 @@ mod tests {
         let mut edits = EditSession::default();
         assert!(edits.replace_range(&doc, 1, 0, 5, 0, "x").is_err());
         assert!(edits.replace_range(&doc, 3, 0, 3, 0, "x").is_err());
+    }
+
+    #[test]
+    fn replace_range_can_seed_an_empty_document() {
+        let (_f, doc) = doc_from(b"");
+        assert_eq!(doc.line_count(), 0);
+        let mut edits = EditSession::default();
+        // Typing into a 0-line file inserts the first line.
+        let caret = edits.replace_range(&doc, 0, 0, 0, 0, "hi").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["hi"]);
+        assert_eq!(caret, (0, 2));
+        // A multi-line paste into an empty doc seeds several lines.
+        let (_f2, doc2) = doc_from(b"");
+        let mut e2 = EditSession::default();
+        let caret2 = e2.replace_range(&doc2, 0, 0, 0, 0, "one\ntwo").unwrap();
+        assert_eq!(texts(&e2, &doc2), vec!["one", "two"]);
+        assert_eq!(caret2, (1, 3));
+        // Any non-origin range on an empty doc is rejected.
+        let (_f3, doc3) = doc_from(b"");
+        let mut e3 = EditSession::default();
+        assert!(e3.replace_range(&doc3, 0, 0, 1, 0, "x").is_err());
     }
 
     #[test]

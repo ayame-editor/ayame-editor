@@ -558,8 +558,10 @@ button.toggle.on {
   left: 0;
   display: inline-block;
   min-width: 7ch;
-  padding: 0 12px 0 8px;
-  margin-right: 8px;
+  /* The whole gutter→text gap lives inside the padding (border box), so
+     getBoundingClientRect().width in gutterPixels() measures the true text
+     origin — a margin here would be excluded and shift the caret 8px left. */
+  padding: 0 20px 0 8px;
   text-align: right;
   color: var(--gutter-fg);
   background: var(--gutter-bg);

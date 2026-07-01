@@ -60,6 +60,7 @@ const state = {
   // ---- caret-based (Notepad-style) editing ----
   caret: { line: 0, col: 0 }, // (line, col) in Unicode scalars, like the backend
   goalCol: 0, // remembered column for vertical caret motion
+  editGen: 0, // bumps on every user caret move; lets an in-flight edit detect it
   composing: false, // an IME composition is in progress
   focused: false, // the hidden text input holds focus (draw the caret)
   sel: null, // selection: { anchor: {line,col}, head: {line,col} } or null
@@ -306,7 +307,7 @@ function gutterPixels() {
       return row.firstChild.getBoundingClientRect().width;
     }
   }
-  return 7 * charWidth() + 20;
+  return 7 * charWidth() + 29; // fallback: 8 + 20 padding + 1 border
 }
 
 // Map a mouse event to a {line, col} position in the document.
@@ -840,6 +841,7 @@ function setCaret(line, col) {
   col = Math.max(0, Math.min(col, lineLen(line)));
   state.caret = { line, col };
   state.activeLine = line;
+  state.editGen++; // user-driven caret placement (click, search, open, …)
 }
 
 // Caret motion for the keyboard: `extend` grows the selection from its anchor.
@@ -854,6 +856,7 @@ function moveCaret(line, col, extend) {
   }
   state.caret = { line, col };
   state.activeLine = line;
+  state.editGen++; // user-driven caret motion (arrows, Home/End, PageUp/Down)
   revealCaret();
   scheduleRender();
 }
@@ -892,7 +895,7 @@ function positionCaret() {
   if (!caretEl || !hi) return;
   const vis = rowsVisible();
   const onScreen =
-    state.total > 0 &&
+    !!state.stat?.open &&
     state.caret.line >= state.first &&
     state.caret.line < state.first + vis;
   const show = onScreen && state.focused && !anyModalOpen();
@@ -937,16 +940,38 @@ function replaceTarget() {
   return { l0: state.caret.line, c0: state.caret.col, l1: state.caret.line, c1: state.caret.col };
 }
 
-// The one primitive every edit funnels through. Refresh the cache *before*
-// placing the caret so setCaret clamps against the post-edit line lengths (not
-// the stale, pre-edit ones — otherwise every insertion loses its last column).
+// The one primitive every edit funnels through. The backend returns the
+// authoritative post-edit caret (already column-clamped against the real
+// document), so we commit it — and the new line count — to local state
+// immediately, before any await that could reject. That keeps the caret/cache
+// from going stale while the document advanced, and lets the next queued edit
+// resolve its range against a correct caret even if the refresh below fails.
 async function applyRange(l0, c0, l1, c1, text) {
+  const gen = state.editGen;
   const res = await apiPost("/api/edit/replace_range", { l0, c0, l1, c1, text });
-  state.sel = null;
-  await refreshStat();
-  await reloadViewport();
-  setCaret(res.caret_line, res.caret_col);
-  state.goalCol = state.caret.col;
+  state.total = res.stats.total_lines;
+  if (state.editGen === gen) {
+    // No user navigation happened during the round-trip: honor the edit caret.
+    const line = Math.min(res.caret_line, Math.max(0, state.total - 1));
+    state.sel = null;
+    state.caret = { line, col: res.caret_col };
+    state.activeLine = line;
+    state.goalCol = res.caret_col;
+  } else {
+    // The user moved the caret mid-edit — keep their position, re-clamped to
+    // the new line count (don't clobber it with the edit's caret).
+    const line = Math.min(state.caret.line, Math.max(0, state.total - 1));
+    state.caret = { line, col: state.caret.col };
+    state.activeLine = line;
+  }
+  revealCaret(); // scroll so the caret line is covered by the reload below
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-edit refresh failed", e);
+    flashCount("再読込エラー");
+  }
   revealCaret();
   render();
 }
@@ -954,8 +979,10 @@ async function applyRange(l0, c0, l1, c1, text) {
 // Insert (or replace the selection with) `text`, which may contain newlines.
 // The target range is resolved *inside* the queued step, so a burst of
 // keystrokes each sees the caret left by the previous edit (never a stale one).
+// A 0-line document (an empty file) is editable too: replaceTarget yields the
+// (0,0)..(0,0) origin range, which the backend accepts to seed the first line.
 function typeText(text) {
-  if (state.total === 0) return;
+  if (!state.stat?.open) return;
   enqueueEdit(() => {
     const t = replaceTarget();
     return applyRange(t.l0, t.c0, t.l1, t.c1, text);
@@ -1253,6 +1280,9 @@ function onGlobalKey(e) {
   if (promptVisible()) return;
   if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
   if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
+  // A modal owns the keyboard: never run editor/clipboard/history/nav commands
+  // against the hidden document behind Settings / the Opener / a prompt.
+  if (anyModalOpen()) return;
   if (mod && k === "o") { e.preventDefault(); showOpener(); return; }
   if (mod && k === "b") { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
   if (mod && (k === "n" || k === "t")) { e.preventDefault(); newUntitled(); return; }
