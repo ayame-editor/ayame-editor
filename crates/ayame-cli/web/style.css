@@ -250,15 +250,6 @@ html, body {
   flex: 0 0 auto;
 }
 
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  color: var(--fg);
-  gap: 7px;
-  padding-right: 2px;
-}
-.brand-icon { display: block; flex: 0 0 auto; border-radius: 5px; }
-.brand-name { font-size: 14px; }
 
 .file {
   flex: 1 1 120px;
@@ -830,20 +821,8 @@ button { border-radius: var(--radius); }
 #ambient svg { width: 100%; height: 100%; display: block; }
 #content { z-index: 1; }
 
-/* theme JSON editor inside Settings */
-.settings-panel { width: min(480px, 94vw); }
-.set-theme-json { align-items: flex-start; }
-.set-json-wrap { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.set-json-wrap textarea {
-  width: 100%; height: 150px; resize: vertical; box-sizing: border-box;
-  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px 10px; outline: none;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
-}
-.set-json-wrap textarea:focus { border-color: var(--accent-bright); }
-.set-json-actions { display: flex; gap: 8px; }
-.set-json-actions .cmd { flex: 1; height: 30px; border: 1px solid var(--border); }
-.set-msg { min-height: 15px; font-size: 11.5px; color: var(--fg-dim); }
+.settings-panel { width: min(440px, 94vw); }
+#apply-theme.hidden { display: none; }
 
 /* generic prompt modal (replaces window.prompt) */
 .prompt-panel { width: min(460px, 92vw); }

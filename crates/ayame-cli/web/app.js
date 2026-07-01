@@ -661,6 +661,7 @@ function updateStatusMeta() {
   }
   $("filename").textContent = `${s.dirty ? "* " : ""}${displayName(s.path)}`;
   $("filename").title = isUntitled(s.path) ? "untitled" : s.path;
+  $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
   const lines = s.view_lines ?? s.lines;
   $("st-lines").textContent = `${commas(lines)} 行`;
   $("st-size").textContent = humanBytes(s.bytes);
@@ -1212,6 +1213,7 @@ function initEvents() {
   $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
   $("save-copy").addEventListener("click", saveCopy);
+  $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
   $("sort-save").addEventListener("click", sortSave);
@@ -1993,43 +1995,57 @@ function populateThemeSelect() {
     sel.appendChild(o);
   }
 }
-function setThemeMsg(m, isErr) {
-  const el = $("set-msg"); if (!el) return;
-  el.textContent = m || "";
-  el.style.color = isErr ? "var(--danger)" : "var(--fg-dim)";
+function persistCustomTheme(t) {
+  const customs = { ...(state.settings.customThemes || {}) };
+  customs[t.name] = t;
+  state.settings = {
+    ...state.settings, customThemes: customs, theme: "custom:" + t.name,
+    illus: null, bgMode: (t.background && t.background.mode) || "watercolor",
+  };
+  saveSettings(state.settings);
+  populateThemeSelect();
+  if ($("set-theme")) $("set-theme").value = "custom:" + t.name;
 }
-function showThemeJSON(id) {
-  const t = themeJSONFor(id);
-  $("set-json").value = t
-    ? JSON.stringify(t, null, 2)
-    : "// dark / black はJSON非対応です。iris系を選ぶか、JSONを貼り付けて「適用」。";
-  setThemeMsg("");
+
+// Open the current theme's JSON as an ordinary editor tab, so it can be edited
+// like any text file (edit / undo / Ctrl+S), then applied with テーマ適用.
+async function openThemeJsonDoc() {
+  const id = state.settings.theme;
+  const t = themeJSONFor(id) || THEME_PRESETS["iris-light"];
+  const jsonText = JSON.stringify(t, null, 2);
+  const base = (id ? id.replace(/^custom:/, "") : "theme") || "theme";
+  hideSettings();
+  try {
+    const r = await fetch("/api/upload?name=" + encodeURIComponent(base + ".ayame-theme.json"),
+                          { method: "POST", body: jsonText });
+    if (!r.ok) throw new Error(await r.text());
+    onDocumentOpened(await r.json());
+  } catch (e) {
+    flashCount("テーマを開けません");
+    console.error(e);
+  }
 }
-function applyThemeJSON() {
-  let t; try { t = JSON.parse($("set-json").value); } catch (e) { return setThemeMsg("JSON エラー: " + e.message, true); }
-  if (!t.color) return setThemeMsg("color フィールドが必要です。", true);
-  document.documentElement.dataset.theme = "custom";
-  clearCustomVars(); applyCustomVars(t);
-  $("set-bg").value = (t.background && t.background.mode) || "watercolor";
-  const pct = Math.round((t.illustration ?? 0.2) * 100);
-  $("set-illus").value = pct; $("set-illus-val").textContent = pct + "%";
-  setThemeMsg("適用しました（保存は「カスタム保存」）。");
+
+// Apply the theme JSON in the active buffer (a *.ayame-theme.json tab).
+async function applyThemeFromBuffer() {
+  try {
+    const count = Math.min(state.total, MAX_COPY_LINES);
+    const r = await api(`/api/lines?start=0&count=${count}`);
+    const text = r.lines.map((l) => l.text).join("\n");
+    const t = JSON.parse(text);
+    if (!t.color) return flashCount("color がありません");
+    document.documentElement.dataset.theme = "custom";
+    clearCustomVars();
+    applyCustomVars(t);
+    if (t.name) persistCustomTheme(t);
+    flashCount(`テーマ適用${t.name ? `: ${t.name}` : ""}`);
+  } catch (e) {
+    flashCount("テーマ JSON エラー");
+    console.error(e);
+  }
 }
-function saveThemeJSON() {
-  let t; try { t = JSON.parse($("set-json").value); } catch (e) { return setThemeMsg("JSON エラー: " + e.message, true); }
-  if (!t.name) return setThemeMsg("name フィールドが必要です。", true);
-  const customs = { ...(state.settings.customThemes || {}) }; customs[t.name] = t;
-  state.settings = { ...state.settings, customThemes: customs, theme: "custom:" + t.name, illus: null, bgMode: (t.background && t.background.mode) || "watercolor" };
-  saveSettings(state.settings); applySettings(state.settings);
-  populateThemeSelect(); $("set-theme").value = "custom:" + t.name;
-  setThemeMsg(`「${t.name}」を保存しました（localStorage）。`);
-}
-function exportThemeJSON() {
-  let t; try { t = JSON.parse($("set-json").value); } catch (e) { return setThemeMsg("JSON エラー: " + e.message, true); }
-  const blob = new Blob([JSON.stringify(t, null, 2)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = (t.name || "ayame-theme").toLowerCase().replace(/\s+/g, "-") + ".json"; a.click();
-  setThemeMsg(`${a.download} を書き出しました。`);
+function isThemeDoc(path) {
+  return !!path && /\.ayame-theme\.json$/i.test(path);
 }
 
 function initSettings() {
@@ -2043,14 +2059,12 @@ function initSettings() {
   $("set-font").value = state.settings.font;
   $("set-fontsize").value = state.settings.fontSize;
   $("set-fontsize-val").textContent = `${state.settings.fontSize}px`;
-  showThemeJSON(state.settings.theme);
 
   $("set-theme").addEventListener("change", () => {
     const id = $("set-theme").value;
     state.settings = { ...state.settings, theme: id, illus: null };
     saveSettings(state.settings); applySettings(state.settings);
     const pct = themeIllusPct(id); $("set-illus").value = pct; $("set-illus-val").textContent = pct + "%";
-    showThemeJSON(id);
   });
   $("set-bg").addEventListener("change", () => updateSetting("bgMode", $("set-bg").value));
   $("set-illus").addEventListener("input", () => {
@@ -2066,9 +2080,7 @@ function initSettings() {
   });
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
-  $("set-apply").addEventListener("click", applyThemeJSON);
-  $("set-save").addEventListener("click", saveThemeJSON);
-  $("set-export").addEventListener("click", exportThemeJSON);
+  $("theme-json-edit").addEventListener("click", openThemeJsonDoc);
 
   $("open-settings").addEventListener("click", showSettings);
   $("settings-close").addEventListener("click", hideSettings);

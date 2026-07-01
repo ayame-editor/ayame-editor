@@ -11,15 +11,11 @@
   <body>
     <div id="app">
       <header id="toolbar">
-        <div class="tb-group brand" title="Ayame">
-          <img class="brand-icon" src="/favicon.svg" width="20" height="20" alt="" />
-          <span class="brand-name">Ayame</span>
-        </div>
-
         <div class="tb-group">
           <button id="toggle-sidebar" class="ico" title="エクスプローラー (Ctrl+B)">☰</button>
           <button id="open-file" class="cmd" title="ファイルを開く (Ctrl+O)">開く</button>
           <button id="save-copy" class="cmd" title="別ファイルへ保存 (Ctrl+S)">保存</button>
+          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用">テーマ適用</button>
         </div>
 
         <div class="tb-sep"></div>
@@ -183,17 +179,9 @@
             <input id="set-ruler" type="checkbox" />
             <span class="set-val"></span>
           </label>
-          <div class="set-row set-theme-json">
+          <div class="set-row">
             <span class="set-label">テーマJSON</span>
-            <div class="set-json-wrap">
-              <textarea id="set-json" spellcheck="false"></textarea>
-              <div class="set-json-actions">
-                <button id="set-apply" class="cmd">適用</button>
-                <button id="set-save" class="cmd">カスタム保存</button>
-                <button id="set-export" class="cmd">書き出し</button>
-              </div>
-              <div id="set-msg" class="set-msg"></div>
-            </div>
+            <button id="theme-json-edit" class="cmd">タブで編集</button>
           </div>
         </div>
       </div>

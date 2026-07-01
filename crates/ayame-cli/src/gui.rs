@@ -65,51 +65,42 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     })
 }
 
-/// The window/taskbar icon, drawn to RGBA in code so it needs no image crate or
-/// bundled asset. It mirrors `web/favicon.svg`: a rounded blue tile with three
-/// white "text" bars and a pink edit caret. (Used on Windows/Linux; the macOS
-/// dock icon comes from the .app bundle's .icns instead.)
+/// The window/taskbar icon: a flat, single-colour iris (菖蒲), drawn to RGBA in
+/// code so it needs no image crate or bundled asset — no gradient, no tile,
+/// transparent background. Mirrors `web/favicon.svg`. (Windows/Linux window
+/// icon; the macOS dock icon comes from the .app bundle's .icns instead.)
 fn app_icon() -> Option<Icon> {
     const N: u32 = 64;
-    const R: f32 = 13.0; // corner radius, in the 64px grid
     let mut px = vec![0u8; (N * N * 4) as usize];
 
-    // Rounded-rect membership: inside [4,60), with rounded corners of radius R.
-    let inside_tile = |x: f32, y: f32| -> bool {
-        if !(4.0..60.0).contains(&x) || !(4.0..60.0).contains(&y) {
-            return false;
-        }
-        let cx = x.clamp(4.0 + R, 60.0 - R);
-        let cy = y.clamp(4.0 + R, 60.0 - R);
-        let (dx, dy) = (x - cx, y - cy);
-        dx * dx + dy * dy <= R * R
-    };
-    // Filled-rect helper for the bars/caret.
-    let in_rect = |x: f32, y: f32, x0: f32, y0: f32, x1: f32, y1: f32| {
-        (x0..x1).contains(&x) && (y0..y1).contains(&y)
+    // Iris petals as filled ellipses (cx, cy, rx, ry) in the 64px grid:
+    // three upright "standards" on top, three drooping "falls" below.
+    let petals: [(f32, f32, f32, f32); 6] = [
+        (32.0, 20.0, 6.5, 14.0),
+        (22.5, 23.0, 5.5, 12.0),
+        (41.5, 23.0, 5.5, 12.0),
+        (32.0, 42.0, 7.0, 13.0),
+        (21.0, 40.0, 5.5, 11.0),
+        (43.0, 40.0, 5.5, 11.0),
+    ];
+    let in_ellipse = |x: f32, y: f32, cx: f32, cy: f32, rx: f32, ry: f32| {
+        let (dx, dy) = ((x - cx) / rx, (y - cy) / ry);
+        dx * dx + dy * dy <= 1.0
     };
 
     for y in 0..N {
         for x in 0..N {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            if !inside_tile(fx, fy) {
-                continue; // transparent outside the tile
-            }
-            // Vertical gradient #8B6FC7 (iris) → #C79A2E (gold).
-            let t = ((fy - 4.0) / 56.0).clamp(0.0, 1.0);
-            let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
-            let mut rgb = [lerp(0x8B, 0xC7), lerp(0x6F, 0x9A), lerp(0xC7, 0x2E)];
-            // Three white bars (document lines).
-            if in_rect(fx, fy, 15.0, 20.0, 39.0, 24.5)
-                || in_rect(fx, fy, 15.0, 30.0, 47.0, 34.5)
-                || in_rect(fx, fy, 15.0, 40.0, 34.0, 44.5)
-            {
-                rgb = [0xff, 0xff, 0xff];
+            let hit = petals
+                .iter()
+                .any(|&(cx, cy, rx, ry)| in_ellipse(fx, fy, cx, cy, rx, ry));
+            if !hit {
+                continue; // transparent
             }
             let i = ((y * N + x) * 4) as usize;
-            px[i] = rgb[0];
-            px[i + 1] = rgb[1];
-            px[i + 2] = rgb[2];
+            px[i] = 0x7A; // flat iris purple #7A5CC0
+            px[i + 1] = 0x5C;
+            px[i + 2] = 0xC0;
             px[i + 3] = 0xff;
         }
     }
