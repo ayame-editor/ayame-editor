@@ -1,0 +1,161 @@
+<!doctype html>
+<!-- Ayame — LAYOUT STUDY: command-palette-centric chrome (Zed / Raycast direction).
+     Thin toolbar; everything lives behind ⌘K. Self-contained, no JS. -->
+<html lang="ja" data-mock="palette">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayame — 16 Command Palette (⌘K)</title>
+    <style>
+      :root {
+        --font-size: 13px; --line-height: 20px;
+        --mono: "Berkeley Mono","JetBrains Mono","SFMono-Regular","Menlo","Consolas",monospace;
+        --ui: "Inter","Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+        --bg:#1A1B26; --bg-panel:#24283B; --bg-toolbar:#16161E; --bg-active:#292E42;
+        --fg:#C0CAF5; --fg-dim:#7982A9; --fg-faint:#565F89;
+        --border:#2A2E42; --border-soft:#222436;
+        --accent:#7AA2F7; --accent-2:#BB9AF7;
+        --gutter-fg:#3B4261; --gutter-active:#A9B1D6;
+        --mark-bg:#29355A; --mark-fg:#7DCFFF; --mark-cur-bg:#E0AF68; --mark-cur-fg:#1A1B26;
+        --ok:#9ECE6A; --warn:#E0AF68; --err:#F7768E;
+      }
+      * { box-sizing: border-box; }
+      html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
+        font-family:var(--ui); -webkit-font-smoothing:antialiased; }
+      #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+
+      /* thin chrome — one line, everything else behind ⌘K */
+      #toolbar {
+        display:flex; align-items:center; gap:10px; height:38px; padding:0 12px;
+        background:var(--bg-toolbar); border-bottom:1px solid var(--border); user-select:none;
+      }
+      .brand { display:flex; align-items:center; gap:8px; font-weight:700; }
+      .brand-mark { width:18px; height:18px; border-radius:5px; display:grid; place-items:center;
+        background:linear-gradient(160deg,var(--accent),var(--accent-2)); }
+      .brand-mark svg { width:12px; height:12px; }
+      .file { color:var(--fg-dim); font-family:var(--mono); font-size:12px; }
+      .file b { color:var(--fg); font-weight:600; }
+      .spacer { flex:1; }
+      .kbd {
+        display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:12px;
+        color:var(--fg-dim); border:1px solid var(--border); border-radius:8px; padding:5px 10px;
+        background:var(--bg); cursor:pointer;
+      }
+      .kbd kbd { font-family:var(--mono); font-size:11px; color:var(--fg);
+        background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:1px 5px; }
+
+      /* editor */
+      #viewport { position:relative; overflow:hidden; }
+      #content { position:absolute; inset:0 26px 0 0; overflow:hidden; filter:blur(1.2px) brightness(.7);
+        font-family:var(--mono); font-size:var(--font-size); line-height:var(--line-height); }
+      .row { height:var(--line-height); white-space:pre; display:flex; }
+      .ln { min-width:9ch; padding:0 14px 0 10px; margin-right:12px; text-align:right;
+        color:var(--gutter-fg); border-right:1px solid var(--border-soft); }
+      .dim{color:var(--fg-dim);} .ok{color:var(--ok);} .warn{color:var(--warn);} .err{color:var(--err);}
+      /* scrim */
+      #scrim { position:absolute; inset:0; background:rgba(10,11,20,.55); backdrop-filter:blur(3px); }
+
+      /* the floating command palette */
+      #palette {
+        position:absolute; top:14%; left:50%; transform:translateX(-50%);
+        width:min(680px,92vw); background:color-mix(in srgb,var(--bg-panel) 96%,transparent);
+        border:1px solid var(--border); border-radius:16px;
+        box-shadow:0 30px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(122,162,247,.08),
+                   0 0 60px -20px var(--accent);
+        overflow:hidden;
+      }
+      .pal-input {
+        display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid var(--border-soft);
+      }
+      .pal-input .mag { color:var(--accent); font-size:16px; }
+      .pal-input input {
+        flex:1; background:transparent; border:none; outline:none; color:var(--fg);
+        font-family:var(--ui); font-size:17px;
+      }
+      .pal-input input::placeholder { color:var(--fg-faint); }
+      .pal-scope { font-family:var(--mono); font-size:11px; color:var(--accent-2);
+        border:1px solid color-mix(in srgb,var(--accent-2) 40%,transparent); border-radius:20px; padding:3px 10px; }
+      .pal-section { padding:8px 16px 4px; font-size:11px; letter-spacing:.6px; text-transform:uppercase; color:var(--fg-faint); }
+      .pal-list { padding:4px 8px 10px; }
+      .pal-item { display:flex; align-items:center; gap:14px; padding:10px 12px; border-radius:10px; cursor:pointer; }
+      .pal-item .ic { width:22px; text-align:center; color:var(--fg-dim); font-size:15px; }
+      .pal-item .lbl { flex:1; font-size:14px; }
+      .pal-item .lbl small { color:var(--fg-dim); font-weight:400; }
+      .pal-item .hint { font-family:var(--mono); font-size:11px; color:var(--fg-faint); }
+      .pal-item mark { background:transparent; color:var(--accent); font-weight:700; }
+      .pal-item.sel { background:linear-gradient(90deg, color-mix(in srgb,var(--accent) 22%,transparent), color-mix(in srgb,var(--accent) 6%,transparent)); }
+      .pal-item.sel .ic { color:var(--accent); }
+      .pal-foot { display:flex; align-items:center; gap:16px; padding:10px 16px; border-top:1px solid var(--border-soft);
+        color:var(--fg-faint); font-size:11px; font-family:var(--mono); }
+      .pal-foot .spacer{flex:1;}
+
+      #statusbar { display:flex; align-items:center; height:26px; padding:0 6px; background:var(--bg-toolbar);
+        border-top:1px solid var(--border); color:var(--fg-dim); font-size:12px; user-select:none;
+        font-variant-numeric:tabular-nums; }
+      #statusbar .seg { padding:0 10px; } #statusbar .spacer{flex:1;}
+      .mode { font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.8px;
+        padding:2px 9px; border-radius:5px; background:var(--accent); color:#0b0d16; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24"><path d="M12 2c1.6 3 1.6 6 0 9-1.6-3-1.6-6 0-9Z" fill="#fff" opacity=".95"/><path d="M12 11c3 .4 5 2.2 6 5-3 .2-5-1-6-3-1 2-3 3.2-6 3 1-2.8 3-4.6 6-5Z" fill="#fff" opacity=".9"/></svg></span>Ayame</div>
+        <span class="file">~/data/<b>pd240_raw_2026-06-25.tsv</b></span>
+        <div class="spacer"></div>
+        <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd> コマンド</span>
+      </header>
+
+      <main id="viewport">
+        <div id="content">
+          <div class="row"><span class="ln">1861744</span><span><span class="dim">20260624  20260625194037</span>  DM120044  0002  EUR      3,300  <span class="ok">OK  </span>  sapporo-05</span></div>
+          <div class="row"><span class="ln">1861745</span><span><span class="dim">20260624  20260625194039</span>  BA001914  0007  JPY    750,000  <span class="err">ERR </span>  tokyo-edge-19</span></div>
+          <div class="row"><span class="ln">1861746</span><span><span class="dim">20260624  20260625194040</span>  AM046422  0006  JPY    620,000  <span class="ok">OK  </span>  fukuoka-01</span></div>
+          <div class="row"><span class="ln">1861747</span><span><span class="dim">20260624  20260625194041</span>  BA002190  0007  JPY  1,250,000  <span class="ok">OK  </span>  osaka-west-11</span></div>
+          <div class="row"><span class="ln">1861748</span><span><span class="dim">20260624  20260625194042</span>  BA001828  0007  USD     12,900  <span class="ok">OK  </span>  tokyo-east-03</span></div>
+          <div class="row"><span class="ln">1861749</span><span><span class="dim">20260624  20260625194044</span>  BA001914  0007  JPY    750,000  <span class="ok">OK  </span>  tokyo-core-07</span></div>
+          <div class="row"><span class="ln">1861750</span><span><span class="dim">20260624  20260625194045</span>  CX773310  0011  JPY  4,120,500  <span class="ok">OK  </span>  nagoya-02</span></div>
+          <div class="row"><span class="ln">1861751</span><span><span class="dim">20260624  20260625194046</span>  DM120051  0002  EUR      3,300  <span class="warn">WARN</span>  sapporo-05</span></div>
+          <div class="row"><span class="ln">1861752</span><span><span class="dim">20260624  20260625194048</span>  AM046431  0006  JPY    980,400  <span class="ok">OK  </span>  tokyo-edge-19</span></div>
+          <div class="row"><span class="ln">1861753</span><span><span class="dim">20260624  20260625194049</span>  BA002204  0007  JPY  1,250,000  <span class="ok">OK  </span>  fukuoka-01</span></div>
+          <div class="row"><span class="ln">1861754</span><span><span class="dim">20260624  20260625194051</span>  BA001841  0007  USD     12,900  <span class="ok">OK  </span>  osaka-west-11</span></div>
+          <div class="row"><span class="ln">1861755</span><span><span class="dim">20260624  20260625194052</span>  CX773322  0011  JPY  4,120,500  <span class="err">ERR </span>  tokyo-east-03</span></div>
+          <div class="row"><span class="ln">1861756</span><span><span class="dim">20260624  20260625194054</span>  DM120066  0002  EUR      3,300  <span class="ok">OK  </span>  nagoya-02</span></div>
+          <div class="row"><span class="ln">1861757</span><span><span class="dim">20260624  20260625194055</span>  AM046448  0006  JPY    620,000  <span class="ok">OK  </span>  sapporo-05</span></div>
+          <div class="row"><span class="ln">1861758</span><span><span class="dim">20260624  20260625194057</span>  BA002218  0007  JPY  1,250,000  <span class="ok">OK  </span>  tokyo-core-07</span></div>
+          <div class="row"><span class="ln">1861759</span><span><span class="dim">20260624  20260625194058</span>  BA001857  0007  USD     12,900  <span class="warn">WARN</span>  fukuoka-01</span></div>
+          <div class="row"><span class="ln">1861760</span><span><span class="dim">20260624  20260625194100</span>  CX773334  0011  JPY  4,120,500  <span class="ok">OK  </span>  osaka-west-11</span></div>
+          <div class="row"><span class="ln">1861761</span><span><span class="dim">20260624  20260625194101</span>  DM120078  0002  EUR      3,300  <span class="ok">OK  </span>  tokyo-edge-19</span></div>
+        </div>
+
+        <div id="scrim"></div>
+        <div id="palette">
+          <div class="pal-input">
+            <span class="mag">⌕</span>
+            <input type="text" value="sort" placeholder="コマンド、ファイル、行、シンボル…" />
+            <span class="pal-scope">&gt; コマンド</span>
+          </div>
+          <div class="pal-section">おすすめ</div>
+          <div class="pal-list">
+            <div class="pal-item sel"><span class="ic">⇅</span><span class="lbl"><mark>ソート</mark>して別ファイルへ保存 <small>— キー列・数値・降順</small></span><span class="hint">⏎</span></div>
+            <div class="pal-item"><span class="ic">⿻</span><span class="lbl"><mark>ソート</mark>差分 (sortdiff) <small>— 並び順を無視して比較</small></span><span class="hint">⌘⇧S</span></div>
+            <div class="pal-item"><span class="ic">▦</span><span class="lbl">列で集計 (group-by) <small>— 通貨列でカウント</small></span><span class="hint">⌘G</span></div>
+            <div class="pal-item"><span class="ic">⌦</span><span class="lbl">重複行を除去 (distinct)</span><span class="hint"></span></div>
+            <div class="pal-item"><span class="ic">★</span><span class="lbl">上位N件を抽出 (top-n) <small>— 金額で降順</small></span><span class="hint"></span></div>
+          </div>
+          <div class="pal-foot"><span>↑↓ 移動</span><span>⏎ 実行</span><span class="spacer"></span><span>4,790,334 行 · 1.36 GiB</span></div>
+        </div>
+      </main>
+
+      <footer id="statusbar">
+        <span class="seg">1,861,749 : 34</span>
+        <span class="seg">4,790,334 行</span>
+        <span class="seg">1.36 GiB</span>
+        <span class="seg">UTF-8 · LF · TSV</span>
+        <div class="spacer"></div>
+        <span class="seg">⌘K でコマンド</span>
+        <span class="mode">NORMAL</span>
+      </footer>
+    </div>
+  </body>
+</html>

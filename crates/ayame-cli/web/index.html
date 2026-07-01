@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#25265f" />
+    <meta name="theme-color" content="#FBF8F1" />
     <title>Ayame</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
@@ -80,6 +80,21 @@
 
         <main id="viewport" tabindex="0">
           <div id="ruler"><div id="ruler-inner"></div><div id="ruler-corner"></div></div>
+          <!-- faint pochoir illustration (opacity = --illus; 0 hides it) -->
+          <div id="ambient" aria-hidden="true">
+            <svg viewBox="0 0 250 320" preserveAspectRatio="xMinYMax slice">
+              <path d="M60 330 C 36 268 58 232 88 206 C 116 182 100 146 72 128"
+                    fill="none" stroke="var(--accent)" stroke-width="26"
+                    stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+              <path d="M136 330 C 124 280 152 256 138 216 C 128 188 150 168 136 142"
+                    fill="none" stroke="var(--gold)" stroke-width="17"
+                    stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+              <path d="M176 176 C 178 190 182 194 196 196 C 182 198 178 202 176 216
+                       C 174 202 170 198 156 196 C 170 194 174 190 176 176 Z"
+                    fill="var(--gold)" opacity=".85"/>
+              <circle cx="96" cy="164" r="6" fill="var(--accent)" opacity=".7"/>
+            </svg>
+          </div>
           <div id="content"><div id="sel-layer"></div></div>
           <div id="vscrollbar"><div id="vthumb"></div></div>
           <div id="overlay" class="overlay hidden"></div>
@@ -138,10 +153,26 @@
           <label class="set-row">
             <span class="set-label">テーマ</span>
             <select id="set-theme">
-              <option value="light">ライト</option>
+              <option value="iris-light">Iris Light</option>
+              <option value="iris-mist">Iris Mist</option>
+              <option value="iris-dawn">Iris Dawn</option>
+              <option value="sumi-light">Sumi Light</option>
+              <option value="mono-paper">Mono Paper (単色)</option>
               <option value="dark">ダーク</option>
               <option value="black">ブラック</option>
             </select>
+          </label>
+          <label class="set-row">
+            <span class="set-label">背景</span>
+            <select id="set-bg">
+              <option value="watercolor">水彩</option>
+              <option value="solid">単色（全単色配慮）</option>
+            </select>
+          </label>
+          <label class="set-row">
+            <span class="set-label">イラスト</span>
+            <input id="set-illus" type="range" min="0" max="100" step="5" />
+            <span id="set-illus-val" class="set-val"></span>
           </label>
           <label class="set-row">
             <span class="set-label">フォント</span>
@@ -161,6 +192,18 @@
             <input id="set-ruler" type="checkbox" />
             <span class="set-val"></span>
           </label>
+          <div class="set-row set-theme-json">
+            <span class="set-label">テーマJSON</span>
+            <div class="set-json-wrap">
+              <textarea id="set-json" spellcheck="false"></textarea>
+              <div class="set-json-actions">
+                <button id="set-apply" class="cmd">適用</button>
+                <button id="set-save" class="cmd">カスタム保存</button>
+                <button id="set-export" class="cmd">書き出し</button>
+              </div>
+              <div id="set-msg" class="set-msg"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
-/* Ayame editor — a quiet, VSCode-flavored editor chrome.
-   Themeable via html[data-theme]; light is the default. One accent color,
-   dense monospaced content, generous hit targets on the toolbar. */
+/* Ayame editor chrome — light-first "Iris" look.
+   Themeable via html[data-theme] (iris-light default, plus iris-mist/dawn,
+   sumi-light, mono-paper, dark, black); custom JSON themes set the same CSS
+   variables at runtime. Acrylic chrome, iris accent, gold search marks. */
 
 :root {
   /* Typography (overridden live by Settings). */
@@ -10,28 +11,87 @@
     "Noto Sans Mono CJK JP", "MS Gothic", monospace;
   --ui: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
 
-  /* Light theme (default). */
-  --bg: #ffffff;
-  --bg-elevated: #f6f6f6;
-  --bg-toolbar: #f3f3f3;
-  --bg-active-line: #eaf1fb;
-  --gutter-bg: #ffffff;
-  --edit-bg: #ffffff;
-  --hover: #0000000d;
-  --fg: #1f1f24;
-  --fg-dim: #6a6a70;
-  --fg-faint: #a0a0a6;
-  --border: #e2e2e4;
-  --accent: #0e639c;
-  --accent-bright: #1177bb;
-  --status: #007acc;
-  --status-fg: #ffffff;
-  --gutter-fg: #9aa0a6;
-  --mark-bg: #fff2a8;
-  --mark-fg: #5a4600;
-  --mark-active-bg: #ffcf3f;
-  --mark-active-fg: #1e1e1e;
-  --danger: #d13438;
+  /* Iris Light (default). Light-first; iris accent + gold marks + acrylic chrome. */
+  --bg: #FBF8F1;
+  --bg-elevated: #FDFCF8;
+  --bg-toolbar: rgba(255,253,248,.72);
+  --bg-active-line: #EDE6FA;
+  --gutter-bg: #FBF8F1;
+  --edit-bg: #FFFFFF;
+  --hover: color-mix(in srgb, var(--accent) 10%, transparent);
+  --fg: #2A2140;
+  --fg-dim: #6E6383;
+  --fg-faint: #A99DBC;
+  --border: #E7E0D3;
+  --accent: #7A5CC0;
+  --accent-bright: #6A4CB0;
+  --status: rgba(255,253,248,.72);
+  --status-fg: #6E6383;
+  --gutter-fg: #B3A7C9;
+  --mark-bg: #FBEBB0;
+  --mark-fg: #6B5510;
+  --mark-active-bg: #E8B84B;
+  --mark-active-fg: #2A2205;
+  --danger: #C0506A;
+  /* Iris tokens */
+  --gold: #C79A2E;
+  --acrylic-blur: 20px;
+  --illus: .2;
+  --radius: 10px;
+  --desk:
+    radial-gradient(46vw 42vh at 12% 84%, rgba(122,92,192,.12), transparent 60%),
+    radial-gradient(42vw 40vh at 88% 14%, rgba(185,139,214,.10), transparent 60%),
+    radial-gradient(30vw 30vh at 70% 96%, rgba(231,197,107,.08), transparent 60%),
+    #FBF8F1;
+}
+
+/* ---- Iris theme presets (light) ------------------------------------------ */
+html[data-theme="iris-mist"] {
+  --bg: #F7F9FC; --bg-elevated: #FDFEFF; --bg-toolbar: rgba(250,252,255,.68);
+  --bg-active-line: #E6EDFA; --gutter-bg: #F7F9FC; --edit-bg: #FFFFFF;
+  --fg: #26314A; --fg-dim: #5E6E8A; --fg-faint: #9DAAC0; --border: #DCE4EF;
+  --accent: #5B79C9; --accent-bright: #4A68B8; --status: rgba(250,252,255,.68); --status-fg: #5E6E8A;
+  --gutter-fg: #9DAAC0; --mark-bg: #E3ECFB; --mark-fg: #2C3E6B;
+  --mark-active-bg: #7EC7C0; --mark-active-fg: #0F2A28; --danger: #C05C74;
+  --gold: #C9A24E; --illus: .22;
+  --desk:
+    radial-gradient(44vw 42vh at 14% 82%, rgba(91,121,201,.12), transparent 60%),
+    radial-gradient(42vw 40vh at 86% 16%, rgba(143,182,224,.10), transparent 60%),
+    radial-gradient(30vw 30vh at 74% 96%, rgba(126,199,192,.08), transparent 60%), #F7F9FC;
+}
+html[data-theme="iris-dawn"] {
+  --bg: #FDF6EE; --bg-elevated: #FFFBF7; --bg-toolbar: rgba(255,250,244,.70);
+  --bg-active-line: #F6E7F0; --gutter-bg: #FDF6EE; --edit-bg: #FFFFFF;
+  --fg: #3A2438; --fg-dim: #7A5A6E; --fg-faint: #B79AA6; --border: #EFE0D6;
+  --accent: #A65CB0; --accent-bright: #944EA0; --status: rgba(255,250,244,.70); --status-fg: #7A5A6E;
+  --gutter-fg: #B79AA6; --mark-bg: #FBE7C8; --mark-fg: #7A4A16;
+  --mark-active-bg: #F0B85A; --mark-active-fg: #3A2205; --danger: #D96A86;
+  --gold: #E0A94E; --illus: .22;
+  --desk:
+    radial-gradient(46vw 42vh at 12% 84%, rgba(166,92,176,.13), transparent 60%),
+    radial-gradient(42vw 40vh at 84% 16%, rgba(224,169,78,.11), transparent 60%),
+    radial-gradient(30vw 30vh at 70% 96%, rgba(227,154,176,.10), transparent 60%), #FDF6EE;
+}
+html[data-theme="sumi-light"] {
+  --bg: #FAFAF8; --bg-elevated: #FFFFFF; --bg-toolbar: rgba(252,252,250,.74);
+  --bg-active-line: #ECE8F4; --gutter-bg: #FAFAF8; --edit-bg: #FFFFFF;
+  --fg: #222024; --fg-dim: #63616A; --fg-faint: #A7A4AE; --border: #E6E4DE;
+  --accent: #7A5CC0; --accent-bright: #6A4CB0; --status: rgba(252,252,250,.74); --status-fg: #63616A;
+  --gutter-fg: #A7A4AE; --mark-bg: #ECE6FA; --mark-fg: #3E2E63;
+  --mark-active-bg: #7A5CC0; --mark-active-fg: #FFFFFF; --danger: #B24A5E;
+  --gold: #B7912F; --illus: .16;
+  --desk:
+    radial-gradient(40vw 40vh at 16% 82%, rgba(122,92,192,.07), transparent 60%),
+    radial-gradient(34vw 34vh at 84% 20%, rgba(40,36,48,.03), transparent 60%), #FAFAF8;
+}
+html[data-theme="mono-paper"] {
+  --bg: #F5F3ED; --bg-elevated: #FBFAF5; --bg-toolbar: rgba(245,243,237,.92);
+  --bg-active-line: #E8E6DE; --gutter-bg: #F5F3ED; --edit-bg: #FBFAF5;
+  --fg: #24231F; --fg-dim: #6C6A63; --fg-faint: #A9A69D; --border: #E2DFD6;
+  --accent: #6F6B79; --accent-bright: #605C6C; --status: rgba(245,243,237,.92); --status-fg: #6C6A63;
+  --gutter-fg: #A9A69D; --mark-bg: #E7E4EC; --mark-fg: #3A3745;
+  --mark-active-bg: #6F6B79; --mark-active-fg: #FFFFFF; --danger: #9A6A6A;
+  --gold: #7A7568; --illus: 0; --acrylic-blur: 8px; --desk: #F4F2EC;   /* 単色 */
 }
 
 html[data-theme="dark"] {
@@ -52,6 +112,7 @@ html[data-theme="dark"] {
   --mark-active-bg: #b8860b;
   --mark-active-fg: #1e1e1e;
   --danger: #f14c4c;
+  --gold: #d9b45a; --illus: 0; --acrylic-blur: 12px; --desk: var(--bg);
 }
 
 html[data-theme="black"] {
@@ -72,6 +133,7 @@ html[data-theme="black"] {
   --mark-active-bg: #b8860b;
   --mark-active-fg: #000000;
   --danger: #ff6b6b;
+  --gold: #d9b45a; --illus: 0; --acrylic-blur: 10px; --desk: var(--bg);
 }
 
 * { box-sizing: border-box; }
@@ -79,7 +141,7 @@ html[data-theme="black"] {
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  background: var(--desk, var(--bg));
   color: var(--fg);
   font-family: var(--ui);
   overflow: hidden;
@@ -89,6 +151,7 @@ html, body {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   height: 100vh;
+  background: transparent;
 }
 
 /* ---- tab bar ---------------------------------------------------------- */
@@ -697,3 +760,42 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
   font-size: 16px;
   box-shadow: 0 10px 34px #00000040;
 }
+
+/* ---- Iris skin: acrylic chrome, iris active-line glow, ambient ------------ */
+#toolbar, #tabbar, #statusbar {
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.3);
+}
+.row.active { box-shadow: inset 2px 0 0 var(--accent), inset 0 0 20px -14px var(--accent); }
+button { border-radius: var(--radius); }
+.field { border-radius: var(--radius); }
+.field:focus-within {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.modal-panel { border-radius: calc(var(--radius) + 4px); }
+
+/* faint pochoir illustration (à la Matisse "Jazz"); opacity = --illus (0 hides) */
+#ambient {
+  position: absolute; left: 0; bottom: 0; width: 200px; height: 240px;
+  z-index: 0; pointer-events: none; opacity: var(--illus, 0);
+  -webkit-mask-image: radial-gradient(120% 120% at 0% 100%, #000, transparent 68%);
+  mask-image: radial-gradient(120% 120% at 0% 100%, #000, transparent 68%);
+}
+#ambient svg { width: 100%; height: 100%; display: block; }
+#content { z-index: 1; }
+
+/* theme JSON editor inside Settings */
+.settings-panel { width: min(480px, 94vw); }
+.set-theme-json { align-items: flex-start; }
+.set-json-wrap { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.set-json-wrap textarea {
+  width: 100%; height: 150px; resize: vertical; box-sizing: border-box;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px; outline: none;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+}
+.set-json-wrap textarea:focus { border-color: var(--accent-bright); }
+.set-json-actions { display: flex; gap: 8px; }
+.set-json-actions .cmd { flex: 1; height: 30px; border: 1px solid var(--border); }
+.set-msg { min-height: 15px; font-size: 11.5px; color: var(--fg-dim); }

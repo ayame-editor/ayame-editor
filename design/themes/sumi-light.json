@@ -1,0 +1,31 @@
+{
+  "name": "Sumi Light",
+  "type": "light",
+  "radius": 10,
+  "color": {
+    "paper": "#FAFAF8",
+    "paper2": "#F0F0EC",
+    "ink": "#222024",
+    "inkDim": "#63616A",
+    "inkFaint": "#A7A4AE",
+    "accent": "#7A5CC0",
+    "accent2": "#9C86C8",
+    "gold": "#B7912F",
+    "stem": "#5E7A66",
+    "edge": "rgba(40,36,48,0.12)",
+    "ok": "#5A7A5A",
+    "warn": "#9C7A2A",
+    "err": "#B24A5E",
+    "markBg": "rgba(122,92,192,0.14)",
+    "markFg": "#3E2E63",
+    "markCur": "#7A5CC0",
+    "markCurFg": "#FFFFFF"
+  },
+  "acrylic": { "tint": "rgba(252,252,250,0.70)", "blur": 22, "noise": 0.03 },
+  "background": { "mode": "watercolor", "solid": "#F0F0EC" },
+  "illustration": 0.32,
+  "watercolor": [
+    { "x": "16%", "y": "76%", "r": "40vh", "color": "rgba(122,92,192,0.14)" },
+    { "x": "82%", "y": "22%", "r": "34vh", "color": "rgba(40,36,48,0.05)" }
+  ]
+}

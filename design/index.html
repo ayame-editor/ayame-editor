@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayame · デザイン案ギャラリー</title>
+    <style>
+      :root {
+        --bg:#0C0A12; --bg2:#141020; --card:#161222; --border:#271E3A;
+        --fg:#ECE7F5; --dim:#A99CC0; --faint:#6A5D82; --iris:#A98BE0; --gold:#C9A227;
+        --mono:"JetBrains Mono","SFMono-Regular","Menlo","Consolas",monospace;
+        --ui:"Inter","Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+      }
+      * { box-sizing:border-box; }
+      html,body { margin:0; background:var(--bg); color:var(--fg); font-family:var(--ui);
+        -webkit-font-smoothing:antialiased; }
+      body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+        background:
+          radial-gradient(60vw 40vh at 15% -5%, rgba(169,139,224,.16), transparent 60%),
+          radial-gradient(50vw 40vh at 100% 0%, rgba(34,211,238,.10), transparent 55%),
+          radial-gradient(40vw 40vh at 60% 100%, rgba(201,162,39,.08), transparent 55%); }
+      .wrap { position:relative; z-index:1; max-width:1360px; margin:0 auto; padding:56px 28px 80px; }
+
+      header.hero { margin-bottom:40px; }
+      .logo { display:flex; align-items:center; gap:14px; }
+      .logo .mark { width:44px; height:44px; border-radius:13px; display:grid; place-items:center;
+        background:linear-gradient(155deg,var(--iris),var(--gold));
+        box-shadow:0 8px 30px -8px var(--iris); }
+      .logo .mark svg{ width:26px; height:26px; }
+      .logo h1 { font-size:30px; margin:0; letter-spacing:.3px; }
+      .logo .jp { color:var(--dim); font-weight:500; font-size:16px; margin-left:2px; }
+      .lede { margin:18px 0 0; max-width:760px; color:var(--dim); font-size:15.5px; line-height:1.7; }
+      .lede b { color:var(--fg); font-weight:600; }
+      .meta { margin-top:18px; display:flex; flex-wrap:wrap; gap:8px; }
+      .pill { font-family:var(--mono); font-size:11.5px; color:var(--dim);
+        border:1px solid var(--border); border-radius:20px; padding:5px 12px; }
+      .pill b{ color:var(--iris); }
+
+      .section-title { margin:44px 0 16px; font-size:13px; letter-spacing:2px; text-transform:uppercase;
+        color:var(--faint); display:flex; align-items:center; gap:12px; }
+      .section-title::after { content:""; flex:1; height:1px; background:var(--border); }
+
+      .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:22px; }
+      .card { background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;
+        text-decoration:none; color:inherit; display:flex; flex-direction:column;
+        transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+      .card:hover { transform:translateY(-4px); border-color:var(--iris);
+        box-shadow:0 24px 60px -24px rgba(169,139,224,.55); }
+      .thumb { position:relative; height:0; padding-bottom:62.5%; overflow:hidden;
+        border-bottom:1px solid var(--border); background:#0a0a10; }
+      .thumb iframe { position:absolute; top:0; left:0; width:1280px; height:800px; border:0;
+        transform-origin:top left; pointer-events:none; }
+      .num { position:absolute; top:10px; left:10px; z-index:2; font-family:var(--mono); font-size:11px;
+        color:#fff; background:rgba(12,10,18,.72); border:1px solid var(--border); border-radius:8px;
+        padding:2px 8px; backdrop-filter:blur(6px); }
+      .cat { position:absolute; top:10px; right:10px; z-index:2; font-family:var(--mono); font-size:10.5px;
+        color:var(--iris); background:rgba(12,10,18,.72); border:1px solid var(--border); border-radius:8px;
+        padding:2px 8px; backdrop-filter:blur(6px); }
+      .cap { padding:13px 15px 15px; }
+      .cap h3 { margin:0; font-size:15px; }
+      .cap p { margin:5px 0 0; color:var(--dim); font-size:12.5px; line-height:1.55; }
+
+      /* featured hero for the current light direction */
+      .featured { display:grid; grid-template-columns:minmax(280px,0.9fr) 1.5fr; gap:26px; align-items:center;
+        background:linear-gradient(135deg, rgba(169,139,224,.10), rgba(201,162,39,.06));
+        border:1px solid var(--border); border-radius:20px; padding:26px; margin:8px 0 8px; }
+      .feat-kicker { font-family:var(--mono); font-size:11.5px; letter-spacing:1.5px; color:var(--gold); }
+      .featured h2 { margin:10px 0 8px; font-size:24px; line-height:1.25; }
+      .featured p { margin:0; color:var(--dim); font-size:14px; line-height:1.7; }
+      .featured p b { color:var(--fg); }
+      .feat-presets { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 4px; }
+      .feat-chip { display:flex; align-items:center; gap:8px; border:1px solid var(--border);
+        border-radius:20px; padding:5px 11px 5px 8px; font-size:12px; color:var(--dim); }
+      .feat-chip .sw { display:flex; gap:3px; }
+      .feat-chip .sw i { width:11px; height:11px; border-radius:3px; }
+      .feat-links { display:flex; gap:12px; margin-top:16px; }
+      .feat-links a { text-decoration:none; font-size:13px; font-weight:600; padding:9px 16px; border-radius:10px; }
+      .feat-links a.go { background:linear-gradient(135deg,var(--iris),#C9A227); color:#160f22; }
+      .feat-links a.sub { color:var(--iris); border:1px solid var(--border); }
+      .feat-frame { display:block; border-radius:14px; overflow:hidden; border:1px solid var(--border);
+        box-shadow:0 30px 70px -30px rgba(169,139,224,.5); }
+      .feat-frame .thumb { position:relative; height:0; padding-bottom:64%; overflow:hidden; background:#0a0a10; }
+      .feat-frame iframe { position:absolute; top:0; left:0; width:1400px; height:900px; border:0;
+        transform-origin:top left; pointer-events:none; }
+      @media (max-width:820px){ .featured { grid-template-columns:1fr; } }
+
+      footer { margin-top:60px; color:var(--faint); font-size:12.5px; line-height:1.7; }
+      footer code { font-family:var(--mono); color:var(--dim); }
+      a.inline { color:var(--iris); text-decoration:none; }
+      a.inline:hover { text-decoration:underline; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="hero">
+        <div class="logo">
+          <span class="mark"><svg viewBox="0 0 24 24"><path d="M12 2c1.6 3 1.6 6 0 9-1.6-3-1.6-6 0-9Z" fill="#fff" opacity=".95"/><path d="M12 11c3 .4 5 2.2 6 5-3 .2-5-1-6-3-1 2-3 3.2-6 3 1-2.8 3-4.6 6-5Z" fill="#fff" opacity=".92"/><rect x="11.2" y="12" width="1.6" height="9" rx=".8" fill="#fff" opacity=".8"/></svg></span>
+          <div><h1>Ayame <span class="jp">デザイン案ギャラリー</span></h1></div>
+        </div>
+        <p class="lede">
+          巨大テキストエディタ Ayame の外観リデザイン。<b>美しく・軽量・モダン・ハッカブル</b>を狙って、
+          同じ画面（同じツールバー・同じ1.36 GiBのTSVデータ・同じ検索状態）を <b>18通り</b>の方向で描き分けています。
+          クロムとデータは全案で共通なので、これは純粋に「見た目」のA/B比較です。カードをクリックすると原寸で開きます。
+        </p>
+        <div class="meta">
+          <span class="pill"><b>18</b> designs</span>
+          <span class="pill">和 · Neon · Hacker · Dev classic · Calm · Light · Modern · Layout</span>
+          <span class="pill">100% self-contained HTML — <b>ビルド不要</b></span>
+        </div>
+      </header>
+
+      <div class="section-title">Featured — 最新の方向（light only）</div>
+      <section class="featured">
+        <div class="feat-copy">
+          <div class="feat-kicker">IRIS · LIGHT · JSON THEMES</div>
+          <h2>Iris Light — iris の切り絵 × Fluent の透明感</h2>
+          <p>ライト専用。iris の静けさに <b>版画（切り絵）のエッセンス</b>（Matisse『Jazz』のようなフラットな型抜きの形）を添え、<b>Fluent 風のわずかな透明感（アクリル）</b>と<b>アシンメトリ</b>な構図。既定は Sumi Light。テーマは <b>JSON で定義</b>でき、アプリ内で編集 → 適用 → <b>カスタム保存（localStorage）</b>→ 書き出しまで。テーマパネルは<b>しまえて</b>、<b>背景は水彩／単色</b>を切替可能（<b>全単色配慮</b>の Mono Paper 同梱）。</p>
+          <div class="feat-presets">
+            <span class="feat-chip"><span class="sw"><i style="background:#7A5CC0"></i><i style="background:#C79A2E"></i><i style="background:#4E9C77"></i></span>Iris Light</span>
+            <span class="feat-chip"><span class="sw"><i style="background:#5B79C9"></i><i style="background:#7EC7C0"></i><i style="background:#C9A24E"></i></span>Iris Mist</span>
+            <span class="feat-chip"><span class="sw"><i style="background:#A65CB0"></i><i style="background:#E39AB0"></i><i style="background:#E0A94E"></i></span>Iris Dawn</span>
+            <span class="feat-chip"><span class="sw"><i style="background:#7A5CC0"></i><i style="background:#5E7A66"></i><i style="background:#B7912F"></i></span>Sumi Light</span>
+          </div>
+          <div class="feat-links">
+            <a class="go" href="gui/iris-light.html" target="_blank" rel="noopener">開く（テーマ編集つき）</a>
+            <a class="sub" href="themes/README.md">テーマ仕様（JSON）</a>
+          </div>
+        </div>
+        <a class="feat-frame" href="gui/iris-light.html" target="_blank" rel="noopener">
+          <div class="thumb"><iframe id="feat-iframe" scrolling="no" tabindex="-1" src="gui/iris-light.html"></iframe></div>
+        </a>
+      </section>
+
+      <div class="section-title">和 — Japanese</div>
+      <div class="grid" data-cat="wa"></div>
+
+      <div class="section-title">Neon &amp; Hacker</div>
+      <div class="grid" data-cat="neon"></div>
+
+      <div class="section-title">Dev classics</div>
+      <div class="grid" data-cat="dev"></div>
+
+      <div class="section-title">Calm · Light · Retro</div>
+      <div class="grid" data-cat="calm"></div>
+
+      <div class="section-title">Modern &amp; Experimental</div>
+      <div class="grid" data-cat="modern"></div>
+
+      <div class="section-title">Layout studies — 構造から変える</div>
+      <div class="grid" data-cat="layout"></div>
+
+      <div class="section-title">Reference</div>
+      <div class="grid" data-cat="ref"></div>
+
+      <footer>
+        すべての案は <code>design/mockups/*.html</code>（レイアウト案と基準は <code>design/_base.html</code>）。
+        JavaScript もビルドも不要で、ブラウザで直接開けます。方向性の解説は <a class="inline" href="./README.md">README.md</a> に。<br />
+        新しい案を足すには <code>_base.html</code> をコピーして <code>:root</code> のパレットと signature effect だけ差し替えてください。
+      </footer>
+    </div>
+
+    <script>
+      // Live thumbnails: each mockup is embedded in a scaled iframe.
+      const DESIGNS = [
+        { cat:"wa", n:"01", file:"mockups/01-ayame-zen.html", tag:"和 · signature",
+          name:"Ayame Zen", blurb:"濃紺夜×アイリス色×金箔。和紙テクスチャに文字が浮かぶ。" },
+        { cat:"wa", n:"02", file:"mockups/02-kanagawa.html", tag:"和 · 浮世絵",
+          name:"Kanagawa 神奈川", blurb:"北斎の富嶽。藍と菫、青海波を忍ばせた落ち着いた配色。" },
+        { cat:"wa", n:"03", file:"mockups/03-sumi-e.html", tag:"和 · minimal",
+          name:"Sumi-e 墨絵", blurb:"墨一色。差し色は朱の落款だけ。余白と静けさで魅せる。" },
+
+        { cat:"neon", n:"04", file:"mockups/04-neon-glass.html", tag:"Neon · glass",
+          name:"Neon Glass Terminal", blurb:"すりガラスのクロムがネオンの街灯りに浮かぶ。行番号がマゼンタ→シアン。" },
+        { cat:"neon", n:"05", file:"mockups/05-synthwave.html", tag:"Neon · retro",
+          name:"Synthwave '84", blurb:"アウトランの夕焼け。地平線のパースグリッドと発光する文字。" },
+        { cat:"neon", n:"06", file:"mockups/06-matrix.html", tag:"Hacker",
+          name:"Matrix Phosphor", blurb:"漆黒に燐光グリーン。デジタルレイン、走査線、点滅カーソル。" },
+
+        { cat:"dev", n:"07", file:"mockups/07-tokyo-night.html", tag:"Dev classic",
+          name:"Tokyo Night", blurb:"開発者に最も愛される夜。青と紫の端正な配色。" },
+        { cat:"dev", n:"08", file:"mockups/08-catppuccin.html", tag:"Dev classic",
+          name:"Catppuccin Mocha", blurb:"パステルの温もり。丸みと柔らかさ、mauveの差し色。" },
+        { cat:"dev", n:"09", file:"mockups/09-rose-pine.html", tag:"Dev classic",
+          name:"Rosé Pine Moon", blurb:"iris・rose・goldの上品な夜。落ち着いた大人の配色。" },
+
+        { cat:"calm", n:"10", file:"mockups/10-nord.html", tag:"Calm · arctic",
+          name:"Nord Frost", blurb:"北極の薄明。冷たいスレートに氷色シアン一点。" },
+        { cat:"calm", n:"11", file:"mockups/11-gruvbox.html", tag:"Calm · retro",
+          name:"Gruvbox", blurb:"温かみのあるレトロ。琥珀と橙、うっすらフィルムグレイン。" },
+        { cat:"calm", n:"12", file:"mockups/12-alabaster-light.html", tag:"Light",
+          name:"Alabaster Light", blurb:"温白色の紙。上質なライトテーマ — 明るくても美しい証明。" },
+        { cat:"calm", n:"15", file:"mockups/15-amber-crt.html", tag:"Retro · CRT",
+          name:"Amber CRT", blurb:"VT220の郷愁。琥珀の燐光、走査線、湾曲ガラスのビネット。" },
+
+        { cat:"modern", n:"13", file:"mockups/13-frostbite.html", tag:"Modern · minimal",
+          name:"Frostbite Wireframe", blurb:"Linear級のミニマル。極細グリッド、氷白文字、銀の微光。" },
+        { cat:"modern", n:"14", file:"mockups/14-aurora-glass.html", tag:"Modern · premium",
+          name:"Aurora Silk Glass", blurb:"すりガラスの奥でオーロラがゆっくり呼吸する。Stripe級の質感。" },
+
+        { cat:"layout", n:"16", file:"mockups/16-command-palette.html", tag:"Layout · ⌘K",
+          name:"Command Palette", blurb:"クロムを細く。全機能を⌘Kのフローティングパレットに集約（Zed/Raycast）。" },
+        { cat:"layout", n:"17", file:"mockups/17-power-split.html", tag:"Layout · 巨大ファイル",
+          name:"Power Split", blurb:"検索ヒットを別ペインに保持しジャンプ。川のミニマップ（klogg方式）。" },
+
+        { cat:"ref", n:"00", file:"_base.html", tag:"Reference",
+          name:"Graphite (base)", blurb:"全案の土台となる中立クローム。ここからパレットだけを差し替える。" },
+      ];
+
+      const SCALE = 0.30; // 1280px * 0.30 ≈ 384px wide thumbnails
+      for (const d of DESIGNS) {
+        const grid = document.querySelector(`.grid[data-cat="${d.cat}"]`);
+        if (!grid) continue;
+        const a = document.createElement("a");
+        a.className = "card"; a.href = d.file; a.target = "_blank"; a.rel = "noopener";
+        a.innerHTML = `
+          <div class="thumb">
+            <span class="num">${d.n}</span><span class="cat">${d.tag}</span>
+            <iframe loading="lazy" scrolling="no" tabindex="-1" src="${d.file}"></iframe>
+          </div>
+          <div class="cap"><h3>${d.name}</h3><p>${d.blurb}</p></div>`;
+        grid.appendChild(a);
+        // scale the iframe to the card's actual width once laid out
+        const frame = a.querySelector("iframe");
+        const fit = () => {
+          const w = a.querySelector(".thumb").clientWidth;
+          const s = w / 1280;
+          frame.style.transform = `scale(${s})`;
+          frame.style.height = (a.querySelector(".thumb").clientHeight / s) + "px";
+        };
+        requestAnimationFrame(fit);
+        window.addEventListener("resize", fit);
+      }
+
+      // scale the featured preview iframe (1400px design width)
+      (function(){
+        const fi = document.getElementById("feat-iframe");
+        if (!fi) return;
+        const thumb = fi.parentElement;
+        const fit = () => { const w = thumb.clientWidth, s = w / 1400;
+          fi.style.transform = `scale(${s})`; fi.style.height = (thumb.clientHeight / s) + "px"; };
+        requestAnimationFrame(fit); window.addEventListener("resize", fit);
+      })();
+    </script>
+  </body>
+</html>

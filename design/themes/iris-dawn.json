@@ -1,0 +1,34 @@
+{
+  "name": "Iris Dawn",
+  "type": "light",
+  "radius": 12,
+  "color": {
+    "paper": "#FDF6EE",
+    "paper2": "#F7E7DC",
+    "ink": "#3A2438",
+    "inkDim": "#7A5A6E",
+    "inkFaint": "#B79AA6",
+    "accent": "#A65CB0",
+    "accent2": "#E39AB0",
+    "gold": "#E0A94E",
+    "stem": "#86B18A",
+    "edge": "rgba(140,80,110,0.16)",
+    "ok": "#5A9A5A",
+    "warn": "#C2872C",
+    "err": "#D96A86",
+    "markBg": "rgba(224,169,78,0.22)",
+    "markFg": "#7A4A16",
+    "markCur": "#F0B85A",
+    "markCurFg": "#3A2205"
+  },
+  "acrylic": { "tint": "rgba(255,250,244,0.64)", "blur": 28, "noise": 0.05 },
+  "background": { "mode": "watercolor", "solid": "#F7E7DC" },
+  "illustration": 0.42,
+  "watercolor": [
+    { "x": "14%", "y": "80%", "r": "46vh", "color": "rgba(166,92,176,0.26)" },
+    { "x": "34%", "y": "34%", "r": "40vh", "color": "rgba(227,154,176,0.24)" },
+    { "x": "80%", "y": "18%", "r": "44vh", "color": "rgba(224,169,78,0.22)" },
+    { "x": "70%", "y": "88%", "r": "34vh", "color": "rgba(166,92,176,0.16)" },
+    { "x": "22%", "y": "58%", "r": "22vh", "color": "rgba(134,177,138,0.16)" }
+  ]
+}

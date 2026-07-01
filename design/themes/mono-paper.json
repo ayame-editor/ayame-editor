@@ -1,0 +1,28 @@
+{
+  "name": "Mono Paper (単色)",
+  "type": "light",
+  "radius": 10,
+  "color": {
+    "paper": "#F5F3ED",
+    "paper2": "#EDEBE3",
+    "ink": "#24231F",
+    "inkDim": "#6C6A63",
+    "inkFaint": "#A9A69D",
+    "accent": "#6F6B79",
+    "accent2": "#8A8794",
+    "gold": "#7A7568",
+    "stem": "#6E7A6E",
+    "edge": "rgba(40,36,30,0.14)",
+    "ok": "#6E7A6E",
+    "warn": "#86775A",
+    "err": "#9A6A6A",
+    "markBg": "rgba(111,107,121,0.16)",
+    "markFg": "#3A3745",
+    "markCur": "#6F6B79",
+    "markCurFg": "#FFFFFF"
+  },
+  "acrylic": { "tint": "rgba(245,243,237,0.92)", "blur": 8, "noise": 0.02 },
+  "background": { "mode": "solid", "solid": "#F4F2EC" },
+  "illustration": 0,
+  "watercolor": []
+}

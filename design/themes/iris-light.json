@@ -1,0 +1,38 @@
+{
+  "name": "Iris Light",
+  "type": "light",
+  "radius": 12,
+  "font": {
+    "mono": "\"Berkeley Mono\",\"JetBrains Mono\",\"SFMono-Regular\",\"Menlo\",\"Consolas\",monospace",
+    "ui": "\"Inter\",\"Segoe UI\",\"Hiragino Kaku Gothic ProN\",\"Noto Sans JP\",system-ui,sans-serif"
+  },
+  "color": {
+    "paper": "#FBF8F1",
+    "paper2": "#F1E9DA",
+    "ink": "#2A2140",
+    "inkDim": "#6E6383",
+    "inkFaint": "#A99DBC",
+    "accent": "#7A5CC0",
+    "accent2": "#B98BD6",
+    "gold": "#C79A2E",
+    "stem": "#4E9C77",
+    "edge": "rgba(90,70,140,0.16)",
+    "ok": "#4E8C4A",
+    "warn": "#B5771D",
+    "err": "#C0506A",
+    "markBg": "rgba(199,154,46,0.20)",
+    "markFg": "#6B5510",
+    "markCur": "#E8B84B",
+    "markCurFg": "#2A2205"
+  },
+  "acrylic": { "tint": "rgba(255,253,248,0.66)", "blur": 30, "noise": 0.05 },
+  "background": { "mode": "watercolor", "solid": "#F1E9DA" },
+  "illustration": 0.4,
+  "watercolor": [
+    { "x": "12%", "y": "78%", "r": "46vh", "color": "rgba(122,92,192,0.30)" },
+    { "x": "26%", "y": "30%", "r": "40vh", "color": "rgba(185,139,214,0.24)" },
+    { "x": "72%", "y": "16%", "r": "42vh", "color": "rgba(169,157,220,0.20)" },
+    { "x": "88%", "y": "82%", "r": "36vh", "color": "rgba(231,197,107,0.18)" },
+    { "x": "20%", "y": "60%", "r": "22vh", "color": "rgba(78,156,119,0.16)" }
+  ]
+}

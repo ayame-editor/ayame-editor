@@ -1,0 +1,483 @@
+<!doctype html>
+<!--
+  Ayame — Iris Light (GUI).
+  A light-only design: iris watercolor beauty + Fluent-style acrylic translucency,
+  asymmetric composition. Themes are DEFINED IN JSON (see design/themes/*.json),
+  and you can edit / apply / save custom themes right in the theme flyout — custom
+  themes persist in localStorage and can be exported as JSON.
+
+  Query params for previews:  ?theme=iris-mist   ?panel=0 (hide theme flyout)
+  Self-contained: presets are embedded so it works fully offline.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayame — Iris Light</title>
+    <style>
+      :root {
+        /* Defaults; the theme engine overwrites these from JSON on load. */
+        --mono:"Berkeley Mono","JetBrains Mono","SFMono-Regular","Menlo","Consolas",monospace;
+        --ui:"Inter","Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+        --font-size:13px; --line-height:22px;
+
+        --paper:#FBF8F1; --paper2:#F1E9DA;
+        --ink:#2A2140; --ink-dim:#6E6383; --ink-faint:#A99DBC;
+        --accent:#7A5CC0; --accent2:#B98BD6; --gold:#C79A2E; --stem:#4E9C77;
+        --edge:rgba(90,70,140,.16);
+        --ok:#4E8C4A; --warn:#B5771D; --err:#C0506A;
+        --mark-bg:rgba(199,154,46,.20); --mark-fg:#6B5510;
+        --mark-cur:#E8B84B; --mark-cur-fg:#2A2205;
+        --acrylic-tint:rgba(255,253,248,.66); --acrylic-blur:30px; --acrylic-noise:.05;
+        --illus:.34; --radius:12px;
+      }
+      * { box-sizing:border-box; }
+      html,body { margin:0; height:100%; overflow:hidden; font-family:var(--ui); color:var(--ink);
+        -webkit-font-smoothing:antialiased; }
+      body { display:grid; place-items:center; background:var(--paper2); }
+
+      /* ambient iris watercolor "desk" — painted by the theme engine */
+      .desk { position:fixed; inset:0; z-index:0; }
+      .desk::after { content:""; position:absolute; inset:0; opacity:.5; mix-blend-mode:soft-light;
+        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+      /* Fluent-style acrylic */
+      .acrylic { position:relative; background:var(--acrylic-tint);
+        backdrop-filter:blur(var(--acrylic-blur)) saturate(1.35);
+        -webkit-backdrop-filter:blur(var(--acrylic-blur)) saturate(1.35);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 0 0 1px var(--edge); }
+      .acrylic::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:var(--acrylic-noise);
+        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+      /* the window — asymmetric: heavy painted rail on the left, editor on the right */
+      .window { position:relative; z-index:1; width:min(1260px,95vw); height:min(780px,92vh);
+        display:grid; grid-template-rows:auto 1fr auto; border-radius:calc(var(--radius) + 6px);
+        overflow:hidden; background:var(--paper);
+        border:1px solid var(--edge);
+        box-shadow:0 50px 130px -40px rgba(60,40,90,.45), 0 2px 0 rgba(255,255,255,.5) inset; }
+
+      /* titlebar — brand pulled to the left, controls to the right (asymmetric) */
+      .titlebar { display:flex; align-items:center; gap:12px; height:46px; padding:0 14px;
+        border-bottom:1px solid var(--edge); }
+      .lights { display:flex; gap:8px; } .lights i{ width:12px;height:12px;border-radius:50%;display:block; }
+      .lights .r{background:#ED6A5E;} .lights .y{background:#F4BF4F;} .lights .g{background:#61C554;}
+      .brand { display:flex; align-items:center; gap:9px; margin-left:8px; font-weight:700; font-size:14px; }
+      .brand .bm { width:22px; height:22px; border-radius:7px; display:grid; place-items:center;
+        background:linear-gradient(155deg,var(--accent),var(--gold)); box-shadow:0 4px 14px -4px var(--accent); }
+      .brand .bm svg{ width:14px; height:14px; }
+      .brand .jp { color:var(--ink-dim); font-weight:500; font-size:12px; }
+      .titlebar .grow{ flex:1; }
+      .filetab { display:flex; align-items:center; gap:8px; padding:5px 12px; border-radius:10px;
+        background:color-mix(in srgb, var(--accent) 10%, transparent); border:1px solid var(--edge);
+        font-family:var(--mono); font-size:12px; color:var(--ink); }
+      .filetab .dot{ width:7px;height:7px;border-radius:50%;background:var(--gold); }
+      .kbd { font-family:var(--mono); font-size:11px; color:var(--ink-dim); border:1px solid var(--edge);
+        border-radius:8px; padding:5px 9px; }
+
+      /* body split — asymmetric columns */
+      .body { position:relative; display:grid; grid-template-columns:288px 1fr; min-height:0; }
+
+      /* LEFT painted rail */
+      .rail { position:relative; overflow:hidden; border-right:1px solid var(--edge);
+        display:flex; flex-direction:column; }
+      .rail-head { padding:16px 18px 10px; }
+      .rail-head h2 { margin:0; font-size:13px; letter-spacing:.4px; color:var(--ink-dim); font-weight:600; }
+      .recent { padding:2px 10px; display:flex; flex-direction:column; gap:2px; }
+      .recent a { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px;
+        color:var(--ink); text-decoration:none; font-size:12.5px; }
+      .recent a .ic{ color:var(--accent); } .recent a .sz{ margin-left:auto; color:var(--ink-faint);
+        font-family:var(--mono); font-size:11px; }
+      .recent a.on { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+      .recent a:hover { background:color-mix(in srgb, var(--accent) 9%, transparent); }
+      /* Pochoir / paper-cut (切り絵) print essence — à la Matisse "Jazz":
+         flat matte cut-out shapes with organic hand-cut edges. No wood texture.
+         Recolors with the theme; muted on the Sumi base so it stays calm. */
+      .rail-head, .recent { position:relative; z-index:2; }
+      .rail-cut { position:absolute; left:0; right:0; bottom:0; height:64%; z-index:0;
+        pointer-events:none; opacity:var(--illus,.34); }
+      .rail-cut svg { width:100%; height:100%; display:block; }
+
+      /* EDITOR */
+      .main { position:relative; overflow:hidden; display:grid; grid-template-rows:auto 1fr; min-width:0; }
+      .toolbar { display:flex; align-items:center; gap:6px; height:42px; padding:0 12px;
+        border-bottom:1px solid var(--edge); }
+      .btn { height:28px; padding:0 11px; border-radius:9px; border:1px solid transparent; background:transparent;
+        color:var(--ink); font-family:var(--ui); font-size:12.5px; cursor:pointer; display:inline-flex;
+        align-items:center; gap:6px; }
+      .btn.ico{ width:30px; padding:0; justify-content:center; color:var(--ink-dim); font-size:15px; }
+      .btn:hover{ background:color-mix(in srgb, var(--accent) 10%, transparent); }
+      .sep{ width:1px; height:18px; background:var(--edge); margin:0 5px; }
+      .toolbar .grow{ flex:1; }
+      .find { display:flex; align-items:center; gap:8px; height:28px; padding:0 10px; border-radius:10px;
+        background:color-mix(in srgb, var(--accent) 7%, transparent); border:1px solid var(--edge); }
+      .find .mag{ color:var(--accent); } .find input{ background:transparent; border:0; outline:0; color:var(--ink);
+        font-family:var(--mono); font-size:12.5px; width:110px; }
+      .find .cnt{ color:var(--ink-dim); font-family:var(--mono); font-size:11.5px; }
+      .tg{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); border:1px solid var(--edge);
+        border-radius:7px; padding:3px 7px; cursor:pointer; }
+      .tg.on{ background:var(--accent); color:#fff; border-color:transparent; }
+
+      .stage { position:relative; overflow:hidden; }
+      .editor { position:absolute; inset:0 30px 0 0; overflow:hidden;
+        font-family:var(--mono); font-size:var(--font-size); line-height:var(--line-height); }
+      .row { height:var(--line-height); white-space:pre; display:flex; position:relative; }
+      .row.active { background:color-mix(in srgb, var(--accent) 13%, transparent); }
+      .row.active::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+        background:var(--accent); box-shadow:inset 4px 0 20px -6px var(--accent); }
+      .ln { min-width:9ch; padding:0 16px 0 12px; margin-right:14px; text-align:right; color:var(--ink-faint);
+        border-right:1px solid var(--edge); font-variant-numeric:tabular-nums; }
+      .row.active .ln{ color:var(--ink); }
+      .dim{color:var(--ink-dim);} .ok{color:var(--ok);} .warn{color:var(--warn);} .err{color:var(--err);}
+      mark{ background:var(--mark-bg); color:var(--mark-fg); border-radius:3px; padding:0 2px; }
+      mark.cur{ background:var(--mark-cur); color:var(--mark-cur-fg); }
+      .minimap{ position:absolute; top:0; right:0; bottom:0; width:30px; border-left:1px solid var(--edge);
+        background:color-mix(in srgb, var(--accent) 5%, transparent); }
+      .minimap .thumb{ position:absolute; left:3px; right:3px; height:80px; top:150px; border-radius:6px;
+        background:color-mix(in srgb, var(--accent) 22%, transparent); }
+      .minimap .tick{ position:absolute; right:4px; width:10px; height:2px; border-radius:1px; background:var(--gold); }
+
+      /* statusbar */
+      .statusbar{ display:flex; align-items:center; height:28px; padding:0 10px; border-top:1px solid var(--edge);
+        color:var(--ink-dim); font-size:11.5px; font-variant-numeric:tabular-nums; }
+      .statusbar .seg{ padding:0 10px; } .statusbar .grow{ flex:1; }
+      .statusbar .dot{ width:7px;height:7px;border-radius:50%;background:var(--stem);display:inline-block;
+        margin-right:7px;vertical-align:middle; }
+      .mode{ font-family:var(--mono); font-weight:700; font-size:10.5px; letter-spacing:.9px; padding:2px 10px;
+        border-radius:7px; margin-left:6px; background:linear-gradient(135deg,var(--accent),var(--gold)); color:#fff; }
+
+      /* THEME flyout — asymmetric, offset lower-right, floating over the editor */
+      .theme { position:absolute; right:22px; bottom:22px; width:344px; z-index:5; border-radius:16px;
+        overflow:hidden; box-shadow:0 30px 70px -24px rgba(60,40,90,.5); }
+      .theme h3 { margin:0; font-size:13px; display:flex; align-items:center; gap:8px; }
+      .theme .th-head { display:flex; align-items:center; gap:10px; padding:13px 15px; border-bottom:1px solid var(--edge); }
+      .theme .th-head .badge{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--accent);
+        border:1px solid var(--edge); border-radius:20px; padding:2px 9px; }
+      .theme .th-body { padding:12px 15px 14px; display:flex; flex-direction:column; gap:10px; }
+      .th-row { display:flex; align-items:center; gap:8px; }
+      .th-row label{ font-size:11.5px; color:var(--ink-dim); min-width:44px; }
+      select, .th textarea, .theme select { font-family:var(--ui); }
+      .theme select { flex:1; height:30px; border-radius:9px; border:1px solid var(--edge); padding:0 8px;
+        background:color-mix(in srgb, var(--paper) 70%, transparent); color:var(--ink); font-size:12.5px; outline:none; }
+      .swatches{ display:flex; gap:6px; }
+      .swatches i{ width:16px; height:16px; border-radius:5px; box-shadow:inset 0 0 0 1px var(--edge); }
+      .theme textarea { width:100%; height:150px; resize:none; border-radius:10px; border:1px solid var(--edge);
+        background:color-mix(in srgb, var(--paper) 75%, transparent); color:var(--ink);
+        font-family:var(--mono); font-size:11px; line-height:1.5; padding:9px 11px; outline:none; }
+      .theme textarea:focus{ border-color:var(--accent); }
+      .th-actions{ display:flex; gap:8px; }
+      .th-actions button{ flex:1; height:32px; border-radius:9px; border:1px solid var(--edge); cursor:pointer;
+        font-family:var(--ui); font-size:12px; color:var(--ink); background:color-mix(in srgb, var(--paper) 60%, transparent); }
+      .th-actions button.primary{ background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; border-color:transparent; }
+      .th-actions button:hover{ filter:brightness(1.04); }
+      .th-note{ font-size:10.5px; color:var(--ink-faint); }
+      .th-msg{ font-size:11px; color:var(--stem); min-height:14px; }
+      .th-msg.err{ color:var(--err); }
+
+      /* collapsible submenu + reopen fab */
+      .theme.tucked { display:none; }
+      .th-x { margin-left:6px; width:24px; height:24px; border:1px solid var(--edge); border-radius:7px;
+        background:transparent; color:var(--ink-dim); cursor:pointer; font-size:12px; line-height:1;
+        display:inline-flex; align-items:center; justify-content:center; }
+      .th-x:hover { background:color-mix(in srgb, var(--accent) 10%, transparent); color:var(--ink); }
+      .theme-fab { position:absolute; right:22px; bottom:22px; z-index:5; display:inline-flex; align-items:center;
+        gap:8px; height:36px; padding:0 15px; border-radius:20px; cursor:pointer; color:var(--ink);
+        font-family:var(--ui); font-size:12.5px; box-shadow:0 14px 34px -14px rgba(60,40,90,.5); }
+      .theme-fab .fab-sw{ width:12px; height:12px; border-radius:4px;
+        background:linear-gradient(135deg,var(--accent),var(--gold)); }
+      .theme-fab.tucked { display:none; }
+
+      /* segmented toggle (background mode) + range (illustration) */
+      .seg { display:inline-flex; border:1px solid var(--edge); border-radius:9px; overflow:hidden; }
+      .seg button { border:0; background:transparent; color:var(--ink-dim); font-family:var(--ui);
+        font-size:11.5px; padding:5px 12px; cursor:pointer; }
+      .seg button.on { background:var(--accent); color:#fff; }
+      .th-row input[type=range]{ flex:1; accent-color:var(--accent); }
+      .th-val{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); min-width:34px; text-align:right; }
+    </style>
+  </head>
+  <body>
+    <div class="desk"></div>
+
+    <div class="window">
+      <!-- titlebar -->
+      <div class="titlebar acrylic">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="brand">
+          <span class="bm"><svg viewBox="0 0 24 24"><path d="M12 2c1.6 3 1.6 6 0 9-1.6-3-1.6-6 0-9Z" fill="#fff" opacity=".95"/><path d="M12 11c3 .4 5 2.2 6 5-3 .2-5-1-6-3-1 2-3 3.2-6 3 1-2.8 3-4.6 6-5Z" fill="#fff" opacity=".92"/></svg></span>
+          Ayame
+        </div>
+        <div class="grow"></div>
+        <div class="filetab"><span class="dot"></span>pd240_raw_2026-06-25.tsv</div>
+        <span class="kbd">⌘K</span>
+      </div>
+
+      <!-- body: painted rail + editor -->
+      <div class="body">
+        <!-- left rail -->
+        <aside class="rail acrylic">
+          <div class="rail-head"><h2>最近開いたファイル</h2></div>
+          <nav class="recent">
+            <a class="on"><span class="ic">▤</span>pd240_raw_2026-06-25.tsv<span class="sz">1.36 GiB</span></a>
+            <a><span class="ic">▤</span>access_2026-06-24.log<span class="sz">812 MiB</span></a>
+            <a><span class="ic">▤</span>ledger_q2.csv<span class="sz">240 MiB</span></a>
+            <a><span class="ic">▤</span>migrate_dump.jsonl<span class="sz">3.1 GiB</span></a>
+          </nav>
+          <!-- pochoir / paper-cut shapes (Matisse "Jazz" essence): flat, organic,
+               hand-cut. Fronds are round-capped strokes; leaves are filled forms. -->
+          <div class="rail-cut" id="rail-cut">
+            <svg viewBox="0 0 300 460" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+              <!-- violet frond -->
+              <path d="M84 470 C 52 404 78 360 112 330 C 142 304 124 262 94 242"
+                    fill="none" stroke="var(--accent)" stroke-width="30"
+                    stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+              <!-- green frond -->
+              <path d="M172 470 C 158 416 190 390 174 348 C 162 318 186 296 172 268"
+                    fill="none" stroke="var(--stem)" stroke-width="20"
+                    stroke-linecap="round" stroke-linejoin="round" opacity=".82"/>
+              <!-- small 4-point star + one dot (Jazz motif) -->
+              <path d="M214 300 C 216 314 220 318 234 320 C 220 322 216 326 214 340
+                       C 212 326 208 322 194 320 C 208 318 212 314 214 300 Z"
+                    fill="var(--gold)" opacity=".85"/>
+              <circle cx="126" cy="286" r="6" fill="var(--gold)" opacity=".8"/>
+            </svg>
+          </div>
+        </aside>
+
+        <!-- editor -->
+        <section class="main">
+          <div class="toolbar">
+            <button class="btn">開く</button><button class="btn">保存</button>
+            <div class="sep"></div>
+            <button class="btn ico">↶</button><button class="btn ico">↷</button>
+            <button class="btn ico">＋</button><button class="btn ico">−</button>
+            <div class="sep"></div>
+            <button class="btn">ソート</button><button class="btn">置換</button>
+            <div class="grow"></div>
+            <span class="tg">Aa</span><span class="tg on">.*</span>
+            <div class="find"><span class="mag">⌕</span><input value="tokyo" /><span class="cnt">6 / 27</span></div>
+          </div>
+          <div class="stage">
+            <div class="editor">
+              <div class="row"><span class="ln">1861740</span><span><span class="dim">20260624 194031</span>  AM046401  0006  JPY  <span class="dim">   980,400</span>  <span class="ok">OK </span>  osaka-west-11</span></div>
+              <div class="row"><span class="ln">1861741</span><span><span class="dim">20260624 194033</span>  BA002190  0007  JPY  <span class="dim"> 1,250,000</span>  <span class="ok">OK </span>  <mark>tokyo</mark>-east-03</span></div>
+              <div class="row"><span class="ln">1861742</span><span><span class="dim">20260624 194034</span>  BA001828  0007  USD  <span class="dim">    12,900</span>  <span class="warn">WARN</span>  nagoya-02</span></div>
+              <div class="row"><span class="ln">1861743</span><span><span class="dim">20260624 194036</span>  CX773301  0011  JPY  <span class="dim"> 4,120,500</span>  <span class="ok">OK </span>  <mark>tokyo</mark>-core-07</span></div>
+              <div class="row"><span class="ln">1861744</span><span><span class="dim">20260624 194037</span>  DM120044  0002  EUR  <span class="dim">     3,300</span>  <span class="ok">OK </span>  sapporo-05</span></div>
+              <div class="row"><span class="ln">1861745</span><span><span class="dim">20260624 194039</span>  BA001914  0007  JPY  <span class="dim">   750,000</span>  <span class="err">ERR </span>  <mark>tokyo</mark>-edge-19</span></div>
+              <div class="row"><span class="ln">1861746</span><span><span class="dim">20260624 194040</span>  AM046422  0006  JPY  <span class="dim">   620,000</span>  <span class="ok">OK </span>  fukuoka-01</span></div>
+              <div class="row"><span class="ln">1861747</span><span><span class="dim">20260624 194041</span>  BA002190  0007  JPY  <span class="dim"> 1,250,000</span>  <span class="ok">OK </span>  osaka-west-11</span></div>
+              <div class="row"><span class="ln">1861748</span><span><span class="dim">20260624 194042</span>  BA001828  0007  USD  <span class="dim">    12,900</span>  <span class="ok">OK </span>  <mark>tokyo</mark>-east-03</span></div>
+              <div class="row active"><span class="ln">1861749</span><span><span class="dim">20260624 194044</span>  BA001914  0007  JPY  <span class="dim">   750,000</span>  <span class="ok">OK </span>  <mark class="cur">tokyo</mark>-core-07</span></div>
+              <div class="row"><span class="ln">1861750</span><span><span class="dim">20260624 194045</span>  CX773310  0011  JPY  <span class="dim"> 4,120,500</span>  <span class="ok">OK </span>  nagoya-02</span></div>
+              <div class="row"><span class="ln">1861751</span><span><span class="dim">20260624 194046</span>  DM120051  0002  EUR  <span class="dim">     3,300</span>  <span class="warn">WARN</span>  sapporo-05</span></div>
+              <div class="row"><span class="ln">1861752</span><span><span class="dim">20260624 194048</span>  AM046431  0006  JPY  <span class="dim">   980,400</span>  <span class="ok">OK </span>  <mark>tokyo</mark>-edge-19</span></div>
+              <div class="row"><span class="ln">1861753</span><span><span class="dim">20260624 194049</span>  BA002204  0007  JPY  <span class="dim"> 1,250,000</span>  <span class="ok">OK </span>  fukuoka-01</span></div>
+              <div class="row"><span class="ln">1861754</span><span><span class="dim">20260624 194051</span>  BA001841  0007  USD  <span class="dim">    12,900</span>  <span class="ok">OK </span>  osaka-west-11</span></div>
+              <div class="row"><span class="ln">1861755</span><span><span class="dim">20260624 194052</span>  CX773322  0011  JPY  <span class="dim"> 4,120,500</span>  <span class="err">ERR </span>  <mark>tokyo</mark>-east-03</span></div>
+              <div class="row"><span class="ln">1861756</span><span><span class="dim">20260624 194054</span>  DM120066  0002  EUR  <span class="dim">     3,300</span>  <span class="ok">OK </span>  nagoya-02</span></div>
+              <div class="row"><span class="ln">1861757</span><span><span class="dim">20260624 194055</span>  AM046448  0006  JPY  <span class="dim">   620,000</span>  <span class="ok">OK </span>  sapporo-05</span></div>
+              <div class="row"><span class="ln">1861758</span><span><span class="dim">20260624 194057</span>  BA002218  0007  JPY  <span class="dim"> 1,250,000</span>  <span class="ok">OK </span>  <mark>tokyo</mark>-core-07</span></div>
+            </div>
+            <div class="minimap">
+              <div class="tick" style="top:40px"></div><div class="tick" style="top:92px"></div>
+              <div class="tick" style="top:150px"></div><div class="tick" style="top:214px"></div>
+              <div class="tick" style="top:300px"></div><div class="tick" style="top:372px"></div>
+              <div class="thumb"></div>
+            </div>
+
+            <!-- theme flyout (asymmetric, floats lower-right; collapsible) -->
+            <div class="theme acrylic" id="theme">
+              <div class="th-head">
+                <h3>テーマ</h3>
+                <div class="swatches" id="swatches"></div>
+                <span class="badge">JSON</span>
+                <button class="th-x" id="th-close" title="しまう">✕</button>
+              </div>
+              <div class="th-body">
+                <div class="th-row">
+                  <label>プリセット</label>
+                  <select id="preset"></select>
+                </div>
+                <div class="th-row">
+                  <label>背景</label>
+                  <div class="seg" id="bg-seg">
+                    <button data-mode="watercolor">水彩</button>
+                    <button data-mode="solid">単色</button>
+                  </div>
+                  <span class="th-note" style="margin-left:auto">単色＝全単色配慮</span>
+                </div>
+                <div class="th-row">
+                  <label>イラスト</label>
+                  <input type="range" id="illus" min="0" max="100" step="5" />
+                  <span class="th-val" id="illus-val">34%</span>
+                </div>
+                <textarea id="json" spellcheck="false"></textarea>
+                <div class="th-actions">
+                  <button class="primary" id="apply">適用</button>
+                  <button id="save">カスタム保存</button>
+                  <button id="export">書き出し</button>
+                </div>
+                <div class="th-msg" id="msg">背景（水彩／単色）とイラスト量も変えられます。カスタムは localStorage に保存。</div>
+                <div class="th-note">design/themes/*.json と同じ形式。保存したテーマは次回も残ります。</div>
+              </div>
+            </div>
+            <!-- reopen tab when the panel is tucked away -->
+            <button class="theme-fab tucked acrylic" id="theme-fab" title="テーマを開く">
+              <span class="fab-sw"></span>テーマ
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- statusbar -->
+      <div class="statusbar acrylic">
+        <span class="seg"><span class="dot"></span>1,861,749 : 34</span>
+        <span class="seg">4,790,334 行</span>
+        <span class="seg">1.36 GiB</span>
+        <span class="seg">UTF-8 · LF · TSV</span>
+        <span class="grow"></span>
+        <span class="seg" id="theme-name">Iris Light</span>
+        <span class="mode">NORMAL</span>
+      </div>
+    </div>
+
+    <script type="module">
+      // ---- embedded presets (mirror design/themes/*.json; keeps this file offline) ----
+      // `background` (mode: watercolor|solid) and `illustration` (0..1) are user-changeable.
+      const PRESETS = {
+        "iris-light": {"name":"Iris Light","type":"light","radius":12,
+          "color":{"paper":"#FBF8F1","paper2":"#F1E9DA","ink":"#2A2140","inkDim":"#6E6383","inkFaint":"#A99DBC","accent":"#7A5CC0","accent2":"#B98BD6","gold":"#C79A2E","stem":"#4E9C77","edge":"rgba(90,70,140,0.16)","ok":"#4E8C4A","warn":"#B5771D","err":"#C0506A","markBg":"rgba(199,154,46,0.20)","markFg":"#6B5510","markCur":"#E8B84B","markCurFg":"#2A2205"},
+          "acrylic":{"tint":"rgba(255,253,248,0.66)","blur":30,"noise":0.05},
+          "background":{"mode":"watercolor","solid":"#F1E9DA"}, "illustration":0.4,
+          "watercolor":[{"x":"12%","y":"78%","r":"46vh","color":"rgba(122,92,192,0.30)"},{"x":"26%","y":"30%","r":"40vh","color":"rgba(185,139,214,0.24)"},{"x":"72%","y":"16%","r":"42vh","color":"rgba(169,157,220,0.20)"},{"x":"88%","y":"82%","r":"36vh","color":"rgba(231,197,107,0.18)"},{"x":"20%","y":"60%","r":"22vh","color":"rgba(78,156,119,0.16)"}]},
+        "iris-mist": {"name":"Iris Mist","type":"light","radius":14,
+          "color":{"paper":"#F7F9FC","paper2":"#EAF0F7","ink":"#26314A","inkDim":"#5E6E8A","inkFaint":"#9DAAC0","accent":"#5B79C9","accent2":"#8FB6E0","gold":"#C9A24E","stem":"#4FA69E","edge":"rgba(70,100,150,0.16)","ok":"#3E8F86","warn":"#B08A2A","err":"#C05C74","markBg":"rgba(91,121,201,0.16)","markFg":"#2C3E6B","markCur":"#7EC7C0","markCurFg":"#0F2A28"},
+          "acrylic":{"tint":"rgba(250,252,255,0.60)","blur":34,"noise":0.04},
+          "background":{"mode":"watercolor","solid":"#EAF0F7"}, "illustration":0.4,
+          "watercolor":[{"x":"16%","y":"74%","r":"44vh","color":"rgba(91,121,201,0.24)"},{"x":"30%","y":"26%","r":"40vh","color":"rgba(143,182,224,0.22)"},{"x":"78%","y":"20%","r":"40vh","color":"rgba(126,199,192,0.18)"},{"x":"86%","y":"80%","r":"34vh","color":"rgba(201,162,78,0.12)"}]},
+        "iris-dawn": {"name":"Iris Dawn","type":"light","radius":12,
+          "color":{"paper":"#FDF6EE","paper2":"#F7E7DC","ink":"#3A2438","inkDim":"#7A5A6E","inkFaint":"#B79AA6","accent":"#A65CB0","accent2":"#E39AB0","gold":"#E0A94E","stem":"#86B18A","edge":"rgba(140,80,110,0.16)","ok":"#5A9A5A","warn":"#C2872C","err":"#D96A86","markBg":"rgba(224,169,78,0.22)","markFg":"#7A4A16","markCur":"#F0B85A","markCurFg":"#3A2205"},
+          "acrylic":{"tint":"rgba(255,250,244,0.64)","blur":28,"noise":0.05},
+          "background":{"mode":"watercolor","solid":"#F7E7DC"}, "illustration":0.42,
+          "watercolor":[{"x":"14%","y":"80%","r":"46vh","color":"rgba(166,92,176,0.26)"},{"x":"34%","y":"34%","r":"40vh","color":"rgba(227,154,176,0.24)"},{"x":"80%","y":"18%","r":"44vh","color":"rgba(224,169,78,0.22)"},{"x":"70%","y":"88%","r":"34vh","color":"rgba(166,92,176,0.16)"},{"x":"22%","y":"58%","r":"22vh","color":"rgba(134,177,138,0.16)"}]},
+        "sumi-light": {"name":"Sumi Light","type":"light","radius":10,
+          "color":{"paper":"#FAFAF8","paper2":"#F0F0EC","ink":"#222024","inkDim":"#63616A","inkFaint":"#A7A4AE","accent":"#7A5CC0","accent2":"#9C86C8","gold":"#B7912F","stem":"#5E7A66","edge":"rgba(40,36,48,0.12)","ok":"#5A7A5A","warn":"#9C7A2A","err":"#B24A5E","markBg":"rgba(122,92,192,0.14)","markFg":"#3E2E63","markCur":"#7A5CC0","markCurFg":"#FFFFFF"},
+          "acrylic":{"tint":"rgba(252,252,250,0.70)","blur":22,"noise":0.03},
+          "background":{"mode":"watercolor","solid":"#F0F0EC"}, "illustration":0.32,
+          "watercolor":[{"x":"16%","y":"76%","r":"40vh","color":"rgba(122,92,192,0.14)"},{"x":"82%","y":"22%","r":"34vh","color":"rgba(40,36,48,0.05)"}]},
+        "mono-paper": {"name":"Mono Paper (単色)","type":"light","radius":10,
+          "color":{"paper":"#F5F3ED","paper2":"#EDEBE3","ink":"#24231F","inkDim":"#6C6A63","inkFaint":"#A9A69D","accent":"#6F6B79","accent2":"#8A8794","gold":"#7A7568","stem":"#6E7A6E","edge":"rgba(40,36,30,0.14)","ok":"#6E7A6E","warn":"#86775A","err":"#9A6A6A","markBg":"rgba(111,107,121,0.16)","markFg":"#3A3745","markCur":"#6F6B79","markCurFg":"#FFFFFF"},
+          "acrylic":{"tint":"rgba(245,243,237,0.92)","blur":8,"noise":0.02},
+          "background":{"mode":"solid","solid":"#F4F2EC"}, "illustration":0,
+          "watercolor":[]}
+      };
+      const CUSTOM_KEY = "ayame.theme.customs.v1";
+      const $ = (id) => document.getElementById(id);
+      const clone = (o) => JSON.parse(JSON.stringify(o));
+
+      const loadCustoms = () => { try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || "{}"); } catch { return {}; } };
+      const saveCustoms = (o) => localStorage.setItem(CUSTOM_KEY, JSON.stringify(o));
+
+      function buildDesk(t) {
+        const bg = t.background || { mode:"watercolor" };
+        if (bg.mode === "solid") return bg.solid || t.color.paper2 || t.color.paper;   // 単色: flat single color
+        const layers = (t.watercolor || []).map(b =>
+          `radial-gradient(${b.r} ${b.r} at ${b.x} ${b.y}, ${b.color}, transparent 62%)`);
+        layers.push(`linear-gradient(155deg, ${t.color.paper2 || t.color.paper}, ${t.color.paper})`);
+        return layers.join(", ");
+      }
+      function applyTheme(t) {
+        const r = document.documentElement.style, c = t.color;
+        const set = (k,v) => v != null && r.setProperty(k, v);
+        set("--paper",c.paper); set("--paper2",c.paper2); set("--ink",c.ink); set("--ink-dim",c.inkDim);
+        set("--ink-faint",c.inkFaint); set("--accent",c.accent); set("--accent2",c.accent2||c.accent);
+        set("--gold",c.gold); set("--stem",c.stem); set("--edge",c.edge);
+        set("--ok",c.ok); set("--warn",c.warn); set("--err",c.err);
+        set("--mark-bg",c.markBg); set("--mark-fg",c.markFg); set("--mark-cur",c.markCur); set("--mark-cur-fg",c.markCurFg);
+        if (t.acrylic) { set("--acrylic-tint",t.acrylic.tint); set("--acrylic-blur",(t.acrylic.blur??30)+"px");
+          set("--acrylic-noise",String(t.acrylic.noise??0.05)); }
+        if (t.font) { set("--mono",t.font.mono); set("--ui",t.font.ui); }
+        set("--illus", String(t.illustration ?? 0.34));
+        set("--radius",(t.radius||12)+"px");
+        document.querySelector(".desk").style.background = buildDesk(t);
+        $("theme-name").textContent = t.name || "Custom";
+        const sw = $("swatches"); if (sw) sw.innerHTML =
+          [c.accent,c.accent2,c.gold,c.stem].map(x=>`<i style="background:${x}"></i>`).join("");
+      }
+
+      // one path so the quick controls and the JSON stay in sync
+      let current = null;
+      function apply(t){ current = t; applyTheme(t); syncControls(t); showJSON(t); }
+      function syncControls(t){
+        const mode = (t.background && t.background.mode) || "watercolor";
+        document.querySelectorAll("#bg-seg button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+        const illus = Math.round((t.illustration ?? 0.34) * 100);
+        $("illus").value = illus; $("illus-val").textContent = illus + "%";
+      }
+
+      function populatePresets(selectName) {
+        const sel = $("preset"); sel.innerHTML = "";
+        const add = (v,label) => { const o=document.createElement("option"); o.value=v; o.textContent=label; sel.appendChild(o); };
+        for (const [k,v] of Object.entries(PRESETS)) add("p:"+k, v.name);
+        const customs = loadCustoms();
+        for (const name of Object.keys(customs)) add("c:"+name, "★ "+name);
+        if (selectName) sel.value = selectName;
+      }
+      function currentFromSelect() {
+        const v = $("preset").value;
+        if (v.startsWith("p:")) return PRESETS[v.slice(2)];
+        if (v.startsWith("c:")) return loadCustoms()[v.slice(2)];
+        return PRESETS["sumi-light"];
+      }
+      function showJSON(t){ $("json").value = JSON.stringify(t, null, 2); }
+      function msg(text, isErr){ const m=$("msg"); m.textContent=text; m.classList.toggle("err", !!isErr); }
+
+      // preset / JSON events
+      $("preset").addEventListener("change", () => { apply(clone(currentFromSelect())); msg("プリセットを適用しました。"); });
+      $("apply").addEventListener("click", () => {
+        try { apply(JSON.parse($("json").value)); msg("適用しました。"); }
+        catch(e){ msg("JSON エラー: " + e.message, true); }
+      });
+      $("save").addEventListener("click", () => {
+        let t; try { t = JSON.parse($("json").value); } catch(e){ return msg("JSON エラー: "+e.message, true); }
+        if (!t.name) return msg("name フィールドが必要です。", true);
+        const customs = loadCustoms(); customs[t.name] = t; saveCustoms(customs);
+        populatePresets("c:"+t.name); apply(t); msg(`「${t.name}」を保存しました（localStorage）。`);
+      });
+      $("export").addEventListener("click", () => {
+        let t; try { t = JSON.parse($("json").value); } catch(e){ return msg("JSON エラー: "+e.message, true); }
+        const blob = new Blob([JSON.stringify(t,null,2)], {type:"application/json"});
+        const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+        a.download = (t.name||"theme").toLowerCase().replace(/\s+/g,"-") + ".json"; a.click();
+        msg(`${a.download} を書き出しました。`);
+      });
+
+      // background mode (水彩 / 単色) — user-changeable, affects submenu too
+      document.querySelectorAll("#bg-seg button").forEach(b => b.addEventListener("click", () => {
+        if (!current) return;
+        const mode = b.dataset.mode;
+        current.background = Object.assign({ solid: current.color.paper2 || current.color.paper }, current.background, { mode });
+        apply(current);
+        msg(mode === "solid" ? "背景を単色に（全単色配慮）。" : "背景を水彩に。");
+      }));
+      // illustration amount
+      $("illus").addEventListener("input", () => {
+        if (!current) return;
+        current.illustration = Number($("illus").value) / 100;
+        apply(current);
+      });
+
+      // collapse / reopen the submenu
+      $("th-close").addEventListener("click", () => { $("theme").classList.add("tucked"); $("theme-fab").classList.remove("tucked"); });
+      $("theme-fab").addEventListener("click", () => { $("theme-fab").classList.add("tucked"); $("theme").classList.remove("tucked"); });
+
+      // init (supports ?theme= and ?panel=0 → start tucked)
+      const params = new URLSearchParams(location.search);
+      const want = params.get("theme");
+      const startKey = (want && PRESETS[want]) ? want : "sumi-light";
+      populatePresets("p:"+startKey);
+      apply(clone(PRESETS[startKey]));
+      if (params.get("panel") === "0") { $("theme").classList.add("tucked"); $("theme-fab").classList.remove("tucked"); }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ayame theme",
+  "description": "A light-first theme for the Ayame editor. Colors drive CSS custom properties; `acrylic` controls the Fluent-style translucency; `watercolor` paints the ambient iris wash behind the window.",
+  "type": "object",
+  "required": ["name", "type", "color", "acrylic", "watercolor"],
+  "properties": {
+    "name": { "type": "string", "description": "Display name shown in the theme picker." },
+    "type": { "type": "string", "enum": ["light"], "description": "Only light themes for now." },
+    "radius": { "type": "number", "default": 12, "description": "Corner radius in px for panels/cards." },
+    "font": {
+      "type": "object",
+      "properties": {
+        "mono": { "type": "string" },
+        "ui": { "type": "string" }
+      }
+    },
+    "color": {
+      "type": "object",
+      "required": ["paper", "ink", "accent"],
+      "properties": {
+        "paper":     { "type": "string", "description": "Editor/content background." },
+        "paper2":    { "type": "string", "description": "Second paper tone for the ambient gradient base." },
+        "ink":       { "type": "string", "description": "Primary text." },
+        "inkDim":    { "type": "string", "description": "Secondary text." },
+        "inkFaint":  { "type": "string", "description": "Tertiary text / gutter." },
+        "accent":    { "type": "string", "description": "Iris — primary accent." },
+        "accent2":   { "type": "string", "description": "Second iris tone (orchid/periwinkle) for gradients." },
+        "gold":      { "type": "string", "description": "Petal-center gold." },
+        "stem":      { "type": "string", "description": "Viridian stem / success." },
+        "edge":      { "type": "string", "description": "Hairline border (rgba)." },
+        "ok":        { "type": "string" },
+        "warn":      { "type": "string" },
+        "err":       { "type": "string" },
+        "markBg":    { "type": "string", "description": "Search highlight background (rgba)." },
+        "markFg":    { "type": "string" },
+        "markCur":   { "type": "string", "description": "Current match background." },
+        "markCurFg": { "type": "string" }
+      }
+    },
+    "acrylic": {
+      "type": "object",
+      "description": "Fluent-style translucency for chrome panels.",
+      "required": ["tint", "blur"],
+      "properties": {
+        "tint": { "type": "string", "description": "Panel fill, e.g. rgba(255,253,248,0.66)." },
+        "blur": { "type": "number", "description": "backdrop-filter blur radius in px." },
+        "noise": { "type": "number", "default": 0.05, "description": "Acrylic grain opacity 0..1." }
+      }
+    },
+    "background": {
+      "type": "object",
+      "description": "User-changeable window/desk background. Applies behind the whole window incl. the submenu.",
+      "properties": {
+        "mode": { "type": "string", "enum": ["watercolor", "solid"], "default": "watercolor",
+          "description": "watercolor = iris blooms; solid = one flat color (単色, for users who want everything monochrome)." },
+        "solid": { "type": "string", "description": "Flat color used when mode = solid." }
+      }
+    },
+    "illustration": {
+      "type": "number", "minimum": 0, "maximum": 1, "default": 0.34,
+      "description": "Opacity of the left-rail paper-cut illustration. 0 hides it entirely."
+    },
+    "watercolor": {
+      "type": "array",
+      "description": "Soft iris blooms painted behind the window. Each entry is one radial wash.",
+      "items": {
+        "type": "object",
+        "required": ["x", "y", "r", "color"],
+        "properties": {
+          "x":     { "type": "string", "description": "CSS x position, e.g. \"18%\"." },
+          "y":     { "type": "string", "description": "CSS y position, e.g. \"70%\"." },
+          "r":     { "type": "string", "description": "CSS radius, e.g. \"42vh\"." },
+          "color": { "type": "string", "description": "rgba wash color." }
+        }
+      }
+    }
+  }
+}

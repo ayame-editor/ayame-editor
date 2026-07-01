@@ -1,0 +1,33 @@
+{
+  "name": "Iris Mist",
+  "type": "light",
+  "radius": 14,
+  "color": {
+    "paper": "#F7F9FC",
+    "paper2": "#EAF0F7",
+    "ink": "#26314A",
+    "inkDim": "#5E6E8A",
+    "inkFaint": "#9DAAC0",
+    "accent": "#5B79C9",
+    "accent2": "#8FB6E0",
+    "gold": "#C9A24E",
+    "stem": "#4FA69E",
+    "edge": "rgba(70,100,150,0.16)",
+    "ok": "#3E8F86",
+    "warn": "#B08A2A",
+    "err": "#C05C74",
+    "markBg": "rgba(91,121,201,0.16)",
+    "markFg": "#2C3E6B",
+    "markCur": "#7EC7C0",
+    "markCurFg": "#0F2A28"
+  },
+  "acrylic": { "tint": "rgba(250,252,255,0.60)", "blur": 34, "noise": 0.04 },
+  "background": { "mode": "watercolor", "solid": "#EAF0F7" },
+  "illustration": 0.4,
+  "watercolor": [
+    { "x": "16%", "y": "74%", "r": "44vh", "color": "rgba(91,121,201,0.24)" },
+    { "x": "30%", "y": "26%", "r": "40vh", "color": "rgba(143,182,224,0.22)" },
+    { "x": "78%", "y": "20%", "r": "40vh", "color": "rgba(126,199,192,0.18)" },
+    { "x": "86%", "y": "80%", "r": "34vh", "color": "rgba(201,162,78,0.12)" }
+  ]
+}
