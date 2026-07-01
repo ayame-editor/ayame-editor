@@ -79,6 +79,7 @@
         </aside>
 
         <main id="viewport" tabindex="0">
+          <div id="ruler"><div id="ruler-inner"></div><div id="ruler-corner"></div></div>
           <div id="content"></div>
           <div id="vscrollbar"><div id="vthumb"></div></div>
           <div id="overlay" class="overlay hidden"></div>
@@ -154,6 +155,11 @@
             <span class="set-label">文字サイズ</span>
             <input id="set-fontsize" type="range" min="11" max="22" step="1" />
             <span id="set-fontsize-val" class="set-val"></span>
+          </label>
+          <label class="set-row">
+            <span class="set-label">列ルーラー</span>
+            <input id="set-ruler" type="checkbox" />
+            <span class="set-val"></span>
           </label>
         </div>
       </div>

@@ -381,6 +381,43 @@ button.toggle.on {
   font-size: var(--font-size);
   line-height: var(--line-height);
 }
+#viewport.has-ruler #content { top: 18px; }
+
+/* ---- column ruler ---------------------------------------------------- */
+
+#ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 14px;
+  height: 18px;
+  overflow: hidden;
+  display: none;
+  background: var(--gutter-bg);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  user-select: none;
+}
+#viewport.has-ruler #ruler { display: block; }
+#ruler-inner { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
+.rtick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--border);
+  padding-left: 2px;
+  line-height: 18px;
+}
+#ruler-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--gutter-bg);
+  border-right: 1px solid var(--border);
+}
 
 .row {
   height: var(--line-height);

@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
-  | AYAME_VERSION=0.1.13 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
+  | AYAME_VERSION=0.1.14 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ローカルに clone 済みなら:
@@ -197,7 +197,7 @@ ayame serve --port 8777                     # FILE 省略。ブラウザで開�
 
 **メモ帳風の編集**：行をクリックするとその位置にカーソルが入り、そのまま入力できます。`Enter` で行を分割、`Backspace`（行頭）/`Delete`（行末）で前後の行と結合、`↑`/`↓` で上下の行へカーソル移動。行末には `[EOF]` を表示します。
 
-**設定**（ツールバーの ⚙）：テーマ（**ライト**（既定）/ ダーク / ブラック）、フォント、文字サイズを切り替えられます（ブラウザに保存）。
+**設定**（ツールバーの ⚙）：テーマ（**ライト**（既定）/ ダーク / ブラック）、フォント、文字サイズ、**列ルーラー**（本文上部の桁目盛り。既定オン）を切り替えられます（ブラウザに保存）。
 
 | 操作 | キー |
 |---|---|

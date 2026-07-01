@@ -76,7 +76,7 @@ fn app_icon() -> Option<Icon> {
 
     // Rounded-rect membership: inside [4,60), with rounded corners of radius R.
     let inside_tile = |x: f32, y: f32| -> bool {
-        if x < 4.0 || x >= 60.0 || y < 4.0 || y >= 60.0 {
+        if !(4.0..60.0).contains(&x) || !(4.0..60.0).contains(&y) {
             return false;
         }
         let cx = x.clamp(4.0 + R, 60.0 - R);
@@ -85,8 +85,9 @@ fn app_icon() -> Option<Icon> {
         dx * dx + dy * dy <= R * R
     };
     // Filled-rect helper for the bars/caret.
-    let in_rect =
-        |x: f32, y: f32, x0: f32, y0: f32, x1: f32, y1: f32| x >= x0 && x < x1 && y >= y0 && y < y1;
+    let in_rect = |x: f32, y: f32, x0: f32, y0: f32, x1: f32, y1: f32| {
+        (x0..x1).contains(&x) && (y0..y1).contains(&y)
+    };
 
     for y in 0..N {
         for x in 0..N {

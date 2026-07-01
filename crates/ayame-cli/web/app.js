@@ -20,7 +20,13 @@ const FONT_STACKS = {
   "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
   system: '"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif',
 };
-const DEFAULT_SETTINGS = { theme: "light", font: "mono", fontSize: 13, sidebar: false };
+const DEFAULT_SETTINGS = {
+  theme: "light",
+  font: "mono",
+  fontSize: 13,
+  sidebar: false,
+  ruler: true,
+};
 
 const state = {
   total: 0,
@@ -92,7 +98,44 @@ function escapeRegExp(s) {
 }
 
 function rowsVisible() {
-  return Math.max(1, Math.ceil($("viewport").clientHeight / LINE_HEIGHT));
+  const h = $("viewport").clientHeight - (state.settings && state.settings.ruler ? 18 : 0);
+  return Math.max(1, Math.ceil(h / LINE_HEIGHT));
+}
+
+// ---- column ruler ----------------------------------------------------------
+
+let _rulerKey = "";
+function buildRuler() {
+  const vp = $("viewport");
+  if (!state.settings.ruler) {
+    vp.classList.remove("has-ruler");
+    return;
+  }
+  vp.classList.add("has-ruler");
+  // Gutter width, measured from a visible row so ticks line up with the text.
+  let gutterPx = 0;
+  for (const row of pool) {
+    if (row.style.display !== "none") {
+      gutterPx = row.firstChild.getBoundingClientRect().width;
+      break;
+    }
+  }
+  const cw = charWidth();
+  const inner = $("ruler-inner");
+  const key = `${Math.round(gutterPx)}|${cw.toFixed(2)}`;
+  if (key !== _rulerKey && gutterPx > 0) {
+    _rulerKey = key;
+    $("ruler-corner").style.width = `${gutterPx}px`;
+    inner.textContent = "";
+    for (let c = 10; c <= 500; c += 10) {
+      const t = document.createElement("span");
+      t.className = "rtick";
+      t.style.left = `${gutterPx + c * cw}px`;
+      t.textContent = String(c);
+      inner.append(t);
+    }
+  }
+  inner.style.transform = `translateX(${-$("content").scrollLeft}px)`;
 }
 
 function maxFirst() {
@@ -309,6 +352,7 @@ function render() {
       fillRow(row, line, cachedLine(line), gutterWidth);
     }
   }
+  buildRuler();
   updateScrollbar();
   updateStatusPos();
 }
@@ -925,6 +969,13 @@ function initEvents() {
   $("upper-save").addEventListener("click", () => caseSave("upper"));
   $("lower-save").addEventListener("click", () => caseSave("lower"));
 
+  // Keep the column ruler aligned as the text scrolls horizontally.
+  $("content").addEventListener("scroll", () => {
+    if (state.settings.ruler) {
+      $("ruler-inner").style.transform = `translateX(${-$("content").scrollLeft}px)`;
+    }
+  });
+
   document.addEventListener("keydown", onGlobalKey);
   window.addEventListener("resize", scheduleRender);
 }
@@ -1490,6 +1541,7 @@ function applySettings(s) {
   root.style.setProperty("--line-height", `${lh}px`);
   LINE_HEIGHT = lh; // keep virtualization math in sync with the CSS
   _charW = 0; // font metrics changed → remeasure on next click
+  _rulerKey = ""; // force the ruler to rebuild against the new metrics
   scheduleRender();
 }
 
@@ -1529,6 +1581,8 @@ function initSettings() {
     $("set-fontsize-val").textContent = `${v}px`;
     updateSetting("fontSize", v);
   });
+  $("set-ruler").checked = !!state.settings.ruler;
+  $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
 
   $("open-settings").addEventListener("click", showSettings);
   $("settings-close").addEventListener("click", hideSettings);
