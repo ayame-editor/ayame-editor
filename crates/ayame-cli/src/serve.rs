@@ -49,7 +49,7 @@ const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
 type Shared = Arc<Document>;
 
-struct AppState {
+pub(crate) struct AppState {
     /// The currently open document, or `None` before any file is loaded. A file
     /// can be opened, swapped, or closed at runtime — the workspace no longer
     /// requires a file on the command line.
@@ -107,14 +107,13 @@ impl AppState {
     }
 }
 
-type SharedState = Arc<AppState>;
+pub(crate) type SharedState = Arc<AppState>;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse(
         args,
         &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
     );
-    let path = pos.first().cloned();
     let host = first_opt(&opts, &["--host"])
         .unwrap_or("127.0.0.1")
         .to_string();
@@ -123,8 +122,24 @@ pub fn cmd_serve(args: &[String]) -> Result<()> {
         .parse()
         .context("--port must be a number")?;
 
-    let open_options = open_opts(&opts, &flags)?;
-    let doc = match &path {
+    let state = Arc::new(build_state(&pos, &opts, &flags)?);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?;
+    rt.block_on(serve(state, host, port))
+}
+
+/// Open the optional FILE argument (if any) and assemble the shared app state.
+/// Shared by `serve` and the native GUI so both open files the same way.
+pub(crate) fn build_state(
+    pos: &[String],
+    opts: &std::collections::HashMap<String, String>,
+    flags: &std::collections::HashSet<String>,
+) -> Result<AppState> {
+    let open_options = open_opts(opts, flags)?;
+    let doc = match pos.first() {
         Some(path) => {
             eprintln!("ayame: opening and indexing '{path}' …");
             let doc =
@@ -148,24 +163,17 @@ pub fn cmd_serve(args: &[String]) -> Result<()> {
             Some(doc)
         }
         None => {
-            eprintln!("ayame: no file given — open one from the browser (drag & drop or 開く)");
+            eprintln!("ayame: no file open yet — open one (drag & drop or 開く)");
             None
         }
     };
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("building tokio runtime")?;
-    rt.block_on(serve(
-        Arc::new(AppState::new(doc, open_options)),
-        host,
-        port,
-    ))
+    Ok(AppState::new(doc, open_options))
 }
 
-async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
-    let app = Router::new()
+/// Build the axum router. Every endpoint is a thin wrapper over `ayame-core`;
+/// the same router serves both the CLI `serve` and the native GUI window.
+fn router(state: SharedState) -> Router {
+    Router::new()
         .route("/", get(index))
         .route("/app.js", get(app_js))
         .route("/style.css", get(style_css))
@@ -197,8 +205,11 @@ async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
         .route("/api/top", get(api_top))
         .route("/api/distinct", get(api_distinct))
         .layer(CatchPanicLayer::new())
-        .with_state(state);
+        .with_state(state)
+}
 
+async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
+    let app = router(state);
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
         .context("invalid host/port")?;
@@ -215,6 +226,62 @@ async fn serve(state: SharedState, host: String, port: u16) -> Result<()> {
         .await
         .context("server error")?;
     Ok(())
+}
+
+/// Start the editor server on an ephemeral loopback port in a dedicated
+/// background thread (with its own Tokio runtime) and return the bound address.
+///
+/// The native GUI uses this: the window's event loop owns the main thread
+/// (required on macOS), while the server runs behind it. The thread and its
+/// short-lived worker children are torn down when the process exits.
+#[cfg(feature = "gui")]
+pub(crate) fn spawn_background(state: SharedState) -> Result<SocketAddr> {
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel::<Result<SocketAddr>>();
+    std::thread::Builder::new()
+        .name("ayame-server".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .context("building tokio runtime")
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            };
+            rt.block_on(async move {
+                let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
+                let listener = match tokio::net::TcpListener::bind(addr)
+                    .await
+                    .with_context(|| format!("binding {addr}"))
+                {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                };
+                let local = match listener.local_addr().context("resolving local addr") {
+                    Ok(a) => a,
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                };
+                // Hand the resolved address back before we start serving.
+                if tx.send(Ok(local)).is_err() {
+                    return; // the GUI gave up waiting; nothing to serve
+                }
+                let _ = axum::serve(listener, router(state)).await;
+            });
+        })
+        .context("spawning server thread")?;
+
+    rx.recv().context("server thread died before binding")?
 }
 
 // ---- static assets ------------------------------------------------------------

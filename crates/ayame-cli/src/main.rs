@@ -4,6 +4,8 @@
 //! the rest of a data engineer's toolbox; `ayame serve` launches the GUI.
 
 mod gen;
+#[cfg(feature = "gui")]
+mod gui;
 mod serve;
 
 use std::collections::{HashMap, HashSet};
@@ -42,6 +44,7 @@ COMMANDS:
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
     serve  <FILE>                 Launch the local web editor (--host, --port)
+    gui    [FILE]                 Open the editor in a native desktop window
     cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
     version                       Show version
 
@@ -111,8 +114,18 @@ fn run(args: Vec<String>) -> Result<()> {
     let cmd = match args.first() {
         Some(c) => c.clone(),
         None => {
-            print!("{HELP}");
-            return Ok(());
+            // No arguments: in a GUI build this is the double-click case, so
+            // open the native window. Workers always re-spawn with a subcommand,
+            // so they never land here. Plain CLI builds print help as before.
+            #[cfg(feature = "gui")]
+            {
+                return gui::cmd_gui(&[]);
+            }
+            #[cfg(not(feature = "gui"))]
+            {
+                print!("{HELP}");
+                return Ok(());
+            }
         }
     };
     if cmd == "-h" || cmd == "--help" || cmd == "help" {
@@ -142,6 +155,8 @@ fn run(args: Vec<String>) -> Result<()> {
         "distinct" => cmd_distinct(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
+        #[cfg(feature = "gui")]
+        "gui" => gui::cmd_gui(rest),
         "cache" => cmd_cache(rest),
         other => {
             print!("{HELP}");

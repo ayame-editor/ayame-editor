@@ -10,6 +10,13 @@ repository.workspace = true
 name = "ayame"
 path = "src/main.rs"
 
+[features]
+# Default builds are the standalone, statically-linkable CLI + web server with
+# no webview dependency. The native desktop window is opt-in so CLI releases
+# stay small and dependency-free.
+default = []
+gui = ["dep:wry", "dep:tao"]
+
 [dependencies]
 ayame-core = { path = "../ayame-core" }
 anyhow.workspace = true
@@ -19,3 +26,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 axum = "0.8"
 tower-http = { version = "0.6", features = ["catch-panic"] }
 futures-util = { version = "0.3", default-features = false }
+
+# Native window (feature = "gui"): the OS webview (WKWebView / WebView2 /
+# WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.
+wry = { version = "0.52", optional = true }
+tao = { version = "0.34", optional = true }

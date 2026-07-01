@@ -92,9 +92,118 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Native desktop app (feature = "gui"): the same binary + OS webview, packaged
+  # for double-click. Kept as a SEPARATE set of artifacts so the static CLI above
+  # stays dependency-free. macOS ships an .app bundle; Linux needs WebKitGTK.
+  build-gui:
+    name: gui ${{ matrix.suffix }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64
+            bin: ayame
+            rustflags: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64
+            bin: ayame.exe
+            rustflags: "-C target-feature=+crt-static"
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: macos-x86_64
+            bin: ayame
+            rustflags: ""
+          - os: macos-14
+            target: aarch64-apple-darwin
+            suffix: macos-aarch64
+            bin: ayame
+            rustflags: ""
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+      - name: Install Linux webview deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --locked --features gui --target "${{ matrix.target }}"
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          fi
+          ver="${tag#v}"
+          mkdir -p dist
+          src="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          strip "$src" 2>/dev/null || true
+          case "${{ matrix.suffix }}" in
+            macos-*)
+              app="Ayame.app"
+              rm -rf "$app"
+              mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+              cp "$src" "$app/Contents/MacOS/ayame"
+              cp crates/ayame-cli/web/favicon.svg "$app/Contents/Resources/favicon.svg" || true
+              printf '%s\n' \
+                '<?xml version="1.0" encoding="UTF-8"?>' \
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                '<plist version="1.0">' \
+                '<dict>' \
+                '  <key>CFBundleName</key><string>Ayame</string>' \
+                '  <key>CFBundleDisplayName</key><string>Ayame</string>' \
+                '  <key>CFBundleIdentifier</key><string>com.hjosugi.ayame</string>' \
+                "  <key>CFBundleVersion</key><string>${ver}</string>" \
+                "  <key>CFBundleShortVersionString</key><string>${ver}</string>" \
+                '  <key>CFBundleExecutable</key><string>ayame</string>' \
+                '  <key>CFBundlePackageType</key><string>APPL</string>' \
+                '  <key>LSMinimumSystemVersion</key><string>10.13</string>' \
+                '  <key>NSHighResolutionCapable</key><true/>' \
+                '</dict>' \
+                '</plist>' > "$app/Contents/Info.plist"
+              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}.zip"
+              ditto -c -k --keepParent "$app" "$out"
+              rm -rf "$app"
+              ;;
+            windows-*)
+              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}.exe"
+              cp "$src" "$out"
+              ;;
+            *)
+              out="dist/ayame-gui-${tag}-${{ matrix.suffix }}"
+              cp "$src" "$out"
+              ;;
+          esac
+          out_dir="$(dirname "$out")"
+          out_name="$(basename "$out")"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd "$out_dir" && sha256sum "$out_name") > "$out.sha256"
+          else
+            (cd "$out_dir" && shasum -a 256 "$out_name") > "$out.sha256"
+          fi
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ayame-gui-${{ matrix.suffix }}
+          path: dist/*
+          if-no-files-found: error
+
   publish:
     name: publish GitHub Release
-    needs: build
+    needs: [build, build-gui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
@@ -117,7 +226,7 @@ jobs:
             gh release create "$tag" dist/* \
               --title "$tag" \
               --target "$GITHUB_SHA" \
-              --notes "Ayame ${tag}: standalone command-line binaries with embedded web assets."
+              --notes "Ayame ${tag}: standalone CLI binaries (ayame-*) plus native desktop apps (ayame-gui-*, macOS .app), all with embedded web assets."
           else
             gh release upload "$tag" dist/* --clobber
           fi

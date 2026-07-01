@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
-  | AYAME_VERSION=0.1.9 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
+  | AYAME_VERSION=0.1.10 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ローカルに clone 済みなら:
@@ -83,6 +83,7 @@ ayame serve sample.csv --port 8777          # 表示された URL をブラウ�
 | `distinct <FILE> -k COL` | 近似ユニーク数（HyperLogLog） |
 | `gen    <FILE> --lines N` | 合成テストデータ生成（`--cols`, `--encoding`） |
 | `serve  [<FILE>]` | ローカル Web エディタを起動（`--host`, `--port`）。FILE 省略で空の状態から開始 |
+| `gui    [<FILE>]` | ネイティブのデスクトップウィンドウでエディタを開く（GUI ビルドのみ） |
 | `cache  [path\|info\|clear]` | 索引キャッシュの確認・消去 |
 
 ## 使い方
@@ -204,6 +205,28 @@ ayame serve --port 8777                     # FILE 省略。ブラウザで開�
 | 大小無視 / 正規表現の切替 | `Alt+C` / `Alt+R` |
 | 先頭 / 末尾へ | `Ctrl+Home` / `Ctrl+End` |
 | ページ送り | `PageUp` / `PageDown` / `Space` |
+
+### ネイティブアプリ（gui）
+
+ブラウザのタブではなく、**独立したデスクトップウィンドウ**でエディタを開きます。中身は
+`serve` と同じローカルサーバ＋Web UI を、OS 標準の webview（macOS=WKWebView /
+Windows=WebView2 / Linux=WebKitGTK）で表示します。Chromium を同梱しないため Electron
+より軽量です。
+
+```sh
+ayame gui                 # 空の状態でウィンドウを開く（ファイルは中で開く）
+ayame gui huge.csv        # ファイルを開いた状態でウィンドウを起動
+```
+
+配布されるネイティブアプリ（`ayame-gui-*` / macOS は `Ayame.app`）は、**ダブルクリック**
+で起動します。サーバはランダムなローカルポートで自動起動し、ウィンドウを閉じると終了します。
+
+- macOS / Windows: OS 内蔵の webview を使うため追加ランタイム不要。
+- Linux: 実行時に WebKitGTK が必要です（例: Debian/Ubuntu 系 `libwebkit2gtk-4.1-0`）。
+  単体 static な CLI バイナリ（`ayame`）はこの依存を持たず、従来どおり動きます。
+
+> ソースからネイティブアプリをビルドするには feature を有効にします:
+> `cargo build --release --features gui`（Linux は `libwebkit2gtk-4.1-dev`, `libgtk-3-dev` が必要）。
 
 ### 索引キャッシュ
 
