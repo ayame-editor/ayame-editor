@@ -1535,7 +1535,7 @@ async function openPath(path) {
 async function uploadFile(file) {
   if (!confirmDiscardIfDirty()) return;
   openerMsg(`読み込み中… (${file.name})`, true);
-  flashCount(`読み込み中: ${file.name}`);
+  showLoading(`読み込み中… ${file.name}`);
   try {
     const r = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
@@ -1545,6 +1545,8 @@ async function uploadFile(file) {
     onDocumentOpened(await r.json());
   } catch (e) {
     reportOpenError("読み込みエラー: " + e.message);
+  } finally {
+    hideLoading();
   }
 }
 
