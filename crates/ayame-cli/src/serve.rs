@@ -11,6 +11,7 @@
 //! opens it. The active document lives behind an `RwLock<Option<_>>` and can be
 //! swapped at runtime.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -49,12 +50,30 @@ const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 
 type Shared = Arc<Document>;
 
+/// State of a tab that is open but not currently focused. The focused tab's
+/// document and edits live in `AppState::doc`/`edits` so every existing endpoint
+/// keeps operating on "the active document" unchanged; switching tabs just swaps
+/// that live state with an entry here.
+struct InactiveTab {
+    doc: Shared,
+    edits: EditSession,
+}
+
+#[derive(Default)]
+struct TabList {
+    order: Vec<u64>,
+    active: Option<u64>,
+    inactive: HashMap<u64, InactiveTab>,
+    next_id: u64,
+}
+
 pub(crate) struct AppState {
-    /// The currently open document, or `None` before any file is loaded. A file
-    /// can be opened, swapped, or closed at runtime — the workspace no longer
-    /// requires a file on the command line.
+    /// The currently open (focused) document, or `None` when no tab is open.
     doc: RwLock<Option<Shared>>,
     edits: RwLock<EditSession>,
+    /// All open tabs. The active tab's live doc/edits are the fields above; the
+    /// rest are parked in `TabList::inactive`.
+    tabs: RwLock<TabList>,
     /// The open options (encoding/stride/cache) picked on the command line,
     /// reused whenever a new file is opened from the browser.
     open_opts: OpenOptions,
@@ -62,11 +81,135 @@ pub(crate) struct AppState {
 
 impl AppState {
     fn new(doc: Option<Document>, open_opts: OpenOptions) -> AppState {
+        let shared = doc.map(Arc::new);
+        let mut tabs = TabList {
+            next_id: 1,
+            ..TabList::default()
+        };
+        if shared.is_some() {
+            let id = tabs.next_id;
+            tabs.next_id += 1;
+            tabs.order.push(id);
+            tabs.active = Some(id);
+        }
         AppState {
-            doc: RwLock::new(doc.map(Arc::new)),
+            doc: RwLock::new(shared),
             edits: RwLock::new(EditSession::default()),
+            tabs: RwLock::new(tabs),
             open_opts,
         }
+    }
+
+    /// Park the currently active tab's live state so a different tab can take
+    /// over the `doc`/`edits` slots. Caller holds the `tabs` write lock.
+    fn park_active(&self, tabs: &mut TabList) {
+        if let Some(aid) = tabs.active {
+            if let Some(doc) = self.doc.read().expect("document lock poisoned").clone() {
+                let edits = self.edits.read().expect("edit lock poisoned").clone();
+                tabs.inactive.insert(aid, InactiveTab { doc, edits });
+            }
+        }
+    }
+
+    /// Make `doc` a brand-new tab and focus it (used by open / new / upload).
+    fn install_new_tab(&self, doc: Shared) {
+        {
+            let mut tabs = self.tabs.write().expect("tabs lock poisoned");
+            self.park_active(&mut tabs);
+            let id = tabs.next_id;
+            tabs.next_id += 1;
+            tabs.order.push(id);
+            tabs.active = Some(id);
+        }
+        *self.doc.write().expect("document lock poisoned") = Some(doc);
+        *self.edits.write().expect("edit lock poisoned") = EditSession::default();
+    }
+
+    /// Focus an already-open tab.
+    fn switch_tab(&self, id: u64) -> Result<(), (StatusCode, String)> {
+        let restored = {
+            let mut tabs = self.tabs.write().expect("tabs lock poisoned");
+            if tabs.active == Some(id) {
+                return Ok(());
+            }
+            if !tabs.order.contains(&id) {
+                return Err(bad_request("no such tab"));
+            }
+            self.park_active(&mut tabs);
+            tabs.active = Some(id);
+            tabs.inactive.remove(&id)
+        };
+        if let Some(t) = restored {
+            *self.doc.write().expect("document lock poisoned") = Some(t.doc);
+            *self.edits.write().expect("edit lock poisoned") = t.edits;
+        }
+        Ok(())
+    }
+
+    /// Close a tab; if it was active, focus a neighbor (or empty the workspace).
+    fn close_tab(&self, id: u64) {
+        let restored = {
+            let mut tabs = self.tabs.write().expect("tabs lock poisoned");
+            let Some(idx) = tabs.order.iter().position(|x| *x == id) else {
+                return;
+            };
+            tabs.order.remove(idx);
+            tabs.inactive.remove(&id);
+            if tabs.active != Some(id) {
+                return; // closed a background tab; active state untouched
+            }
+            // The closed tab was active — pick the neighbor at the same slot.
+            let next = tabs.order.get(idx).or_else(|| tabs.order.last()).copied();
+            tabs.active = next;
+            next.and_then(|nid| tabs.inactive.remove(&nid))
+        };
+        match restored {
+            Some(t) => {
+                *self.doc.write().expect("document lock poisoned") = Some(t.doc);
+                *self.edits.write().expect("edit lock poisoned") = t.edits;
+            }
+            None => {
+                *self.doc.write().expect("document lock poisoned") = None;
+                *self.edits.write().expect("edit lock poisoned") = EditSession::default();
+            }
+        }
+    }
+
+    /// Snapshot every open tab for the tab bar.
+    fn tabs_response(&self) -> TabsResponse {
+        let tabs = self.tabs.read().expect("tabs lock poisoned");
+        let active = tabs.active;
+        let mut out = Vec::with_capacity(tabs.order.len());
+        for &id in &tabs.order {
+            let (path, dirty) = if Some(id) == active {
+                match self.doc.read().expect("document lock poisoned").clone() {
+                    Some(d) => {
+                        let dirty = self
+                            .edits
+                            .read()
+                            .expect("edit lock poisoned")
+                            .stats(&d)
+                            .dirty;
+                        (d.path().to_path_buf(), dirty)
+                    }
+                    None => continue,
+                }
+            } else {
+                match tabs.inactive.get(&id) {
+                    Some(t) => (t.doc.path().to_path_buf(), t.edits.stats(&t.doc).dirty),
+                    None => continue,
+                }
+            };
+            let path = path.to_string_lossy().to_string();
+            out.push(TabInfo {
+                id,
+                name: tab_name(&path),
+                path,
+                dirty,
+                active: Some(id) == active,
+            });
+        }
+        TabsResponse { tabs: out }
     }
 
     /// The open document, if any.
@@ -98,13 +241,34 @@ impl AppState {
             .await
             .map_err(internal)?
             .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
-        {
-            let mut slot = self.doc.write().expect("document lock poisoned");
-            *slot = Some(Arc::new(doc));
-        }
-        self.edits.write().expect("edit lock poisoned").clear();
+        self.install_new_tab(Arc::new(doc));
         Ok(())
     }
+}
+
+/// Friendly tab label: "untitled" for scratch buffers, else the file's basename.
+fn tab_name(path: &str) -> String {
+    if path.contains("ayame-untitled-") {
+        return "untitled".to_string();
+    }
+    Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+#[derive(Serialize)]
+struct TabInfo {
+    id: u64,
+    name: String,
+    path: String,
+    dirty: bool,
+    active: bool,
+}
+
+#[derive(Serialize)]
+struct TabsResponse {
+    tabs: Vec<TabInfo>,
 }
 
 pub(crate) type SharedState = Arc<AppState>;
@@ -181,6 +345,9 @@ fn router(state: SharedState) -> Router {
         .route("/api/stat", get(api_stat))
         .route("/api/open", post(api_open))
         .route("/api/new", post(api_new))
+        .route("/api/tabs", get(api_tabs))
+        .route("/api/tabs/select", post(api_tabs_select))
+        .route("/api/tabs/close", post(api_tabs_close))
         .route("/api/browse", get(api_browse))
         .route(
             "/api/upload",
@@ -391,11 +558,40 @@ async fn api_new(
     let dir = std::env::temp_dir().join(format!("ayame-untitled-{}", std::process::id()));
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
     let target = unique_upload_path(&dir, "untitled.txt");
-    tokio::fs::File::create(&target).await.map_err(internal)?;
+    // One empty line, so the buffer is immediately editable yet still "clean"
+    // (no pending edits) — closing a pristine untitled won't prompt.
+    tokio::fs::write(&target, b"\n").await.map_err(internal)?;
     state
         .open_path(target.to_string_lossy().to_string())
         .await?;
     Ok(Json(stat_response(&state)))
+}
+
+// ---- tabs -------------------------------------------------------------------
+
+async fn api_tabs(State(state): State<SharedState>) -> Json<TabsResponse> {
+    Json(state.tabs_response())
+}
+
+#[derive(Deserialize)]
+struct TabIdRequest {
+    id: u64,
+}
+
+async fn api_tabs_select(
+    State(state): State<SharedState>,
+    Json(req): Json<TabIdRequest>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    state.switch_tab(req.id)?;
+    Ok(Json(stat_response(&state)))
+}
+
+async fn api_tabs_close(
+    State(state): State<SharedState>,
+    Json(req): Json<TabIdRequest>,
+) -> Json<StatResponse> {
+    state.close_tab(req.id);
+    Json(stat_response(&state))
 }
 
 #[derive(Deserialize)]

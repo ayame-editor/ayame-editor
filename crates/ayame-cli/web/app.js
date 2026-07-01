@@ -44,6 +44,7 @@ const state = {
   editingLine: -1,
   editCaret: null, // caret column to place when the next line editor opens
   settings: { ...DEFAULT_SETTINGS },
+  tabs: [], // open tabs from /api/tabs
 };
 
 const pool = [];
@@ -400,6 +401,9 @@ function updateStatusMeta() {
   $("redo-edit").disabled = !s.can_redo;
   $("st-index").textContent =
     `索引 ${commas(s.checkpoints)} 点 / ${humanBytes(s.index_bytes)} / ${s.index_ms} ms`;
+  // Keep the active tab's unsaved-dot in sync as you type (no full refetch).
+  const at = $("tabs").querySelector(".tab.active");
+  if (at) at.classList.toggle("dirty", !!s.dirty);
 }
 
 function isUntitled(path) {
@@ -952,6 +956,17 @@ function onGlobalKey(e) {
     showOpener();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    newUntitled(); // new tab
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
+    e.preventDefault();
+    const active = state.tabs.find((t) => t.active);
+    if (active) closeTab(active.id);
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
     e.preventDefault();
     const g = $("goto");
@@ -1176,6 +1191,7 @@ function onDocumentOpened(stat) {
   m.setAttribute("aria-hidden", "true");
   updateStatusMeta();
   render();
+  refreshTabs();
   $("viewport").focus();
 }
 
@@ -1213,17 +1229,85 @@ function initDropZone() {
   });
 }
 
+// ---- tabs ------------------------------------------------------------------
+
+async function refreshTabs() {
+  try {
+    const r = await api("/api/tabs");
+    renderTabs(r.tabs);
+  } catch {
+    // non-fatal: the tab bar just won't update
+  }
+}
+
+function renderTabs(list) {
+  state.tabs = list;
+  const c = $("tabs");
+  c.textContent = "";
+  for (const t of list) {
+    const el = document.createElement("div");
+    el.className = "tab" + (t.active ? " active" : "") + (t.dirty ? " dirty" : "");
+    el.dataset.id = String(t.id);
+    el.title = t.path;
+    const dot = document.createElement("span");
+    dot.className = "tab-dot";
+    const nm = document.createElement("span");
+    nm.className = "tab-name";
+    nm.textContent = t.name;
+    const x = document.createElement("span");
+    x.className = "tab-x";
+    x.textContent = "✕";
+    x.title = "閉じる";
+    el.append(dot, nm, x);
+    el.addEventListener("click", () => {
+      if (!t.active) selectTab(t.id);
+    });
+    el.addEventListener("mousedown", (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        closeTab(t.id); // middle-click closes
+      }
+    });
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeTab(t.id);
+    });
+    c.append(el);
+  }
+}
+
+async function selectTab(id) {
+  try {
+    onDocumentOpened(await apiPost("/api/tabs/select", { id }));
+  } catch (e) {
+    flashCount("タブ切替エラー");
+    console.error(e);
+  }
+}
+
+async function closeTab(id) {
+  const t = state.tabs.find((x) => x.id === id);
+  if (t && t.dirty && !confirm(`${t.name} の未保存の編集を破棄して閉じますか?`)) return;
+  try {
+    const stat = await apiPost("/api/tabs/close", { id });
+    if (!stat.open) {
+      await newUntitled(); // closed the last tab → open a fresh page
+    } else {
+      onDocumentOpened(stat);
+    }
+  } catch (e) {
+    flashCount("タブを閉じられません");
+    console.error(e);
+  }
+}
+
 // Start a fresh empty "untitled" buffer with a blank editable first line, so
 // the app opens to a usable page (like Notepad) instead of a dialog.
 async function newUntitled() {
   try {
     onDocumentOpened(await apiPost("/api/new", {}));
-    if (state.total === 0) {
-      await apiPost("/api/edit/insert", { line: 0, text: "" });
-      clearLineCache();
-      await refreshStat();
-      beginEdit(0, 0);
-    }
+    // The buffer already has one empty line; drop the caret in, Notepad-style.
+    if (state.total >= 1) beginEdit(0, 0);
   } catch (e) {
     showOpener();
     openerMsg("新規バッファを作成できません: " + e.message);
@@ -1247,6 +1331,7 @@ function initWorkspace() {
   $("opener").addEventListener("click", (e) => {
     if (e.target === $("opener")) hideOpener();
   });
+  $("new-tab").addEventListener("click", () => newUntitled());
   initDropZone();
 }
 
@@ -1347,6 +1432,7 @@ async function boot() {
   } else {
     $("viewport").focus();
     render();
+    refreshTabs();
   }
 }
 
