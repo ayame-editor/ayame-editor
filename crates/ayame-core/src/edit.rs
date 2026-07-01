@@ -187,8 +187,22 @@ impl EditSession {
         }
     }
 
+    /// Current (overlay-resolved) text of a logical line.
+    fn line_text(&self, doc: &Document, logical: u64) -> Result<String> {
+        self.line(doc, logical)
+            .map(|l| l.text)
+            .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))
+    }
+
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
         let before = self.events.clone();
+        self.replace_line_inner(doc, logical, text)?;
+        self.finish_change(before);
+        Ok(())
+    }
+
+    /// Mutation without snapshotting undo history (composed by `replace_range`).
+    fn replace_line_inner(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
@@ -214,13 +228,24 @@ impl EditSession {
                 self.clean_anchor(anchor);
             }
         }
-        self.finish_change(before);
         Ok(())
     }
 
     /// Insert `text` before logical line `logical`; `logical == total_lines`
     /// appends after the current document.
     pub fn insert_line_before(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
+        let before = self.events.clone();
+        self.insert_line_before_inner(doc, logical, text)?;
+        self.finish_change(before);
+        Ok(())
+    }
+
+    fn insert_line_before_inner(
+        &mut self,
+        doc: &Document,
+        logical: u64,
+        text: String,
+    ) -> Result<()> {
         let total = self.total_lines(doc);
         if logical > total {
             return Err(Error::Unsupported(format!(
@@ -228,17 +253,14 @@ impl EditSession {
                 logical + 1
             )));
         }
-        let before = self.events.clone();
         if logical == total {
             self.events
                 .entry(doc.line_count())
                 .or_default()
                 .inserts
                 .push(text);
-            self.finish_change(before);
             return Ok(());
         }
-
         match self.locate(logical, doc.line_count()).unwrap() {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
                 self.events.entry(orig).or_default().inserts.push(text);
@@ -251,12 +273,17 @@ impl EditSession {
                     .insert(index, text);
             }
         }
-        self.finish_change(before);
         Ok(())
     }
 
     pub fn delete_line(&mut self, doc: &Document, logical: u64) -> Result<()> {
         let before = self.events.clone();
+        self.delete_line_inner(doc, logical)?;
+        self.finish_change(before);
+        Ok(())
+    }
+
+    fn delete_line_inner(&mut self, doc: &Document, logical: u64) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
@@ -276,8 +303,63 @@ impl EditSession {
                 self.clean_anchor(anchor);
             }
         }
-        self.finish_change(before);
         Ok(())
+    }
+
+    /// Replace the logical span (l0,c0)..(l1,c1) with `text` (which may contain
+    /// '\n'), as a SINGLE undo unit. Column offsets are Unicode scalar (char)
+    /// counts into the decoded line text. Returns the caret (line, col) after
+    /// the edit. `replace_range(l,c,l,c,text)` is a plain insert at (l,c).
+    pub fn replace_range(
+        &mut self,
+        doc: &Document,
+        l0: u64,
+        c0: usize,
+        l1: u64,
+        c1: usize,
+        text: &str,
+    ) -> Result<(u64, usize)> {
+        let total = self.total_lines(doc);
+        if l0 > l1 || l1 >= total {
+            return Err(Error::Unsupported(format!(
+                "range spans lines {}..{} outside the document",
+                l0 + 1,
+                l1 + 1
+            )));
+        }
+        let first = self.line_text(doc, l0)?;
+        let last = if l1 == l0 {
+            first.clone()
+        } else {
+            self.line_text(doc, l1)?
+        };
+        let c0 = c0.min(first.chars().count());
+        let c1 = c1.min(last.chars().count());
+        let head: String = first.chars().take(c0).collect();
+        let tail: String = last.chars().skip(c1).collect();
+
+        let mut parts: Vec<String> = text.split('\n').map(String::from).collect();
+        let n = parts.len();
+        let li = n - 1;
+        parts[0] = format!("{head}{}", parts[0]);
+        parts[li] = format!("{}{tail}", parts[li]);
+
+        // One undo step: snapshot once, mutate via the snapshot-free inners,
+        // finish once. Delete the interior lines descending so anchors above
+        // the cursor don't shift under us.
+        let before = self.events.clone();
+        self.replace_line_inner(doc, l0, parts[0].clone())?;
+        for l in ((l0 + 1)..=l1).rev() {
+            self.delete_line_inner(doc, l)?;
+        }
+        for (k, p) in parts[1..].iter().enumerate() {
+            self.insert_line_before_inner(doc, l0 + 1 + k as u64, p.clone())?;
+        }
+        self.finish_change(before);
+
+        let caret_line = l0 + (n as u64 - 1);
+        let caret_col = parts[li].chars().count() - tail.chars().count();
+        Ok((caret_line, caret_col))
     }
 
     pub fn save_to_path(&self, doc: &Document, target: impl AsRef<Path>) -> Result<SaveResult> {
@@ -596,6 +678,108 @@ mod tests {
         assert_eq!(edits.stats(&doc).total_lines, 2);
         assert_eq!(std::fs::read(&out).unwrap(), b"alpha\nbeta\n");
         let _ = std::fs::remove_file(out);
+    }
+
+    fn texts(edits: &EditSession, doc: &Document) -> Vec<String> {
+        edits
+            .lines(doc, 0, 100)
+            .into_iter()
+            .map(|l| l.text)
+            .collect()
+    }
+
+    #[test]
+    fn replace_range_typing_within_a_line_inserts_and_moves_caret() {
+        let (_f, doc) = doc_from(b"hello\nworld\n");
+        let mut edits = EditSession::default();
+        // Type "XY" between 'he' and 'llo' on line 0.
+        let caret = edits.replace_range(&doc, 0, 2, 0, 2, "XY").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["heXYllo", "world"]);
+        assert_eq!(caret, (0, 4));
+    }
+
+    #[test]
+    fn replace_range_enter_splits_a_line_into_two() {
+        let (_f, doc) = doc_from(b"hello\n");
+        let mut edits = EditSession::default();
+        // Press Enter after "he": split into "he" and "llo".
+        let caret = edits.replace_range(&doc, 0, 2, 0, 2, "\n").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["he", "llo"]);
+        assert_eq!(caret, (1, 0));
+        assert_eq!(edits.stats(&doc).total_lines, 2);
+    }
+
+    #[test]
+    fn replace_range_backspace_merges_two_lines() {
+        let (_f, doc) = doc_from(b"foo\nbar\n");
+        let mut edits = EditSession::default();
+        // Backspace at start of line 1 joins it onto the end of line 0.
+        let caret = edits.replace_range(&doc, 0, 3, 1, 0, "").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["foobar"]);
+        assert_eq!(caret, (0, 3));
+        assert_eq!(edits.stats(&doc).total_lines, 1);
+    }
+
+    #[test]
+    fn replace_range_multi_line_selection_replaced_with_multi_line_text() {
+        let (_f, doc) = doc_from(b"aaa\nbbb\nccc\nddd\n");
+        let mut edits = EditSession::default();
+        // Select from (0,1) through (2,1) and replace with "X\nY\nZ".
+        let caret = edits.replace_range(&doc, 0, 1, 2, 1, "X\nY\nZ").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["aX", "Y", "Zcc", "ddd"]);
+        assert_eq!(caret, (2, 1));
+    }
+
+    #[test]
+    fn replace_range_is_a_single_undo_unit() {
+        let (_f, doc) = doc_from(b"aaa\nbbb\nccc\n");
+        let mut edits = EditSession::default();
+        edits.replace_range(&doc, 0, 1, 2, 1, "X\nY\nZ").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["aX", "Y", "Zcc"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["aaa", "bbb", "ccc"]);
+        assert!(edits.redo());
+        assert_eq!(texts(&edits, &doc), vec!["aX", "Y", "Zcc"]);
+    }
+
+    #[test]
+    fn replace_range_paste_multiline_into_a_caret() {
+        let (_f, doc) = doc_from(b"start\nend\n");
+        let mut edits = EditSession::default();
+        // Paste "one\ntwo\nthree" at (0,5) — the end of line 0.
+        let caret = edits
+            .replace_range(&doc, 0, 5, 0, 5, "one\ntwo\nthree")
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["startone", "two", "three", "end"]);
+        assert_eq!(caret, (2, 5));
+    }
+
+    #[test]
+    fn replace_range_counts_unicode_scalars_not_bytes() {
+        let (_f, doc) = doc_from("あいう\nかきく\n".as_bytes());
+        let mut edits = EditSession::default();
+        // Replace the middle char of line 0 ('い', chars 1..2) with "X".
+        let caret = edits.replace_range(&doc, 0, 1, 0, 2, "X").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["あXう", "かきく"]);
+        assert_eq!(caret, (0, 2));
+    }
+
+    #[test]
+    fn replace_range_clamps_columns_past_line_end() {
+        let (_f, doc) = doc_from(b"hi\n");
+        let mut edits = EditSession::default();
+        // Columns beyond the line length clamp to the end.
+        let caret = edits.replace_range(&doc, 0, 99, 0, 99, "!").unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["hi!"]);
+        assert_eq!(caret, (0, 3));
+    }
+
+    #[test]
+    fn replace_range_rejects_out_of_range_lines() {
+        let (_f, doc) = doc_from(b"a\nb\n");
+        let mut edits = EditSession::default();
+        assert!(edits.replace_range(&doc, 1, 0, 5, 0, "x").is_err());
+        assert!(edits.replace_range(&doc, 3, 0, 3, 0, "x").is_err());
     }
 
     #[test]

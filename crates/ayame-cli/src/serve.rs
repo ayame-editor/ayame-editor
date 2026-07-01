@@ -358,6 +358,7 @@ fn router(state: SharedState) -> Router {
         .route("/api/edit/line", post(api_edit_line))
         .route("/api/edit/insert", post(api_edit_insert))
         .route("/api/edit/delete", post(api_edit_delete))
+        .route("/api/edit/replace_range", post(api_edit_replace_range))
         .route("/api/edit/save", post(api_edit_save))
         .route("/api/edit/undo", post(api_edit_undo))
         .route("/api/edit/redo", post(api_edit_redo))
@@ -844,6 +845,41 @@ async fn api_edit_delete(
     let mut edits = state.edits.write().expect("edit lock poisoned");
     edits.delete_line(&doc, req.line).map_err(bad_request)?;
     Ok(Json(edits.stats(&doc)))
+}
+
+/// Replace the span (l0,c0)..(l1,c1) with `text` (possibly multi-line) as one
+/// undo step — the primitive the Notepad-style editor commits against. Column
+/// offsets are Unicode scalar (char) counts into the decoded line text.
+#[derive(Deserialize)]
+struct ReplaceRangeRequest {
+    l0: u64,
+    c0: usize,
+    l1: u64,
+    c1: usize,
+    text: String,
+}
+
+#[derive(Serialize)]
+struct ReplaceRangeResponse {
+    stats: EditStats,
+    caret_line: u64,
+    caret_col: usize,
+}
+
+async fn api_edit_replace_range(
+    State(state): State<SharedState>,
+    Json(req): Json<ReplaceRangeRequest>,
+) -> Result<Json<ReplaceRangeResponse>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
+    let mut edits = state.edits.write().expect("edit lock poisoned");
+    let (caret_line, caret_col) = edits
+        .replace_range(&doc, req.l0, req.c0, req.l1, req.c1, &req.text)
+        .map_err(bad_request)?;
+    Ok(Json(ReplaceRangeResponse {
+        stats: edits.stats(&doc),
+        caret_line,
+        caret_col,
+    }))
 }
 
 #[derive(Deserialize)]
