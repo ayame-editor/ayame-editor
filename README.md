@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
-  | AYAME_VERSION=0.1.8 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
+  | AYAME_VERSION=0.1.9 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ローカルに clone 済みなら:
