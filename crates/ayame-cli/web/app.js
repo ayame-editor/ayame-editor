@@ -14,6 +14,7 @@ const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 const SETTINGS_KEY = "ayame.settings.v1";
 const TREE_KEY = "ayame.treeRoot.v1";
+const MAX_COPY_LINES = 20000; // cap for copy/cut/delete of a selection
 
 const FONT_STACKS = {
   mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
@@ -55,6 +56,9 @@ const state = {
   treeParent: null, // parent of the current tree root (for the "up" button)
   treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
+  sel: null, // multi-line selection: { anchor: {line,col}, head: {line,col} }
+  dragging: false,
+  dragMoved: false,
 };
 
 const pool = [];
@@ -191,15 +195,8 @@ function ensurePool(count) {
     const tx = document.createElement("span");
     tx.className = "tx";
     row.append(ln, tx);
-    // Single click puts a caret on the line and starts editing it, like a
-    // normal text editor. The gutter and the [EOF] marker are not editable.
-    row.addEventListener("mousedown", (e) => {
-      if (row.classList.contains("eof")) return;
-      if (e.target.closest(".line-edit")) return; // clicking inside the editor
-      const line = Number(row.dataset.line);
-      if (!Number.isFinite(line) || line < 0 || line >= state.total) return;
-      beginEdit(line, caretFromEvent(row, e));
-    });
+    // Mouse selection/caret is handled at the #content level (see initSelection),
+    // so it works uniformly across the pooled rows and beyond the viewport.
     content.append(row);
     pool.push(row);
   }
@@ -318,10 +315,219 @@ function charWidth() {
   return _charW;
 }
 
-function caretFromEvent(row, e) {
-  const tx = row.lastChild;
-  const rect = tx.getBoundingClientRect();
-  return Math.max(0, Math.round((e.clientX - rect.left) / charWidth()));
+// ---- selection (multi-line, coordinate-based) ------------------------------
+
+// Width in px of the line-number gutter, measured from a visible row.
+function gutterPixels() {
+  for (const row of pool) {
+    if (row.style.display !== "none" && row.firstChild) {
+      return row.firstChild.getBoundingClientRect().width;
+    }
+  }
+  return 7 * charWidth() + 20;
+}
+
+// Map a mouse event to a {line, col} position in the document.
+function coordsFromEvent(e) {
+  const content = $("content");
+  const rect = content.getBoundingClientRect();
+  const rowInView = Math.floor((e.clientY - rect.top) / LINE_HEIGHT);
+  let line = state.first + Math.max(0, rowInView);
+  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  const x = e.clientX - rect.left - gutterPixels() + content.scrollLeft;
+  let col = Math.max(0, Math.round(x / charWidth()));
+  const len = cachedLine(line)?.text.length ?? 0;
+  return { line, col: Math.min(col, len) };
+}
+
+// Normalized selection: { start, end } with start <= end, or null.
+function selRange() {
+  if (!state.sel) return null;
+  const { anchor: a, head: h } = state.sel;
+  const forward = a.line < h.line || (a.line === h.line && a.col <= h.col);
+  return forward ? { start: a, end: h } : { start: h, end: a };
+}
+
+function hasSelection() {
+  const r = selRange();
+  return !!r && !(r.start.line === r.end.line && r.start.col === r.end.col);
+}
+
+function clearSelection() {
+  if (state.sel) {
+    state.sel = null;
+    scheduleRender();
+  }
+}
+
+function renderSelection() {
+  const layer = $("sel-layer");
+  layer.textContent = "";
+  const r = selRange();
+  if (!r || (r.start.line === r.end.line && r.start.col === r.end.col)) return;
+  const gpx = gutterPixels();
+  const cw = charWidth();
+  const vis = rowsVisible() + OVERSCAN;
+  const from = Math.max(r.start.line, state.first);
+  const to = Math.min(r.end.line, state.first + vis);
+  for (let line = from; line <= to; line++) {
+    const startCol = line === r.start.line ? r.start.col : 0;
+    const len = cachedLine(line)?.text.length ?? 0;
+    // End of a fully/partly selected line extends a bit past its text so the
+    // trailing newline reads as selected, like a normal editor.
+    let endCol = line === r.end.line ? Math.min(r.end.col, len) : len + 1;
+    if (endCol < startCol) endCol = startCol;
+    const rect = document.createElement("div");
+    rect.className = "selrect";
+    rect.style.left = `${gpx + startCol * cw}px`;
+    rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
+    rect.style.width = `${Math.max(2, (endCol - startCol) * cw)}px`;
+    layer.append(rect);
+  }
+}
+
+function initSelection() {
+  const content = $("content");
+  content.addEventListener("mousedown", async (e) => {
+    if (e.button !== 0 || e.target.closest(".line-edit")) return;
+    // Commit any in-progress line edit before selecting.
+    if (state.editingLine >= 0) {
+      const inp = content.querySelector(".line-edit");
+      const l = state.editingLine;
+      state.editingLine = -1;
+      if (inp) {
+        try {
+          if (await commitIfChanged(l, inp.value)) {
+            clearLineCache();
+            await refreshStat();
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const p = coordsFromEvent(e);
+    if (e.shiftKey && state.sel) {
+      state.sel.head = p;
+      state.dragMoved = true;
+    } else {
+      state.sel = { anchor: p, head: p };
+      state.dragMoved = false;
+    }
+    state.dragging = true;
+    $("viewport").focus();
+    scheduleRender();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!state.dragging) return;
+    const p = coordsFromEvent(e);
+    const a = state.sel.anchor;
+    if (p.line !== a.line || p.col !== a.col) state.dragMoved = true;
+    state.sel.head = p;
+    // Auto-scroll when dragging past the top/bottom edge.
+    const rect = $("content").getBoundingClientRect();
+    if (e.clientY < rect.top + 14) setFirst(state.first - 2);
+    else if (e.clientY > rect.bottom - 14) setFirst(state.first + 2);
+    scheduleRender();
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!state.dragging) return;
+    state.dragging = false;
+    if (!state.dragMoved) {
+      // A plain click: place the caret and start editing that line.
+      const p = state.sel.head;
+      state.sel = null;
+      beginEdit(p.line, p.col);
+    } else {
+      scheduleRender();
+    }
+  });
+}
+
+function selectAll() {
+  if (state.total === 0) return;
+  const last = state.total - 1;
+  state.sel = {
+    anchor: { line: 0, col: 0 },
+    head: { line: last, col: cachedLine(last)?.text.length ?? Number.MAX_SAFE_INTEGER },
+  };
+  state.editingLine = -1;
+  $("viewport").focus();
+  scheduleRender();
+}
+
+// Fetch the selected text (bounded) and join with newlines.
+async function selectedText(r) {
+  const count = Math.min(r.end.line - r.start.line + 1, MAX_COPY_LINES);
+  const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
+  const L = res.lines.map((x) => x.text);
+  if (L.length === 1) return (L[0] ?? "").slice(r.start.col, r.end.col);
+  const out = [(L[0] ?? "").slice(r.start.col)];
+  for (let i = 1; i < L.length - 1; i++) out.push(L[i]);
+  out.push((L[L.length - 1] ?? "").slice(0, r.end.col));
+  return out.join("\n");
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for webviews without the async clipboard API.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0;";
+    document.body.append(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      /* give up silently */
+    }
+    ta.remove();
+  }
+}
+
+async function copySelection() {
+  const r = selRange();
+  if (!r) return;
+  try {
+    await copyToClipboard(await selectedText(r));
+    flashCount("コピーしました");
+  } catch (e) {
+    flashCount("コピーエラー");
+    console.error(e);
+  }
+}
+
+async function deleteSelection() {
+  const r = selRange();
+  if (!r || !hasSelection()) return;
+  const count = Math.min(r.end.line - r.start.line + 1, MAX_COPY_LINES);
+  try {
+    const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
+    const L = res.lines.map((x) => x.text);
+    const merged = (L[0] ?? "").slice(0, r.start.col) + (L[L.length - 1] ?? "").slice(r.end.col);
+    await apiPost("/api/edit/line", { line: r.start.line, text: merged });
+    for (let i = r.start.line + L.length - 1; i > r.start.line; i--) {
+      await apiPost("/api/edit/delete", { line: i });
+    }
+    state.sel = null;
+    clearLineCache();
+    await refreshStat();
+    beginEdit(r.start.line, r.start.col);
+  } catch (e) {
+    flashCount("削除エラー");
+    console.error(e);
+  }
+}
+
+async function cutSelection() {
+  const r = selRange();
+  if (!r || !hasSelection()) return;
+  await copyToClipboard(await selectedText(r));
+  await deleteSelection();
 }
 
 function appendHighlighted(container, text) {
@@ -367,6 +573,7 @@ function render() {
     }
   }
   buildRuler();
+  renderSelection();
   updateScrollbar();
   updateStatusPos();
 }
@@ -653,6 +860,7 @@ function clearLineCache() {
 
 function beginEdit(line, caret = null) {
   if (line < 0 || line >= state.total) return;
+  state.sel = null; // editing a line clears any range selection
   state.activeLine = line;
   state.editingLine = line;
   state.editCaret = caret; // null → select whole line
@@ -1074,6 +1282,28 @@ function onGlobalKey(e) {
     if (active) closeTab(active.id);
     return;
   }
+  // Multi-line selection: select-all / copy / cut / delete (when not typing in
+  // the single-line editor).
+  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+    e.preventDefault();
+    selectAll();
+    return;
+  }
+  if (!inLineEditor && hasSelection() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+    e.preventDefault();
+    copySelection();
+    return;
+  }
+  if (!inLineEditor && hasSelection() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+    e.preventDefault();
+    cutSelection();
+    return;
+  }
+  if (!inInput && hasSelection() && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault();
+    deleteSelection();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
     e.preventDefault();
     const g = $("goto");
@@ -1152,6 +1382,7 @@ function onGlobalKey(e) {
     case "Escape":
       state.activeLine = -1;
       state.editingLine = -1;
+      state.sel = null;
       scheduleRender();
       break;
   }
@@ -1289,6 +1520,7 @@ function onDocumentOpened(stat) {
   state.first = 0;
   state.activeLine = -1;
   state.editingLine = -1;
+  state.sel = null;
   state.lastMatch = null;
   state.searchHits = null;
   state.searchTruncated = false;
@@ -1645,6 +1877,7 @@ async function boot() {
   initSettings();
   initScrollbar();
   initEvents();
+  initSelection();
   initWorkspace();
   initTree();
   try {

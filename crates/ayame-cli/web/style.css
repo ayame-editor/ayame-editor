@@ -380,7 +380,22 @@ button.toggle.on {
   font-family: var(--mono);
   font-size: var(--font-size);
   line-height: var(--line-height);
+  user-select: none; /* rows use a custom (line,col) selection, not native */
 }
+
+/* Custom multi-line selection highlight (drawn behind/over the text). */
+#sel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.selrect {
+  position: absolute;
+  height: var(--line-height);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: 2px;
+}
+.line-edit { user-select: text; }
 #viewport.has-ruler #content { top: 18px; }
 
 /* ---- column ruler ---------------------------------------------------- */
