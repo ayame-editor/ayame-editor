@@ -180,6 +180,7 @@ fn router(state: SharedState) -> Router {
         .route("/favicon.svg", get(favicon_svg))
         .route("/api/stat", get(api_stat))
         .route("/api/open", post(api_open))
+        .route("/api/new", post(api_new))
         .route("/api/browse", get(api_browse))
         .route(
             "/api/upload",
@@ -378,6 +379,22 @@ async fn api_open(
         return Err(bad_request("path is empty"));
     }
     state.open_path(path).await?;
+    Ok(Json(stat_response(&state)))
+}
+
+/// Start a fresh, empty "untitled" buffer so the editor opens to a blank page
+/// (like Notepad) instead of demanding a file up front. Backed by an empty temp
+/// file so all the normal edit/save machinery works; Save prompts for a real path.
+async fn api_new(
+    State(state): State<SharedState>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let dir = std::env::temp_dir().join(format!("ayame-untitled-{}", std::process::id()));
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let target = unique_upload_path(&dir, "untitled.txt");
+    tokio::fs::File::create(&target).await.map_err(internal)?;
+    state
+        .open_path(target.to_string_lossy().to_string())
+        .await?;
     Ok(Json(stat_response(&state)))
 }
 

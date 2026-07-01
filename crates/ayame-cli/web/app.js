@@ -8,10 +8,18 @@
 // ceiling entirely.
 
 const $ = (id) => document.getElementById(id);
-const LINE_HEIGHT = 18;
+let LINE_HEIGHT = 18; // tracks --line-height; updated by Settings (font size)
 const OVERSCAN = 6;
 const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
+const SETTINGS_KEY = "ayame.settings.v1";
+
+const FONT_STACKS = {
+  mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
+  "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
+  system: '"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif',
+};
+const DEFAULT_SETTINGS = { theme: "light", font: "mono", fontSize: 13 };
 
 const state = {
   total: 0,
@@ -34,6 +42,8 @@ const state = {
   history: [],
   historyIndex: -1,
   editingLine: -1,
+  editCaret: null, // caret column to place when the next line editor opens
+  settings: { ...DEFAULT_SETTINGS },
 };
 
 const pool = [];
@@ -133,16 +143,14 @@ function ensurePool(count) {
     const tx = document.createElement("span");
     tx.className = "tx";
     row.append(ln, tx);
-    row.addEventListener("click", () => {
+    // Single click puts a caret on the line and starts editing it, like a
+    // normal text editor. The gutter and the [EOF] marker are not editable.
+    row.addEventListener("mousedown", (e) => {
+      if (row.classList.contains("eof")) return;
+      if (e.target.closest(".line-edit")) return; // clicking inside the editor
       const line = Number(row.dataset.line);
-      if (Number.isFinite(line)) {
-        state.activeLine = line;
-        scheduleRender();
-      }
-    });
-    row.addEventListener("dblclick", () => {
-      const line = Number(row.dataset.line);
-      if (Number.isFinite(line)) beginEdit(line);
+      if (!Number.isFinite(line) || line < 0 || line >= state.total) return;
+      beginEdit(line, caretFromEvent(row, e));
     });
     content.append(row);
     pool.push(row);
@@ -152,11 +160,11 @@ function ensurePool(count) {
 function fillRow(row, line, rec, gutterWidth) {
   const ln = row.firstChild;
   const tx = row.lastChild;
+  row.className = "row";
   row.dataset.line = String(line);
   ln.textContent = String(line + 1).padStart(gutterWidth, " ");
   tx.textContent = "";
-  tx.classList.remove("pending", "edited");
-  row.classList.toggle("dirty", !!rec?.edited);
+  tx.classList.remove("pending");
   row.classList.toggle("inserted", !!rec?.inserted);
   if (rec == null) {
     tx.classList.add("pending");
@@ -168,8 +176,16 @@ function fillRow(row, line, rec, gutterWidth) {
   } else {
     tx.textContent = rec.text;
   }
-  if (rec?.edited) tx.classList.add("edited");
   row.classList.toggle("active", line === state.activeLine);
+}
+
+function fillEofRow(row) {
+  row.className = "row eof";
+  row.dataset.line = "-1";
+  row.firstChild.textContent = "";
+  const tx = row.lastChild;
+  tx.className = "tx";
+  tx.textContent = "[EOF]";
 }
 
 function renderLineEditor(container, line, text) {
@@ -177,27 +193,73 @@ function renderLineEditor(container, line, text) {
   input.className = "line-edit";
   input.value = text;
   input.spellcheck = false;
-  input.addEventListener("click", (e) => e.stopPropagation());
-  input.addEventListener("dblclick", (e) => e.stopPropagation());
+  const stop = (e) => e.stopPropagation();
+  input.addEventListener("mousedown", stop);
+  input.addEventListener("click", stop);
+  input.addEventListener("dblclick", stop);
   input.addEventListener("keydown", (e) => {
+    const val = input.value;
+    const pos = input.selectionStart;
+    const sel = input.selectionEnd - input.selectionStart;
     if (e.key === "Enter") {
       e.preventDefault();
-      commitEdit(line, input.value);
+      splitLine(line, val, pos); // Enter splits the line at the caret
     } else if (e.key === "Escape") {
       e.preventDefault();
       state.editingLine = -1;
       scheduleRender();
       $("viewport").focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      moveEdit(line, val, pos, -1);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      moveEdit(line, val, pos, +1);
+    } else if (e.key === "Backspace" && pos === 0 && sel === 0 && line > 0) {
+      e.preventDefault();
+      joinWithPrev(line, val); // Backspace at col 0 joins the previous line
+    } else if (e.key === "Delete" && pos === val.length && sel === 0 && line < state.total - 1) {
+      e.preventDefault();
+      joinWithNext(line, val); // Delete at end pulls the next line up
     }
   });
   input.addEventListener("blur", () => {
     if (state.editingLine === line) commitEdit(line, input.value);
   });
   container.append(input);
+  const caret = state.editCaret;
+  state.editCaret = null;
   queueMicrotask(() => {
     input.focus();
-    input.select();
+    if (caret == null) {
+      input.select();
+    } else {
+      const p = Math.max(0, Math.min(caret, input.value.length));
+      input.setSelectionRange(p, p);
+    }
   });
+}
+
+// Character width of the monospace content font, for click→caret mapping.
+let _charW = 0;
+function charWidth() {
+  if (_charW) return _charW;
+  const cs = getComputedStyle($("content"));
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;";
+  probe.style.fontFamily = cs.fontFamily;
+  probe.style.fontSize = cs.fontSize;
+  probe.textContent = "0".repeat(100);
+  document.body.append(probe);
+  _charW = probe.getBoundingClientRect().width / 100 || 8;
+  probe.remove();
+  return _charW;
+}
+
+function caretFromEvent(row, e) {
+  const tx = row.lastChild;
+  const rect = tx.getBoundingClientRect();
+  return Math.max(0, Math.round((e.clientX - rect.left) / charWidth()));
 }
 
 function appendHighlighted(container, text) {
@@ -231,12 +293,16 @@ function render() {
   for (let r = 0; r < pool.length; r++) {
     const row = pool[r];
     const line = state.first + r;
-    if (r >= count || line >= state.total) {
+    if (r >= count || line > state.total) {
       row.style.display = "none";
       continue;
     }
     row.style.display = "";
-    fillRow(row, line, cachedLine(line), gutterWidth);
+    if (line === state.total) {
+      fillEofRow(row); // one marker row just past the last line
+    } else {
+      fillRow(row, line, cachedLine(line), gutterWidth);
+    }
   }
   updateScrollbar();
   updateStatusPos();
@@ -320,8 +386,8 @@ function updateStatusMeta() {
     $("redo-edit").disabled = true;
     return;
   }
-  $("filename").textContent = `${s.dirty ? "* " : ""}${s.path}`;
-  $("filename").title = s.path;
+  $("filename").textContent = `${s.dirty ? "* " : ""}${displayName(s.path)}`;
+  $("filename").title = isUntitled(s.path) ? "untitled" : s.path;
   const lines = s.view_lines ?? s.lines;
   $("st-lines").textContent = `${commas(lines)} 行`;
   $("st-size").textContent = humanBytes(s.bytes);
@@ -334,6 +400,18 @@ function updateStatusMeta() {
   $("redo-edit").disabled = !s.can_redo;
   $("st-index").textContent =
     `索引 ${commas(s.checkpoints)} 点 / ${humanBytes(s.index_bytes)} / ${s.index_ms} ms`;
+}
+
+function isUntitled(path) {
+  return !!path && path.includes("ayame-untitled-");
+}
+
+// Show a short, friendly name in the toolbar (basename, or "untitled").
+function displayName(path) {
+  if (!path) return "—";
+  if (isUntitled(path)) return "untitled";
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || path;
 }
 
 function enc(e) {
@@ -507,26 +585,118 @@ function clearLineCache() {
   state.loadToken++;
 }
 
-function beginEdit(line) {
+function beginEdit(line, caret = null) {
   if (line < 0 || line >= state.total) return;
   state.activeLine = line;
   state.editingLine = line;
+  state.editCaret = caret; // null → select whole line
   scheduleRender();
 }
 
 async function commitEdit(line, text) {
   state.editingLine = -1;
   try {
-    await apiPost("/api/edit/line", { line, text });
-    clearLineCache();
-    state.activeLine = line;
-    await refreshStat();
+    if (await commitIfChanged(line, text)) {
+      clearLineCache();
+      state.activeLine = line;
+      await refreshStat();
+    }
     render();
   } catch (e) {
     flashCount("編集エラー");
     console.error(e);
   }
   $("viewport").focus();
+}
+
+// Only persist a line when its text actually changed, so merely moving the
+// caret between lines never dirties the document.
+async function commitIfChanged(line, text) {
+  const rec = cachedLine(line);
+  if (rec && rec.text === text) return false;
+  await apiPost("/api/edit/line", { line, text });
+  return true;
+}
+
+// Move the caret to the adjacent line (ArrowUp/Down), committing the current
+// line first and keeping the column.
+async function moveEdit(line, text, col, dir) {
+  const target = line + dir;
+  if (target < 0 || target >= state.total) return;
+  state.editingLine = -1;
+  try {
+    if (await commitIfChanged(line, text)) {
+      clearLineCache();
+      await refreshStat();
+    }
+    state.activeLine = target;
+    state.editingLine = target;
+    state.editCaret = col;
+    revealLine(target);
+    render();
+  } catch (e) {
+    flashCount("編集エラー");
+    console.error(e);
+  }
+}
+
+// Enter: split the line at the caret into two lines.
+async function splitLine(line, text, pos) {
+  state.editingLine = -1;
+  try {
+    await apiPost("/api/edit/line", { line, text: text.slice(0, pos) });
+    await apiPost("/api/edit/insert", { line: line + 1, text: text.slice(pos) });
+    clearLineCache();
+    await refreshStat();
+    state.activeLine = line + 1;
+    state.editingLine = line + 1;
+    state.editCaret = 0;
+    revealLine(line + 1);
+    render();
+  } catch (e) {
+    flashCount("編集エラー");
+    console.error(e);
+  }
+}
+
+// Backspace at column 0: merge this line onto the end of the previous one.
+async function joinWithPrev(line, text) {
+  const prevText = cachedLine(line - 1)?.text ?? "";
+  state.editingLine = -1;
+  try {
+    await apiPost("/api/edit/line", { line: line - 1, text: prevText + text });
+    await apiPost("/api/edit/delete", { line });
+    clearLineCache();
+    await refreshStat();
+    state.activeLine = line - 1;
+    state.editingLine = line - 1;
+    state.editCaret = prevText.length;
+    revealLine(line - 1);
+    render();
+  } catch (e) {
+    flashCount("編集エラー");
+    console.error(e);
+  }
+}
+
+// Delete at end of line: pull the next line up onto this one.
+async function joinWithNext(line, text) {
+  const nextText = cachedLine(line + 1)?.text ?? "";
+  state.editingLine = -1;
+  try {
+    await apiPost("/api/edit/line", { line, text: text + nextText });
+    await apiPost("/api/edit/delete", { line: line + 1 });
+    clearLineCache();
+    await refreshStat();
+    state.activeLine = line;
+    state.editingLine = line;
+    state.editCaret = text.length;
+    revealLine(line);
+    render();
+  } catch (e) {
+    flashCount("編集エラー");
+    console.error(e);
+  }
 }
 
 async function insertLineBelow() {
@@ -765,7 +935,12 @@ function toggleOpt(key, id) {
 function onGlobalKey(e) {
   const inInput = e.target.tagName === "INPUT";
   const inLineEditor = inInput && e.target.classList.contains("line-edit");
-  // The open dialog owns Escape while it's up.
+  // Modals own Escape while they're up.
+  if (e.key === "Escape" && settingsVisible()) {
+    e.preventDefault();
+    hideSettings();
+    return;
+  }
   if (e.key === "Escape" && openerVisible()) {
     e.preventDefault();
     hideOpener();
@@ -1038,6 +1213,23 @@ function initDropZone() {
   });
 }
 
+// Start a fresh empty "untitled" buffer with a blank editable first line, so
+// the app opens to a usable page (like Notepad) instead of a dialog.
+async function newUntitled() {
+  try {
+    onDocumentOpened(await apiPost("/api/new", {}));
+    if (state.total === 0) {
+      await apiPost("/api/edit/insert", { line: 0, text: "" });
+      clearLineCache();
+      await refreshStat();
+      beginEdit(0, 0);
+    }
+  } catch (e) {
+    showOpener();
+    openerMsg("新規バッファを作成できません: " + e.message);
+  }
+}
+
 function initWorkspace() {
   $("open-file").addEventListener("click", showOpener);
   $("opener-close").addEventListener("click", hideOpener);
@@ -1058,10 +1250,87 @@ function initWorkspace() {
   initDropZone();
 }
 
+// ---- settings (theme / font) -----------------------------------------------
+
+function loadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    return { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings(s) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  } catch {
+    // ignore private-mode quota errors
+  }
+}
+
+function applySettings(s) {
+  const root = document.documentElement;
+  root.dataset.theme = s.theme; // light | dark | black
+  root.style.setProperty("--mono", FONT_STACKS[s.font] || FONT_STACKS.mono);
+  const fs = Math.max(11, Math.min(22, Number(s.fontSize) || 13));
+  root.style.setProperty("--font-size", `${fs}px`);
+  const lh = fs + 6;
+  root.style.setProperty("--line-height", `${lh}px`);
+  LINE_HEIGHT = lh; // keep virtualization math in sync with the CSS
+  _charW = 0; // font metrics changed → remeasure on next click
+  scheduleRender();
+}
+
+function updateSetting(key, value) {
+  state.settings = { ...state.settings, [key]: value };
+  applySettings(state.settings);
+  saveSettings(state.settings);
+}
+
+function settingsVisible() {
+  return !$("settings").classList.contains("hidden");
+}
+function showSettings() {
+  const m = $("settings");
+  m.classList.remove("hidden");
+  m.setAttribute("aria-hidden", "false");
+}
+function hideSettings() {
+  const m = $("settings");
+  m.classList.add("hidden");
+  m.setAttribute("aria-hidden", "true");
+  $("viewport").focus();
+}
+
+function initSettings() {
+  state.settings = loadSettings();
+  applySettings(state.settings);
+  $("set-theme").value = state.settings.theme;
+  $("set-font").value = state.settings.font;
+  $("set-fontsize").value = state.settings.fontSize;
+  $("set-fontsize-val").textContent = `${state.settings.fontSize}px`;
+
+  $("set-theme").addEventListener("change", () => updateSetting("theme", $("set-theme").value));
+  $("set-font").addEventListener("change", () => updateSetting("font", $("set-font").value));
+  $("set-fontsize").addEventListener("input", () => {
+    const v = Number($("set-fontsize").value);
+    $("set-fontsize-val").textContent = `${v}px`;
+    updateSetting("fontSize", v);
+  });
+
+  $("open-settings").addEventListener("click", showSettings);
+  $("settings-close").addEventListener("click", hideSettings);
+  $("settings").addEventListener("click", (e) => {
+    if (e.target === $("settings")) hideSettings();
+  });
+}
+
 // ---- boot ------------------------------------------------------------------
 
 async function boot() {
   state.history = loadSearchHistory();
+  initSettings();
   initScrollbar();
   initEvents();
   initWorkspace();
@@ -1074,7 +1343,7 @@ async function boot() {
   }
   updateStatusMeta();
   if (!state.stat.open) {
-    showOpener();
+    await newUntitled(); // open to a blank untitled page, not the file dialog
   } else {
     $("viewport").focus();
     render();

@@ -30,7 +30,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Ayame — 菖蒲")
+        .with_title("Ayame")
         .with_inner_size(LogicalSize::new(1280.0, 800.0))
         .build(&event_loop)
         .context("creating window")?;
