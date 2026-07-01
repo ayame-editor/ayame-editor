@@ -259,10 +259,16 @@ function renderLineEditor(container, line, text) {
       $("viewport").focus();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      moveEdit(line, val, pos, -1);
+      jumpEdit(line, val, line - 1, pos); // same column, line above
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      moveEdit(line, val, pos, +1);
+      jumpEdit(line, val, line + 1, pos); // same column, line below
+    } else if (e.key === "ArrowLeft" && pos === 0 && sel === 0 && line > 0) {
+      e.preventDefault();
+      jumpEdit(line, val, line - 1, (cachedLine(line - 1)?.text ?? "").length);
+    } else if (e.key === "ArrowRight" && pos === val.length && sel === 0 && line < state.total - 1) {
+      e.preventDefault();
+      jumpEdit(line, val, line + 1, 0);
     } else if (e.key === "Backspace" && pos === 0 && sel === 0 && line > 0) {
       e.preventDefault();
       joinWithPrev(line, val); // Backspace at col 0 joins the previous line
@@ -270,6 +276,14 @@ function renderLineEditor(container, line, text) {
       e.preventDefault();
       joinWithNext(line, val); // Delete at end pulls the next line up
     }
+  });
+  // Pasting text that contains newlines becomes multiple lines (like Notepad),
+  // instead of collapsing into this single-line input.
+  input.addEventListener("paste", (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData("text") ?? "";
+    if (!/[\r\n]/.test(text)) return; // single line → let the input handle it
+    e.preventDefault();
+    pasteMultiline(line, input.value, input.selectionStart, input.selectionEnd, text);
   });
   input.addEventListener("blur", () => {
     if (state.editingLine === line) commitEdit(line, input.value);
@@ -670,21 +684,20 @@ async function commitIfChanged(line, text) {
   return true;
 }
 
-// Move the caret to the adjacent line (ArrowUp/Down), committing the current
-// line first and keeping the column.
-async function moveEdit(line, text, col, dir) {
-  const target = line + dir;
-  if (target < 0 || target >= state.total) return;
+// Move the caret to another line (arrow keys), committing the current line
+// first if it changed, and placing the caret at `targetCol`.
+async function jumpEdit(line, text, targetLine, targetCol) {
+  if (targetLine < 0 || targetLine >= state.total) return;
   state.editingLine = -1;
   try {
     if (await commitIfChanged(line, text)) {
       clearLineCache();
       await refreshStat();
     }
-    state.activeLine = target;
-    state.editingLine = target;
-    state.editCaret = col;
-    revealLine(target);
+    state.activeLine = targetLine;
+    state.editingLine = targetLine;
+    state.editCaret = targetCol;
+    revealLine(targetLine);
     render();
   } catch (e) {
     flashCount("編集エラー");
@@ -707,6 +720,40 @@ async function splitLine(line, text, pos) {
     render();
   } catch (e) {
     flashCount("編集エラー");
+    console.error(e);
+  }
+}
+
+// Paste multi-line text at the caret: the first pasted line joins the text
+// before the caret, the last joins the text after it, and any lines between
+// become new lines — the Notepad behavior.
+async function pasteMultiline(line, val, selStart, selEnd, raw) {
+  const parts = raw.replace(/\r\n?/g, "\n").split("\n");
+  const before = val.slice(0, selStart);
+  const after = val.slice(selEnd);
+  state.editingLine = -1;
+  try {
+    await apiPost("/api/edit/line", { line, text: before + parts[0] });
+    let caretLine = line;
+    let caretCol = (before + parts[0]).length;
+    for (let i = 1; i < parts.length; i++) {
+      const last = i === parts.length - 1;
+      await apiPost("/api/edit/insert", {
+        line: line + i,
+        text: last ? parts[i] + after : parts[i],
+      });
+      caretLine = line + i;
+      caretCol = parts[i].length; // caret sits just before the trailing `after`
+    }
+    clearLineCache();
+    await refreshStat();
+    state.activeLine = caretLine;
+    state.editingLine = caretLine;
+    state.editCaret = caretCol;
+    revealLine(caretLine);
+    render();
+  } catch (e) {
+    flashCount("貼り付けエラー");
     console.error(e);
   }
 }
