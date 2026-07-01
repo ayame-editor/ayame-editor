@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh \
-  | AYAME_VERSION=0.1.12 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
+  | AYAME_VERSION=0.1.13 AYAME_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ローカルに clone 済みなら:
@@ -192,6 +192,8 @@ ayame serve --port 8777                     # FILE 省略。ブラウザで開�
 - 開いているファイルはいつでも別ファイルに切り替えられます（未保存の編集があれば確認）。
 
 **タブ（複数ファイル）**：ファイルはタブで開き、複数を同時に扱えます。タブのクリックで切替、`✕`（または中クリック）で閉じる、`＋` で新規。未保存タブには印（`•`）が付きます。ショートカット: 新規 `Ctrl+N` / 閉じる `Ctrl+W`。
+
+**エクスプローラー（ファイルツリー）**：ツールバーの `☰`（`Ctrl+B`）でサイドバーを開閉。フォルダを展開してファイルをクリックするとタブで開きます。ルートは「開く」ダイアログの **フォルダ** ボタンで表示中のフォルダに設定でき、`↑` で親フォルダへ移動できます（開閉状態はブラウザに保存）。
 
 **メモ帳風の編集**：行をクリックするとその位置にカーソルが入り、そのまま入力できます。`Enter` で行を分割、`Backspace`（行頭）/`Delete`（行末）で前後の行と結合、`↑`/`↓` で上下の行へカーソル移動。行末には `[EOF]` を表示します。
 

@@ -17,6 +17,7 @@
         </div>
 
         <div class="tb-group">
+          <button id="toggle-sidebar" class="ico" title="エクスプローラー (Ctrl+B)">☰</button>
           <button id="open-file" class="cmd" title="ファイルを開く (Ctrl+O)">開く</button>
           <button id="save-copy" class="cmd" title="別ファイルへ保存 (Ctrl+S)">保存</button>
         </div>
@@ -66,11 +67,23 @@
         <button id="new-tab" class="tab-new" title="新規タブ (Ctrl+N)">＋</button>
       </nav>
 
-      <main id="viewport" tabindex="0">
-        <div id="content"></div>
-        <div id="vscrollbar"><div id="vthumb"></div></div>
-        <div id="overlay" class="overlay hidden"></div>
-      </main>
+      <div id="main">
+        <aside id="sidebar" class="hidden">
+          <div class="sb-head">
+            <span class="sb-title">エクスプローラー</span>
+            <button id="sb-openfolder" class="ico" title="フォルダを開く">📂</button>
+            <button id="sb-up" class="ico" title="親フォルダへ">↑</button>
+          </div>
+          <div id="sb-root" class="sb-root" title=""></div>
+          <div id="tree" class="tree"></div>
+        </aside>
+
+        <main id="viewport" tabindex="0">
+          <div id="content"></div>
+          <div id="vscrollbar"><div id="vthumb"></div></div>
+          <div id="overlay" class="overlay hidden"></div>
+        </main>
+      </div>
 
       <footer id="statusbar">
         <span id="st-pos" class="seg">—</span>
@@ -99,6 +112,7 @@
         <div class="opener-path">
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" />
+          <button id="opener-folder" class="cmd" title="表示中のフォルダをツリーに開く">フォルダ</button>
           <button id="opener-open" class="cmd">開く</button>
         </div>
 

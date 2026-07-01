@@ -13,13 +13,14 @@ const OVERSCAN = 6;
 const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 const SETTINGS_KEY = "ayame.settings.v1";
+const TREE_KEY = "ayame.treeRoot.v1";
 
 const FONT_STACKS = {
   mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
   "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
   system: '"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif',
 };
-const DEFAULT_SETTINGS = { theme: "light", font: "mono", fontSize: 13 };
+const DEFAULT_SETTINGS = { theme: "light", font: "mono", fontSize: 13, sidebar: false };
 
 const state = {
   total: 0,
@@ -45,6 +46,9 @@ const state = {
   editCaret: null, // caret column to place when the next line editor opens
   settings: { ...DEFAULT_SETTINGS },
   tabs: [], // open tabs from /api/tabs
+  treeParent: null, // parent of the current tree root (for the "up" button)
+  treeLoaded: false,
+  openerDir: null, // directory currently shown in the open dialog
 };
 
 const pool = [];
@@ -956,6 +960,11 @@ function onGlobalKey(e) {
     showOpener();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    setSidebar(!sidebarOpen());
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
     e.preventDefault();
     newUntitled(); // new tab
@@ -1095,6 +1104,7 @@ async function browse(dir) {
 }
 
 function renderBrowse(res) {
+  state.openerDir = res.dir;
   $("opener-cwd").textContent = res.dir;
   $("opener-cwd").title = res.dir;
   const list = $("opener-list");
@@ -1301,6 +1311,122 @@ async function closeTab(id) {
   }
 }
 
+// ---- sidebar file tree ------------------------------------------------------
+
+function sidebarOpen() {
+  return !$("sidebar").classList.contains("hidden");
+}
+
+function setSidebar(open) {
+  $("sidebar").classList.toggle("hidden", !open);
+  $("toggle-sidebar").classList.toggle("on", open);
+  state.settings = { ...state.settings, sidebar: open };
+  saveSettings(state.settings);
+  if (open && !state.treeLoaded) {
+    state.treeLoaded = true;
+    treeSetRoot(localStorage.getItem(TREE_KEY) || null);
+  }
+  scheduleRender(); // viewport width changed
+}
+
+// Load `dir` (or the server default when null) as the tree root.
+async function treeSetRoot(dir) {
+  try {
+    const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
+    const res = await api(`/api/browse${q}`);
+    state.treeParent = res.parent;
+    $("sb-root").textContent = res.dir;
+    $("sb-root").title = res.dir;
+    try {
+      localStorage.setItem(TREE_KEY, res.dir);
+    } catch {
+      // ignore quota
+    }
+    const tree = $("tree");
+    tree.textContent = "";
+    tree.append(renderTreeEntries(res.entries, 0));
+  } catch (e) {
+    // A stale saved root: fall back to the server default once.
+    if (dir) {
+      treeSetRoot(null);
+    } else {
+      $("tree").textContent = "";
+    }
+  }
+}
+
+function renderTreeEntries(entries, depth) {
+  const frag = document.createDocumentFragment();
+  for (const ent of entries) frag.append(renderTreeNode(ent, depth));
+  return frag;
+}
+
+function renderTreeNode(ent, depth) {
+  const row = document.createElement("div");
+  row.className = "tnode " + (ent.is_dir ? "dir" : "file");
+  row.style.paddingLeft = `${8 + depth * 14}px`;
+  const chev = document.createElement("span");
+  chev.className = "chev";
+  chev.textContent = ent.is_dir ? "▸" : "";
+  const nm = document.createElement("span");
+  nm.className = "tname";
+  nm.textContent = ent.name;
+  row.append(chev, nm);
+
+  if (!ent.is_dir) {
+    row.title = ent.path;
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPath(ent.path); // opens in a new tab
+    });
+    return row;
+  }
+
+  // Folder: lazily load children on first expand.
+  const kids = document.createElement("div");
+  kids.className = "tkids";
+  kids.style.display = "none";
+  let loaded = false;
+  row.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const opening = kids.style.display === "none";
+    if (opening && !loaded) {
+      loaded = true;
+      try {
+        const res = await api(`/api/browse?dir=${encodeURIComponent(ent.path)}`);
+        kids.append(renderTreeEntries(res.entries, depth + 1));
+      } catch {
+        loaded = false;
+      }
+    }
+    kids.style.display = opening ? "block" : "none";
+    chev.textContent = opening ? "▾" : "▸";
+  });
+  const frag = document.createDocumentFragment();
+  frag.append(row, kids);
+  return frag;
+}
+
+function initTree() {
+  $("toggle-sidebar").addEventListener("click", () => setSidebar(!sidebarOpen()));
+  $("sb-up").addEventListener("click", () => {
+    if (state.treeParent) treeSetRoot(state.treeParent);
+  });
+  $("sb-openfolder").addEventListener("click", () => {
+    // Reuse the open dialog to pick a folder for the tree root.
+    showOpener();
+  });
+  $("opener-folder").addEventListener("click", () => {
+    if (!state.openerDir) return;
+    if (!sidebarOpen()) setSidebar(true);
+    state.treeLoaded = true;
+    treeSetRoot(state.openerDir);
+    hideOpener();
+  });
+  // Apply persisted visibility.
+  if (state.settings.sidebar) setSidebar(true);
+}
+
 // Start a fresh empty "untitled" buffer with a blank editable first line, so
 // the app opens to a usable page (like Notepad) instead of a dialog.
 async function newUntitled() {
@@ -1419,6 +1545,7 @@ async function boot() {
   initScrollbar();
   initEvents();
   initWorkspace();
+  initTree();
   try {
     await refreshStat();
   } catch (e) {
