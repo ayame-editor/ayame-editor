@@ -449,7 +449,61 @@ button.toggle.on {
   background: color-mix(in srgb, var(--accent) 26%, transparent);
   border-radius: 2px;
 }
-.line-edit { user-select: text; }
+
+/* The fluid text caret: a thin blinking bar positioned by transform. */
+#caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: var(--line-height);
+  background: var(--accent);
+  pointer-events: none;
+  display: none;
+  will-change: transform;
+}
+#caret.on {
+  display: block;
+  animation: caret-blink 1.06s steps(1) infinite;
+}
+@keyframes caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* The hidden text/IME input that actually receives keystrokes. It sits exactly
+   at the caret so the OS IME candidate window appears in the right place; it is
+   invisible until an IME composition is in progress, when it shows the string
+   being composed inline. */
+#hidden-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: var(--line-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font: inherit;
+  line-height: var(--line-height);
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  z-index: 3;
+}
+#hidden-input.composing {
+  width: auto;
+  min-width: 1ch;
+  color: var(--fg);
+  background: var(--edit-bg);
+  caret-color: var(--accent);
+  text-decoration: underline;
+  box-shadow: 0 1px 0 var(--accent);
+}
 #viewport.has-ruler #content { top: 18px; }
 
 /* ---- column ruler ---------------------------------------------------- */
@@ -516,22 +570,6 @@ button.toggle.on {
 
 .tx { color: var(--fg); }
 .tx.pending { color: var(--fg-faint); }
-
-.line-edit {
-  width: calc(100vw - 140px);
-  min-width: 40ch;
-  height: var(--line-height);
-  margin: 0;
-  padding: 0;                 /* align the caret/text exactly with the row text */
-  border: 0;
-  border-radius: 0;
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent-bright);
-  background: var(--edit-bg);
-  color: var(--fg);
-  font: inherit;
-  line-height: var(--line-height);
-}
 
 mark {
   background: var(--mark-bg);

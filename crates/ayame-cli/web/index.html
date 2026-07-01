@@ -82,7 +82,13 @@
               <circle cx="96" cy="164" r="6" fill="var(--accent)" opacity=".7"/>
             </svg>
           </div>
-          <div id="content"><div id="sel-layer"></div></div>
+          <div id="content">
+            <div id="sel-layer"></div>
+            <div id="caret" aria-hidden="true"></div>
+            <textarea id="hidden-input" spellcheck="false" autocapitalize="off"
+                      autocomplete="off" autocorrect="off" wrap="off"
+                      aria-label="エディタ"></textarea>
+          </div>
           <div id="vscrollbar"><div id="vthumb"></div></div>
           <div id="overlay" class="overlay hidden"></div>
         </main>

@@ -52,16 +52,20 @@ const state = {
   searchTruncated: false,
   history: [],
   historyIndex: -1,
-  editingLine: -1,
-  editCaret: null, // caret column to place when the next line editor opens
   settings: { ...DEFAULT_SETTINGS },
   tabs: [], // open tabs from /api/tabs
   treeParent: null, // parent of the current tree root (for the "up" button)
   treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
-  sel: null, // multi-line selection: { anchor: {line,col}, head: {line,col} }
+  // ---- caret-based (Notepad-style) editing ----
+  caret: { line: 0, col: 0 }, // (line, col) in Unicode scalars, like the backend
+  goalCol: 0, // remembered column for vertical caret motion
+  composing: false, // an IME composition is in progress
+  focused: false, // the hidden text input holds focus (draw the caret)
+  sel: null, // selection: { anchor: {line,col}, head: {line,col} } or null
   dragging: false,
   dragMoved: false,
+  dragAnchor: null, // caret at mouse-down, promoted to a selection once it moves
 };
 
 const pool = [];
@@ -217,8 +221,6 @@ function fillRow(row, line, rec, gutterWidth) {
   if (rec == null) {
     tx.classList.add("pending");
     tx.textContent = "⋯";
-  } else if (state.editingLine === line) {
-    renderLineEditor(tx, line, rec.text);
   } else if (state.matcher) {
     appendHighlighted(tx, rec.text);
   } else {
@@ -236,86 +238,63 @@ function fillEofRow(row) {
   tx.textContent = "[EOF]";
 }
 
-function renderLineEditor(container, line, text) {
-  const input = document.createElement("input");
-  input.className = "line-edit";
-  input.value = text;
-  input.spellcheck = false;
-  const stop = (e) => e.stopPropagation();
-  input.addEventListener("mousedown", stop);
-  input.addEventListener("click", stop);
-  input.addEventListener("dblclick", stop);
-  input.addEventListener("keydown", (e) => {
-    const val = input.value;
-    const pos = input.selectionStart;
-    const sel = input.selectionEnd - input.selectionStart;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      splitLine(line, val, pos); // Enter splits the line at the caret
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      state.editingLine = -1;
-      scheduleRender();
-      $("viewport").focus();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      jumpEdit(line, val, line - 1, pos); // same column, line above
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      jumpEdit(line, val, line + 1, pos); // same column, line below
-    } else if (e.key === "ArrowLeft" && pos === 0 && sel === 0 && line > 0) {
-      e.preventDefault();
-      jumpEdit(line, val, line - 1, (cachedLine(line - 1)?.text ?? "").length);
-    } else if (e.key === "ArrowRight" && pos === val.length && sel === 0 && line < state.total - 1) {
-      e.preventDefault();
-      jumpEdit(line, val, line + 1, 0);
-    } else if (e.key === "Backspace" && pos === 0 && sel === 0 && line > 0) {
-      e.preventDefault();
-      joinWithPrev(line, val); // Backspace at col 0 joins the previous line
-    } else if (e.key === "Delete" && pos === val.length && sel === 0 && line < state.total - 1) {
-      e.preventDefault();
-      joinWithNext(line, val); // Delete at end pulls the next line up
-    }
-  });
-  // Pasting text that contains newlines becomes multiple lines (like Notepad),
-  // instead of collapsing into this single-line input.
-  input.addEventListener("paste", (e) => {
-    const text = (e.clipboardData || window.clipboardData)?.getData("text") ?? "";
-    if (!/[\r\n]/.test(text)) return; // single line → let the input handle it
-    e.preventDefault();
-    pasteMultiline(line, input.value, input.selectionStart, input.selectionEnd, text);
-  });
-  input.addEventListener("blur", () => {
-    if (state.editingLine === line) commitEdit(line, input.value);
-  });
-  container.append(input);
-  const caret = state.editCaret;
-  state.editCaret = null;
-  queueMicrotask(() => {
-    input.focus();
-    if (caret == null) {
-      input.select();
-    } else {
-      const p = Math.max(0, Math.min(caret, input.value.length));
-      input.setSelectionRange(p, p);
-    }
-  });
-}
-
-// Character width of the monospace content font, for click→caret mapping.
+// Character width of the monospace content font, for a rough fallback only
+// (real caret/selection geometry is measured from the actual glyphs below, so
+// CJK, tabs and proportional fallbacks all line up).
 let _charW = 0;
 function charWidth() {
   if (_charW) return _charW;
-  const cs = getComputedStyle($("content"));
-  const probe = document.createElement("span");
-  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;";
-  probe.style.fontFamily = cs.fontFamily;
-  probe.style.fontSize = cs.fontSize;
-  probe.textContent = "0".repeat(100);
-  document.body.append(probe);
-  _charW = probe.getBoundingClientRect().width / 100 || 8;
-  probe.remove();
+  _charW = measureTextWidth("0".repeat(100)) / 100 || 8;
   return _charW;
+}
+
+// Measure the rendered pixel width of `str` in the content font. One reused,
+// hidden probe kept inside #content so it inherits the exact font metrics.
+let _measSpan = null;
+function measureTextWidth(str) {
+  if (!str) return 0;
+  if (!_measSpan) {
+    _measSpan = document.createElement("span");
+    _measSpan.style.cssText =
+      "position:absolute;visibility:hidden;white-space:pre;top:-9999px;left:0;pointer-events:none;";
+    $("content").appendChild(_measSpan);
+  }
+  _measSpan.textContent = str;
+  return _measSpan.getBoundingClientRect().width;
+}
+
+// Unicode-scalar view of a line's text (matches the backend's char columns).
+function lineChars(line) {
+  return Array.from(cachedLine(line)?.text ?? "");
+}
+function lineLen(line) {
+  return lineChars(line).length;
+}
+
+// Pixel x (in #content coordinates, gutter included) of column `col` on `line`.
+function caretX(line, col) {
+  const cs = lineChars(line);
+  const head = cs.slice(0, Math.max(0, Math.min(col, cs.length))).join("");
+  return gutterPixels() + measureTextWidth(head);
+}
+
+// Inverse of caretX: nearest column boundary to pixel x (content coordinates).
+function colFromX(line, x) {
+  const cs = lineChars(line);
+  const local = x - gutterPixels();
+  if (local <= 0) return 0;
+  const full = measureTextWidth(cs.join(""));
+  if (local >= full) return cs.length;
+  let lo = 0,
+    hi = cs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (measureTextWidth(cs.slice(0, mid).join("")) < local) lo = mid + 1;
+    else hi = mid;
+  }
+  const wLo = measureTextWidth(cs.slice(0, lo).join(""));
+  const wPrev = lo > 0 ? measureTextWidth(cs.slice(0, lo - 1).join("")) : 0;
+  return local - wPrev < wLo - local ? lo - 1 : lo;
 }
 
 // ---- selection (multi-line, coordinate-based) ------------------------------
@@ -337,10 +316,8 @@ function coordsFromEvent(e) {
   const rowInView = Math.floor((e.clientY - rect.top) / LINE_HEIGHT);
   let line = state.first + Math.max(0, rowInView);
   line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
-  const x = e.clientX - rect.left - gutterPixels() + content.scrollLeft;
-  let col = Math.max(0, Math.round(x / charWidth()));
-  const len = cachedLine(line)?.text.length ?? 0;
-  return { line, col: Math.min(col, len) };
+  const x = e.clientX - rect.left + content.scrollLeft; // #content coordinates
+  return { line, col: colFromX(line, x) };
 }
 
 // Normalized selection: { start, end } with start <= end, or null.
@@ -368,68 +345,58 @@ function renderSelection() {
   layer.textContent = "";
   const r = selRange();
   if (!r || (r.start.line === r.end.line && r.start.col === r.end.col)) return;
-  const gpx = gutterPixels();
   const cw = charWidth();
   const vis = rowsVisible() + OVERSCAN;
   const from = Math.max(r.start.line, state.first);
   const to = Math.min(r.end.line, state.first + vis);
   for (let line = from; line <= to; line++) {
     const startCol = line === r.start.line ? r.start.col : 0;
-    const len = cachedLine(line)?.text.length ?? 0;
-    // End of a fully/partly selected line extends a bit past its text so the
+    const len = lineLen(line);
+    // A line selected through its end extends a hair past the text so the
     // trailing newline reads as selected, like a normal editor.
-    let endCol = line === r.end.line ? Math.min(r.end.col, len) : len + 1;
-    if (endCol < startCol) endCol = startCol;
+    const endCol = line === r.end.line ? Math.min(r.end.col, len) : len;
+    const trail = line === r.end.line ? 0 : cw * 0.6;
+    const left = caretX(line, startCol);
+    const width = caretX(line, endCol) - left + trail;
     const rect = document.createElement("div");
     rect.className = "selrect";
-    rect.style.left = `${gpx + startCol * cw}px`;
+    rect.style.left = `${left}px`;
     rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
-    rect.style.width = `${Math.max(2, (endCol - startCol) * cw)}px`;
+    rect.style.width = `${Math.max(2, width)}px`;
     layer.append(rect);
   }
 }
 
 function initSelection() {
   const content = $("content");
-  content.addEventListener("mousedown", async (e) => {
-    if (e.button !== 0 || e.target.closest(".line-edit")) return;
-    // Commit any in-progress line edit before selecting.
-    if (state.editingLine >= 0) {
-      const inp = content.querySelector(".line-edit");
-      const l = state.editingLine;
-      state.editingLine = -1;
-      if (inp) {
-        try {
-          if (await commitIfChanged(l, inp.value)) {
-            clearLineCache();
-            await refreshStat();
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
+  content.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // keep focus on the hidden input, not the div
     const p = coordsFromEvent(e);
-    if (e.shiftKey && state.sel) {
-      state.sel.head = p;
+    if (e.shiftKey) {
+      const anchor = state.sel ? state.sel.anchor : { ...state.caret };
+      state.sel = { anchor, head: p };
+      state.dragAnchor = anchor;
       state.dragMoved = true;
     } else {
-      state.sel = { anchor: p, head: p };
+      state.sel = null; // a bare click collapses any selection to a caret
+      state.dragAnchor = p;
       state.dragMoved = false;
     }
+    setCaret(p.line, p.col);
     state.dragging = true;
-    $("viewport").focus();
-    scheduleRender();
+    focusEditor();
   });
 
   window.addEventListener("mousemove", (e) => {
     if (!state.dragging) return;
     const p = coordsFromEvent(e);
-    const a = state.sel.anchor;
+    const a = state.dragAnchor;
     if (p.line !== a.line || p.col !== a.col) state.dragMoved = true;
-    state.sel.head = p;
+    if (state.dragMoved) state.sel = { anchor: a, head: p };
+    setCaret(p.line, p.col);
     // Auto-scroll when dragging past the top/bottom edge.
-    const rect = $("content").getBoundingClientRect();
+    const rect = content.getBoundingClientRect();
     if (e.clientY < rect.top + 14) setFirst(state.first - 2);
     else if (e.clientY > rect.bottom - 14) setFirst(state.first + 2);
     scheduleRender();
@@ -438,14 +405,24 @@ function initSelection() {
   window.addEventListener("mouseup", () => {
     if (!state.dragging) return;
     state.dragging = false;
-    if (!state.dragMoved) {
-      // A plain click: place the caret and start editing that line.
-      const p = state.sel.head;
-      state.sel = null;
-      beginEdit(p.line, p.col);
-    } else {
-      scheduleRender();
-    }
+    if (!state.dragMoved) state.sel = null; // plain click → just the caret
+    scheduleRender();
+  });
+
+  // Double-click selects the word under the caret.
+  content.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    const p = coordsFromEvent(e);
+    const cs = lineChars(p.line);
+    const isWord = (ch) => /[\p{L}\p{N}_]/u.test(ch || "");
+    if (!isWord(cs[p.col]) && !isWord(cs[p.col - 1])) return;
+    let a = p.col,
+      b = p.col;
+    while (a > 0 && isWord(cs[a - 1])) a--;
+    while (b < cs.length && isWord(cs[b])) b++;
+    state.sel = { anchor: { line: p.line, col: a }, head: { line: p.line, col: b } };
+    setCaret(p.line, b);
+    focusEditor();
   });
 }
 
@@ -454,11 +431,10 @@ function selectAll() {
   const last = state.total - 1;
   state.sel = {
     anchor: { line: 0, col: 0 },
-    head: { line: last, col: cachedLine(last)?.text.length ?? Number.MAX_SAFE_INTEGER },
+    head: { line: last, col: lineLen(last) },
   };
-  state.editingLine = -1;
-  $("viewport").focus();
-  scheduleRender();
+  setCaret(last, lineLen(last));
+  focusEditor();
 }
 
 // Fetch the selected text (bounded) and join with newlines.
@@ -504,33 +480,16 @@ async function copySelection() {
   }
 }
 
-async function deleteSelection() {
-  const r = selRange();
-  if (!r || !hasSelection()) return;
-  const count = Math.min(r.end.line - r.start.line + 1, MAX_COPY_LINES);
-  try {
-    const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
-    const L = res.lines.map((x) => x.text);
-    const merged = (L[0] ?? "").slice(0, r.start.col) + (L[L.length - 1] ?? "").slice(r.end.col);
-    await apiPost("/api/edit/line", { line: r.start.line, text: merged });
-    for (let i = r.start.line + L.length - 1; i > r.start.line; i--) {
-      await apiPost("/api/edit/delete", { line: i });
-    }
-    state.sel = null;
-    clearLineCache();
-    await refreshStat();
-    beginEdit(r.start.line, r.start.col);
-  } catch (e) {
-    flashCount("削除エラー");
-    console.error(e);
-  }
+function deleteSelection() {
+  if (!hasSelection()) return;
+  typeText(""); // replace the selection with nothing
 }
 
 async function cutSelection() {
   const r = selRange();
   if (!r || !hasSelection()) return;
   await copyToClipboard(await selectedText(r));
-  await deleteSelection();
+  deleteSelection();
 }
 
 function appendHighlighted(container, text) {
@@ -577,6 +536,7 @@ function render() {
   }
   buildRuler();
   renderSelection();
+  positionCaret();
   updateScrollbar();
   updateStatusPos();
 }
@@ -706,8 +666,7 @@ function updateStatusPos() {
     $("st-pos").textContent = "行 0";
     return;
   }
-  const cur = state.activeLine >= 0 ? state.activeLine : state.first;
-  $("st-pos").textContent = `行 ${commas(cur + 1)}`;
+  $("st-pos").textContent = `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`;
 }
 
 // ---- search ----------------------------------------------------------------
@@ -756,7 +715,8 @@ async function findStep(dir) {
     }
     const h = res.hit;
     state.lastMatch = { byte: h.byte, len: h.byte_len };
-    state.activeLine = h.line;
+    state.sel = null;
+    setCaret(h.line, 0);
     revealLine(h.line);
     updateCount();
   } catch (e) {
@@ -862,189 +822,179 @@ function clearLineCache() {
   state.loadToken++;
 }
 
-function beginEdit(line, caret = null) {
-  if (line < 0 || line >= state.total) return;
-  state.sel = null; // editing a line clears any range selection
+// ===========================================================================
+//  Caret-based editing (Notepad / Sakura Editor style)
+//
+//  There is a single fluid caret (state.caret) you can place anywhere and type
+//  across lines. Every mutation is expressed as one range replacement and sent
+//  to the backend's /api/edit/replace_range, which records it as a single undo
+//  step and returns the resulting caret. Edits are serialized through a small
+//  queue so fast typing/IME stays in order; the visible window is re-fetched
+//  after each edit (cheap over loopback) rather than mirrored optimistically.
+// ===========================================================================
+
+// Move the caret without touching the selection model wholesale (callers set
+// state.sel themselves). Keeps the active-line highlight on the caret line.
+function setCaret(line, col) {
+  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  col = Math.max(0, Math.min(col, lineLen(line)));
+  state.caret = { line, col };
   state.activeLine = line;
-  state.editingLine = line;
-  state.editCaret = caret; // null → select whole line
+}
+
+// Caret motion for the keyboard: `extend` grows the selection from its anchor.
+function moveCaret(line, col, extend) {
+  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  col = Math.max(0, Math.min(col, lineLen(line)));
+  if (extend) {
+    const anchor = state.sel ? state.sel.anchor : { ...state.caret };
+    state.sel = { anchor, head: { line, col } };
+  } else {
+    state.sel = null;
+  }
+  state.caret = { line, col };
+  state.activeLine = line;
+  revealCaret();
   scheduleRender();
 }
 
-async function commitEdit(line, text) {
-  state.editingLine = -1;
-  try {
-    if (await commitIfChanged(line, text)) {
-      clearLineCache();
-      state.activeLine = line;
-      await refreshStat();
+function focusEditor() {
+  const hi = $("hidden-input");
+  if (hi && document.activeElement !== hi) hi.focus({ preventScroll: true });
+  state.focused = true;
+  scheduleRender();
+}
+
+// Bring the caret into view: scroll vertically (whole lines) and horizontally
+// (#content is the horizontal scroll container).
+function revealCaret() {
+  const vis = rowsVisible();
+  if (state.caret.line < state.first) {
+    state.first = Math.min(state.caret.line, maxFirst());
+  } else if (state.caret.line >= state.first + vis) {
+    state.first = Math.min(Math.max(0, state.caret.line - vis + 1), maxFirst());
+  }
+  const content = $("content");
+  const x = caretX(state.caret.line, state.caret.col);
+  const view = content.clientWidth;
+  const margin = 24;
+  if (x - margin < content.scrollLeft) {
+    content.scrollLeft = Math.max(0, x - margin);
+  } else if (x + margin > content.scrollLeft + view) {
+    content.scrollLeft = x + margin - view;
+  }
+}
+
+// Position the caret element and the hidden IME input at the caret pixel.
+function positionCaret() {
+  const caretEl = $("caret");
+  const hi = $("hidden-input");
+  if (!caretEl || !hi) return;
+  const vis = rowsVisible();
+  const onScreen =
+    state.total > 0 &&
+    state.caret.line >= state.first &&
+    state.caret.line < state.first + vis;
+  const show = onScreen && state.focused && !anyModalOpen();
+  caretEl.classList.toggle("on", show && !state.composing);
+  if (!onScreen) return;
+  const x = caretX(state.caret.line, state.caret.col);
+  const y = (state.caret.line - state.first) * LINE_HEIGHT;
+  caretEl.style.transform = `translate(${x}px, ${y}px)`;
+  hi.style.transform = `translate(${x}px, ${y}px)`;
+}
+
+function anyModalOpen() {
+  return promptVisible() || settingsVisible() || openerVisible();
+}
+
+// ---- the serialized edit queue --------------------------------------------
+
+let editChain = Promise.resolve();
+function enqueueEdit(fn) {
+  editChain = editChain.then(fn).catch((e) => {
+    flashCount("編集エラー");
+    console.error(e);
+  });
+  return editChain;
+}
+
+// Re-fetch the padded window around state.first into the cache in one shot, so
+// the text never blinks to the "⋯" pending placeholder between keystrokes.
+async function reloadViewport() {
+  const start = Math.max(0, state.first - PAD);
+  const count = rowsVisible() + OVERSCAN + 2 * PAD;
+  const res = await api(`/api/lines?start=${start}&count=${count}`);
+  state.cache = { start, lines: res.lines };
+  state.total = res.total;
+  state.loadToken++; // cancel any in-flight ensureData for the old contents
+}
+
+// The range the next text insertion replaces: the selection, or the caret.
+function replaceTarget() {
+  const r = selRange();
+  if (r) return { l0: r.start.line, c0: r.start.col, l1: r.end.line, c1: r.end.col };
+  return { l0: state.caret.line, c0: state.caret.col, l1: state.caret.line, c1: state.caret.col };
+}
+
+// The one primitive every edit funnels through. Refresh the cache *before*
+// placing the caret so setCaret clamps against the post-edit line lengths (not
+// the stale, pre-edit ones — otherwise every insertion loses its last column).
+async function applyRange(l0, c0, l1, c1, text) {
+  const res = await apiPost("/api/edit/replace_range", { l0, c0, l1, c1, text });
+  state.sel = null;
+  await refreshStat();
+  await reloadViewport();
+  setCaret(res.caret_line, res.caret_col);
+  state.goalCol = state.caret.col;
+  revealCaret();
+  render();
+}
+
+// Insert (or replace the selection with) `text`, which may contain newlines.
+// The target range is resolved *inside* the queued step, so a burst of
+// keystrokes each sees the caret left by the previous edit (never a stale one).
+function typeText(text) {
+  if (state.total === 0) return;
+  enqueueEdit(() => {
+    const t = replaceTarget();
+    return applyRange(t.l0, t.c0, t.l1, t.c1, text);
+  });
+}
+
+function insertNewline() {
+  typeText("\n");
+}
+
+function backspace() {
+  enqueueEdit(() => {
+    if (hasSelection()) {
+      const t = replaceTarget();
+      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
-    render();
-  } catch (e) {
-    flashCount("編集エラー");
-    console.error(e);
-  }
-  $("viewport").focus();
+    const { line, col } = state.caret;
+    if (col > 0) return applyRange(line, col - 1, line, col, "");
+    if (line > 0) return applyRange(line - 1, lineLen(line - 1), line, 0, "");
+    return null;
+  });
 }
 
-// Only persist a line when its text actually changed, so merely moving the
-// caret between lines never dirties the document.
-async function commitIfChanged(line, text) {
-  const rec = cachedLine(line);
-  if (rec && rec.text === text) return false;
-  await apiPost("/api/edit/line", { line, text });
-  return true;
-}
-
-// Move the caret to another line (arrow keys), committing the current line
-// first if it changed, and placing the caret at `targetCol`.
-async function jumpEdit(line, text, targetLine, targetCol) {
-  if (targetLine < 0 || targetLine >= state.total) return;
-  state.editingLine = -1;
-  try {
-    if (await commitIfChanged(line, text)) {
-      clearLineCache();
-      await refreshStat();
+function forwardDelete() {
+  enqueueEdit(() => {
+    if (hasSelection()) {
+      const t = replaceTarget();
+      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
-    state.activeLine = targetLine;
-    state.editingLine = targetLine;
-    state.editCaret = targetCol;
-    revealLine(targetLine);
-    render();
-  } catch (e) {
-    flashCount("編集エラー");
-    console.error(e);
-  }
+    const { line, col } = state.caret;
+    if (col < lineLen(line)) return applyRange(line, col, line, col + 1, "");
+    if (line < state.total - 1) return applyRange(line, col, line + 1, 0, "");
+    return null;
+  });
 }
 
-// Enter: split the line at the caret into two lines.
-async function splitLine(line, text, pos) {
-  state.editingLine = -1;
-  try {
-    await apiPost("/api/edit/line", { line, text: text.slice(0, pos) });
-    await apiPost("/api/edit/insert", { line: line + 1, text: text.slice(pos) });
-    clearLineCache();
-    await refreshStat();
-    state.activeLine = line + 1;
-    state.editingLine = line + 1;
-    state.editCaret = 0;
-    revealLine(line + 1);
-    render();
-  } catch (e) {
-    flashCount("編集エラー");
-    console.error(e);
-  }
-}
-
-// Paste multi-line text at the caret: the first pasted line joins the text
-// before the caret, the last joins the text after it, and any lines between
-// become new lines — the Notepad behavior.
-async function pasteMultiline(line, val, selStart, selEnd, raw) {
-  const parts = raw.replace(/\r\n?/g, "\n").split("\n");
-  const before = val.slice(0, selStart);
-  const after = val.slice(selEnd);
-  state.editingLine = -1;
-  try {
-    await apiPost("/api/edit/line", { line, text: before + parts[0] });
-    let caretLine = line;
-    let caretCol = (before + parts[0]).length;
-    for (let i = 1; i < parts.length; i++) {
-      const last = i === parts.length - 1;
-      await apiPost("/api/edit/insert", {
-        line: line + i,
-        text: last ? parts[i] + after : parts[i],
-      });
-      caretLine = line + i;
-      caretCol = parts[i].length; // caret sits just before the trailing `after`
-    }
-    clearLineCache();
-    await refreshStat();
-    state.activeLine = caretLine;
-    state.editingLine = caretLine;
-    state.editCaret = caretCol;
-    revealLine(caretLine);
-    render();
-  } catch (e) {
-    flashCount("貼り付けエラー");
-    console.error(e);
-  }
-}
-
-// Backspace at column 0: merge this line onto the end of the previous one.
-async function joinWithPrev(line, text) {
-  const prevText = cachedLine(line - 1)?.text ?? "";
-  state.editingLine = -1;
-  try {
-    await apiPost("/api/edit/line", { line: line - 1, text: prevText + text });
-    await apiPost("/api/edit/delete", { line });
-    clearLineCache();
-    await refreshStat();
-    state.activeLine = line - 1;
-    state.editingLine = line - 1;
-    state.editCaret = prevText.length;
-    revealLine(line - 1);
-    render();
-  } catch (e) {
-    flashCount("編集エラー");
-    console.error(e);
-  }
-}
-
-// Delete at end of line: pull the next line up onto this one.
-async function joinWithNext(line, text) {
-  const nextText = cachedLine(line + 1)?.text ?? "";
-  state.editingLine = -1;
-  try {
-    await apiPost("/api/edit/line", { line, text: text + nextText });
-    await apiPost("/api/edit/delete", { line: line + 1 });
-    clearLineCache();
-    await refreshStat();
-    state.activeLine = line;
-    state.editingLine = line;
-    state.editCaret = text.length;
-    revealLine(line);
-    render();
-  } catch (e) {
-    flashCount("編集エラー");
-    console.error(e);
-  }
-}
-
-async function insertLineBelow() {
-  const base = state.activeLine >= 0 ? state.activeLine : state.first;
-  const line = Math.min(state.total, base + 1);
-  try {
-    await apiPost("/api/edit/insert", { line, text: "" });
-    clearLineCache();
-    await refreshStat();
-    state.activeLine = line;
-    state.editingLine = line;
-    revealLine(line);
-  } catch (e) {
-    flashCount("挿入エラー");
-    console.error(e);
-  }
-}
-
-async function deleteActiveLine() {
-  const line = state.activeLine >= 0 ? state.activeLine : state.first;
-  if (line < 0 || line >= state.total) return;
-  try {
-    await apiPost("/api/edit/delete", { line });
-    clearLineCache();
-    await refreshStat();
-    if (state.total === 0) {
-      state.activeLine = -1;
-      state.editingLine = -1;
-      render();
-    } else {
-      state.activeLine = Math.min(line, state.total - 1);
-      revealLine(state.activeLine);
-    }
-  } catch (e) {
-    flashCount("削除エラー");
-    console.error(e);
-  }
+function pasteText(raw) {
+  const text = raw.replace(/\r\n?/g, "\n");
+  typeText(text);
 }
 
 async function saveCopy() {
@@ -1065,33 +1015,34 @@ async function revertEdits() {
   if (!confirm("未保存の編集を破棄しますか?")) return;
   await apiPost("/api/edit/revert", {});
   clearLineCache();
-  state.editingLine = -1;
+  state.sel = null;
+  setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), 0);
   await refreshStat();
   render();
 }
 
 async function undoEdit() {
-  try {
+  enqueueEdit(async () => {
     await apiPost("/api/edit/undo", {});
-    clearLineCache();
+    state.sel = null;
     await refreshStat();
+    await reloadViewport();
+    setCaret(state.caret.line, state.caret.col); // re-clamp into the new bounds
+    revealCaret();
     render();
-  } catch (e) {
-    flashCount("Undo エラー");
-    console.error(e);
-  }
+  });
 }
 
 async function redoEdit() {
-  try {
+  enqueueEdit(async () => {
     await apiPost("/api/edit/redo", {});
-    clearLineCache();
+    state.sel = null;
     await refreshStat();
+    await reloadViewport();
+    setCaret(state.caret.line, state.caret.col);
+    revealCaret();
     render();
-  } catch (e) {
-    flashCount("Redo エラー");
-    console.error(e);
-  }
+  });
 }
 
 async function sortSave() {
@@ -1165,14 +1116,6 @@ function setQueryFromInput() {
   scheduleRender();
 }
 
-function gotoFromInput() {
-  const v = parseInt($("goto").value.replace(/[^0-9]/g, ""), 10);
-  if (!Number.isFinite(v) || v < 1) return;
-  const line = Math.min(v - 1, Math.max(0, state.total - 1));
-  state.activeLine = line;
-  revealLine(line);
-}
-
 function initEvents() {
   const vp = $("viewport");
 
@@ -1203,7 +1146,7 @@ function initEvents() {
         e.preventDefault();
       }
     } else if (e.key === "Escape") {
-      $("viewport").focus();
+      focusEditor();
     }
   });
 
@@ -1261,7 +1204,7 @@ function askPrompt(title, label, value = "") {
       $("prompt-cancel").removeEventListener("click", onCancel);
       $("prompt-close").removeEventListener("click", onCancel);
       modal.removeEventListener("mousedown", onBackdrop);
-      $("viewport").focus();
+      focusEditor();
       resolve(val);
     };
     const onOk = () => finish(input.value);
@@ -1288,155 +1231,258 @@ function showLoading(text) {
 }
 function hideLoading() { $("overlay").classList.add("hidden"); }
 
-// Jump the active line to a 1-based line number.
+// Jump the caret to a 1-based line number.
 function gotoLine(n) {
   const v = parseInt(String(n).replace(/[^0-9]/g, ""), 10);
   if (!Number.isFinite(v) || v < 1) return;
   const line = Math.min(v - 1, Math.max(0, state.total - 1));
-  state.activeLine = line;
+  state.sel = null;
+  setCaret(line, 0);
   revealLine(line);
+  focusEditor();
 }
 
+// App-level shortcuts. Caret motion and text editing live in onEditKey (bound
+// to the hidden input); those keys never reach here because onEditKey stops
+// their propagation. `inField` is true only for the real text inputs (find /
+// opener / prompt / settings), never the editor's hidden textarea.
 function onGlobalKey(e) {
-  const inInput = e.target.tagName === "INPUT";
-  const inLineEditor = inInput && e.target.classList.contains("line-edit");
-  // A prompt modal owns all keys while it is open.
+  const inField = e.target.tagName === "INPUT";
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
   if (promptVisible()) return;
-  // Modals own Escape while they're up.
-  if (e.key === "Escape" && settingsVisible()) {
-    e.preventDefault();
-    hideSettings();
-    return;
-  }
-  if (e.key === "Escape" && openerVisible()) {
-    e.preventDefault();
-    hideOpener();
-    return;
-  }
-  // Shortcuts that work even from inputs:
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
-    e.preventDefault();
-    showOpener();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-    e.preventDefault();
-    setSidebar(!sidebarOpen());
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "n" || e.key.toLowerCase() === "t")) {
-    e.preventDefault();
-    newUntitled(); // new tab (Ctrl+N / Ctrl+T)
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+  if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
+  if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
+  if (mod && k === "o") { e.preventDefault(); showOpener(); return; }
+  if (mod && k === "b") { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
+  if (mod && (k === "n" || k === "t")) { e.preventDefault(); newUntitled(); return; }
+  if (mod && k === "g") {
     e.preventDefault();
     askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
     return;
   }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
+  if (mod && k === "w") {
     e.preventDefault();
     const active = state.tabs.find((t) => t.active);
     if (active) closeTab(active.id);
     return;
   }
-  // Multi-line selection: select-all / copy / cut / delete (when not typing in
-  // the single-line editor).
-  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-    e.preventDefault();
-    selectAll();
-    return;
-  }
-  if (!inLineEditor && hasSelection() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-    e.preventDefault();
-    copySelection();
-    return;
-  }
-  if (!inLineEditor && hasSelection() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
-    e.preventDefault();
-    cutSelection();
-    return;
-  }
-  if (!inInput && hasSelection() && (e.key === "Delete" || e.key === "Backspace")) {
-    e.preventDefault();
-    deleteSelection();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-    e.preventDefault();
-    const f = $("find");
-    f.focus();
-    f.select();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-    e.preventDefault();
-    saveCopy();
-    return;
-  }
-  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-    e.preventDefault();
-    if (e.shiftKey) redoEdit();
-    else undoEdit();
-    return;
-  }
-  if (!inLineEditor && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-    e.preventDefault();
-    redoEdit();
-    return;
-  }
-  if (e.key === "F3") {
-    e.preventDefault();
-    findStep(e.shiftKey ? "prev" : "next");
-    return;
-  }
-  if (e.altKey && e.key.toLowerCase() === "c") {
-    toggleOpt("ci", "opt-case");
-    return;
-  }
-  if (e.altKey && e.key.toLowerCase() === "r") {
-    toggleOpt("regex", "opt-regex");
-    return;
-  }
-  if (e.altKey && e.key.toLowerCase() === "w") {
-    toggleOpt("word", "opt-word");
-    return;
-  }
-  if (inInput) return; // leave normal text editing alone
+  if (mod && k === "f") { e.preventDefault(); const f = $("find"); f.focus(); f.select(); return; }
+  if (mod && k === "s") { e.preventDefault(); saveCopy(); return; }
+  if (e.key === "F3") { e.preventDefault(); findStep(e.shiftKey ? "prev" : "next"); return; }
+  if (e.altKey && k === "c") { toggleOpt("ci", "opt-case"); return; }
+  if (e.altKey && k === "r") { toggleOpt("regex", "opt-regex"); return; }
+  if (e.altKey && k === "w") { toggleOpt("word", "opt-word"); return; }
+  // Editor clipboard / history — not while typing in a search or dialog field.
+  if (inField) return;
+  if (mod && k === "a") { e.preventDefault(); selectAll(); return; }
+  if (mod && k === "c") { e.preventDefault(); copySelection(); return; }
+  if (mod && k === "x") { e.preventDefault(); cutSelection(); return; }
+  if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redoEdit() : undoEdit(); return; }
+  if (mod && k === "y") { e.preventDefault(); redoEdit(); return; }
+}
 
-  const vis = rowsVisible();
+// ---- editor keyboard: caret motion + structural edits ----------------------
+
+const isWordChar = (ch) => /[\p{L}\p{N}_]/u.test(ch || "");
+
+function wordLeft(line, col) {
+  const cs = lineChars(line);
+  if (col === 0) return line > 0 ? [line - 1, lineLen(line - 1)] : [line, 0];
+  let i = col;
+  while (i > 0 && !isWordChar(cs[i - 1])) i--;
+  while (i > 0 && isWordChar(cs[i - 1])) i--;
+  return [line, i];
+}
+
+function wordRight(line, col) {
+  const cs = lineChars(line);
+  const len = cs.length;
+  if (col >= len) return line < state.total - 1 ? [line + 1, 0] : [line, len];
+  let i = col;
+  while (i < len && !isWordChar(cs[i])) i++;
+  while (i < len && isWordChar(cs[i])) i++;
+  return [line, i];
+}
+
+function deleteWordBack() {
+  enqueueEdit(() => {
+    if (hasSelection()) {
+      const t = replaceTarget();
+      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
+    }
+    const c = state.caret;
+    const [l, col] = wordLeft(c.line, c.col);
+    if (l === c.line && col === c.col) return null;
+    return applyRange(l, col, c.line, c.col, "");
+  });
+}
+
+function deleteWordFwd() {
+  enqueueEdit(() => {
+    if (hasSelection()) {
+      const t = replaceTarget();
+      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
+    }
+    const c = state.caret;
+    const [l, col] = wordRight(c.line, c.col);
+    if (l === c.line && col === c.col) return null;
+    return applyRange(c.line, c.col, l, col, "");
+  });
+}
+
+function onEditKey(e) {
+  if (state.composing || e.isComposing) return; // IME owns the keyboard
+  if (anyModalOpen()) return; // a dialog is up; don't edit behind it
+  const mod = e.ctrlKey || e.metaKey;
+  const shift = e.shiftKey;
+  const c = state.caret;
+  const take = () => { e.preventDefault(); e.stopPropagation(); };
   switch (e.key) {
-    case "ArrowDown": setFirst(state.first + 1); e.preventDefault(); break;
-    case "ArrowUp": setFirst(state.first - 1); e.preventDefault(); break;
-    case "PageDown": setFirst(state.first + vis); e.preventDefault(); break;
-    case "PageUp": setFirst(state.first - vis); e.preventDefault(); break;
-    case " ": setFirst(state.first + (e.shiftKey ? -vis : vis)); e.preventDefault(); break;
+    case "ArrowLeft":
+      take();
+      if (mod) { const [l, col] = wordLeft(c.line, c.col); moveCaret(l, col, shift); }
+      else if (c.col > 0) moveCaret(c.line, c.col - 1, shift);
+      else if (c.line > 0) moveCaret(c.line - 1, lineLen(c.line - 1), shift);
+      state.goalCol = state.caret.col;
+      return;
+    case "ArrowRight":
+      take();
+      if (mod) { const [l, col] = wordRight(c.line, c.col); moveCaret(l, col, shift); }
+      else if (c.col < lineLen(c.line)) moveCaret(c.line, c.col + 1, shift);
+      else if (c.line < state.total - 1) moveCaret(c.line + 1, 0, shift);
+      state.goalCol = state.caret.col;
+      return;
+    case "ArrowUp":
+      take();
+      if (mod) setFirst(state.first - 1);
+      else if (c.line > 0) moveCaret(c.line - 1, state.goalCol, shift);
+      return;
+    case "ArrowDown":
+      take();
+      if (mod) setFirst(state.first + 1);
+      else if (c.line < state.total - 1) moveCaret(c.line + 1, state.goalCol, shift);
+      return;
     case "Home":
-      if (e.ctrlKey || e.metaKey) { setFirst(0); e.preventDefault(); }
-      break;
+      take();
+      moveCaret(mod ? 0 : c.line, 0, shift);
+      state.goalCol = state.caret.col;
+      return;
     case "End":
-      if (e.ctrlKey || e.metaKey) { setFirst(maxFirst()); e.preventDefault(); }
-      break;
-    case "F2":
-    case "Enter":
-      beginEdit(state.activeLine >= 0 ? state.activeLine : state.first);
-      e.preventDefault();
-      break;
-    case "Insert":
-      insertLineBelow();
-      e.preventDefault();
-      break;
+      take();
+      if (mod) { const last = state.total - 1; moveCaret(last, lineLen(last), shift); }
+      else moveCaret(c.line, lineLen(c.line), shift);
+      state.goalCol = state.caret.col;
+      return;
+    case "PageUp":
+      take();
+      moveCaret(c.line - rowsVisible(), state.goalCol, shift);
+      return;
+    case "PageDown":
+      take();
+      moveCaret(c.line + rowsVisible(), state.goalCol, shift);
+      return;
+    case "Backspace":
+      take();
+      mod ? deleteWordBack() : backspace();
+      return;
     case "Delete":
-      deleteActiveLine();
-      e.preventDefault();
-      break;
+      take();
+      mod ? deleteWordFwd() : forwardDelete();
+      return;
+    case "Enter":
+      take();
+      insertNewline();
+      return;
+    case "Tab":
+      if (mod) return; // don't trap window focus-cycling combos
+      take();
+      typeText("\t");
+      return;
     case "Escape":
-      state.activeLine = -1;
-      state.editingLine = -1;
-      state.sel = null;
-      scheduleRender();
+      if (state.sel) { take(); state.sel = null; scheduleRender(); }
+      return;
+    default:
+      return; // printable input flows through beforeinput / composition
+  }
+}
+
+function onBeforeInput(e) {
+  if (state.composing) return; // composition text is committed on compositionend
+  if (anyModalOpen()) { e.preventDefault(); return; }
+  switch (e.inputType) {
+    case "insertText":
+      e.preventDefault();
+      if (e.data != null) typeText(e.data);
+      break;
+    case "insertLineBreak":
+    case "insertParagraph":
+      e.preventDefault();
+      insertNewline();
+      break;
+    case "deleteContentBackward":
+    case "deleteSoftLineBackward":
+      e.preventDefault();
+      backspace();
+      break;
+    case "deleteWordBackward":
+      e.preventDefault();
+      deleteWordBack();
+      break;
+    case "deleteContentForward":
+    case "deleteSoftLineForward":
+      e.preventDefault();
+      forwardDelete();
+      break;
+    case "deleteWordForward":
+      e.preventDefault();
+      deleteWordFwd();
+      break;
+    case "insertFromPaste":
+      e.preventDefault(); // the paste event carries the clipboard text
+      break;
+    default:
       break;
   }
+}
+
+function onPaste(e) {
+  const text = (e.clipboardData || window.clipboardData)?.getData("text") ?? "";
+  e.preventDefault();
+  if (text) pasteText(text);
+}
+
+function onCompStart() {
+  state.composing = true;
+  $("hidden-input").classList.add("composing");
+  positionCaret();
+}
+function onCompUpdate() {
+  positionCaret(); // the textarea itself renders the composing string
+}
+function onCompEnd(e) {
+  state.composing = false;
+  const hi = $("hidden-input");
+  hi.classList.remove("composing");
+  const data = e.data || "";
+  hi.value = "";
+  if (data) typeText(data);
+  else scheduleRender();
+}
+
+function initEditor() {
+  const hi = $("hidden-input");
+  hi.addEventListener("keydown", onEditKey);
+  hi.addEventListener("beforeinput", onBeforeInput);
+  hi.addEventListener("input", () => { if (!state.composing) hi.value = ""; });
+  hi.addEventListener("paste", onPaste);
+  hi.addEventListener("compositionstart", onCompStart);
+  hi.addEventListener("compositionupdate", onCompUpdate);
+  hi.addEventListener("compositionend", onCompEnd);
+  hi.addEventListener("focus", () => { state.focused = true; scheduleRender(); });
+  hi.addEventListener("blur", () => { state.focused = false; scheduleRender(); });
+  // Keep the caret glued to its cell during horizontal scroll.
+  $("content").addEventListener("scroll", positionCaret);
 }
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
@@ -1462,7 +1508,7 @@ function hideOpener() {
   const m = $("opener");
   m.classList.add("hidden");
   m.setAttribute("aria-hidden", "true");
-  $("viewport").focus();
+  focusEditor();
 }
 
 function openerMsg(text, busy = false) {
@@ -1569,10 +1615,11 @@ function reportOpenError(msg) {
 function onDocumentOpened(stat) {
   state.stat = stat;
   state.total = stat.view_lines ?? stat.lines ?? 0;
-  // Fresh document: reset navigation, search, and edit view state.
+  // Fresh document: reset navigation, search, and caret state.
   state.first = 0;
-  state.activeLine = -1;
-  state.editingLine = -1;
+  state.caret = { line: 0, col: 0 };
+  state.goalCol = 0;
+  state.activeLine = 0;
   state.sel = null;
   state.lastMatch = null;
   state.searchHits = null;
@@ -1585,7 +1632,7 @@ function onDocumentOpened(stat) {
   updateStatusMeta();
   render();
   refreshTabs();
-  $("viewport").focus();
+  focusEditor();
 }
 
 function hasFiles(e) {
@@ -1816,7 +1863,8 @@ async function newUntitled() {
   try {
     onDocumentOpened(await apiPost("/api/new", {}));
     // The buffer already has one empty line; drop the caret in, Notepad-style.
-    if (state.total >= 1) beginEdit(0, 0);
+    setCaret(0, 0);
+    focusEditor();
   } catch (e) {
     showOpener();
     openerMsg("新規バッファを作成できません: " + e.message);
@@ -1973,7 +2021,7 @@ function hideSettings() {
   const m = $("settings");
   m.classList.add("hidden");
   m.setAttribute("aria-hidden", "true");
-  $("viewport").focus();
+  focusEditor();
 }
 
 // ---- theme JSON editor (in Settings) --------------------------------------
@@ -2096,6 +2144,7 @@ async function boot() {
   initSettings();
   initScrollbar();
   initEvents();
+  initEditor();
   initSelection();
   initWorkspace();
   initTree();
@@ -2110,7 +2159,7 @@ async function boot() {
   if (!state.stat.open) {
     await newUntitled(); // open to a blank untitled page, not the file dialog
   } else {
-    $("viewport").focus();
+    focusEditor();
     render();
     refreshTabs();
   }
