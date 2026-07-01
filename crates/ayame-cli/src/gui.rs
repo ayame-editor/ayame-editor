@@ -95,16 +95,12 @@ fn app_icon() -> Option<Icon> {
             if !inside_tile(fx, fy) {
                 continue; // transparent outside the tile
             }
-            // Vertical gradient #2a7fc0 → #0e639c.
+            // Vertical gradient #8B6FC7 (iris) → #C79A2E (gold).
             let t = ((fy - 4.0) / 56.0).clamp(0.0, 1.0);
             let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
-            let mut rgb = [lerp(0x2a, 0x0e), lerp(0x7f, 0x63), lerp(0xc0, 0x9c)];
-            // Pink caret bar.
-            if in_rect(fx, fy, 44.0, 16.0, 48.0, 48.0) {
-                rgb = [0xe8, 0xa0, 0xbf];
-            }
-            // Three white text bars.
-            else if in_rect(fx, fy, 15.0, 20.0, 39.0, 24.5)
+            let mut rgb = [lerp(0x8B, 0xC7), lerp(0x6F, 0x9A), lerp(0xC7, 0x2E)];
+            // Three white bars (document lines).
+            if in_rect(fx, fy, 15.0, 20.0, 39.0, 24.5)
                 || in_rect(fx, fy, 15.0, 30.0, 47.0, 34.5)
                 || in_rect(fx, fy, 15.0, 40.0, 34.0, 44.5)
             {

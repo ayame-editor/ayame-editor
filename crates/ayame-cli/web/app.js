@@ -1048,7 +1048,7 @@ async function deleteActiveLine() {
 
 async function saveCopy() {
   const suggested = `${state.stat?.path || "ayame"}.edited`;
-  const path = prompt("保存先パス", suggested);
+  const path = await askPrompt("別名で保存", "保存先パス", suggested);
   if (path == null) return;
   try {
     const res = await apiPost("/api/edit/save", { path });
@@ -1095,9 +1095,9 @@ async function redoEdit() {
 
 async function sortSave() {
   const base = state.stat?.path || "ayame";
-  const path = prompt("ソート保存先パス", `${base}.sorted`);
+  const path = await askPrompt("ソートして保存", "保存先パス", `${base}.sorted`);
   if (path == null) return;
-  const keyText = prompt("キー列 (空なら行全体)", "");
+  const keyText = await askPrompt("ソート", "キー列 (空なら行全体)", "");
   if (keyText == null) return;
   const key = keyText.trim() === "" ? null : Number(keyText.trim());
   if (keyText.trim() !== "" && (!Number.isInteger(key) || key < 1)) {
@@ -1117,11 +1117,11 @@ async function sortSave() {
 
 async function replaceSave() {
   const base = state.stat?.path || "ayame";
-  const find = prompt("置換前", $("find").value || state.query || "");
+  const find = await askPrompt("置換", "置換前の文字列", $("find").value || state.query || "");
   if (find == null || find === "") return;
-  const replacement = prompt("置換後", "");
+  const replacement = await askPrompt("置換", "置換後の文字列", "");
   if (replacement == null) return;
-  const path = prompt("置換保存先パス", `${base}.replaced`);
+  const path = await askPrompt("置換して保存", "保存先パス", `${base}.replaced`);
   if (path == null) return;
   try {
     const res = await apiPost("/api/replace/save", {
@@ -1141,7 +1141,7 @@ async function replaceSave() {
 async function caseSave(mode) {
   const base = state.stat?.path || "ayame";
   const suffix = mode === "upper" ? "upper" : "lower";
-  const path = prompt(`${mode === "upper" ? "大文字" : "小文字"}保存先パス`, `${base}.${suffix}`);
+  const path = await askPrompt(`${mode === "upper" ? "大文字化" : "小文字化"}して保存`, "保存先パス", `${base}.${suffix}`);
   if (path == null) return;
   try {
     const res = await apiPost("/api/case/save", { path, mode });
@@ -1190,11 +1190,6 @@ function initEvents() {
     { passive: false }
   );
 
-  $("goto").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") gotoFromInput();
-    if (e.key === "Escape") $("viewport").focus();
-  });
-
   const find = $("find");
   find.addEventListener("input", setQueryFromInput);
   find.addEventListener("keydown", (e) => {
@@ -1219,13 +1214,8 @@ function initEvents() {
   $("save-copy").addEventListener("click", saveCopy);
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
-  $("insert-line").addEventListener("click", insertLineBelow);
-  $("delete-line").addEventListener("click", deleteActiveLine);
-  $("revert-edit").addEventListener("click", revertEdits);
   $("sort-save").addEventListener("click", sortSave);
   $("replace-save").addEventListener("click", replaceSave);
-  $("upper-save").addEventListener("click", () => caseSave("upper"));
-  $("lower-save").addEventListener("click", () => caseSave("lower"));
 
   // Keep the column ruler aligned as the text scrolls horizontally.
   $("content").addEventListener("scroll", () => {
@@ -1249,9 +1239,67 @@ function toggleOpt(key, id) {
   if (state.query) updateCount();
 }
 
+// ---- generic input prompt (replaces the browser's window.prompt) ---------
+function promptVisible() { return !$("prompt").classList.contains("hidden"); }
+function askPrompt(title, label, value = "") {
+  return new Promise((resolve) => {
+    const modal = $("prompt");
+    $("prompt-title").textContent = title || "入力";
+    $("prompt-label").textContent = label || "";
+    const input = $("prompt-input");
+    input.value = value;
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    const finish = (val) => {
+      modal.classList.add("hidden");
+      modal.setAttribute("aria-hidden", "true");
+      input.removeEventListener("keydown", onKey);
+      $("prompt-ok").removeEventListener("click", onOk);
+      $("prompt-cancel").removeEventListener("click", onCancel);
+      $("prompt-close").removeEventListener("click", onCancel);
+      modal.removeEventListener("mousedown", onBackdrop);
+      $("viewport").focus();
+      resolve(val);
+    };
+    const onOk = () => finish(input.value);
+    const onCancel = () => finish(null);
+    const onKey = (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") { ev.preventDefault(); finish(input.value); }
+      else if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
+    };
+    const onBackdrop = (ev) => { if (ev.target === modal) finish(null); };
+    input.addEventListener("keydown", onKey);
+    $("prompt-ok").addEventListener("click", onOk);
+    $("prompt-cancel").addEventListener("click", onCancel);
+    $("prompt-close").addEventListener("click", onCancel);
+    modal.addEventListener("mousedown", onBackdrop);
+  });
+}
+
+// ---- loading overlay ------------------------------------------------------
+function showLoading(text) {
+  const o = $("overlay");
+  o.textContent = text || "読み込み中…";
+  o.classList.remove("hidden");
+}
+function hideLoading() { $("overlay").classList.add("hidden"); }
+
+// Jump the active line to a 1-based line number.
+function gotoLine(n) {
+  const v = parseInt(String(n).replace(/[^0-9]/g, ""), 10);
+  if (!Number.isFinite(v) || v < 1) return;
+  const line = Math.min(v - 1, Math.max(0, state.total - 1));
+  state.activeLine = line;
+  revealLine(line);
+}
+
 function onGlobalKey(e) {
   const inInput = e.target.tagName === "INPUT";
   const inLineEditor = inInput && e.target.classList.contains("line-edit");
+  // A prompt modal owns all keys while it is open.
+  if (promptVisible()) return;
   // Modals own Escape while they're up.
   if (e.key === "Escape" && settingsVisible()) {
     e.preventDefault();
@@ -1274,9 +1322,14 @@ function onGlobalKey(e) {
     setSidebar(!sidebarOpen());
     return;
   }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "n" || e.key.toLowerCase() === "t")) {
     e.preventDefault();
-    newUntitled(); // new tab
+    newUntitled(); // new tab (Ctrl+N / Ctrl+T)
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+    e.preventDefault();
+    askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
@@ -1305,13 +1358,6 @@ function onGlobalKey(e) {
   if (!inInput && hasSelection() && (e.key === "Delete" || e.key === "Backspace")) {
     e.preventDefault();
     deleteSelection();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
-    e.preventDefault();
-    const g = $("goto");
-    g.focus();
-    g.select();
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
@@ -1437,7 +1483,7 @@ async function browse(dir) {
 
 function renderBrowse(res) {
   state.openerDir = res.dir;
-  $("opener-cwd").textContent = res.dir;
+  $("opener-cwd").textContent = res.dir.replace(/^\\\\\?\\/, "");
   $("opener-cwd").title = res.dir;
   const list = $("opener-list");
   list.textContent = "";
@@ -1450,13 +1496,13 @@ function renderBrowse(res) {
 
 function browseRow(ent, isUp) {
   const row = document.createElement("button");
-  row.className = "opener-row" + (ent.is_dir ? " dir" : "");
+  row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
   const ic = document.createElement("span");
   ic.className = "ic";
-  ic.textContent = ent.is_dir ? (isUp ? "↰" : "▸") : "·";
+  ic.textContent = isUp ? "↑" : ent.is_dir ? "▸" : "·";
   const nm = document.createElement("span");
   nm.className = "nm";
-  nm.textContent = isUp ? ".. (親フォルダ)" : ent.name;
+  nm.textContent = isUp ? "上の階層へ" : ent.name;
   const sz = document.createElement("span");
   sz.className = "sz";
   sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
@@ -1820,7 +1866,7 @@ function saveSettings(s) {
 const THEME_PRESETS = {
   "iris-light": {"name":"Iris Light","type":"light","radius":10,
     "color":{"paper":"#FBF8F1","paper2":"#FDFCF8","ink":"#2A2140","inkDim":"#6E6383","inkFaint":"#A99DBC","accent":"#7A5CC0","accent2":"#6A4CB0","gold":"#C79A2E","edge":"#E7E0D3","err":"#C0506A","markBg":"#FBEBB0","markFg":"#6B5510","markCur":"#E8B84B","markCurFg":"#2A2205"},
-    "acrylic":{"tint":"rgba(255,253,248,0.72)","blur":20},"background":{"mode":"watercolor","solid":"#FBF8F1"},"illustration":0.2,
+    "acrylic":{"tint":"rgba(255,253,248,0.72)","blur":20},"background":{"mode":"watercolor","solid":"#FBF8F1"},"illustration":0.1,
     "watercolor":[{"x":"12%","y":"84%","r":"46vh","color":"rgba(122,92,192,0.12)"},{"x":"88%","y":"14%","r":"42vh","color":"rgba(185,139,214,0.10)"},{"x":"70%","y":"96%","r":"30vh","color":"rgba(231,197,107,0.08)"}]},
   "iris-mist": {"name":"Iris Mist","type":"light","radius":12,
     "color":{"paper":"#F7F9FC","paper2":"#FDFEFF","ink":"#26314A","inkDim":"#5E6E8A","inkFaint":"#9DAAC0","accent":"#5B79C9","accent2":"#4A68B8","gold":"#C9A24E","edge":"#DCE4EF","err":"#C05C74","markBg":"#E3ECFB","markFg":"#2C3E6B","markCur":"#7EC7C0","markCurFg":"#0F2A28"},

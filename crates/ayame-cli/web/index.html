@@ -27,9 +27,6 @@
         <div class="tb-group">
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)">↶</button>
           <button id="redo-edit" class="ico" title="やり直す (Ctrl+Y)">↷</button>
-          <button id="insert-line" class="ico" title="行を挿入 (Insert)">＋</button>
-          <button id="delete-line" class="ico" title="行を削除 (Delete)">−</button>
-          <button id="revert-edit" class="ico" title="未保存の編集を破棄">↺</button>
         </div>
 
         <div class="tb-sep"></div>
@@ -37,17 +34,11 @@
         <div class="tb-group">
           <button id="sort-save" class="cmd" title="ソートして別ファイルへ保存">ソート</button>
           <button id="replace-save" class="cmd" title="置換して別ファイルへ保存">置換</button>
-          <button id="upper-save" class="ico" title="大文字化して保存">A↑</button>
-          <button id="lower-save" class="ico" title="小文字化して保存">a↓</button>
         </div>
 
         <div class="file" id="filename" title="">—</div>
 
         <div class="tb-group find-group">
-          <div class="field goto">
-            <input id="goto" type="text" inputmode="numeric" autocomplete="off"
-                   placeholder="行 (Ctrl+G)" />
-          </div>
           <div class="field find">
             <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
             <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
@@ -203,6 +194,24 @@
               </div>
               <div id="set-msg" class="set-msg"></div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generic input prompt (replaces the browser's window.prompt). -->
+    <div id="prompt" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel prompt-panel" role="dialog" aria-label="入力">
+        <div class="modal-head">
+          <div class="modal-title" id="prompt-title">入力</div>
+          <button id="prompt-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="prompt-body">
+          <span class="prompt-label" id="prompt-label"></span>
+          <input id="prompt-input" type="text" autocomplete="off" spellcheck="false" />
+          <div class="prompt-actions">
+            <button id="prompt-cancel" class="cmd">キャンセル</button>
+            <button id="prompt-ok" class="cmd primary">OK</button>
           </div>
         </div>
       </div>
