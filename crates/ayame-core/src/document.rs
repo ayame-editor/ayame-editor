@@ -233,6 +233,16 @@ impl Document {
         self.index.line_range(self.buf(), i).map(|(s, _)| s)
     }
 
+    /// Byte offset for decoded character column `col` on line `i`.
+    pub fn line_col_byte(&self, i: u64, col: u64) -> Option<u64> {
+        let buf = self.buf();
+        let (s, e) = self.index.line_range(buf, i)?;
+        let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
+        let prefix: String = text.chars().take(col as usize).collect();
+        let encoded = self.encoding.encode_query(&prefix)?;
+        Some(s + encoded.len() as u64)
+    }
+
     /// Raw (un-decoded, terminator-stripped) bytes of up to `count` lines from
     /// `start`, as `(line_number, &bytes)`. Borrows the mmap, so callers copy
     /// out what they need to keep. Used by data ops that extract a sort/group key

@@ -19,11 +19,15 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebViewBuilder};
 
-use crate::parse;
+use crate::parse_checked;
 
 pub fn cmd_gui(args: &[String]) -> Result<()> {
     // Same file-opening options as `serve`; the window opens empty if no FILE.
-    let (pos, opts, flags) = parse(args, &["--encoding", "--stride", "--cache-dir"]);
+    let (pos, opts, flags) = parse_checked(
+        args,
+        &["--encoding", "--stride", "--cache-dir"],
+        &["--no-cache"],
+    )?;
     let title = initial_window_title(&pos);
 
     // A plain FILE argument is opened asynchronously from the page (via

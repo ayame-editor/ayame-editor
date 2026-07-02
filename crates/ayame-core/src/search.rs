@@ -11,6 +11,11 @@ use crate::{Error, Result};
 use memchr::memmem;
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(test))]
+const FIND_PREV_CHUNK: usize = 64 * 1024 * 1024;
+#[cfg(test)]
+const FIND_PREV_CHUNK: usize = 32;
+
 /// What and how to search for.
 #[derive(Clone, Debug)]
 pub struct SearchOptions {
@@ -236,13 +241,6 @@ pub fn find_next(
 }
 
 /// Last match strictly before `before_byte`.
-///
-/// Implemented as a forward scan over `[base, before_byte)` keeping the final
-/// hit, so its cost is O(before_byte - base) — i.e. worst-case O(file) when the
-/// cursor is near EOF. This is acceptable for interactive "previous" in v1; a
-/// chunk-backward scan (fixed windows from `before_byte` downward, stopping at
-/// the first window that contains a hit) is the planned improvement to make
-/// reverse search genuinely viewport-bounded.
 pub fn find_prev(
     buf: &[u8],
     base: u64,
@@ -260,23 +258,43 @@ pub fn find_prev(
     };
     let matcher = Matcher::build(&search_opts, enc)?;
     let before_byte = opts.byte.clamp(base, buf.len() as u64);
-    let hay = &buf[base as usize..before_byte as usize];
-    let mut last: Option<(usize, usize)> = None;
+    if before_byte <= base {
+        return Ok(None);
+    }
     match matcher {
         Matcher::Literal(finder) => {
             let check_boundary = is_legacy_multibyte(enc);
-            for pos in finder.find_iter(hay) {
-                let abs = base as usize + pos;
-                if check_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
-                    continue;
+            let needle = finder.needle();
+            let overlap = needle.len().saturating_sub(1);
+            let base = base as usize;
+            let mut cursor = before_byte as usize;
+            while cursor > base {
+                let accept_start = cursor.saturating_sub(FIND_PREV_CHUNK).max(base);
+                let scan_start = accept_start.saturating_sub(overlap).max(base);
+                let hay = &buf[scan_start..cursor];
+                for pos in memmem::rfind_iter(hay, needle) {
+                    let abs = scan_start + pos;
+                    if abs < accept_start {
+                        break;
+                    }
+                    if check_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
+                        continue;
+                    }
+                    if opts.whole_word && !is_whole_word_match(buf, abs, needle.len()) {
+                        continue;
+                    }
+                    return Ok(Some(hit_at(buf, index, enc, abs, needle.len())));
                 }
-                if opts.whole_word && !is_whole_word_match(buf, abs, finder.needle().len()) {
-                    continue;
-                }
-                last = Some((abs, finder.needle().len()));
+                cursor = accept_start;
             }
+            Ok(None)
         }
         Matcher::Regex(re) => {
+            // Byte regexes may span arbitrary distances, so keep the exact
+            // whole-prefix scan. Literal and decoded-line searches above/below
+            // are the latency-sensitive interactive cases.
+            let hay = &buf[base as usize..before_byte as usize];
+            let mut last: Option<(usize, usize)> = None;
             for m in re.find_iter(hay) {
                 if m.end() != m.start() {
                     let abs = base as usize + m.start();
@@ -287,38 +305,18 @@ pub fn find_prev(
                     last = Some((abs, len));
                 }
             }
+            Ok(last.map(|(abs, mlen)| hit_at(buf, index, enc, abs, mlen)))
         }
-        Matcher::DecodeLine(re) => {
-            let mut best: Option<SearchHit> = None;
-            let end_line = index.line_of_byte(buf, before_byte);
-            scan_decoded_lines(
-                buf,
-                index,
-                enc,
-                &re,
-                opts.whole_word,
-                0,
-                |line, column, byte, byte_len| {
-                    if line > end_line {
-                        return false;
-                    }
-                    // Mirror the byte path: the match must lie entirely in
-                    // `[base, before_byte)`.
-                    if byte >= base && byte + byte_len <= before_byte {
-                        best = Some(SearchHit {
-                            line,
-                            column,
-                            byte,
-                            byte_len,
-                        });
-                    }
-                    true
-                },
-            );
-            return Ok(best);
-        }
+        Matcher::DecodeLine(re) => Ok(find_prev_decoded_line(
+            buf,
+            index,
+            enc,
+            &re,
+            opts.whole_word,
+            base,
+            before_byte,
+        )),
     }
-    Ok(last.map(|(abs, mlen)| hit_at(buf, index, enc, abs, mlen)))
 }
 
 /// Build a [`SearchHit`] for a raw byte match at `abs` spanning `mlen` bytes,
@@ -487,6 +485,60 @@ fn scan_decoded_lines<F>(
     }
 }
 
+fn find_prev_decoded_line(
+    buf: &[u8],
+    index: &LineIndex,
+    enc: Encoding,
+    re: &regex::Regex,
+    whole_word: bool,
+    base: u64,
+    before_byte: u64,
+) -> Option<SearchHit> {
+    const LINE_BATCH: u64 = 1024;
+    let total = index.line_count();
+    if total == 0 {
+        return None;
+    }
+    let mut line = index.line_of_byte(buf, before_byte).min(total - 1);
+    loop {
+        let batch_start = line.saturating_sub(LINE_BATCH - 1);
+        let ranges = index.line_ranges(buf, batch_start, line - batch_start + 1);
+        for &(ln, ls, le) in ranges.iter().rev() {
+            let raw = &buf[ls as usize..le as usize];
+            let text = enc.decode_line(raw);
+            let matches: Vec<_> = re.find_iter(&text).collect();
+            for m in matches.into_iter().rev() {
+                if m.end() == m.start() {
+                    continue;
+                }
+                if whole_word && !is_whole_word_text(&text, m.start(), m.end()) {
+                    continue;
+                }
+                let cs = text[..m.start()].chars().count();
+                let cl = text[m.start()..m.end()].chars().count();
+                let (boff, blen) = legacy_char_span(enc, raw, cs, cl);
+                if blen == 0 {
+                    continue;
+                }
+                let byte = ls + boff as u64;
+                let byte_len = blen as u64;
+                if byte >= base && byte + byte_len <= before_byte {
+                    return Some(SearchHit {
+                        line: ln,
+                        column: cs as u64,
+                        byte,
+                        byte_len,
+                    });
+                }
+            }
+        }
+        if batch_start == 0 {
+            return None;
+        }
+        line = batch_start - 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,6 +650,35 @@ mod tests {
     }
 
     #[test]
+    fn prev_literal_search_walks_backward_by_chunks() {
+        let mut buf = b"needle first\n".to_vec();
+        for _ in 0..12 {
+            buf.extend_from_slice(b"padding padding padding\n");
+        }
+        let second_start = buf.len() as u64;
+        buf.extend_from_slice(b"needle second\n");
+        let idx = LineIndex::build(&buf, 0, 4);
+
+        let q = |byte| FindOptions {
+            query: "needle".into(),
+            regex: false,
+            case_sensitive: true,
+            whole_word: false,
+            byte,
+        };
+
+        let last = find_prev(&buf, 0, &idx, Encoding::Ascii, &q(buf.len() as u64))
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.byte, second_start);
+
+        let first = find_prev(&buf, 0, &idx, Encoding::Ascii, &q(last.byte))
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.line, 0);
+    }
+
+    #[test]
     fn whole_word_filters_substrings() {
         let buf = b"error\nterror\nerror_code\nerror!\n".to_vec();
         let idx = LineIndex::build(&buf, 0, 16);
@@ -618,6 +699,12 @@ mod tests {
     fn sjis(text: &str) -> Vec<u8> {
         let (cow, _, err) = encoding_rs::SHIFT_JIS.encode(text);
         assert!(!err, "fixture text must be representable in Shift_JIS");
+        cow.into_owned()
+    }
+
+    fn euc_jp(text: &str) -> Vec<u8> {
+        let (cow, _, err) = encoding_rs::EUC_JP.encode(text);
+        assert!(!err, "fixture text must be representable in EUC-JP");
         cow.into_owned()
     }
 
@@ -711,6 +798,49 @@ mod tests {
     }
 
     #[test]
+    fn euc_jp_literal_and_decoded_search_paths_find_japanese_text() {
+        let buf = euc_jp("first line\n検索テスト abc\nエラー: 42\nlast\n");
+        let idx = LineIndex::build(&buf, 0, 16);
+        let len = buf.len() as u64;
+
+        let literal = SearchOptions {
+            query: "検索".into(),
+            max_hits: 10,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::EucJp, &literal).unwrap();
+        assert_eq!(res.hits.len(), 1);
+        assert_eq!(res.hits[0].line, 1);
+        assert_eq!(res.hits[0].byte, "first line\n".len() as u64);
+        assert_eq!(res.hits[0].byte_len, euc_jp("検索").len() as u64);
+
+        let ci = SearchOptions {
+            query: "ABC".into(),
+            case_sensitive: false,
+            max_hits: 10,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::EucJp, &ci).unwrap();
+        assert_eq!(res.hits.len(), 1);
+        assert_eq!(res.hits[0].line, 1);
+
+        let rx = SearchOptions {
+            query: r"エラー: \d+".into(),
+            regex: true,
+            max_hits: 10,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::EucJp, &rx).unwrap();
+        assert_eq!(res.hits.len(), 1);
+        assert_eq!(res.hits[0].line, 2);
+        assert_eq!(
+            res.hits[0].byte,
+            ("first line\n".len() + euc_jp("検索テスト abc\n").len()) as u64
+        );
+        assert_eq!(res.hits[0].byte_len, euc_jp("エラー: 42").len() as u64);
+    }
+
+    #[test]
     fn shift_jis_find_next_and_prev_step_between_decoded_hits() {
         let buf = sjis("テスト\nほかの行\nテスト再び\n");
         let idx = LineIndex::build(&buf, 0, 16);
@@ -731,6 +861,28 @@ mod tests {
             .unwrap();
         assert_eq!(second.line, 2);
         let prev = find_prev(&buf, 0, &idx, Encoding::ShiftJis, &q(second.byte))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prev.line, 0);
+    }
+
+    #[test]
+    fn euc_jp_find_prev_decoded_path_walks_backward_by_lines() {
+        let buf = euc_jp("テスト\nほかの行\nテスト再び\n");
+        let idx = LineIndex::build(&buf, 0, 16);
+        let len = buf.len() as u64;
+        let q = |byte: u64| FindOptions {
+            query: "テスト".into(),
+            regex: false,
+            case_sensitive: false,
+            whole_word: false,
+            byte,
+        };
+        let last = find_prev(&buf, 0, &idx, Encoding::EucJp, &q(len))
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.line, 2);
+        let prev = find_prev(&buf, 0, &idx, Encoding::EucJp, &q(last.byte))
             .unwrap()
             .unwrap();
         assert_eq!(prev.line, 0);

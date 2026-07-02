@@ -28,7 +28,7 @@ use ayame_core::{Document, FileStat};
 use serde::Serialize;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::{first_opt, has_flag, open_opts, parse};
+use crate::{first_opt, has_flag, open_opts, parse_checked};
 
 mod assets;
 mod edit;
@@ -45,10 +45,11 @@ use state::{AppState, SharedState, TabsResponse};
 const MAX_VIEW: u64 = 20_000;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse(
+    let (pos, opts, flags) = parse_checked(
         args,
         &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
-    );
+        &["--no-cache", "--allow-remote"],
+    )?;
     let host = first_opt(&opts, &["--host"])
         .unwrap_or("127.0.0.1")
         .to_string();
@@ -586,6 +587,20 @@ mod tests {
         assert!(body.contains("\"line\":1"), "body: {body}");
         assert!(body.contains("\"byte\":6"), "body: {body}");
         assert_eq!(state.dirty_snapshot_builds(), 1, "first dirty find builds");
+
+        // Search anchors used by the web UI resolve against the same dirty view:
+        // line 1, column 3 is just after "NEE" in "alpha\nNEEDLE...".
+        let (status, linebyte_body) = send(addr, get("/api/linebyte?line=1&col=3", &host)).await;
+        assert_eq!(status, 200, "body: {linebyte_body}");
+        assert!(
+            linebyte_body.contains("\"byte\":9"),
+            "body: {linebyte_body}"
+        );
+        assert_eq!(
+            state.dirty_snapshot_builds(),
+            1,
+            "linebyte reuses the cached dirty snapshot"
+        );
 
         // A second find at the same revision reuses the cached snapshot.
         let (status, body2) = send(addr, get("/api/find?q=NEEDLE&dir=next&from=0", &host)).await;

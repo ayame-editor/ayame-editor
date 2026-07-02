@@ -230,7 +230,7 @@ pub(super) async fn api_sort_save(
     };
     let dir = spawn_dir("sort-save-spill");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
-    let mut cmd = sort_command(wd.input.path(), &target, &req, &dir)?;
+    let mut cmd = sort_command(&wd.doc, wd.input.path(), &target, &req, &dir)?;
     let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     drop(wd); // remove the materialized input, if any
@@ -267,7 +267,7 @@ async fn sort_save_in_place(
     let stage = edit::overwrite_stage_path(&target);
     let dir = spawn_dir("sort-save-spill");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
-    let mut cmd = sort_command(input.path(), &stage, &req, &dir)?;
+    let mut cmd = sort_command(&snap.doc, input.path(), &stage, &req, &dir)?;
     let res = run_artifact_worker("sort", &mut cmd, &stage, total_lines).await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     drop(input); // remove the materialized input, if any
@@ -318,13 +318,16 @@ async fn sort_save_in_place(
 
 /// Build the `ayame sort` worker invocation shared by both sort modes.
 fn sort_command(
+    doc: &Document,
     input: &Path,
     out: &Path,
     req: &SortSaveRequest,
     spill_dir: &Path,
 ) -> Result<Command, (StatusCode, String)> {
     let mut cmd = worker_command()?;
-    cmd.arg("sort").arg(input).arg("--out").arg(out);
+    cmd.arg("sort").arg(input);
+    append_worker_encoding(&mut cmd, doc);
+    cmd.arg("--out").arg(out);
     if let Some(k) = req.key {
         cmd.arg("--key").arg(k.to_string());
     }
@@ -385,9 +388,9 @@ pub(super) async fn api_replace_save(
     let wd = dirty_aware_input(&state, "replace-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
     let mut cmd = worker_command()?;
-    cmd.arg("replace")
-        .arg(wd.input.path())
-        .arg(req.find)
+    cmd.arg("replace").arg(wd.input.path());
+    append_worker_encoding(&mut cmd, &wd.doc);
+    cmd.arg(req.find)
         .arg(req.replacement)
         .arg("--out")
         .arg(&target);
@@ -428,11 +431,9 @@ pub(super) async fn api_case_save(
     let wd = dirty_aware_input(&state, "case-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
     let mut cmd = worker_command()?;
-    cmd.arg("case")
-        .arg(wd.input.path())
-        .arg(mode)
-        .arg("--out")
-        .arg(&target);
+    cmd.arg("case").arg(wd.input.path());
+    append_worker_encoding(&mut cmd, &wd.doc);
+    cmd.arg(mode).arg("--out").arg(&target);
     let res = run_artifact_worker("case", &mut cmd, &target, wd.total_lines).await;
     drop(wd);
     res.map(Json)
@@ -478,9 +479,9 @@ pub(super) async fn api_split_save(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string());
     let mut cmd = worker_command()?;
-    cmd.arg("split")
-        .arg(wd.input.path())
-        .arg("--lines")
+    cmd.arg("split").arg(wd.input.path());
+    append_worker_encoding(&mut cmd, &wd.doc);
+    cmd.arg("--lines")
         .arg(req.lines.to_string())
         .arg("--out-dir")
         .arg(&out_dir)
@@ -539,9 +540,9 @@ pub(super) async fn api_search(
     // the edited view — and repeated searches reuse one materialization.
     let view = dirty_view(&state).await?;
     let mut cmd = worker_command()?;
-    cmd.arg("search")
-        .arg(view.path())
-        .arg("--json")
+    cmd.arg("search").arg(view.path());
+    append_worker_encoding(&mut cmd, view.doc());
+    cmd.arg("--json")
         .arg("--max")
         .arg(q.max.min(100_000).to_string())
         .arg("--start-byte")
@@ -595,8 +596,8 @@ pub(super) async fn api_find(
     // byte offsets are view-accurate even with unsaved edits.
     let view = dirty_view(&state).await?;
     let doc = view.doc().clone();
-    // find_prev in particular can scan everything before the anchor; keep that
-    // off the async workers so slow finds never stall unrelated requests.
+    // Keep find work off the async workers so large searches never stall
+    // unrelated requests.
     let hit = tokio::task::spawn_blocking(move || {
         if q.dir == "prev" {
             doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
@@ -777,6 +778,8 @@ fn web_diff_response(
 #[derive(Deserialize)]
 pub(super) struct LineByteQuery {
     line: u64,
+    #[serde(default)]
+    col: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -787,9 +790,14 @@ pub(super) struct LineByteResponse {
 pub(super) async fn api_linebyte(
     State(state): State<SharedState>,
     Query(q): Query<LineByteQuery>,
-) -> Json<LineByteResponse> {
-    let byte = state.doc_opt().and_then(|doc| doc.line_start_byte(q.line));
-    Json(LineByteResponse { byte })
+) -> Result<Json<LineByteResponse>, (StatusCode, String)> {
+    let view = dirty_view(&state).await?;
+    let doc = view.doc();
+    let byte = match q.col {
+        Some(col) => doc.line_col_byte(q.line, col),
+        None => doc.line_start_byte(q.line),
+    };
+    Ok(Json(LineByteResponse { byte }))
 }
 
 fn requested_or_default(path: &Path, requested: Option<&str>, suffix: &str) -> PathBuf {
@@ -810,6 +818,10 @@ fn spawn_dir(kind: &str) -> PathBuf {
 fn worker_command() -> Result<Command, (StatusCode, String)> {
     let exe = std::env::current_exe().map_err(internal)?;
     Ok(Command::new(exe))
+}
+
+fn append_worker_encoding(cmd: &mut Command, doc: &Document) {
+    cmd.arg("--encoding").arg(doc.stat().encoding.label());
 }
 
 /// The 502 every endpoint returns when its worker child exits unsuccessfully.
@@ -918,7 +930,7 @@ async fn wait_worker_output(
 mod tests {
     use std::io::Write as _;
 
-    use ayame_core::OpenOptions;
+    use ayame_core::{Encoding, OpenOptions};
 
     use super::*;
 
@@ -936,6 +948,50 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(contents).unwrap();
         path
+    }
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn assert_has_arg_pair(cmd: &Command, key: &str, value: &str) {
+        let args = command_args(cmd);
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == key && pair[1] == value),
+            "missing {key} {value:?} in args: {args:?}"
+        );
+    }
+
+    #[test]
+    fn sort_worker_command_inherits_the_open_document_encoding() {
+        let path = scratch_file("forced-sjis.txt", b"a\nb\n");
+        let doc = Document::open(
+            &path,
+            &OpenOptions {
+                encoding: Some(Encoding::ShiftJis),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        let req = SortSaveRequest {
+            path: None,
+            in_place: false,
+            key: None,
+            numeric: false,
+            reverse: false,
+            delim: None,
+        };
+        let out = path.with_extension("sorted");
+        let spill = path.with_extension("spill");
+
+        let cmd = sort_command(&doc, &path, &out, &req, &spill).unwrap();
+
+        assert_has_arg_pair(&cmd, "--encoding", "Shift_JIS");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

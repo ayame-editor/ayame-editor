@@ -263,6 +263,18 @@ mod tests {
     }
 
     #[test]
+    fn labels_round_trip_through_cli_parse() {
+        for enc in [
+            Encoding::Utf8,
+            Encoding::ShiftJis,
+            Encoding::EucJp,
+            Encoding::Ascii,
+        ] {
+            assert_eq!(Encoding::parse(enc.label()), Some(enc));
+        }
+    }
+
+    #[test]
     fn eol_detection() {
         assert_eq!(detect_eol(b"a\nb\n"), Eol::Lf);
         assert_eq!(detect_eol(b"a\r\nb\r\n"), Eol::Crlf);

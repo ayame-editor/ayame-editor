@@ -18,11 +18,11 @@
 「目標アーキテクチャを一気に作らない」。各ステップは失敗時に v0.1 動作へ安全にフォールバックする。
 
 1. **プロセス隔離（安定性の証明）** — ✅ **実装済み（op ワーカー版）**
-   `ayame serve` は重い op（search/sort/group）を `--worker` 相当の**使い捨て子プロセス**（`current_exe` を re-exec）で実行。ワーカーが**捕捉不能な SIGABRT でも**落ちると当該リクエストは 502、エンジンと `/api/lines`（ビューポート）は 200 を維持。`AYAME_WORKER_CRASH` フックで決定的に実証（`scripts/crash-isolation-test.sh`、10/10 PASS）。**未了**: Tauri window が axum ホスト自体を監督する案（ホストプロセス死＝DESIGN §4.1 の case 3）はこの環境では GUI 検証不可のため後続。
+   `ayame serve` は重い op（search/sort/replace/case/split）を `--worker` 相当の**使い捨て子プロセス**（`current_exe` を re-exec）で実行。ワーカーが**捕捉不能な SIGABRT でも**落ちると当該リクエストは 502、エンジンと `/api/lines`（ビューポート）は 200 を維持。`AYAME_WORKER_CRASH` フックで決定的に実証（`scripts/crash-isolation-test.sh`、10/10 PASS）。**未了**: Tauri window が axum ホスト自体を監督する案（ホストプロセス死＝DESIGN §4.1 の case 3）はこの環境では GUI 検証不可のため後続。
 2. **ディスクキャッシュ（オフロードの証明）** — ✅ **実装済み**
    `LineIndex::to_bytes/from_bytes`（FNV-1a checksum trailer 付き）、content-addressed キャッシュ（`hash(canonical_path+size+mtime+stride)`）、`O_EXCL` 単一ライタロック＋tmp→atomic-rename。`Document::open` がキャッシュ参照、ミス/破損/失効は `LineIndex::build` へ安全にフォールバック。CLI は既定ON（`--no-cache`/`--cache-dir`/`ayame cache {path,info,clear}`）。実測: 構築 24ms → 再オープン 0ms。
-3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（search/sort/group/top/distinct）**
-   `/api/search`・`/api/sort`・`/api/group`・`/api/top`・`/api/distinct` は子プロセスを spawn→wait→exit、結果は JSON / artifact ファイルでハンドオフ（親プロセスは preview 分だけ読む）。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。
+3. **使い捨て子プロセスのワーカー** — ✅ **実装済み（Web: search/sort/replace/case/split、CLI: group/top/distinct）**
+   `/api/search` と `/api/{sort,replace,case,split}/save` は子プロセスを spawn→wait→exit、結果は JSON / artifact ファイルでハンドオフ。CLI の `group` / `top` / `distinct` も同じ core ops を使う。ワーカー timeout 付き。ハートビートも IPC フレーミングも無しの最小形。
 4. **外部マージ SORT** — ✅ **実装済み**（`ayame-core::ops::sort` ＋ `ayame sort`）
    明示メモリ予算でラン生成（`par_sort_unstable`）→ ディスク spill → fan-in 64 の多段ヒープ k-way マージ → 順序保存の `Vec<u64>` 順列。数値は順序保存エンコード、文字はデコードして **NFC 正規化済みコードポイント順**（Shift_JIS も正しい順序）、列指定（`-k`/`--delim`）・降順（`-r`）。実測: 500万行を 16 MiB 予算で 15 ラン・95 MiB spill・3.25 秒。**未了**: エディタでの仮想順列表示。
 
@@ -41,7 +41,7 @@
   - TOP-N: 有界 O(N) ヒープ（上位/下位、数値/文字）。
   - DISTINCT: HyperLogLog（2^p レジスタ、既定 p=14＝16 KB・誤差 ~0.8%、基数に依らず一定メモリ）。
   - CSV欄モデル: `csv-core` で RFC-4180 クォート（区切りを含む `"a,b"`、`""` エスケープ）。`--csv` で有効化。
-  - `serve`: `/api/top`・`/api/distinct` 露出済み（重い走査は worker 隔離）。
+  - `serve`: 現在は search/sort/replace/case/split を worker 隔離。GROUP-BY / TOP-N / DISTINCT のブラウザ操作化は後続。
   - **未了**: 引用フィールド内の**埋め込み改行**（1物理行=1レコード前提）、ホットパーティション再分割、per-group の distinct（HLL）、ブラウザ UI への操作パネル統合。
 - ✅ **GUI diff確認** 実装済み:
   - 行単位 diff、bounded resync window、出力 hunk/line 上限。

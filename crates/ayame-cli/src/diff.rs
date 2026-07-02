@@ -5,12 +5,12 @@ use ayame_core::{Document, Encoding, OpenOptions};
 use serde::Serialize;
 
 use crate::{
-    commas, first_opt, has_flag, maybe_crash, open_opts, parse, sort_document_to_utf8_file,
+    commas, first_opt, has_flag, maybe_crash, open_opts, parse_checked, sort_document_to_utf8_file,
     temp_work_dir,
 };
 
 pub(crate) fn cmd_diff(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse(
+    let (pos, opts, flags) = parse_checked(
         args,
         &[
             "--encoding",
@@ -21,7 +21,14 @@ pub(crate) fn cmd_diff(args: &[String]) -> Result<()> {
             "--window",
             "--width",
         ],
-    );
+        &[
+            "--no-cache",
+            "--json",
+            "--summary",
+            "--side-by-side",
+            "--side",
+        ],
+    )?;
     let old_path = pos.first().context("expected OLD file")?;
     let new_path = pos.get(1).context("expected NEW file")?;
     let open = open_opts(&opts, &flags)?;
@@ -35,7 +42,7 @@ pub(crate) fn cmd_diff(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_sortdiff(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (pos, opts, flags) = parse(
+    let (pos, opts, flags) = parse_checked(
         args,
         &[
             "--encoding",
@@ -53,7 +60,19 @@ pub(crate) fn cmd_sortdiff(args: &[String]) -> Result<()> {
             "--window",
             "--width",
         ],
-    );
+        &[
+            "--no-cache",
+            "--json",
+            "--summary",
+            "--side-by-side",
+            "--side",
+            "--numeric",
+            "-n",
+            "--reverse",
+            "-r",
+            "--csv",
+        ],
+    )?;
     let old_path = pos.first().context("expected OLD file")?;
     let new_path = pos.get(1).context("expected NEW file")?;
     let open = open_opts(&opts, &flags)?;

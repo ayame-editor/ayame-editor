@@ -40,6 +40,7 @@ const KEYMAP_ACTIONS = [
   ["saveFile", "保存", "Ctrl+S"],
   ["saveAs", "別名で保存", "Ctrl+Shift+S"],
   ["closeTab", "タブを閉じる", "Ctrl+W"],
+  ["commandPalette", "コマンドパレット", "Ctrl+Shift+P"],
   ["toggleSidebar", "エクスプローラー表示", "Ctrl+B"],
   ["find", "検索", "Ctrl+F"],
   ["findNext", "次の一致", "F3"],
@@ -48,6 +49,7 @@ const KEYMAP_ACTIONS = [
   ["undo", "元に戻す", "Ctrl+Z"],
   ["redo", "やり直す", ["Ctrl+Y", "Ctrl+Shift+Z"]],
   ["selectAll", "すべて選択", "Ctrl+A"],
+  ["selectNextOccurrence", "次の一致を選択", "Ctrl+D"],
   ["addCursorAbove", "カーソルを上に追加", "Ctrl+Alt+ArrowUp"],
   ["addCursorBelow", "カーソルを下に追加", "Ctrl+Alt+ArrowDown"],
   ["copy", "コピー", "Ctrl+C"],
@@ -58,6 +60,12 @@ const KEYMAP_ACTIONS = [
   ["sortSave", "ソート", ""],
   ["replaceSave", "置換して保存", ""],
   ["diffFile", "2ファイル差分", ""],
+  ["splitFile", "ファイルを分割", ""],
+  ["caseUpper", "大文字化して保存", ""],
+  ["caseLower", "小文字化して保存", ""],
+  ["settings", "設定", ""],
+  ["keymap", "キー設定", ""],
+  ["revert", "保存時の状態に戻す", ""],
 ];
 const DEFAULT_KEYMAP = Object.fromEntries(KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]));
 
@@ -154,6 +162,12 @@ function setModalOpen(modal, open) {
 }
 
 const APP_MENUS = ["file", "edit", "selection", "view", "tools"];
+const MENU_ID_ACTIONS = [
+  ["new-file", "newFile"],
+  ["open-file", "openFile"],
+  ["save-file", "saveFile"],
+  ["save-copy", "saveAs"],
+];
 
 function fileMenuVisible() {
   return APP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
@@ -431,6 +445,129 @@ function renderKeymapRows() {
   list.append(frag);
 }
 
+let paletteItems = [];
+let paletteIndex = 0;
+
+function commandPaletteVisible() {
+  return !$("command-palette").classList.contains("hidden");
+}
+
+function commandLabelFromElement(el) {
+  return el?.querySelector(".menu-label")?.textContent?.trim() || "";
+}
+
+function commandPaletteItems() {
+  const keymapLabels = new Map(KEYMAP_ACTIONS.map(([action, label]) => [action, label]));
+  const seen = new Set();
+  const items = [];
+  const add = (action, label = "") => {
+    if (!action || seen.has(action)) return;
+    seen.add(action);
+    const text = label || keymapLabels.get(action) || action;
+    items.push({
+      action,
+      label: text.replace(/\.\.\.$/, ""),
+      shortcut: shortcutFor(action),
+    });
+  };
+  for (const [id, action] of MENU_ID_ACTIONS) add(action, commandLabelFromElement($(id)));
+  document.querySelectorAll("[data-menu-action]").forEach((el) => {
+    add(el.dataset.menuAction, commandLabelFromElement(el));
+  });
+  for (const [action, label] of KEYMAP_ACTIONS) add(action, label);
+  return items;
+}
+
+function paletteMatches(item, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay = `${item.label} ${item.action} ${item.shortcut}`.toLowerCase();
+  return q.split(/\s+/).every((part) => hay.includes(part));
+}
+
+function renderCommandPalette() {
+  const list = $("palette-list");
+  const query = $("palette-input").value;
+  const visible = paletteItems.filter((item) => paletteMatches(item, query));
+  paletteIndex = Math.max(0, Math.min(paletteIndex, visible.length - 1));
+  list.textContent = "";
+  const frag = document.createDocumentFragment();
+  visible.forEach((item, index) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "palette-row";
+    row.classList.toggle("active", index === paletteIndex);
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", index === paletteIndex ? "true" : "false");
+    const label = document.createElement("span");
+    label.className = "palette-label";
+    label.textContent = item.label;
+    const key = document.createElement("span");
+    key.className = "palette-key";
+    key.textContent = item.shortcut;
+    row.append(label, key);
+    row.addEventListener("mouseenter", () => {
+      if (paletteIndex === index) return;
+      paletteIndex = index;
+      renderCommandPalette();
+    });
+    row.addEventListener("click", () => executePaletteItem(item));
+    frag.append(row);
+  });
+  list.append(frag);
+  list.querySelector(".palette-row.active")?.scrollIntoView({ block: "nearest" });
+}
+
+function showCommandPalette() {
+  hideFileMenu();
+  if (promptVisible() || formVisible() || commandPaletteVisible()) return;
+  paletteItems = commandPaletteItems();
+  paletteIndex = 0;
+  $("palette-input").value = "";
+  setModalOpen($("command-palette"), true);
+  renderCommandPalette();
+  queueMicrotask(() => $("palette-input").focus());
+}
+
+function hideCommandPalette() {
+  setModalOpen($("command-palette"), false);
+  focusEditor();
+}
+
+function movePalette(delta) {
+  const visible = paletteItems.filter((item) => paletteMatches(item, $("palette-input").value));
+  if (!visible.length) return;
+  paletteIndex = (paletteIndex + delta + visible.length) % visible.length;
+  renderCommandPalette();
+}
+
+function executePaletteItem(item) {
+  if (!item) return;
+  hideCommandPalette();
+  queueMicrotask(() => runMenuAction(item.action));
+}
+
+function initCommandPalette() {
+  $("palette-close").addEventListener("click", hideCommandPalette);
+  $("command-palette").addEventListener("click", (e) => {
+    if (e.target === $("command-palette")) hideCommandPalette();
+  });
+  $("palette-input").addEventListener("input", () => {
+    paletteIndex = 0;
+    renderCommandPalette();
+  });
+  $("palette-input").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); hideCommandPalette(); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); movePalette(-1); return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const visible = paletteItems.filter((item) => paletteMatches(item, $("palette-input").value));
+      executePaletteItem(visible[paletteIndex]);
+    }
+  });
+}
+
 function rowsVisible() {
   const h = $("viewport").clientHeight - (state.settings && state.settings.ruler ? 18 : 0);
   return Math.max(1, Math.ceil(h / LINE_HEIGHT));
@@ -504,9 +641,10 @@ function ensureData(start, count) {
     .catch((e) => console.error("lines fetch failed", e));
 }
 
-async function lineByte(line) {
+async function lineByte(line, col = null) {
   try {
-    const r = await api(`/api/linebyte?line=${Math.max(0, line)}`);
+    const q = col == null ? "" : `&col=${Math.max(0, col)}`;
+    const r = await api(`/api/linebyte?line=${Math.max(0, line)}${q}`);
     return r.byte ?? 0;
   } catch {
     return 0;
@@ -671,7 +809,7 @@ function hasSelection() {
   const rr = rectRange();
   if (rr) return rr.l0 !== rr.l1 || rr.c0 !== rr.c1;
   const r = selRange();
-  return !!r && !(r.start.line === r.end.line && r.start.col === r.end.col);
+  return (!!r && !rangeEmpty(r)) || selectionRanges().length > 0;
 }
 
 // Like hasSelection(), but a zero-width rect (c0 == c1 across several lines)
@@ -680,7 +818,34 @@ function hasSelection() {
 function hasTextSelection() {
   const rr = rectRange();
   if (rr) return rr.c0 !== rr.c1;
-  return hasSelection();
+  return selectionRanges().length > 0;
+}
+
+function appendSelectionRect(layer, line, startCol, endCol, trailingNewline = false) {
+  const left = caretX(line, startCol);
+  const trail = trailingNewline ? charWidth() * 0.6 : 0;
+  const width = caretX(line, endCol) - left + trail;
+  const rect = document.createElement("div");
+  rect.className = "selrect";
+  rect.style.left = `${left}px`;
+  rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
+  rect.style.width = `${Math.max(2, width)}px`;
+  layer.append(rect);
+}
+
+function renderRangeSelection(layer, r) {
+  if (!r || rangeEmpty(r)) return;
+  const vis = rowsVisible() + OVERSCAN;
+  const from = Math.max(r.start.line, state.first);
+  const to = Math.min(r.end.line, state.first + vis);
+  for (let line = from; line <= to; line++) {
+    const startCol = line === r.start.line ? r.start.col : 0;
+    const len = lineLen(line);
+    // A line selected through its end extends a hair past the text so the
+    // trailing newline reads as selected, like a normal editor.
+    const endCol = line === r.end.line ? Math.min(r.end.col, len) : len;
+    appendSelectionRect(layer, line, startCol, endCol, line !== r.end.line);
+  }
 }
 
 function renderSelection() {
@@ -692,39 +857,11 @@ function renderSelection() {
     const from = Math.max(rr.l0, state.first);
     const to = Math.min(rr.l1, state.first + vis);
     for (let line = from; line <= to; line++) {
-      const left = caretX(line, rr.c0);
-      const width = Math.max(2, caretX(line, rr.c1) - left);
-      const rect = document.createElement("div");
-      rect.className = "selrect";
-      rect.style.left = `${left}px`;
-      rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
-      rect.style.width = `${width}px`;
-      layer.append(rect);
+      appendSelectionRect(layer, line, rr.c0, rr.c1);
     }
     return;
   }
-  const r = selRange();
-  if (!r || (r.start.line === r.end.line && r.start.col === r.end.col)) return;
-  const cw = charWidth();
-  const vis = rowsVisible() + OVERSCAN;
-  const from = Math.max(r.start.line, state.first);
-  const to = Math.min(r.end.line, state.first + vis);
-  for (let line = from; line <= to; line++) {
-    const startCol = line === r.start.line ? r.start.col : 0;
-    const len = lineLen(line);
-    // A line selected through its end extends a hair past the text so the
-    // trailing newline reads as selected, like a normal editor.
-    const endCol = line === r.end.line ? Math.min(r.end.col, len) : len;
-    const trail = line === r.end.line ? 0 : cw * 0.6;
-    const left = caretX(line, startCol);
-    const width = caretX(line, endCol) - left + trail;
-    const rect = document.createElement("div");
-    rect.className = "selrect";
-    rect.style.left = `${left}px`;
-    rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
-    rect.style.width = `${Math.max(2, width)}px`;
-    layer.append(rect);
-  }
+  for (const r of selectionRanges()) renderRangeSelection(layer, r);
 }
 
 function initSelection() {
@@ -835,12 +972,12 @@ function hideCtxMenu() {
 function posInsideSelection(p) {
   const rr = rectRange();
   if (rr) return p.line >= rr.l0 && p.line <= rr.l1 && p.col >= rr.c0 && p.col <= rr.c1;
-  const r = selRange();
-  if (!r) return false;
-  if (p.line < r.start.line || p.line > r.end.line) return false;
-  if (p.line === r.start.line && p.col < r.start.col) return false;
-  if (p.line === r.end.line && p.col > r.end.col) return false;
-  return true;
+  return selectionRanges().some((r) => {
+    if (p.line < r.start.line || p.line > r.end.line) return false;
+    if (p.line === r.start.line && p.col < r.start.col) return false;
+    if (p.line === r.end.line && p.col > r.end.col) return false;
+    return true;
+  });
 }
 
 async function pasteFromClipboard() {
@@ -859,10 +996,15 @@ async function pasteFromClipboard() {
 // clipboard cap does not apply. Output matches what copy would produce.
 async function saveSelectionToFile() {
   const rr = rectRange();
-  const r = selRange();
+  const ranges = selectionRanges();
+  const r = selRange() || (ranges.length === 1 ? ranges[0] : null);
   if ((!rr && !r) || !hasTextSelection()) {
     // A zero-width rect selects no characters — nothing to write out.
     flashCount("選択がありません", "error");
+    return;
+  }
+  if (!rr && ranges.length > 1) {
+    flashCount("複数選択はコピーまたは切り取りを使ってください", "error");
     return;
   }
   const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
@@ -962,14 +1104,40 @@ function selectAll() {
   focusEditor();
 }
 
-function selectionLineCount(r) {
-  const rr = rectRange();
-  if (rr) return rr.l1 - rr.l0 + 1;
+function rangeLineCount(r) {
   return r.end.line - r.start.line + 1;
 }
 
+function selectionLineCount(r = null) {
+  const rr = rectRange();
+  if (rr) return rr.l1 - rr.l0 + 1;
+  if (r) return rangeLineCount(r);
+  return selectionRanges().reduce((n, range) => n + rangeLineCount(range), 0);
+}
+
+async function selectedTextForRange(r, maxLines = MAX_COPY_LINES) {
+  const count = Math.min(rangeLineCount(r), maxLines);
+  const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
+  // Columns are Unicode scalar counts (the server contract); slicing UTF-16
+  // units here would split surrogate pairs (emoji etc.).
+  const L = res.lines.map((x) => Array.from(x.text ?? ""));
+  if (!L.length) return "";
+  const complete = count >= rangeLineCount(r);
+  if (L.length === 1) {
+    const endCol = complete && r.start.line === r.end.line ? r.end.col : L[0].length;
+    return L[0].slice(r.start.col, endCol).join("");
+  }
+  const out = [L[0].slice(r.start.col).join("")];
+  for (let i = 1; i < L.length - 1; i++) out.push(L[i].join(""));
+  if (L.length > 1) {
+    const last = L[L.length - 1];
+    out.push(last.slice(0, complete ? r.end.col : last.length).join(""));
+  }
+  return out.join("\n");
+}
+
 // Fetch the selected text (bounded) and join with newlines.
-async function selectedText(r) {
+async function selectedText(r = null) {
   const rr = rectRange();
   if (rr) {
     const count = Math.min(rr.l1 - rr.l0 + 1, MAX_COPY_LINES);
@@ -979,15 +1147,14 @@ async function selectedText(r) {
       return chars.slice(rr.c0, rr.c1).join("");
     }).join("\n");
   }
-  const count = Math.min(r.end.line - r.start.line + 1, MAX_COPY_LINES);
-  const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
-  // Columns are Unicode scalar counts (the server contract); slicing UTF-16
-  // units here would split surrogate pairs (emoji etc.).
-  const L = res.lines.map((x) => Array.from(x.text ?? ""));
-  if (L.length === 1) return L[0].slice(r.start.col, r.end.col).join("");
-  const out = [L[0].slice(r.start.col).join("")];
-  for (let i = 1; i < L.length - 1; i++) out.push(L[i].join(""));
-  out.push(L[L.length - 1].slice(0, r.end.col).join(""));
+  const ranges = r ? [r] : selectionRanges();
+  const out = [];
+  let remaining = MAX_COPY_LINES;
+  for (const range of ranges) {
+    if (remaining <= 0) break;
+    out.push(await selectedTextForRange(range, remaining));
+    remaining -= Math.min(rangeLineCount(range), remaining);
+  }
   return out.join("\n");
 }
 
@@ -1011,14 +1178,16 @@ async function copyToClipboard(text) {
 }
 
 async function copySelection() {
-  const r = selRange();
-  if (!r) return;
+  if (!hasTextSelection()) return;
   try {
-    const total = selectionLineCount(r);
-    await copyToClipboard(await selectedText(r));
+    const total = selectionLineCount();
+    await copyToClipboard(await selectedText());
     if (total > MAX_COPY_LINES) {
+      const multi = selectionRanges().length > 1;
       flashCount(
-        `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます`,
+        multi
+          ? `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません`
+          : `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます`,
         "error"
       );
     } else {
@@ -1036,19 +1205,21 @@ function deleteSelection() {
 }
 
 async function cutSelection() {
-  const r = selRange();
-  if (!r || !hasSelection()) return;
+  if (!hasTextSelection()) return;
   // Never delete more than what reached the clipboard: a capped copy followed
   // by a full delete would silently destroy data.
-  const total = selectionLineCount(r);
+  const total = selectionLineCount();
   if (total > MAX_COPY_LINES) {
+    const multi = selectionRanges().length > 1;
     flashCount(
-      `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー`,
+      multi
+        ? `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。削除だけなら Delete キー`
+        : `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー`,
       "error"
     );
     return;
   }
-  await copyToClipboard(await selectedText(r));
+  await copyToClipboard(await selectedText());
   deleteSelection();
 }
 
@@ -1422,6 +1593,122 @@ async function findStep(dir) {
   }
 }
 
+function wordRangeAt(p) {
+  const cs = lineChars(p.line);
+  if (!cs.length) return null;
+  let i = Math.min(p.col, cs.length - 1);
+  if (!isWordChar(cs[i]) && p.col > 0 && isWordChar(cs[p.col - 1])) i = p.col - 1;
+  if (!isWordChar(cs[i])) return null;
+  let a = i;
+  let b = i + 1;
+  while (a > 0 && isWordChar(cs[a - 1])) a--;
+  while (b < cs.length && isWordChar(cs[b])) b++;
+  return { start: { line: p.line, col: a }, end: { line: p.line, col: b } };
+}
+
+function selectPrimaryRange(r) {
+  state.sel = { anchor: clonePoint(r.start), head: clonePoint(r.end) };
+  state.caret = clonePoint(r.end);
+  state.activeLine = state.caret.line;
+  state.goalCol = state.caret.col;
+  state.editGen++;
+  revealLine(state.caret.line);
+  focusEditor();
+  scheduleRender();
+}
+
+function promoteSelectionRange(r) {
+  const nextKey = rangeKey(r);
+  const old = state.sel && !state.sel.rect ? normalizedRange(state.sel.anchor, state.sel.head) : null;
+  if (old && !rangeEmpty(old) && rangeKey(old) !== nextKey) {
+    const exists = state.extraCursors.some((c) => {
+      const cr = cursorSelectionRange(c);
+      return cr && rangeKey(cr) === rangeKey(old);
+    });
+    if (!exists) {
+      state.extraCursors.push({
+        line: state.sel.head.line,
+        col: state.sel.head.col,
+        sel: cloneSelection(state.sel),
+      });
+    }
+  }
+  state.extraCursors = state.extraCursors.filter((c) => {
+    const cr = cursorSelectionRange(c);
+    return !cr || rangeKey(cr) !== nextKey;
+  });
+  selectPrimaryRange(r);
+}
+
+async function findNextOccurrenceRange(query, fromByte, existing) {
+  const selected = new Set(existing.map(rangeKey));
+  const charLen = Array.from(query).length;
+  let from = fromByte;
+  let wrapped = false;
+  for (let i = 0; i < existing.length + 3; i++) {
+    const params = new URLSearchParams({
+      dir: "next",
+      from: String(from),
+      q: query,
+      regex: "false",
+      ci: "false",
+      word: "false",
+    });
+    const res = await api(`/api/find?${params.toString()}`);
+    if (!res.hit) {
+      if (wrapped) return null;
+      from = 0;
+      wrapped = true;
+      continue;
+    }
+    const h = res.hit;
+    const r = {
+      start: { line: h.line, col: h.column },
+      end: { line: h.line, col: h.column + charLen },
+    };
+    if (!selected.has(rangeKey(r))) return r;
+    from = h.byte + Math.max(1, h.byte_len);
+  }
+  return null;
+}
+
+async function selectNextOccurrence() {
+  if (!state.stat?.open) return;
+  if (rectRange()) {
+    flashCount("矩形選択では Ctrl+D は使えません", "error");
+    return;
+  }
+  let ranges = selectionRanges();
+  if (!ranges.length) {
+    const r = wordRangeAt(state.caret);
+    if (!r) {
+      flashCount("選択できる単語がありません");
+      return;
+    }
+    selectPrimaryRange(r);
+    return;
+  }
+  const query = await selectedTextForRange(ranges[0]);
+  if (!query || query.includes("\n")) {
+    flashCount("複数行選択では Ctrl+D は使えません", "error");
+    return;
+  }
+  ranges = selectionRanges();
+  const last = ranges[ranges.length - 1];
+  const from = await lineByte(last.end.line, last.end.col);
+  try {
+    const next = await findNextOccurrenceRange(query, from, ranges);
+    if (!next) {
+      flashCount("次の一致はありません");
+      return;
+    }
+    promoteSelectionRange(next);
+  } catch (e) {
+    flashCount("検索エラー", "error");
+    console.error(e);
+  }
+}
+
 async function updateCount() {
   if (!state.query) {
     $("find-count").textContent = "";
@@ -1576,7 +1863,30 @@ function moveCaret(line, col, extend) {
   scheduleRender();
 }
 
-// ---- multi-cursor (MVP: extra insertion carets, no per-cursor selections) ---
+// ---- multi-cursor -----------------------------------------------------------
+
+function clonePoint(p) {
+  return { line: p.line, col: p.col };
+}
+
+function cloneSelection(sel) {
+  return sel ? { anchor: clonePoint(sel.anchor), head: clonePoint(sel.head), rect: !!sel.rect } : null;
+}
+
+function normalizedRange(anchor, head) {
+  const forward = anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
+  return forward
+    ? { start: clonePoint(anchor), end: clonePoint(head) }
+    : { start: clonePoint(head), end: clonePoint(anchor) };
+}
+
+function rangeEmpty(r) {
+  return r.start.line === r.end.line && r.start.col === r.end.col;
+}
+
+function rangeKey(r) {
+  return `${r.start.line}:${r.start.col}:${r.end.line}:${r.end.col}`;
+}
 
 // Primary caret plus the extra cursors, deduped and in document order. The
 // entry carrying `primary: true` mirrors state.caret.
@@ -1587,12 +1897,50 @@ function allCursors() {
     const k = `${c.line}:${c.col}`;
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ line: c.line, col: c.col, primary });
+    out.push({
+      line: c.line,
+      col: c.col,
+      primary,
+      sel: primary ? cloneSelection(state.sel && !state.sel.rect ? state.sel : null) : cloneSelection(c.sel),
+    });
   };
   push(state.caret, true);
   for (const c of state.extraCursors) push(c, false);
   out.sort((a, b) => a.line - b.line || a.col - b.col);
   return out;
+}
+
+function cursorSelectionRange(c) {
+  const sel = c.primary ? state.sel : c.sel;
+  if (!sel || sel.rect) return null;
+  const r = normalizedRange(sel.anchor, sel.head);
+  return rangeEmpty(r) ? null : r;
+}
+
+function selectionRanges() {
+  const ranges = [];
+  const seen = new Set();
+  const add = (r, primary = false) => {
+    if (!r || rangeEmpty(r)) return;
+    const key = rangeKey(r);
+    if (seen.has(key)) return;
+    seen.add(key);
+    ranges.push({ ...r, primary });
+  };
+  const rr = rectRange();
+  if (rr) return ranges;
+  add(selRange(), true);
+  for (const c of state.extraCursors) add(cursorSelectionRange(c), false);
+  ranges.sort((a, b) => a.start.line - b.start.line || a.start.col - b.start.col);
+  return ranges;
+}
+
+function hasCursorSelections() {
+  if (state.sel && !state.sel.rect && selRange() && !rangeEmpty(selRange())) return true;
+  return state.extraCursors.some((c) => {
+    const r = cursorSelectionRange(c);
+    return r && !rangeEmpty(r);
+  });
 }
 
 function clearExtraCursors() {
@@ -1602,6 +1950,10 @@ function clearExtraCursors() {
   }
 }
 
+function clearExtraSelections() {
+  for (const c of state.extraCursors) c.sel = null;
+}
+
 // Ctrl+Click: add a caret; clicking an existing extra caret removes it; the
 // primary caret is left alone.
 function toggleExtraCursorAt(line, col) {
@@ -1609,8 +1961,9 @@ function toggleExtraCursorAt(line, col) {
   const i = state.extraCursors.findIndex((c) => c.line === line && c.col === col);
   if (i >= 0) state.extraCursors.splice(i, 1);
   else {
-    state.sel = null; // extra cursors and range selections are exclusive
-    state.extraCursors.push({ line, col });
+    state.sel = null;
+    clearExtraSelections();
+    state.extraCursors.push({ line, col, sel: null });
   }
   state.editGen++; // user cursor action: an in-flight edit must not clobber it
   scheduleRender();
@@ -1620,7 +1973,8 @@ function addExtraCursorAt(line, col) {
   if (line === state.caret.line && col === state.caret.col) return;
   if (state.extraCursors.some((c) => c.line === line && c.col === col)) return;
   state.sel = null;
-  state.extraCursors.push({ line, col });
+  clearExtraSelections();
+  state.extraCursors.push({ line, col, sel: null });
   state.editGen++; // user cursor action: an in-flight edit must not clobber it
   // Keep the newest cursor visible, like revealCaret does for the primary.
   const vis = rowsVisible();
@@ -1729,7 +2083,7 @@ function positionExtraCarets(vis, focusVisible) {
 }
 
 function anyModalOpen() {
-  return promptVisible() || formVisible() || settingsVisible() || keymapVisible() || diffVisible() || openerVisible();
+  return promptVisible() || formVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible();
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -1920,6 +2274,17 @@ function multiInsert(cursors, textFor) {
   return applyBatch(edits, cursors, cursors.map((_, i) => i));
 }
 
+function cursorReplaceRange(c) {
+  const r = cursorSelectionRange(c);
+  if (r) return { l0: r.start.line, c0: r.start.col, l1: r.end.line, c1: r.end.col };
+  return { l0: c.line, c0: c.col, l1: c.line, c1: c.col };
+}
+
+function multiReplace(cursors, textFor) {
+  const edits = cursors.map((c, i) => ({ ...cursorReplaceRange(c), text: textFor(i) }));
+  return applyBatch(edits, cursors, cursors.map((_, i) => i));
+}
+
 // Insert (or replace the selection with) `text`, which may contain newlines.
 // The target range is resolved *inside* the queued step, so a burst of
 // keystrokes each sees the caret left by the previous edit (never a stale one).
@@ -1929,8 +2294,10 @@ function typeText(text) {
   if (!state.stat?.open) return;
   enqueueEdit(() => {
     if (state.extraCursors.length) {
-      // Multi-cursor: the same text goes in at every caret, as one undo step.
-      return multiInsert(allCursors(), () => text);
+      // Multi-cursor: the same text goes in at every caret, or replaces each
+      // cursor's selection, as one undo step.
+      const cursors = allCursors();
+      return hasCursorSelections() ? multiReplace(cursors, () => text) : multiInsert(cursors, () => text);
     }
     const rr = rectRange();
     if (rr) {
@@ -1977,6 +2344,9 @@ async function lineLensFor(lineNumbers) {
 // (callers then handle their caret-relative case). Call inside enqueueEdit.
 function deleteSelectionEdit() {
   if (!hasSelection()) return null;
+  if (state.extraCursors.length && hasCursorSelections()) {
+    return multiReplace(allCursors(), () => "");
+  }
   const rr = rectRange();
   if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
   const t = replaceTarget();
@@ -1985,6 +2355,8 @@ function deleteSelectionEdit() {
 
 function backspace() {
   enqueueEdit(async () => {
+    const del = deleteSelectionEdit();
+    if (del) return del;
     if (state.extraCursors.length) {
       // Per cursor: delete one char before the caret (line-join at col 0).
       // allCursors() dedupes positions, so ranges may touch but never overlap;
@@ -2008,8 +2380,6 @@ function backspace() {
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    const del = deleteSelectionEdit();
-    if (del) return del;
     const { line, col } = state.caret;
     if (col > 0) return applyRange(line, col - 1, line, col, "");
     if (line > 0) {
@@ -2023,6 +2393,8 @@ function backspace() {
 
 function forwardDelete() {
   enqueueEdit(async () => {
+    const del = deleteSelectionEdit();
+    if (del) return del;
     if (state.extraCursors.length) {
       // Per cursor: delete one char after the caret (line-join at EOL). Same
       // dedupe rule as backspace; the very end of the document yields no edit.
@@ -2044,8 +2416,6 @@ function forwardDelete() {
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    const del = deleteSelectionEdit();
-    if (del) return del;
     const { line, col } = state.caret;
     const lens = await lineLensFor([line]);
     if (!lens.has(line)) return null;
@@ -2073,7 +2443,8 @@ function pasteText(raw) {
     const cursors = allCursors();
     const lines = text.split("\n");
     const perCursor = lines.length === cursors.length ? lines : null;
-    return multiInsert(cursors, (i) => (perCursor ? perCursor[i] : text));
+    const textFor = (i) => (perCursor ? perCursor[i] : text);
+    return hasCursorSelections() ? multiReplace(cursors, textFor) : multiInsert(cursors, textFor);
   });
 }
 
@@ -2750,9 +3121,15 @@ function onGlobalKey(e) {
   if (e.key === "Escape" && ctxMenuVisible()) { e.preventDefault(); hideCtxMenu(); return; }
   if (e.key === "Escape" && fileMenuVisible()) { e.preventDefault(); hideFileMenu(true); return; }
   if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
+  if (e.key === "Escape" && commandPaletteVisible()) { e.preventDefault(); hideCommandPalette(); return; }
   if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
   if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
   if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
+  if (!anyModalOpen() && matchesShortcut(e, "commandPalette")) {
+    e.preventDefault();
+    showCommandPalette();
+    return;
+  }
   // A modal owns the keyboard: never run editor/clipboard/history/nav commands
   // against the hidden document behind Settings / the Opener / a prompt.
   if (anyModalOpen()) return;
@@ -2781,6 +3158,12 @@ function onGlobalKey(e) {
   if (matchesShortcut(e, "sortSave")) { e.preventDefault(); sortSave(); return; }
   if (matchesShortcut(e, "replaceSave")) { e.preventDefault(); replaceSave(); return; }
   if (matchesShortcut(e, "diffFile")) { e.preventDefault(); diffFile(); return; }
+  if (matchesShortcut(e, "splitFile")) { e.preventDefault(); splitFile(); return; }
+  if (matchesShortcut(e, "caseUpper")) { e.preventDefault(); caseSave("upper"); return; }
+  if (matchesShortcut(e, "caseLower")) { e.preventDefault(); caseSave("lower"); return; }
+  if (matchesShortcut(e, "settings")) { e.preventDefault(); showSettings(); return; }
+  if (matchesShortcut(e, "keymap")) { e.preventDefault(); showKeymap(); return; }
+  if (matchesShortcut(e, "revert")) { e.preventDefault(); revertEdits(); return; }
   // Editor clipboard / history — not while typing in a search or dialog field.
   if (inField) return;
   if (matchesShortcut(e, "selectAll")) { e.preventDefault(); selectAll(); return; }
@@ -2815,9 +3198,9 @@ function wordRight(line, col) {
 
 function deleteWordBack() {
   enqueueEdit(() => {
-    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     const del = deleteSelectionEdit();
     if (del) return del;
+    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     const c = state.caret;
     const [l, col] = wordLeft(c.line, c.col);
     if (l === c.line && col === c.col) return null;
@@ -2827,9 +3210,9 @@ function deleteWordBack() {
 
 function deleteWordFwd() {
   enqueueEdit(() => {
-    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     const del = deleteSelectionEdit();
     if (del) return del;
+    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     const c = state.caret;
     const [l, col] = wordRight(c.line, c.col);
     if (l === c.line && col === c.col) return null;
@@ -2855,6 +3238,7 @@ function onEditKey(e) {
   // Checked before the switch so the plain-arrow cases never swallow them.
   if (matchesShortcut(e, "addCursorAbove")) { take(); addCursorAbove(); return; }
   if (matchesShortcut(e, "addCursorBelow")) { take(); addCursorBelow(); return; }
+  if (matchesShortcut(e, "selectNextOccurrence")) { take(); selectNextOccurrence(); return; }
   switch (e.key) {
     case "ArrowLeft":
       take();
@@ -3561,6 +3945,7 @@ function runMenuAction(action) {
   // at any time — so ALL actions are ignored while a modal is open. (In-page
   // menus are unreachable then; this guards the native path.)
   if (anyModalOpen()) return;
+  if (action === "commandPalette") return showCommandPalette();
   if (action === "undo") return undoEdit();
   if (action === "redo") return redoEdit();
   if (action === "find") return showFind();
@@ -3569,6 +3954,7 @@ function runMenuAction(action) {
     return;
   }
   if (action === "selectAll") return selectAll();
+  if (action === "selectNextOccurrence") return selectNextOccurrence();
   if (action === "addCursorAbove") return addCursorAbove();
   if (action === "addCursorBelow") return addCursorBelow();
   if (action === "copy") return copySelection();
@@ -3983,6 +4369,7 @@ window.__ayameOpenNativePaths = (paths) => {
 async function boot() {
   state.history = loadSearchHistory();
   initSettings();
+  initCommandPalette();
   initScrollbar();
   initEvents();
   initEditor();

@@ -70,7 +70,7 @@
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="revert" role="menuitem"
                     title="未保存の編集をすべて破棄して、ディスク上の内容に戻します">
-              <span class="menu-label">保存時の状態に戻す</span><span class="menu-key"></span>
+              <span class="menu-label">保存時の状態に戻す</span><span class="menu-key" data-key-action="revert"></span>
             </button>
           </div>
         </div>
@@ -88,6 +88,7 @@
           <button id="selection-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">選択</button>
           <div id="selection-menu" class="file-menu hidden" role="menu" aria-label="選択">
             <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
+            <button class="menu-item" data-menu-action="selectNextOccurrence" role="menuitem"><span class="menu-label">次の一致を選択</span><span class="menu-key" data-key-action="selectNextOccurrence">Ctrl+D</span></button>
             <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
             <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
@@ -100,8 +101,9 @@
           <div id="view-menu" class="file-menu hidden" role="menu" aria-label="表示">
             <button class="menu-item" data-menu-action="toggleSidebar" role="menuitem"><span class="menu-label">エクスプローラー</span><span class="menu-key" data-key-action="toggleSidebar">Ctrl+B</span></button>
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label">検索バー</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+            <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="settings" role="menuitem"><span class="menu-label">設定</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="settings" role="menuitem"><span class="menu-label">設定</span><span class="menu-key" data-key-action="settings"></span></button>
           </div>
         </div>
       </nav>
@@ -143,13 +145,13 @@
             <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
             <button class="menu-item" data-menu-action="splitFile" role="menuitem"
                     title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)">
-              <span class="menu-label">ファイルを分割</span><span class="menu-key"></span>
+              <span class="menu-label">ファイルを分割</span><span class="menu-key" data-key-action="splitFile"></span>
             </button>
             <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字化して保存</span><span class="menu-key"></span></button>
-            <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字化して保存</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字化して保存</span><span class="menu-key" data-key-action="caseUpper"></span></button>
+            <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字化して保存</span><span class="menu-key" data-key-action="caseLower"></span></button>
             <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label">キー設定</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label">キー設定</span><span class="menu-key" data-key-action="keymap"></span></button>
           </div>
         </div>
       </header>
@@ -340,6 +342,19 @@
             <button id="keymap-reset" class="cmd">既定に戻す</button>
             <button id="keymap-done" class="cmd primary">閉じる</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="command-palette" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel palette-panel" role="dialog" aria-label="コマンドパレット">
+        <div class="modal-head">
+          <div class="modal-title">コマンドパレット</div>
+          <button id="palette-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="palette-body">
+          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false" />
+          <div id="palette-list" class="palette-list" role="listbox"></div>
         </div>
       </div>
     </div>
