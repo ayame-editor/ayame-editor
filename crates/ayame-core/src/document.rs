@@ -278,6 +278,30 @@ impl Document {
         Some(&buf[s as usize..raw_end as usize])
     }
 
+    /// Contiguous raw bytes spanning original lines `[start, end)`, including
+    /// each line's original terminator. `end == line_count()` means "through
+    /// the end of the file" (covering a final line without a terminator).
+    /// Costs two sparse-index lookups regardless of how many lines the span
+    /// covers, so untouched runs can be copied out in one `write_all`.
+    /// Returns `None` if the range is out of bounds; an empty range yields `b""`.
+    pub fn raw_lines_span(&self, start: u64, end: u64) -> Option<&[u8]> {
+        let total = self.line_count();
+        if start > end || end > total {
+            return None;
+        }
+        if start == end {
+            return Some(&[]);
+        }
+        let buf = self.buf();
+        let (s, _text_end, _raw_end) = self.index.line_range_with_terminator(buf, start)?;
+        let e = if end == total {
+            self.len
+        } else {
+            self.index.line_range_with_terminator(buf, end)?.0
+        };
+        Some(&buf[s as usize..e as usize])
+    }
+
     /// Original terminator bytes for line `i`, if the line has one.
     pub fn line_terminator(&self, i: u64) -> Option<&[u8]> {
         let buf = self.buf();

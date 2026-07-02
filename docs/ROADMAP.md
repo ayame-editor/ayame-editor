@@ -6,11 +6,11 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト42件。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト86件（core 65 + cli 21、CIで常時実行）。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
 - `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
-- `ayame serve`: 行単位編集（置換/挿入/削除/undo/redo）と保存コピー。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
-- `ayame sort --out`、`sortdiff`、`replace --out`、`case upper|lower --out`。Web エディタからもソート/置換/ケース変換を別ファイル保存。
+- `ayame serve`: 行単位編集（置換/挿入/削除/undo/redo）、上書き保存 / 保存コピー、通常範囲選択、矩形選択、選択範囲置換。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
+- `ayame sort --out`、`sortdiff`、`replace --out`（`--jobs`/`--chunk-lines` による行境界chunk並列一括置換）、`case upper|lower --out`。Web エディタからもソート/置換/ケース変換を別ファイル保存。
 - ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
 
 ## 🎯 v1 最小増分（次の4ステップ）
@@ -30,7 +30,8 @@
 
 - ✅ CI: fmt / clippy `-D warnings` / tests / release build。
 - ✅ GitHub Releases: タグ push で Linux / Windows / macOS の単体バイナリと sha256 を生成。
-- ✅ Local package: `scripts/release-local.sh` で `dist/ayame-v<version>-<target>` を生成。
+- ✅ Native app gate: `--features gui` で OS WebView（WKWebView / WebView2 / WebKitGTK）を使う単体アプリを生成。`ayame <FILE>` でファイル関連付け起動にも対応。
+- ✅ Local package: `scripts/release-local.sh` でネイティブアプリ版 `dist/ayame-v<version>-<target>` を生成。
 - ✅ 単体バイナリ検証: `--version`、`gen/stat/group --out-groups/distinct`、checksum、crash isolation。
 
 ## 🔭 v2 以降（将来）
@@ -42,9 +43,12 @@
   - CSV欄モデル: `csv-core` で RFC-4180 クォート（区切りを含む `"a,b"`、`""` エスケープ）。`--csv` で有効化。
   - `serve`: `/api/top`・`/api/distinct` 露出済み（重い走査は worker 隔離）。
   - **未了**: 引用フィールド内の**埋め込み改行**（1物理行=1レコード前提）、ホットパーティション再分割、per-group の distinct（HLL）、ブラウザ UI への操作パネル統合。
-- ✅ **初期 diff CLI** 実装済み（`ayame diff OLD NEW`）:
-  - 行単位 diff、bounded resync window、`--summary`、`--json`、出力 hunk/line 上限。
-  - **未了**: side-by-side UI、inline word diff、directory diff、巨大差分 artifact 化。
+- ✅ **GUI diff確認** 実装済み:
+  - 行単位 diff、bounded resync window、出力 hunk/line 上限。
+  - ✅ GUI side-by-side: 差分モーダルで現在バッファ（未保存編集込み）と比較先ファイルの hunk preview を左右表示（1hunk 既定80行、API上限500行）。
+  - ✅ inline word diff: `replace` hunk の同位置行に単語トークン差分を重ねて表示（長大行は自動で行単位表示へフォールバック）。
+  - CLI は同じエンジンの検証用サブコマンドとして残置（製品導線は GUI）。
+  - **未了**: directory diff、巨大差分 artifact 化。
 - **OTP風 supervisor**（長命プールのハートビート/バックオフ）、`ayame-ipc`（bincode フレーミング）。
 - ✅ **キャッシュ GC** 実装済み（`ayame cache gc --max-size --max-age-days --dry-run`）。
 - **キャッシュ GC の高度化**（低ディスク時デグレード、artifact/job cache への拡張）。
@@ -55,5 +59,5 @@
 
 ## 🚧 意図的に「やらない／後回し」
 
-- **巨大ファイル編集の高度化**。初期の行単位差分編集、undo/redo、別ファイルへの全体置換/ケース変換は実装済み。次は上書き保存、範囲選択、矩形選択、選択範囲置換、append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
+- **巨大ファイル編集の高度化**。行単位差分編集、undo/redo、上書き保存、別名保存、範囲選択、矩形選択、選択範囲置換、別ファイルへの全体置換/ケース変換は実装済み。次は append-only 編集 WAL / piece table の永続化へ進める。**フルインメモリ rope は作らない**。
 - v1 段階での cgroup RSS 上限、syscall チューニング（fadvise/fallocate）、DuckDB —— いずれも「守る対象」が出来てから。

@@ -15,7 +15,7 @@ case "$target" in
   *windows-msvc*) export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-feature=+crt-static" ;;
 esac
 
-cargo build --release --locked --target "$target"
+cargo build --release --locked --features gui --target "$target"
 
 target_dir="$(cargo metadata --format-version=1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
 mkdir -p dist

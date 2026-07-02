@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Ayame — Iris Light (GUI).
+  Ayame Editor — Iris Light (GUI).
   A light-only design: iris watercolor beauty + Fluent-style acrylic translucency,
   asymmetric composition. Themes are DEFINED IN JSON (see design/themes/*.json),
   and you can edit / apply / save custom themes right in the theme flyout — custom
@@ -13,7 +13,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ayame — Iris Light</title>
+    <title>Ayame Editor — Iris Light</title>
     <style>
       :root {
         /* Defaults; the theme engine overwrites these from JSON on load. */
@@ -61,10 +61,10 @@
         border-bottom:1px solid var(--edge); }
       .lights { display:flex; gap:8px; } .lights i{ width:12px;height:12px;border-radius:50%;display:block; }
       .lights .r{background:#ED6A5E;} .lights .y{background:#F4BF4F;} .lights .g{background:#61C554;}
-      .brand { display:flex; align-items:center; gap:9px; margin-left:8px; font-weight:700; font-size:14px; }
-      .brand .bm { width:22px; height:22px; border-radius:7px; display:grid; place-items:center;
-        background:linear-gradient(155deg,var(--accent),var(--gold)); box-shadow:0 4px 14px -4px var(--accent); }
-      .brand .bm svg{ width:14px; height:14px; }
+      .brand { display:flex; align-items:center; gap:10px; margin-left:8px; font-weight:700; font-size:20px;
+        letter-spacing:0; color:#101014; }
+      .brand .bm { width:28px; height:28px; display:grid; place-items:center; }
+      .brand .bm svg{ width:28px; height:28px; display:block; }
       .brand .jp { color:var(--ink-dim); font-weight:500; font-size:12px; }
       .titlebar .grow{ flex:1; }
       .filetab { display:flex; align-items:center; gap:8px; padding:5px 12px; border-radius:10px;
@@ -203,8 +203,25 @@
       <div class="titlebar acrylic">
         <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
         <div class="brand">
-          <span class="bm"><svg viewBox="0 0 24 24"><path d="M12 2c1.6 3 1.6 6 0 9-1.6-3-1.6-6 0-9Z" fill="#fff" opacity=".95"/><path d="M12 11c3 .4 5 2.2 6 5-3 .2-5-1-6-3-1 2-3 3.2-6 3 1-2.8 3-4.6 6-5Z" fill="#fff" opacity=".92"/></svg></span>
-          Ayame
+          <span class="bm"><svg viewBox="0 0 64 64" aria-hidden="true">
+            <defs>
+              <linearGradient id="ayameMark" x1="14" y1="8" x2="50" y2="56" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#B6A0E8"/><stop offset=".48" stop-color="#8B70CF"/><stop offset="1" stop-color="#6F56B8"/>
+              </linearGradient>
+              <linearGradient id="ayameMarkDark" x1="26" y1="16" x2="43" y2="50" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#8E76D0"/><stop offset="1" stop-color="#6048A8"/>
+              </linearGradient>
+            </defs>
+            <g fill="url(#ayameMark)">
+              <path d="M32 6c5.2 8.3 5.2 16.4 0 24.2C26.8 22.4 26.8 14.3 32 6Z"/>
+              <path d="M18.4 16.6c6.8 2.3 11.6 7.5 13.2 15.5-7.5 1.2-13.4-2.7-17.2-11.6 1-1.8 2.3-3.1 4-3.9Z"/>
+              <path d="M45.6 16.6c-6.8 2.3-11.6 7.5-13.2 15.5 7.5 1.2 13.4-2.7 17.2-11.6-1-1.8-2.3-3.1-4-3.9Z"/>
+              <path d="M24.7 31.5C20.2 36 17.6 42.1 16.8 50c6.5-.8 11.4-4.4 14.1-10.6-1.1-2.8-3.1-5.4-6.2-7.9Z"/>
+              <path d="M39.3 31.5C43.8 36 46.4 42.1 47.2 50c-6.5-.8-11.4-4.4-14.1-10.6 1.1-2.8 3.1-5.4 6.2-7.9Z"/>
+            </g>
+            <path d="M32 28.8c4.7 4.7 5.2 10.6 0 18.7-5.2-8.1-4.7-14 0-18.7Z" fill="url(#ayameMarkDark)"/>
+          </svg></span>
+          Ayame Editor
         </div>
         <div class="grow"></div>
         <div class="filetab"><span class="dot"></span>pd240_raw_2026-06-25.tsv</div>

@@ -3,6 +3,12 @@
 //! The CLI is intentionally small and `grep`/`sed`-flavored so it composes with
 //! the rest of a data engineer's toolbox; `ayame serve` launches the GUI.
 
+// The shipped desktop build must not flash a console window behind the editor.
+// Worker child processes are unaffected (their stdio is piped); terminal use of
+// the gui build loses console output by design — the CLI-only build keeps it.
+#![cfg_attr(all(windows, feature = "gui"), windows_subsystem = "windows")]
+
+mod diff;
 mod gen;
 #[cfg(feature = "gui")]
 mod gui;
@@ -17,10 +23,9 @@ use std::time::{Duration, SystemTime};
 use anyhow::{bail, Context, Result};
 use ayame_core::{
     CaseMode, CaseOptions, DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow,
-    OpenOptions, OrderingReader, ReplaceOptions, SearchOptions, SortOptions, TopOptions,
+    OpenOptions, OrderingReader, ParallelReplaceOptions, ReplaceOptions, SearchOptions,
+    SortOptions, TopOptions, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
-use serde::Serialize;
-
 const HELP: &str = "\
 ayame — edit, transform, search and navigate text files of any size
 
@@ -34,7 +39,7 @@ COMMANDS:
     line   <FILE> <N>             Print line N (1-based)
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, -w whole-word, --max N
-    diff   <OLD> <NEW>            Line diff with bounded resync windows
+    diff   <OLD> <NEW>            Line/side-by-side diff with bounded resync windows
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
     replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
@@ -43,7 +48,8 @@ COMMANDS:
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
     gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
-    serve  <FILE>                 Launch the local web editor (--host, --port)
+    serve  <FILE>                 Launch the local web editor (--host, --port,
+                                  --allow-remote for non-loopback hosts)
     gui    [FILE]                 Open the editor in a native desktop window
     cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
     version                       Show version
@@ -68,9 +74,18 @@ TRANSFORM OPTIONS:
     --out <FILE>       Output file for sort/replace/case
     -i, --ignore-case  Case-insensitive replace
     -e, --regex        Regex replace pattern
+    --jobs <N>         Parallel replace workers (replace only; 0 = Rayon default)
+    --chunk-lines <N>  Lines per parallel replace chunk (default 4000000)
 
 SEARCH OPTIONS:
     --start-byte <N>   Begin search at a byte offset (for worker/API resume)
+
+SERVE OPTIONS:
+    --host <ADDR>      Bind address (default 127.0.0.1, loopback only)
+    --port <N>         Port (default 8777)
+    --allow-remote     Required to bind a non-loopback --host. DANGER: exposes
+                       the editor (unauthenticated read/write access to this
+                       machine's files) to the network - trusted networks only
 
 GROUP OPTIONS:
     --value <COL>      Numeric value column for sum/min/max/avg
@@ -88,6 +103,8 @@ DIFF OPTIONS:
     --max-hunks <N>       max hunks to print/store (default 200)
     --max-lines <N>       max lines printed per side in one hunk (default 200)
     --window <N>          resync search window in lines (default 128)
+    --side-by-side        print a two-column comparison
+    --width <N>           total side-by-side width (default 160)
 
 EXAMPLES:
     ayame stat huge.csv
@@ -137,6 +154,11 @@ fn run(args: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
+    #[cfg(feature = "gui")]
+    if should_open_path_in_gui(&cmd) {
+        return gui::cmd_gui(&args);
+    }
+
     let rest = &args[1..];
     match cmd.as_str() {
         "stat" => cmd_stat(rest),
@@ -145,9 +167,9 @@ fn run(args: Vec<String>) -> Result<()> {
         "line" => cmd_line(rest),
         "lines" => cmd_lines(rest),
         "search" => cmd_search(rest),
-        "diff" => cmd_diff(rest),
+        "diff" => diff::cmd_diff(rest),
         "sort" => cmd_sort(rest),
-        "sortdiff" | "sort-diff" => cmd_sortdiff(rest),
+        "sortdiff" | "sort-diff" => diff::cmd_sortdiff(rest),
         "replace" => cmd_replace(rest),
         "case" => cmd_case(rest),
         "group" => cmd_group(rest),
@@ -163,6 +185,32 @@ fn run(args: Vec<String>) -> Result<()> {
             bail!("unknown command '{other}'");
         }
     }
+}
+
+#[cfg(feature = "gui")]
+fn should_open_path_in_gui(cmd: &str) -> bool {
+    !matches!(
+        cmd,
+        "stat"
+            | "head"
+            | "tail"
+            | "line"
+            | "lines"
+            | "search"
+            | "diff"
+            | "sort"
+            | "sortdiff"
+            | "sort-diff"
+            | "replace"
+            | "case"
+            | "group"
+            | "top"
+            | "distinct"
+            | "gen"
+            | "serve"
+            | "gui"
+            | "cache"
+    ) && Path::new(cmd).exists()
 }
 
 // ---- argument parsing helpers -------------------------------------------------
@@ -403,7 +451,24 @@ fn cmd_sort(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// User-facing sorted output (`sort --out`, GUI sort-save): emit each line's
+/// ORIGINAL bytes with its ORIGINAL terminator (and the BOM prefix), so
+/// sorting never transcodes the encoding or rewrites line endings the way
+/// decode+`writeln!` would. Same lines, same bytes — just reordered.
 fn write_sorted_text(doc: &Document, ordering_path: &Path, out_path: &Path) -> Result<()> {
+    write_sorted_output(doc, ordering_path, out_path, write_ordered_lines_raw)
+}
+
+/// Common tmp-file + atomic-rename scaffolding for the sorted-text writers.
+fn write_sorted_output<F>(
+    doc: &Document,
+    ordering_path: &Path,
+    out_path: &Path,
+    write_lines: F,
+) -> Result<()>
+where
+    F: FnOnce(&Document, &Path, &mut BufWriter<std::fs::File>) -> Result<()>,
+{
     if out_path.exists() {
         bail!(
             "'{}' already exists; choose another output path",
@@ -415,12 +480,18 @@ fn write_sorted_text(doc: &Document, ordering_path: &Path, out_path: &Path) -> R
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     let tmp = temp_sibling_with_label(out_path, "sort");
-    let file =
-        std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
-    let mut w = BufWriter::new(file);
-    write_ordered_lines_utf8(doc, ordering_path, &mut w)?;
-    w.flush()?;
-    drop(w);
+    let written = (|| -> Result<()> {
+        let file =
+            std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        let mut w = BufWriter::new(file);
+        write_lines(doc, ordering_path, &mut w)?;
+        w.flush()?;
+        Ok(())
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     std::fs::rename(&tmp, out_path)
         .or_else(|_| std::fs::copy(&tmp, out_path).map(|_| ()))
         .with_context(|| format!("writing {}", out_path.display()))?;
@@ -428,6 +499,36 @@ fn write_sorted_text(doc: &Document, ordering_path: &Path, out_path: &Path) -> R
     Ok(())
 }
 
+/// Byte-preserving line writer: raw bytes + raw terminator per line. The one
+/// line that had no terminator in the source (the original last line) gains
+/// the document's default terminator when the sort moves it off the end —
+/// otherwise it would fuse with its new neighbor.
+fn write_ordered_lines_raw<W: Write>(
+    doc: &Document,
+    ordering_path: &Path,
+    w: &mut W,
+) -> Result<()> {
+    w.write_all(doc.prefix_bytes())?; // keep the BOM, if any
+    let total = doc.line_count();
+    let mut rd = OrderingReader::open(ordering_path)?;
+    let mut emitted = 0u64;
+    while let Some(ln) = rd.next_line()? {
+        emitted += 1;
+        let Some(bytes) = doc.raw_line_with_terminator(ln) else {
+            continue;
+        };
+        w.write_all(bytes)?;
+        let unterminated = doc.line_terminator(ln).is_none_or(|t| t.is_empty());
+        if unterminated && emitted < total {
+            w.write_all(doc.default_terminator())?;
+        }
+    }
+    Ok(())
+}
+
+/// Decoding line writer (UTF-8 + `\n`), for `sortdiff`'s intermediate
+/// artifacts only: they are re-opened with a forced UTF-8 encoding and
+/// compared as decoded text, possibly across two different source encodings.
 fn write_ordered_lines_utf8<W: Write>(
     doc: &Document,
     ordering_path: &Path,
@@ -440,83 +541,6 @@ fn write_ordered_lines_utf8<W: Write>(
         }
     }
     Ok(())
-}
-
-fn cmd_sortdiff(args: &[String]) -> Result<()> {
-    maybe_crash();
-    let (pos, opts, flags) = parse(
-        args,
-        &[
-            "--encoding",
-            "--stride",
-            "--cache-dir",
-            "--key",
-            "-k",
-            "--delim",
-            "-t",
-            "--quote",
-            "--budget",
-            "--spill-dir",
-            "--max-hunks",
-            "--max-lines",
-            "--window",
-        ],
-    );
-    let old_path = pos.first().context("expected OLD file")?;
-    let new_path = pos.get(1).context("expected NEW file")?;
-    let open = open_opts(&opts, &flags)?;
-    let old = Document::open(old_path, &open).with_context(|| format!("opening '{old_path}'"))?;
-    let new = Document::open(new_path, &open).with_context(|| format!("opening '{new_path}'"))?;
-    let max_hunks: usize = first_opt(&opts, &["--max-hunks"])
-        .unwrap_or("200")
-        .parse()
-        .context("--max-hunks must be a number")?;
-    let max_lines: u64 = first_opt(&opts, &["--max-lines"])
-        .unwrap_or("200")
-        .parse()
-        .context("--max-lines must be a number")?;
-    let window: u64 = first_opt(&opts, &["--window"])
-        .unwrap_or("128")
-        .parse()
-        .context("--window must be a number")?;
-
-    let root = first_opt(&opts, &["--spill-dir"])
-        .map(PathBuf::from)
-        .unwrap_or_else(|| temp_work_dir("sortdiff"));
-    let result = (|| -> Result<()> {
-        std::fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
-        let old_sorted = root.join("old.sorted.txt");
-        let new_sorted = root.join("new.sorted.txt");
-        sort_document_to_utf8_file(&old, &opts, &flags, root.join("old-spill"), &old_sorted)
-            .context("sorting OLD")?;
-        sort_document_to_utf8_file(&new, &opts, &flags, root.join("new-spill"), &new_sorted)
-            .context("sorting NEW")?;
-
-        let sorted_open = OpenOptions {
-            encoding: Some(Encoding::Utf8),
-            ..OpenOptions::default()
-        };
-        let old_doc = Document::open(&old_sorted, &sorted_open)
-            .with_context(|| format!("opening {}", old_sorted.display()))?;
-        let new_doc = Document::open(&new_sorted, &sorted_open)
-            .with_context(|| format!("opening {}", new_sorted.display()))?;
-        let result = diff_documents(&old_doc, &new_doc, max_hunks, window.max(1));
-        if has_flag(&flags, &["--json"]) {
-            println!("{}", serde_json::to_string_pretty(&result)?);
-            return Ok(());
-        }
-        if has_flag(&flags, &["--summary"]) {
-            print_diff_summary(&result);
-            return Ok(());
-        }
-        for h in &result.hunks {
-            print_diff_hunk(&old_doc, &new_doc, h, max_lines)?;
-        }
-        print_diff_summary(&result);
-        Ok(())
-    })();
-    let _ = std::fs::remove_dir_all(&root);
-    result
 }
 
 fn sort_document_to_utf8_file(
@@ -539,27 +563,45 @@ fn sort_document_to_utf8_file(
         spill_dir: spill_dir.clone(),
     };
     let res = ayame_core::ops::sort(doc, &sopts)?;
-    write_sorted_text(doc, &res.ordering_path, out_path)?;
+    // NOT the byte-preserving writer: sortdiff re-opens these artifacts with a
+    // forced UTF-8 encoding and compares decoded text across encodings.
+    write_sorted_output(doc, &res.ordering_path, out_path, write_ordered_lines_utf8)?;
     let _ = std::fs::remove_dir_all(spill_dir);
     Ok(())
 }
 
 fn cmd_replace(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, flags) = open_doc(args, &["--out"])?;
+    let (doc, pos, opts, flags) = open_doc(args, &["--out", "--jobs", "--chunk-lines"])?;
     let find = pos.get(1).context("expected FIND pattern")?.clone();
     let replacement = pos.get(2).context("expected REPLACEMENT text")?.clone();
     let out = first_opt(&opts, &["--out"]).context("replace requires --out <FILE>")?;
-    let res = ayame_core::replace_to_path(
-        &doc,
-        out,
-        &ReplaceOptions {
-            find,
-            replacement,
-            regex: has_flag(&flags, &["-e", "--regex"]),
-            case_sensitive: !has_flag(&flags, &["-i", "--ignore-case"]),
-        },
-    )?;
+    let replace_opts = ReplaceOptions {
+        find,
+        replacement,
+        regex: has_flag(&flags, &["-e", "--regex"]),
+        case_sensitive: !has_flag(&flags, &["-i", "--ignore-case"]),
+    };
+    let jobs = first_opt(&opts, &["--jobs"])
+        .map(|s| s.parse::<usize>().context("--jobs must be a number"))
+        .transpose()?;
+    let chunk_lines = first_opt(&opts, &["--chunk-lines"])
+        .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
+        .transpose()?
+        .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
+        ayame_core::replace_to_path_parallel(
+            &doc,
+            out,
+            &replace_opts,
+            &ParallelReplaceOptions {
+                jobs: jobs.unwrap_or(0),
+                chunk_lines,
+            },
+        )?
+    } else {
+        ayame_core::replace_to_path(&doc, out, &replace_opts)?
+    };
     eprintln!(
         "{} replacement(s), {} changed line(s), {} -> {}",
         commas(res.replacements),
@@ -1138,238 +1180,6 @@ fn cmd_search(args: &[String]) -> Result<()> {
         }
     );
     Ok(())
-}
-
-fn cmd_diff(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse(
-        args,
-        &[
-            "--encoding",
-            "--stride",
-            "--cache-dir",
-            "--max-hunks",
-            "--max-lines",
-            "--window",
-        ],
-    );
-    let old_path = pos.first().context("expected OLD file")?;
-    let new_path = pos.get(1).context("expected NEW file")?;
-    let open = open_opts(&opts, &flags)?;
-    let old = Document::open(old_path, &open).with_context(|| format!("opening '{old_path}'"))?;
-    let new = Document::open(new_path, &open).with_context(|| format!("opening '{new_path}'"))?;
-    let max_hunks: usize = first_opt(&opts, &["--max-hunks"])
-        .unwrap_or("200")
-        .parse()
-        .context("--max-hunks must be a number")?;
-    let max_lines: u64 = first_opt(&opts, &["--max-lines"])
-        .unwrap_or("200")
-        .parse()
-        .context("--max-lines must be a number")?;
-    let window: u64 = first_opt(&opts, &["--window"])
-        .unwrap_or("128")
-        .parse()
-        .context("--window must be a number")?;
-
-    let result = diff_documents(&old, &new, max_hunks, window.max(1));
-    if has_flag(&flags, &["--json"]) {
-        println!("{}", serde_json::to_string_pretty(&result)?);
-        return Ok(());
-    }
-    if has_flag(&flags, &["--summary"]) {
-        print_diff_summary(&result);
-        return Ok(());
-    }
-    for h in &result.hunks {
-        print_diff_hunk(&old, &new, h, max_lines)?;
-    }
-    print_diff_summary(&result);
-    Ok(())
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct DiffResult {
-    old_lines: u64,
-    new_lines: u64,
-    hunks: Vec<DiffHunk>,
-    hunk_count: u64,
-    omitted_hunks: u64,
-    added: u64,
-    deleted: u64,
-    modified: u64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct DiffHunk {
-    kind: DiffKind,
-    old_start: u64,
-    old_len: u64,
-    new_start: u64,
-    new_len: u64,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum DiffKind {
-    Insert,
-    Delete,
-    Replace,
-}
-
-fn diff_documents(old: &Document, new: &Document, max_hunks: usize, window: u64) -> DiffResult {
-    let old_total = old.line_count();
-    let new_total = new.line_count();
-    let mut i = 0u64;
-    let mut j = 0u64;
-    let mut result = DiffResult {
-        old_lines: old_total,
-        new_lines: new_total,
-        hunks: Vec::new(),
-        hunk_count: 0,
-        omitted_hunks: 0,
-        added: 0,
-        deleted: 0,
-        modified: 0,
-    };
-
-    while i < old_total || j < new_total {
-        if i < old_total && j < new_total && old.line(i) == new.line(j) {
-            i += 1;
-            j += 1;
-            continue;
-        }
-
-        let h = next_diff_hunk(old, new, i, j, window);
-        apply_diff_stats(&mut result, &h);
-        result.hunk_count += 1;
-        if result.hunks.len() < max_hunks {
-            result.hunks.push(h.clone());
-        } else {
-            result.omitted_hunks += 1;
-        }
-        i += h.old_len;
-        j += h.new_len;
-    }
-    result
-}
-
-fn next_diff_hunk(old: &Document, new: &Document, i: u64, j: u64, window: u64) -> DiffHunk {
-    let old_total = old.line_count();
-    let new_total = new.line_count();
-    if i >= old_total {
-        return DiffHunk {
-            kind: DiffKind::Insert,
-            old_start: i,
-            old_len: 0,
-            new_start: j,
-            new_len: new_total - j,
-        };
-    }
-    if j >= new_total {
-        return DiffHunk {
-            kind: DiffKind::Delete,
-            old_start: i,
-            old_len: old_total - i,
-            new_start: j,
-            new_len: 0,
-        };
-    }
-
-    let old_line = old.line(i).unwrap_or_default();
-    let new_line = new.line(j).unwrap_or_default();
-    let insertion_resync = find_line(new, &old_line, j + 1, (j + 1 + window).min(new_total));
-    let deletion_resync = find_line(old, &new_line, i + 1, (i + 1 + window).min(old_total));
-
-    match (insertion_resync, deletion_resync) {
-        (Some(rj), Some(li)) if rj - j <= li - i => insert_hunk(i, j, rj - j),
-        (Some(_rj), Some(li)) => delete_hunk(i, j, li - i),
-        (Some(rj), None) => insert_hunk(i, j, rj - j),
-        (None, Some(li)) => delete_hunk(i, j, li - i),
-        (None, None) => DiffHunk {
-            kind: DiffKind::Replace,
-            old_start: i,
-            old_len: 1,
-            new_start: j,
-            new_len: 1,
-        },
-    }
-}
-
-fn insert_hunk(old_start: u64, new_start: u64, new_len: u64) -> DiffHunk {
-    DiffHunk {
-        kind: DiffKind::Insert,
-        old_start,
-        old_len: 0,
-        new_start,
-        new_len,
-    }
-}
-
-fn delete_hunk(old_start: u64, new_start: u64, old_len: u64) -> DiffHunk {
-    DiffHunk {
-        kind: DiffKind::Delete,
-        old_start,
-        old_len,
-        new_start,
-        new_len: 0,
-    }
-}
-
-fn find_line(doc: &Document, target: &str, start: u64, end: u64) -> Option<u64> {
-    (start..end).find(|&n| doc.line(n).as_deref() == Some(target))
-}
-
-fn apply_diff_stats(result: &mut DiffResult, h: &DiffHunk) {
-    match h.kind {
-        DiffKind::Insert => result.added += h.new_len,
-        DiffKind::Delete => result.deleted += h.old_len,
-        DiffKind::Replace => {
-            let both = h.old_len.min(h.new_len);
-            result.modified += both;
-            result.deleted += h.old_len - both;
-            result.added += h.new_len - both;
-        }
-    }
-}
-
-fn print_diff_hunk(old: &Document, new: &Document, h: &DiffHunk, max_lines: u64) -> Result<()> {
-    println!(
-        "@@ -{},{} +{},{} {:?} @@",
-        h.old_start + 1,
-        h.old_len,
-        h.new_start + 1,
-        h.new_len,
-        h.kind
-    );
-    let old_shown = h.old_len.min(max_lines);
-    for n in h.old_start..h.old_start + old_shown {
-        println!("-{}", old.line(n).unwrap_or_default());
-    }
-    if h.old_len > old_shown {
-        println!("-... {} more line(s)", h.old_len - old_shown);
-    }
-    let new_shown = h.new_len.min(max_lines);
-    for n in h.new_start..h.new_start + new_shown {
-        println!("+{}", new.line(n).unwrap_or_default());
-    }
-    if h.new_len > new_shown {
-        println!("+... {} more line(s)", h.new_len - new_shown);
-    }
-    Ok(())
-}
-
-fn print_diff_summary(result: &DiffResult) {
-    eprintln!(
-        "{} hunk(s), {} added, {} deleted, {} modified{}",
-        commas(result.hunk_count),
-        commas(result.added),
-        commas(result.deleted),
-        commas(result.modified),
-        if result.omitted_hunks > 0 {
-            " (output truncated; raise --max-hunks)"
-        } else {
-            ""
-        }
-    );
 }
 
 // ---- formatting ---------------------------------------------------------------

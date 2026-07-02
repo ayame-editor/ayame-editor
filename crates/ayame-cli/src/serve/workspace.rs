@@ -1,0 +1,355 @@
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::Result;
+use axum::extract::{Query, Request, State};
+use axum::http::StatusCode;
+use axum::Json;
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
+
+use super::{
+    bad_request, internal, stat_response, AppState, SharedState, StatResponse, TabsResponse,
+};
+
+// ---- workspace: open / browse / upload --------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct OpenRequest {
+    path: String,
+}
+
+/// Open a file that already lives on the server's filesystem, by path.
+pub(super) async fn api_open(
+    State(state): State<SharedState>,
+    Json(req): Json<OpenRequest>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let path = req.path.trim().to_string();
+    if path.is_empty() {
+        return Err(bad_request("path is empty"));
+    }
+    state.open_path(path).await?;
+    Ok(Json(stat_response(&state)))
+}
+
+/// Start a fresh, empty "untitled" buffer so the editor opens to a blank page
+/// (like Notepad) instead of demanding a file up front. Backed by an empty temp
+/// file so all the normal edit/save machinery works; Save prompts for a real path.
+pub(super) async fn api_new(
+    State(state): State<SharedState>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let dir = untitled_dir();
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let target = unique_upload_path(&dir, &untitled_template_name());
+    // One empty line, so the buffer is immediately editable yet still "clean"
+    // (no pending edits) — closing a pristine untitled won't prompt.
+    tokio::fs::write(&target, b"\n").await.map_err(internal)?;
+    state
+        .open_path(target.to_string_lossy().to_string())
+        .await?;
+    Ok(Json(stat_response(&state)))
+}
+
+// ---- tabs -------------------------------------------------------------------
+
+pub(super) async fn api_tabs(State(state): State<SharedState>) -> Json<TabsResponse> {
+    Json(state.tabs_response())
+}
+
+#[derive(Deserialize)]
+pub(super) struct TabIdRequest {
+    id: u64,
+}
+
+pub(super) async fn api_tabs_select(
+    State(state): State<SharedState>,
+    Json(req): Json<TabIdRequest>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    state.switch_tab(req.id).await?;
+    Ok(Json(stat_response(&state)))
+}
+
+pub(super) async fn api_tabs_close(
+    State(state): State<SharedState>,
+    Json(req): Json<TabIdRequest>,
+) -> Json<StatResponse> {
+    state.close_tab(req.id).await;
+    Json(stat_response(&state))
+}
+
+#[derive(Deserialize)]
+pub(super) struct BrowseQuery {
+    #[serde(default)]
+    dir: Option<String>,
+}
+
+#[derive(Serialize)]
+pub(super) struct BrowseEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+}
+
+#[derive(Serialize)]
+pub(super) struct BrowseResponse {
+    dir: String,
+    parent: Option<String>,
+    entries: Vec<BrowseEntry>,
+}
+
+/// List a directory on the server so the browser can navigate to a file and
+/// open it — a minimal, server-side file picker for the workspace.
+pub(super) async fn api_browse(
+    State(state): State<SharedState>,
+    Query(q): Query<BrowseQuery>,
+) -> Result<Json<BrowseResponse>, (StatusCode, String)> {
+    let requested = q
+        .dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_browse_dir(&state));
+    // Resolve `..`/symlinks to a real path where possible; fall back to the raw
+    // path so a still-listable directory isn't rejected over a canonicalize quirk.
+    let dir = tokio::fs::canonicalize(&requested)
+        .await
+        .unwrap_or(requested);
+
+    let mut rd = tokio::fs::read_dir(&dir)
+        .await
+        .map_err(|e| bad_request(format!("{}: {e}", dir.display())))?;
+    let mut entries = Vec::new();
+    while let Some(ent) = rd.next_entry().await.map_err(internal)? {
+        let name = ent.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue; // hide dotfiles to keep the picker readable
+        }
+        let meta = match ent.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue, // skip entries we can't stat (broken symlink, perms)
+        };
+        let is_dir = meta.is_dir();
+        entries.push(BrowseEntry {
+            name,
+            path: ent.path().to_string_lossy().to_string(),
+            is_dir,
+            size: if is_dir { 0 } else { meta.len() },
+        });
+        if entries.len() >= 10_000 {
+            break; // cap huge directories; the picker is not a file manager
+        }
+    }
+    // Directories first, then case-insensitive by name.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    let parent = dir.parent().map(|p| p.to_string_lossy().to_string());
+    Ok(Json(BrowseResponse {
+        dir: dir.to_string_lossy().to_string(),
+        parent,
+        entries,
+    }))
+}
+
+fn default_browse_dir(state: &AppState) -> PathBuf {
+    if let Some(doc) = state.doc_opt() {
+        if let Some(parent) = doc.path().parent() {
+            if !parent.as_os_str().is_empty() {
+                return parent.to_path_buf();
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[derive(Deserialize)]
+pub(super) struct UploadQuery {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Upload cap. Large enough for any realistic drag & drop (on-disk giants are
+/// better opened by path), finite so one endless request body cannot fill the
+/// disk. NOTE: this must be enforced by hand below — the handler consumes the
+/// raw `Request`, and axum's `DefaultBodyLimit` is only consulted by the
+/// buffering extractors (`Bytes`/`Json`/...), never by a raw body stream.
+pub(super) const MAX_UPLOAD_BYTES: u64 = 4 << 30; // 4 GiB
+
+/// Accept a file dropped into the browser: stream its bytes to a temp file
+/// (bounded memory, matching Ayame's design) and open it. Intended for pulling
+/// in convenience files; on-disk giants are better opened by path.
+pub(super) async fn api_upload(
+    State(state): State<SharedState>,
+    Query(q): Query<UploadQuery>,
+    request: Request,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    let name = sanitize_filename(q.name.as_deref().unwrap_or("dropped.txt"));
+    let dir = uploads_dir();
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let target = unique_upload_path(&dir, &name);
+
+    let mut file = tokio::fs::File::create(&target).await.map_err(internal)?;
+    let mut stream = request.into_body().into_data_stream();
+    let mut written: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| bad_request(format!("upload stream error: {e}")))?;
+        written = written.saturating_add(chunk.len() as u64);
+        if written > MAX_UPLOAD_BYTES {
+            drop(file);
+            let _ = tokio::fs::remove_file(&target).await;
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!(
+                    "upload exceeds the {} GiB limit — open large files by path instead",
+                    MAX_UPLOAD_BYTES >> 30
+                ),
+            ));
+        }
+        file.write_all(&chunk).await.map_err(internal)?;
+    }
+    file.flush().await.map_err(internal)?;
+    drop(file);
+
+    state
+        .open_path(target.to_string_lossy().to_string())
+        .await?;
+    Ok(Json(stat_response(&state)))
+}
+
+// ---- per-process scratch directories ------------------------------------------
+
+pub(super) fn uploads_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("ayame-uploads-{}", std::process::id()))
+}
+
+pub(super) fn untitled_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("ayame-untitled-{}", std::process::id()))
+}
+
+/// Scratch home for sort results the client didn't pick a destination for.
+pub(super) fn sorted_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("ayame-sorted-{}", std::process::id()))
+}
+
+/// Best-effort removal of this process's scratch directories (uploads,
+/// untitled buffers, unsaved sort results) on graceful shutdown. Failures are
+/// ignored: files may be mmap'd on platforms that refuse deletion of mapped
+/// files, and the names are pid-scoped so leftovers never collide.
+pub(super) fn cleanup_temp_dirs() {
+    for dir in [uploads_dir(), untitled_dir(), sorted_dir()] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Reduce an untrusted upload name to a bare, separator-free file name so a
+/// dropped file can never escape the uploads directory.
+fn sanitize_filename(raw: &str) -> String {
+    let base = Path::new(raw)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        "dropped.txt".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+fn untitled_template_name() -> String {
+    let template = std::env::var("AYAME_UNTITLED_NAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "untitled.txt".to_string());
+    let (year, month, day, hour, minute, second) = utc_date_time(SystemTime::now());
+    let date = format!("{year:04}{month:02}{day:02}");
+    let time = format!("{hour:02}{minute:02}{second:02}");
+    let datetime = format!("{date}-{time}");
+    let rendered = template
+        .replace("{date}", &date)
+        .replace("{time}", &time)
+        .replace("{datetime}", &datetime)
+        .replace("{pid}", &std::process::id().to_string());
+    sanitize_filename(&rendered)
+}
+
+fn utc_date_time(now: SystemTime) -> (i32, u32, u32, u32, u32, u32) {
+    let secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let days = secs.div_euclid(86_400);
+    let second_of_day = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = (second_of_day / 3_600) as u32;
+    let minute = ((second_of_day % 3_600) / 60) as u32;
+    let second = (second_of_day % 60) as u32;
+    (year, month, day, hour, minute, second)
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    // Howard Hinnant's civil-from-days conversion, using the Unix epoch.
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u32, day as u32)
+}
+
+/// A path in `dir` for `name` that doesn't collide with an existing file
+/// ("data.csv" → "data-1.csv", "data-2.csv", …).
+pub(super) fn unique_upload_path(dir: &Path, name: &str) -> PathBuf {
+    let base = dir.join(name);
+    if !base.exists() {
+        return base;
+    }
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.to_string());
+    let ext = Path::new(name)
+        .extension()
+        .map(|s| format!(".{}", s.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 1..10_000 {
+        let p = dir.join(format!("{stem}-{n}{ext}"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    base
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn civil_date_from_unix_epoch() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_358), (2023, 1, 1));
+    }
+
+    #[test]
+    fn utc_date_time_splits_seconds() {
+        assert_eq!(
+            utc_date_time(UNIX_EPOCH + Duration::from_secs(1_704_067_205)),
+            (2024, 1, 1, 0, 0, 5)
+        );
+    }
+}

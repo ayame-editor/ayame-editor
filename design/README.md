@@ -17,6 +17,9 @@
 
 ## 見かた
 
+すばやく比較するなら、PNG中心の静的カタログ [`design-list.html`](./design-list.html) と
+一覧表 [`DESIGN_LIST.md`](./DESIGN_LIST.md) を使います。
+
 `design/index.html` をブラウザで開くと、全案のライブサムネイル一覧が出ます（クリックで原寸）。
 
 ```sh

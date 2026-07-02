@@ -16,12 +16,44 @@ use crate::{Document, Error, Result};
 #[derive(Clone, Debug, Default)]
 pub struct EditSession {
     events: BTreeMap<u64, EditEvent>,
-    undo: Vec<BTreeMap<u64, EditEvent>>,
-    redo: Vec<BTreeMap<u64, EditEvent>>,
+    undo: Vec<UndoRecord>,
+    redo: Vec<UndoRecord>,
     revision: u64,
 }
 
 const HISTORY_LIMIT: usize = 256;
+
+/// One undo/redo generation: the inverse steps of a single edit transaction,
+/// stored in the order the forward mutations happened. Rolling back applies
+/// them in reverse; applying a step yields its own inverse, so undo and redo
+/// share one mechanism. A record's size is proportional to what the edit
+/// touched — a keystroke records one small step — never to the size of the
+/// whole overlay (the previous design cloned the entire overlay per edit).
+type UndoRecord = Vec<UndoOp>;
+
+#[derive(Clone, Debug)]
+enum UndoOp {
+    /// Set `replacement`/`deleted` of the event at `anchor` (inserts kept).
+    SetLineState {
+        anchor: u64,
+        replacement: Option<String>,
+        deleted: bool,
+    },
+    /// Overwrite `inserts[index]` at `anchor` with `text`.
+    SetInsert {
+        anchor: u64,
+        index: usize,
+        text: String,
+    },
+    /// Remove `inserts[index]` at `anchor`.
+    RemoveInsert { anchor: u64, index: usize },
+    /// Re-insert `text` at `inserts[index]` of `anchor`.
+    InsertInsert {
+        anchor: u64,
+        index: usize,
+        text: String,
+    },
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct EditEvent {
@@ -84,21 +116,21 @@ impl EditSession {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(previous) = self.undo.pop() else {
+        let Some(record) = self.undo.pop() else {
             return false;
         };
-        let current = std::mem::replace(&mut self.events, previous);
-        push_history(&mut self.redo, current);
+        let inverse = self.apply_record(record);
+        push_history(&mut self.redo, inverse);
         self.bump();
         true
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo.pop() else {
+        let Some(record) = self.redo.pop() else {
             return false;
         };
-        let current = std::mem::replace(&mut self.events, next);
-        push_history(&mut self.undo, current);
+        let inverse = self.apply_record(record);
+        push_history(&mut self.undo, inverse);
         self.bump();
         true
     }
@@ -195,25 +227,45 @@ impl EditSession {
     }
 
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
-        let before = self.events.clone();
-        self.replace_line_inner(doc, logical, text)?;
-        self.finish_change(before);
+        let mut record = UndoRecord::new();
+        self.replace_line_inner(doc, logical, text, &mut record)?;
+        self.finish_change(record);
         Ok(())
     }
 
-    /// Mutation without snapshotting undo history (composed by `replace_range`).
-    fn replace_line_inner(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
+    /// Mutation without committing undo history (composed by `replace_range`).
+    /// Appends the inverse of every actual state change to `record`.
+    fn replace_line_inner(
+        &mut self,
+        doc: &Document,
+        logical: u64,
+        text: String,
+        record: &mut UndoRecord,
+    ) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
         {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
-                let ev = self.events.entry(orig).or_default();
-                ev.replacement = if doc.line(orig).as_deref() == Some(text.as_str()) {
+                let replacement = if doc.line(orig).as_deref() == Some(text.as_str()) {
                     None
                 } else {
                     Some(text)
                 };
+                let prior = self.events.get(&orig);
+                let prior_replacement = prior.and_then(|ev| ev.replacement.clone());
+                let prior_deleted = prior.is_some_and(|ev| ev.deleted);
+                if prior_replacement == replacement && !prior_deleted {
+                    // No state change; the end state is identical either way.
+                    return Ok(());
+                }
+                record.push(UndoOp::SetLineState {
+                    anchor: orig,
+                    replacement: prior_replacement,
+                    deleted: prior_deleted,
+                });
+                let ev = self.events.entry(orig).or_default();
+                ev.replacement = replacement;
                 ev.deleted = false;
                 self.clean_anchor(orig);
             }
@@ -223,7 +275,13 @@ impl EditSession {
                     .get_mut(&anchor)
                     .and_then(|ev| ev.inserts.get_mut(index))
                 {
-                    *line = text;
+                    if *line != text {
+                        record.push(UndoOp::SetInsert {
+                            anchor,
+                            index,
+                            text: std::mem::replace(line, text),
+                        });
+                    }
                 }
                 self.clean_anchor(anchor);
             }
@@ -234,9 +292,9 @@ impl EditSession {
     /// Insert `text` before logical line `logical`; `logical == total_lines`
     /// appends after the current document.
     pub fn insert_line_before(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
-        let before = self.events.clone();
-        self.insert_line_before_inner(doc, logical, text)?;
-        self.finish_change(before);
+        let mut record = UndoRecord::new();
+        self.insert_line_before_inner(doc, logical, text, &mut record)?;
+        self.finish_change(record);
         Ok(())
     }
 
@@ -245,6 +303,7 @@ impl EditSession {
         doc: &Document,
         logical: u64,
         text: String,
+        record: &mut UndoRecord,
     ) -> Result<()> {
         let total = self.total_lines(doc);
         if logical > total {
@@ -254,18 +313,26 @@ impl EditSession {
             )));
         }
         if logical == total {
-            self.events
-                .entry(doc.line_count())
-                .or_default()
-                .inserts
-                .push(text);
+            let anchor = doc.line_count();
+            let ev = self.events.entry(anchor).or_default();
+            record.push(UndoOp::RemoveInsert {
+                anchor,
+                index: ev.inserts.len(),
+            });
+            ev.inserts.push(text);
             return Ok(());
         }
         match self.locate(logical, doc.line_count()).unwrap() {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
-                self.events.entry(orig).or_default().inserts.push(text);
+                let ev = self.events.entry(orig).or_default();
+                record.push(UndoOp::RemoveInsert {
+                    anchor: orig,
+                    index: ev.inserts.len(),
+                });
+                ev.inserts.push(text);
             }
             LineRef::Inserted { anchor, index } => {
+                record.push(UndoOp::RemoveInsert { anchor, index });
                 self.events
                     .entry(anchor)
                     .or_default()
@@ -277,18 +344,33 @@ impl EditSession {
     }
 
     pub fn delete_line(&mut self, doc: &Document, logical: u64) -> Result<()> {
-        let before = self.events.clone();
-        self.delete_line_inner(doc, logical)?;
-        self.finish_change(before);
+        let mut record = UndoRecord::new();
+        self.delete_line_inner(doc, logical, &mut record)?;
+        self.finish_change(record);
         Ok(())
     }
 
-    fn delete_line_inner(&mut self, doc: &Document, logical: u64) -> Result<()> {
+    fn delete_line_inner(
+        &mut self,
+        doc: &Document,
+        logical: u64,
+        record: &mut UndoRecord,
+    ) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
             .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
         {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
+                let prior = self.events.get(&orig);
+                let prior_replacement = prior.and_then(|ev| ev.replacement.clone());
+                let prior_deleted = prior.is_some_and(|ev| ev.deleted);
+                if prior_replacement.is_some() || !prior_deleted {
+                    record.push(UndoOp::SetLineState {
+                        anchor: orig,
+                        replacement: prior_replacement,
+                        deleted: prior_deleted,
+                    });
+                }
                 let ev = self.events.entry(orig).or_default();
                 ev.replacement = None;
                 ev.deleted = true;
@@ -297,7 +379,12 @@ impl EditSession {
             LineRef::Inserted { anchor, index } => {
                 if let Some(ev) = self.events.get_mut(&anchor) {
                     if index < ev.inserts.len() {
-                        ev.inserts.remove(index);
+                        let removed = ev.inserts.remove(index);
+                        record.push(UndoOp::InsertInsert {
+                            anchor,
+                            index,
+                            text: removed,
+                        });
                     }
                 }
                 self.clean_anchor(anchor);
@@ -328,12 +415,12 @@ impl EditSession {
                     "the document is empty; only an insertion at line 1 is valid".into(),
                 ));
             }
-            let before = self.events.clone();
+            let mut record = UndoRecord::new();
             let parts: Vec<String> = text.split('\n').map(String::from).collect();
             for (k, p) in parts.iter().enumerate() {
-                self.insert_line_before_inner(doc, k as u64, p.clone())?;
+                self.insert_line_before_inner(doc, k as u64, p.clone(), &mut record)?;
             }
-            self.finish_change(before);
+            self.finish_change(record);
             let last = parts.len() - 1;
             return Ok((last as u64, parts[last].chars().count()));
         }
@@ -361,33 +448,109 @@ impl EditSession {
         parts[0] = format!("{head}{}", parts[0]);
         parts[li] = format!("{}{tail}", parts[li]);
 
-        // One undo step: snapshot once, mutate via the snapshot-free inners,
-        // finish once. Delete the interior lines descending so anchors above
-        // the cursor don't shift under us.
-        let before = self.events.clone();
-        self.replace_line_inner(doc, l0, parts[0].clone())?;
+        // One undo step: collect every inverse into one record, commit once.
+        // Delete the interior lines descending so anchors above the cursor
+        // don't shift under us.
+        let mut record = UndoRecord::new();
+        self.replace_line_inner(doc, l0, parts[0].clone(), &mut record)?;
         for l in ((l0 + 1)..=l1).rev() {
-            self.delete_line_inner(doc, l)?;
+            self.delete_line_inner(doc, l, &mut record)?;
         }
         for (k, p) in parts[1..].iter().enumerate() {
-            self.insert_line_before_inner(doc, l0 + 1 + k as u64, p.clone())?;
+            self.insert_line_before_inner(doc, l0 + 1 + k as u64, p.clone(), &mut record)?;
         }
-        self.finish_change(before);
+        self.finish_change(record);
 
         let caret_line = l0 + (n as u64 - 1);
         let caret_col = parts[li].chars().count() - tail.chars().count();
         Ok((caret_line, caret_col))
     }
 
+    /// Replace the same column span on every line in `[l0, l1]` as one undo
+    /// unit. Multi-line `text` is mapped row-by-row, which is what rectangular
+    /// paste expects.
+    pub fn replace_rect(
+        &mut self,
+        doc: &Document,
+        l0: u64,
+        l1: u64,
+        c0: usize,
+        c1: usize,
+        text: &str,
+    ) -> Result<(u64, usize)> {
+        let total = self.total_lines(doc);
+        if total == 0 {
+            return Err(Error::Unsupported(
+                "rectangular selection is not valid in an empty document".into(),
+            ));
+        }
+        let top = l0.min(l1);
+        let bottom = l0.max(l1);
+        if bottom >= total {
+            return Err(Error::Unsupported(format!(
+                "rectangle spans lines {}..{} outside the document",
+                top + 1,
+                bottom + 1
+            )));
+        }
+        let left = c0.min(c1);
+        let right = c0.max(c1);
+        let parts: Vec<&str> = text.split('\n').collect();
+        let mut record = UndoRecord::new();
+        for line in top..=bottom {
+            let replacement = if parts.len() == 1 {
+                parts[0]
+            } else {
+                parts.get((line - top) as usize).copied().unwrap_or("")
+            };
+            let original = self.line_text(doc, line)?;
+            let len = original.chars().count();
+            let start = left.min(len);
+            let end = right.min(len);
+            let head: String = original.chars().take(start).collect();
+            let tail: String = original.chars().skip(end).collect();
+            self.replace_line_inner(doc, line, format!("{head}{replacement}{tail}"), &mut record)?;
+        }
+        self.finish_change(record);
+        let caret_line = if parts.len() == 1 {
+            bottom
+        } else {
+            let last_row = parts.len().saturating_sub(1) as u64;
+            top + last_row.min(bottom - top)
+        };
+        let caret_text = parts
+            .get((caret_line - top) as usize)
+            .or_else(|| parts.first())
+            .copied()
+            .unwrap_or("");
+        Ok((caret_line, left + caret_text.chars().count()))
+    }
+
     pub fn save_to_path(&self, doc: &Document, target: impl AsRef<Path>) -> Result<SaveResult> {
-        let target = target.as_ref();
-        if target.exists() {
+        self.save_to_path_inner(doc, target.as_ref(), false)
+    }
+
+    pub fn save_to_path_overwrite(
+        &self,
+        doc: &Document,
+        target: impl AsRef<Path>,
+    ) -> Result<SaveResult> {
+        self.save_to_path_inner(doc, target.as_ref(), true)
+    }
+
+    fn save_to_path_inner(
+        &self,
+        doc: &Document,
+        target: &Path,
+        overwrite: bool,
+    ) -> Result<SaveResult> {
+        if target.exists() && !overwrite {
             return Err(Error::Unsupported(format!(
                 "'{}' already exists; choose another save path",
                 target.display()
             )));
         }
-        self.write_stream(doc, target)?;
+        self.write_stream(doc, target, overwrite)?;
         let bytes = std::fs::metadata(target)?.len();
         Ok(SaveResult {
             path: target.to_path_buf(),
@@ -446,31 +609,39 @@ impl EditSession {
         }
     }
 
-    fn write_stream(&self, doc: &Document, target: &Path) -> Result<()> {
+    fn write_stream(&self, doc: &Document, target: &Path, overwrite: bool) -> Result<()> {
         let tmp = temp_path(target);
         let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         let mut w = BufWriter::new(file);
 
         w.write_all(doc.prefix_bytes())?;
         let original_total = doc.line_count();
-        for orig in 0..original_total {
-            if let Some(ev) = self.events.get(&orig) {
-                for text in &ev.inserts {
-                    write_edited_line(&mut w, doc, text, doc.default_terminator())?;
-                }
-                if ev.deleted {
-                    continue;
-                }
-                if let Some(text) = &ev.replacement {
-                    let term = doc.line_terminator(orig).unwrap_or(b"");
-                    write_edited_line(&mut w, doc, text, term)?;
-                } else if let Some(bytes) = doc.raw_line_with_terminator(orig) {
-                    w.write_all(bytes)?;
-                }
-            } else if let Some(bytes) = doc.raw_line_with_terminator(orig) {
-                w.write_all(bytes)?;
+        // Walk only the (sparse) edited anchors. Every run of untouched
+        // original lines between two anchors is one contiguous mmap byte
+        // range, copied out with a single write. This keeps saving
+        // O(edits × stride + bytes) instead of the previous per-line random
+        // access, which cost O(lines × stride).
+        let mut next_unwritten = 0u64;
+        for (&anchor, ev) in self.events.range(..original_total) {
+            copy_original_span(&mut w, doc, next_unwritten, anchor)?;
+            next_unwritten = anchor;
+            for text in &ev.inserts {
+                write_edited_line(&mut w, doc, text, doc.default_terminator())?;
             }
+            if ev.deleted {
+                next_unwritten = anchor + 1;
+                continue;
+            }
+            if let Some(text) = &ev.replacement {
+                let term = doc.line_terminator(anchor).unwrap_or(b"");
+                write_edited_line(&mut w, doc, text, term)?;
+                next_unwritten = anchor + 1;
+            }
+            // An event carrying only inserts leaves its anchor line untouched;
+            // `next_unwritten` stays at `anchor` so the next contiguous copy
+            // starts with that original line.
         }
+        copy_original_span(&mut w, doc, next_unwritten, original_total)?;
 
         if let Some(ev) = self.events.get(&original_total) {
             if !ev.inserts.is_empty()
@@ -493,8 +664,19 @@ impl EditSession {
         match std::fs::rename(&tmp, target) {
             Ok(()) => Ok(()),
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                Err(Error::Io(e))
+                if overwrite && target.exists() {
+                    std::fs::remove_file(target)?;
+                    match std::fs::rename(&tmp, target) {
+                        Ok(()) => Ok(()),
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&tmp);
+                            Err(Error::Io(e))
+                        }
+                    }
+                } else {
+                    let _ = std::fs::remove_file(&tmp);
+                    Err(Error::Io(e))
+                }
             }
         }
     }
@@ -514,21 +696,117 @@ impl EditSession {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    fn finish_change(&mut self, before: BTreeMap<u64, EditEvent>) {
-        if before == self.events {
+    fn finish_change(&mut self, record: UndoRecord) {
+        if record.is_empty() {
             return;
         }
-        push_history(&mut self.undo, before);
+        push_history(&mut self.undo, record);
         self.redo.clear();
         self.bump();
     }
+
+    /// Apply a record's steps in reverse order (unwinding one transaction) and
+    /// return the record that plays the transaction back the other way.
+    fn apply_record(&mut self, record: UndoRecord) -> UndoRecord {
+        let mut inverse = Vec::with_capacity(record.len());
+        for op in record.into_iter().rev() {
+            inverse.push(self.apply_op(op));
+        }
+        inverse
+    }
+
+    /// Apply one inverse step and return the step that inverts it again.
+    /// Records are only replayed against the exact overlay state they were
+    /// recorded from, so the referenced anchors/indices always exist; the
+    /// fallbacks below merely keep this total instead of panicking.
+    fn apply_op(&mut self, op: UndoOp) -> UndoOp {
+        match op {
+            UndoOp::SetLineState {
+                anchor,
+                replacement,
+                deleted,
+            } => {
+                let ev = self.events.entry(anchor).or_default();
+                let inverse = UndoOp::SetLineState {
+                    anchor,
+                    replacement: std::mem::replace(&mut ev.replacement, replacement),
+                    deleted: std::mem::replace(&mut ev.deleted, deleted),
+                };
+                self.clean_anchor(anchor);
+                inverse
+            }
+            UndoOp::SetInsert {
+                anchor,
+                index,
+                text,
+            } => match self
+                .events
+                .get_mut(&anchor)
+                .and_then(|ev| ev.inserts.get_mut(index))
+            {
+                Some(line) => UndoOp::SetInsert {
+                    anchor,
+                    index,
+                    text: std::mem::replace(line, text),
+                },
+                None => UndoOp::SetInsert {
+                    anchor,
+                    index,
+                    text,
+                },
+            },
+            UndoOp::RemoveInsert { anchor, index } => {
+                let removed = self
+                    .events
+                    .get_mut(&anchor)
+                    .filter(|ev| index < ev.inserts.len())
+                    .map(|ev| ev.inserts.remove(index));
+                self.clean_anchor(anchor);
+                match removed {
+                    Some(text) => UndoOp::InsertInsert {
+                        anchor,
+                        index,
+                        text,
+                    },
+                    None => UndoOp::RemoveInsert { anchor, index },
+                }
+            }
+            UndoOp::InsertInsert {
+                anchor,
+                index,
+                text,
+            } => {
+                let ev = self.events.entry(anchor).or_default();
+                let index = index.min(ev.inserts.len());
+                ev.inserts.insert(index, text);
+                UndoOp::RemoveInsert { anchor, index }
+            }
+        }
+    }
 }
 
-fn push_history(stack: &mut Vec<BTreeMap<u64, EditEvent>>, snapshot: BTreeMap<u64, EditEvent>) {
+fn push_history(stack: &mut Vec<UndoRecord>, record: UndoRecord) {
     if stack.len() == HISTORY_LIMIT {
         stack.remove(0);
     }
-    stack.push(snapshot);
+    stack.push(record);
+}
+
+/// Copy original lines `[start, end)` (with their terminators) as one
+/// contiguous byte range out of the mmap.
+fn copy_original_span(mut w: impl Write, doc: &Document, start: u64, end: u64) -> Result<()> {
+    if start >= end {
+        return Ok(());
+    }
+    let bytes = doc.raw_lines_span(start, end).ok_or_else(|| {
+        Error::Unsupported(format!(
+            "original lines {}..{} are out of range while saving",
+            start + 1,
+            end
+        ))
+    })?;
+    w.write_all(bytes)?;
+    Ok(())
 }
 
 fn write_edited_line(
@@ -622,6 +900,18 @@ mod tests {
         edits.save_to_path(&doc, &out).unwrap();
         assert_eq!(std::fs::read(&out).unwrap(), b"a\r\nB\r\nc\r\nd\r\n");
         let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn save_to_path_overwrite_replaces_existing_file() {
+        let (_f, doc) = doc_from(b"alpha\nbeta\n");
+        let mut out = NamedTempFile::new().unwrap();
+        out.write_all(b"old\n").unwrap();
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "BETA".into()).unwrap();
+        let res = edits.save_to_path_overwrite(&doc, out.path()).unwrap();
+        assert_eq!(res.lines, 2);
+        assert_eq!(std::fs::read(out.path()).unwrap(), b"alpha\nBETA\n");
     }
 
     #[test]
@@ -760,6 +1050,30 @@ mod tests {
     }
 
     #[test]
+    fn replace_rect_is_a_single_undo_unit() {
+        let (_f, doc) = doc_from(b"abcd\nefgh\nijkl\n");
+        let mut edits = EditSession::default();
+        let caret = edits.replace_rect(&doc, 0, 2, 1, 3, "X").unwrap();
+        assert_eq!(caret, (2, 2));
+        assert_eq!(texts(&edits, &doc), vec!["aXd", "eXh", "iXl"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["abcd", "efgh", "ijkl"]);
+        assert!(edits.redo());
+        assert_eq!(texts(&edits, &doc), vec!["aXd", "eXh", "iXl"]);
+    }
+
+    #[test]
+    fn replace_rect_maps_multiline_text_by_row() {
+        let (_f, doc) = doc_from(b"abcd\nefgh\nijkl\n");
+        let mut edits = EditSession::default();
+        let caret = edits.replace_rect(&doc, 0, 2, 1, 3, "X\nYY\nZ").unwrap();
+        assert_eq!(caret, (2, 2));
+        assert_eq!(texts(&edits, &doc), vec!["aXd", "eYYh", "iZl"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["abcd", "efgh", "ijkl"]);
+    }
+
+    #[test]
     fn replace_range_paste_multiline_into_a_caret() {
         let (_f, doc) = doc_from(b"start\nend\n");
         let mut edits = EditSession::default();
@@ -818,6 +1132,118 @@ mod tests {
         let (_f3, doc3) = doc_from(b"");
         let mut e3 = EditSession::default();
         assert!(e3.replace_range(&doc3, 0, 0, 1, 0, "x").is_err());
+    }
+
+    #[test]
+    fn save_copies_untouched_runs_between_sparse_edits() {
+        // Large enough for real gaps between edits; CRLF everywhere and a
+        // final line without a terminator.
+        let mut data = Vec::new();
+        for i in 0..500u64 {
+            data.extend_from_slice(format!("line {i}\r\n").as_bytes());
+        }
+        data.extend_from_slice(b"tail-no-eol");
+        let (f, doc) = doc_from(&data);
+        let out = f.path().with_extension("sparse");
+        let mut edits = EditSession::default();
+        // Ordered so each logical line still equals its original line number.
+        edits
+            .insert_line_before(&doc, 200, "INSERTED".into())
+            .unwrap();
+        edits.replace_line(&doc, 10, "TEN".into()).unwrap();
+        edits.delete_line(&doc, 100).unwrap();
+        edits.save_to_path(&doc, &out).unwrap();
+
+        let mut expect = Vec::new();
+        for i in 0..500u64 {
+            if i == 100 {
+                continue;
+            }
+            if i == 200 {
+                expect.extend_from_slice(b"INSERTED\r\n");
+            }
+            if i == 10 {
+                expect.extend_from_slice(b"TEN\r\n");
+            } else {
+                expect.extend_from_slice(format!("line {i}\r\n").as_bytes());
+            }
+        }
+        expect.extend_from_slice(b"tail-no-eol");
+        assert_eq!(std::fs::read(&out).unwrap(), expect);
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn undo_redo_walk_multi_step_history() {
+        let (_f, doc) = doc_from(b"a\nb\n");
+        let mut edits = EditSession::default();
+        edits.insert_line_before(&doc, 1, "x".into()).unwrap(); // a x b
+        edits.replace_line(&doc, 1, "y".into()).unwrap(); // a y b (edits the inserted line)
+        edits.delete_line(&doc, 1).unwrap(); // a b
+        edits.delete_line(&doc, 0).unwrap(); // b
+        assert_eq!(texts(&edits, &doc), vec!["b"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["a", "b"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["a", "y", "b"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["a", "x", "b"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["a", "b"]);
+        assert!(!edits.is_dirty());
+        assert!(!edits.can_undo());
+        // Walk the whole history forward again.
+        assert!(edits.redo());
+        assert!(edits.redo());
+        assert!(edits.redo());
+        assert!(edits.redo());
+        assert_eq!(texts(&edits, &doc), vec!["b"]);
+        assert!(!edits.can_redo());
+    }
+
+    #[test]
+    fn history_limit_keeps_last_256_generations() {
+        let (_f, doc) = doc_from(b"seed\n");
+        let mut edits = EditSession::default();
+        for k in 0..300u32 {
+            edits.replace_line(&doc, 0, format!("v{k}")).unwrap();
+        }
+        let mut undone = 0;
+        while edits.undo() {
+            undone += 1;
+        }
+        assert_eq!(undone, 256);
+        // 300 edits with 256 undoable generations lands on the state after
+        // edit #43 (0-based), exactly like the old snapshot history did.
+        assert_eq!(texts(&edits, &doc), vec!["v43"]);
+        assert!(edits.is_dirty());
+    }
+
+    #[test]
+    fn undo_after_paste_and_edits_inside_pasted_block() {
+        let (_f, doc) = doc_from(b"top\nbottom\n");
+        let mut edits = EditSession::default();
+        // Paste three lines between top and bottom.
+        edits
+            .replace_range(&doc, 0, 3, 0, 3, "\np1\np2\np3")
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["top", "p1", "p2", "p3", "bottom"]);
+        // Type into the middle pasted line.
+        edits.replace_range(&doc, 2, 2, 2, 2, "X").unwrap();
+        assert_eq!(
+            texts(&edits, &doc),
+            vec!["top", "p1", "p2X", "p3", "bottom"]
+        );
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["top", "p1", "p2", "p3", "bottom"]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["top", "bottom"]);
+        assert!(edits.redo());
+        assert!(edits.redo());
+        assert_eq!(
+            texts(&edits, &doc),
+            vec!["top", "p1", "p2X", "p3", "bottom"]
+        );
     }
 
     #[test]

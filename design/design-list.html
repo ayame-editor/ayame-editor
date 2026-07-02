@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayame Design List</title>
+    <style>
+      :root {
+        --bg: #fbf8f1;
+        --panel: #fdfcf8;
+        --panel-2: #f4efe6;
+        --ink: #2a2140;
+        --muted: #6e6383;
+        --border: #e3dbce;
+        --accent: #7a5cc0;
+        --gold: #c79a2e;
+        --green: #3f8f6b;
+        --danger: #c0506a;
+        --blue: #3979a8;
+        --ui: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+        --mono: "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--ui);
+      }
+
+      body {
+        min-width: 320px;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .wrap {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 20px;
+        align-items: end;
+        padding: 18px 0 24px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.18;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 860px;
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .action {
+        display: inline-flex;
+        min-height: 34px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 13px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .action.primary {
+        border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+        background: #efe7ff;
+        color: #5c40a0;
+      }
+
+      .section-head {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        margin: 34px 0 14px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-size: 15px;
+        letter-spacing: 0;
+      }
+
+      .section-head::after {
+        content: "";
+        height: 1px;
+        flex: 1;
+        background: var(--border);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        text-decoration: none;
+        box-shadow: 0 1px 0 rgba(42, 33, 64, 0.04);
+      }
+
+      .card:hover {
+        border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+        box-shadow: 0 16px 40px -26px rgba(42, 33, 64, 0.45);
+      }
+
+      .preview {
+        position: relative;
+        aspect-ratio: 2800 / 1720;
+        overflow: hidden;
+        background: #ece5d9;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .preview.tall {
+        aspect-ratio: 2800 / 1800;
+      }
+
+      .preview img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .badge {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        max-width: calc(100% - 20px);
+        padding: 4px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        border-radius: 6px;
+        background: rgba(42, 33, 64, 0.72);
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .cap {
+        display: grid;
+        gap: 8px;
+        padding: 13px 14px 15px;
+      }
+
+      .title-row {
+        display: flex;
+        gap: 8px;
+        align-items: start;
+        justify-content: space-between;
+      }
+
+      h3 {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      .tag {
+        flex: none;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: var(--panel-2);
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.2;
+      }
+
+      .tag.primary {
+        background: #efe7ff;
+        color: #5c40a0;
+      }
+
+      .tag.structure {
+        background: #e1eff7;
+        color: var(--blue);
+      }
+
+      .tag.accessible {
+        background: #dff3e9;
+        color: var(--green);
+      }
+
+      .desc {
+        margin: 0;
+        min-height: 38px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .links span {
+        display: inline-flex;
+        height: 24px;
+        align-items: center;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .decision {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      .decision-item {
+        min-height: 112px;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .decision-item b {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--ink);
+        font-size: 13px;
+      }
+
+      .decision-item p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      footer {
+        margin-top: 42px;
+        padding-top: 18px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      code {
+        font-family: var(--mono);
+      }
+
+      @media (max-width: 900px) {
+        header,
+        .decision {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <div>
+          <h1>Ayame Design List</h1>
+          <p class="lead">
+            Figma connector が止まっていても確認できる、PNGベースの静的デザイン一覧です。
+            クリックで実HTMLモックまたは現行プロトタイプを開けます。リリース向けの第一候補は Iris Light / Iris Sumi Clean、
+            巨大ファイル体験の構造は Power Split と Command Palette を統合する前提です。
+          </p>
+        </div>
+        <nav class="actions" aria-label="links">
+          <a class="action primary" href="./gui/iris-light.html">Current GUI</a>
+          <a class="action" href="./index.html">Live Gallery</a>
+          <a class="action" href="./DESIGN_LIST.md">Markdown</a>
+          <a class="action" href="./figma/ayame-editor-design.use-figma.js">Figma Script</a>
+        </nav>
+      </header>
+
+      <section class="decision" aria-label="recommendation">
+        <div class="decision-item">
+          <b>1. Primary visual</b>
+          <p>Iris Light. Light-only, compact, readable, and already wired to JSON theme editing.</p>
+        </div>
+        <div class="decision-item">
+          <b>2. Default candidate</b>
+          <p>Iris Sumi Clean. Quiet enough for daily native-editor use and safer for long sessions.</p>
+        </div>
+        <div class="decision-item">
+          <b>3. Huge-file structure</b>
+          <p>Power Split. Search hits, compare, and minimap should be first-class workflow surfaces.</p>
+        </div>
+        <div class="decision-item">
+          <b>4. Advanced commands</b>
+          <p>Command Palette. Sort, replace, diff, case conversion, keymap, and batch operations belong here.</p>
+        </div>
+      </section>
+
+      <div id="catalog"></div>
+
+      <footer>
+        Static catalog source: <code>design/design-list.html</code>.
+        The full Figma-ready native editor screen is generated from
+        <code>design/figma/ayame-editor-design.use-figma.js</code> once the connector is available.
+      </footer>
+    </main>
+
+    <script>
+      const sections = [
+        {
+          title: "Recommended / Current Direction",
+          items: [
+            {
+              name: "Iris Light",
+              tag: "primary",
+              tone: "primary",
+              img: "renders/iris-light.png",
+              href: "gui/iris-light.html?theme=iris-light",
+              desc: "リリース向け第一候補。ライト専用、JSONテーマ編集、検索/差分/設定まで含む現行GUI方向。",
+              tall: true,
+            },
+            {
+              name: "Iris Sumi Clean",
+              tag: "default",
+              tone: "primary",
+              img: "renders/iris-sumi-clean.png",
+              href: "gui/iris-light.html?theme=sumi-light&panel=0",
+              desc: "既定テーマ候補。落ち着いた紙面、長時間編集向け、色の主張を抑えた実務寄り。",
+              tall: true,
+            },
+            {
+              name: "Iris Mist Clean",
+              tag: "alternate",
+              tone: "primary",
+              img: "renders/iris-mist-clean.png",
+              href: "gui/iris-light.html?theme=iris-mist&panel=0",
+              desc: "青み寄りの代替案。冷静で比較・検索画面に合うが、既定には少し個性が強い。",
+              tall: true,
+            },
+            {
+              name: "Iris Mono",
+              tag: "accessible",
+              tone: "accessible",
+              img: "renders/iris-mono.png",
+              href: "gui/iris-light.html?theme=mono-paper",
+              desc: "全単色配慮。水彩・装飾なしで、読みやすさと視認性を優先するモード。",
+              tall: true,
+            },
+            {
+              name: "Iris Dawn",
+              tag: "warm",
+              img: "renders/iris-dawn.png",
+              href: "gui/iris-light.html?theme=iris-dawn",
+              desc: "少し暖色寄りのIris。ブランド感は出るが、日常利用ではSumiより華やか。",
+              tall: true,
+            },
+          ],
+        },
+        {
+          title: "Workflow Structure",
+          items: [
+            {
+              no: "17",
+              name: "Power Split",
+              tag: "structure",
+              tone: "structure",
+              img: "renders/17-power-split.png",
+              href: "mockups/17-power-split.html",
+              desc: "巨大ファイル検索・比較の本命構造。検索ヒット別ペインと川ミニマップを統合する。",
+            },
+            {
+              no: "16",
+              name: "Command Palette",
+              tag: "structure",
+              tone: "structure",
+              img: "renders/16-command-palette.png",
+              href: "mockups/16-command-palette.html",
+              desc: "Sort/replace/diff/case/keymap など高度操作の入口。メニューより速い導線。",
+            },
+          ],
+        },
+        {
+          title: "Classic Mockups",
+          items: [
+            ["00", "Graphite", "reference", "renders/00-graphite.png", "_base.html", "全案の土台。中立クロームと基準レイアウト。"],
+            ["01", "Ayame Zen", "japanese", "renders/01-ayame-zen.png", "mockups/01-ayame-zen.html", "濃紺夜、アイリス色、金箔。ブランド感は強い。"],
+            ["02", "Kanagawa", "japanese", "renders/02-kanagawa.png", "mockups/02-kanagawa.html", "藍と菫、青海波。落ち着いた浮世絵方向。"],
+            ["03", "Sumi-e", "japanese", "renders/03-sumi-e.png", "mockups/03-sumi-e.html", "墨一色と朱の差し色。余白が強いミニマル案。"],
+            ["04", "Neon Glass Terminal", "neon", "renders/04-neon-glass.png", "mockups/04-neon-glass.html", "すりガラスとネオン。映えるが実務既定には強い。"],
+            ["05", "Synthwave '84", "neon", "renders/05-synthwave.png", "mockups/05-synthwave.html", "アウトラン調。隠しテーマ向け。"],
+            ["06", "Matrix Phosphor", "hacker", "renders/06-matrix.png", "mockups/06-matrix.html", "燐光グリーンと走査線。遊び枠。"],
+            ["07", "Tokyo Night", "dev", "renders/07-tokyo-night.png", "mockups/07-tokyo-night.html", "定番の夜テーマ。互換プリセット向け。"],
+            ["08", "Catppuccin Mocha", "dev", "renders/08-catppuccin.png", "mockups/08-catppuccin.html", "柔らかいパステル。プリセット向け。"],
+            ["09", "Rose Pine Moon", "dev", "renders/09-rose-pine.png", "mockups/09-rose-pine.html", "上品な夜。Iris系と相性がよい。"],
+            ["10", "Nord Frost", "calm", "renders/10-nord.png", "mockups/10-nord.html", "冷たいスレートと氷色シアン。"],
+            ["11", "Gruvbox", "retro", "renders/11-gruvbox.png", "mockups/11-gruvbox.html", "温かいレトロ。長く愛される配色。"],
+            ["12", "Alabaster Light", "light", "renders/12-alabaster-light.png", "mockups/12-alabaster-light.html", "ライトテーマ研究の基礎。"],
+            ["13", "Frostbite Wireframe", "modern", "renders/13-frostbite.png", "mockups/13-frostbite.html", "極細グリッドと氷白文字。"],
+            ["14", "Aurora Silk Glass", "modern", "renders/14-aurora-glass.png", "mockups/14-aurora-glass.html", "プレミアム感のあるガラス表現。"],
+            ["15", "Amber CRT", "retro", "renders/15-amber-crt.png", "mockups/15-amber-crt.html", "琥珀CRT。隠しテーマ向け。"],
+          ].map(([no, name, tag, img, href, desc]) => ({ no, name, tag, img, href, desc })),
+        },
+      ];
+
+      const catalog = document.getElementById("catalog");
+
+      for (const section of sections) {
+        const head = document.createElement("div");
+        head.className = "section-head";
+        head.innerHTML = `<h2>${section.title}</h2>`;
+        catalog.appendChild(head);
+
+        const grid = document.createElement("section");
+        grid.className = "grid";
+        grid.setAttribute("aria-label", section.title);
+        catalog.appendChild(grid);
+
+        for (const item of section.items) {
+          const card = document.createElement("a");
+          card.className = "card";
+          card.href = item.href;
+          card.target = "_blank";
+          card.rel = "noopener";
+          const tagClass = item.tone ? ` ${item.tone}` : "";
+          card.innerHTML = `
+            <div class="preview${item.tall ? " tall" : ""}">
+              <img src="${item.img}" alt="${item.name}" loading="lazy" />
+              <span class="badge">${item.no ? item.no + " · " : ""}${item.name}</span>
+            </div>
+            <div class="cap">
+              <div class="title-row">
+                <h3>${item.name}</h3>
+                <span class="tag${tagClass}">${item.tag}</span>
+              </div>
+              <p class="desc">${item.desc}</p>
+              <div class="links"><span>open html</span><span>${item.img.split("/").pop()}</span></div>
+            </div>`;
+          grid.appendChild(card);
+        }
+      }
+    </script>
+  </body>
+</html>

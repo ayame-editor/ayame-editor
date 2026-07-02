@@ -50,7 +50,8 @@ pub use ops::{
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
 pub use transform::{
-    case_to_path, replace_to_path, CaseMode, CaseOptions, ReplaceOptions, TransformResult,
+    case_to_path, replace_to_path, replace_to_path_parallel, CaseMode, CaseOptions,
+    ParallelReplaceOptions, ReplaceOptions, TransformResult, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 
 /// Errors surfaced by the engine.

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ayame-core", "crates/ayame-cli"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/hjosugi/ayame-editor"
@@ -28,3 +28,4 @@ unicode-normalization = "0.1"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+strip = "symbols"  # ~15% smaller binaries; release scripts no longer rely on a host `strip`

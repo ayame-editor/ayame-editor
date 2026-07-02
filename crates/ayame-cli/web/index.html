@@ -4,84 +4,202 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#FBF8F1" />
-    <title>Ayame</title>
+    <title>Ayame Editor</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+      <symbol id="i-sidebar" viewBox="0 0 24 24">
+        <rect x="4" y="4.5" width="16" height="15" rx="2" />
+        <path d="M9 4.5v15" />
+        <path d="M11.8 15.5v-4.2c0-.5.3-.8.8-.8h2.2l.8 1h3.1c.5 0 .8.3.8.8v3.2h-7.7Z" />
+      </symbol>
+      <symbol id="i-open" viewBox="0 0 24 24">
+        <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
+        <path d="M3.8 18.5 6 11h14.2l-2.1 7.5H3.8Z" />
+      </symbol>
+      <symbol id="i-save" viewBox="0 0 24 24">
+        <path d="M5 4.5h11.6l2.4 2.4v12.6H5V4.5Z" />
+        <path d="M8 4.5v5h7v-5M8 15.2h8" />
+        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M17.2 11.2c1.1 1.2 1.1 2.2 0 3.4-1.1-1.2-1.1-2.2 0-3.4Z" />
+      </symbol>
+      <symbol id="i-save-as" viewBox="0 0 24 24">
+        <path d="M5 4.5h10.5l3.5 3.5v11.5H5V4.5Z" />
+        <path d="M8 4.5v5h6.5M8 16h4.8" />
+        <path d="M15 16.7 19.2 12.5l1.3 1.3-4.2 4.2-2 .7.7-2Z" />
+      </symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24">
+        <path d="M9 8H5V4" />
+        <path d="M5.4 8.3a8 8 0 1 1 2.1 8.1" />
+      </symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24">
+        <path d="M15 8h4V4" />
+        <path d="M18.6 8.3a8 8 0 1 0-2.1 8.1" />
+      </symbol>
+      <symbol id="i-sort" viewBox="0 0 24 24">
+        <path d="M7 5v14M7 19l-3-3M7 19l3-3M13 6h7M13 12h5M13 18h3" />
+        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M10.5 4.6c1.1 1.3 1.1 2.3 0 3.6-1.1-1.3-1.1-2.3 0-3.6Z" />
+      </symbol>
+      <symbol id="i-replace" viewBox="0 0 24 24">
+        <path d="M7 7h8.5a3.5 3.5 0 0 1 0 7H14" />
+        <path d="M10 4 7 7l3 3M17 20l3-3-3-3M20 17H8.5a3.5 3.5 0 0 1 0-7H10" />
+      </symbol>
+      <symbol id="i-diff" viewBox="0 0 24 24">
+        <path d="M6 5v14M18 5v14M9 8h6M9 16h6" />
+        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M12 9.8c1.2 1.4 1.2 2.6 0 4-1.2-1.4-1.2-2.6 0-4Z" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="5.8" />
+        <path d="m15 15 4.5 4.5" />
+      </symbol>
+      <symbol id="i-up" viewBox="0 0 24 24">
+        <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
+      </symbol>
+      <symbol id="i-down" viewBox="0 0 24 24">
+        <path d="M12 5v14M6.5 13.5 12 19l5.5-5.5" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.3" />
+        <path d="M12 3.8v2.4M12 17.8v2.4M4.9 7.9 7 9.1M17 14.9l2.1 1.2M4.9 16.1 7 14.9M17 9.1l2.1-1.2" />
+        <path d="M8.4 4.8 9.6 7M14.4 17l1.2 2.2M4.8 12h2.4M16.8 12h2.4M8.4 19.2 9.6 17M14.4 7l1.2-2.2" />
+      </symbol>
+      <symbol id="i-folder-up" viewBox="0 0 24 24">
+        <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
+        <path d="M12 17v-6M9.5 13.5 12 11l2.5 2.5" />
+      </symbol>
+      <symbol id="i-tools" viewBox="0 0 24 24">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </symbol>
+    </svg>
     <div id="app">
-      <header id="toolbar">
-        <div class="tb-group">
-          <button id="toggle-sidebar" class="ico" title="エクスプローラー (Ctrl+B)">☰</button>
-          <button id="open-file" class="cmd" title="ファイルを開く (Ctrl+O)">開く</button>
-          <button id="save-copy" class="cmd" title="別ファイルへ保存 (Ctrl+S)">保存</button>
-          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用">テーマ適用</button>
-        </div>
-
-        <div class="tb-sep"></div>
-
-        <div class="tb-group">
-          <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)">↶</button>
-          <button id="redo-edit" class="ico" title="やり直す (Ctrl+Y)">↷</button>
-        </div>
-
-        <div class="tb-sep"></div>
-
-        <div class="tb-group">
-          <button id="sort-save" class="cmd" title="ソートして別ファイルへ保存">ソート</button>
-          <button id="replace-save" class="cmd" title="置換して別ファイルへ保存">置換</button>
-        </div>
-
-        <div class="file" id="filename" title="">—</div>
-
-        <div class="tb-group find-group">
-          <div class="field find">
-            <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
-            <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
-            <button id="opt-word" class="toggle" title="単語単位 (Alt+W)">ab</button>
-            <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
-            <button id="find-prev" class="ico" title="前の一致 (Shift+F3)">▲</button>
-            <button id="find-next" class="ico" title="次の一致 (F3)">▼</button>
-            <span id="find-count" class="find-count"></span>
+      <nav id="menubar" role="menubar" aria-label="メニュー">
+        <a class="app-brand" href="/" aria-label="Ayame Editor">
+          <img src="/ayame-logo.svg" width="150" height="32" alt="Ayame Editor" />
+        </a>
+        <div class="menu-shell">
+          <button id="file-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">
+            ファイル
+          </button>
+          <div id="file-menu" class="file-menu hidden" role="menu" aria-label="ファイル">
+            <button id="new-file" class="menu-item" role="menuitem">
+              <span class="menu-label">新規テキスト</span><span class="menu-key" data-key-action="newFile">Ctrl+N</span>
+            </button>
+            <button id="open-file" class="menu-item" role="menuitem">
+              <span class="menu-label">開く...</span><span class="menu-key" data-key-action="openFile">Ctrl+O</span>
+            </button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button id="save-file" class="menu-item" role="menuitem">
+              <span class="menu-label">保存</span><span class="menu-key" data-key-action="saveFile">Ctrl+S</span>
+            </button>
+            <button id="save-copy" class="menu-item" role="menuitem">
+              <span class="menu-label">別名で保存...</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
+            </button>
           </div>
         </div>
+        <div class="menu-shell">
+          <button id="edit-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">編集</button>
+          <div id="edit-menu" class="file-menu hidden" role="menu" aria-label="編集">
+            <button class="menu-item" data-menu-action="undo" role="menuitem"><span class="menu-label">元に戻す</span><span class="menu-key" data-key-action="undo">Ctrl+Z</span></button>
+            <button class="menu-item" data-menu-action="redo" role="menuitem"><span class="menu-label">やり直す</span><span class="menu-key" data-key-action="redo">Ctrl+Y</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+            <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
+          </div>
+        </div>
+        <div class="menu-shell">
+          <button id="selection-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">選択</button>
+          <div id="selection-menu" class="file-menu hidden" role="menu" aria-label="選択">
+            <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
+            <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
+            <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
+          </div>
+        </div>
+        <div class="menu-shell">
+          <button id="view-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">表示</button>
+          <div id="view-menu" class="file-menu hidden" role="menu" aria-label="表示">
+            <button class="menu-item" data-menu-action="toggleSidebar" role="menuitem"><span class="menu-label">エクスプローラー</span><span class="menu-key" data-key-action="toggleSidebar">Ctrl+B</span></button>
+            <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label">検索バー</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="settings" role="menuitem"><span class="menu-label">設定</span><span class="menu-key"></span></button>
+          </div>
+        </div>
+      </nav>
+      <!-- Toolbar stays minimal by design: explorer open/close, undo/redo, and
+           the ツール dropdown (sort / replace / diff / case live there). Search
+           floats inside the editor viewport instead. -->
+      <header id="toolbar">
+        <div class="tb-group">
+          <button id="toggle-sidebar" class="cmd nav-toggle" title="エクスプローラー (Ctrl+B)" aria-label="エクスプローラー">
+            <svg class="ay-icon"><use href="#i-sidebar"></use></svg><span class="btn-label">エクスプローラー</span>
+          </button>
+          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用">テーマ適用</button>
+          <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用">キー設定適用</button>
+        </div>
 
-        <button id="open-settings" class="ico" title="設定">⚙</button>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
+            <svg class="ay-icon"><use href="#i-undo"></use></svg>
+          </button>
+          <button id="redo-edit" class="ico" title="やり直す (Ctrl+Y)" aria-label="やり直す">
+            <svg class="ay-icon"><use href="#i-redo"></use></svg>
+          </button>
+        </div>
+
+        <div class="tb-sep"></div>
+
+        <div class="menu-shell">
+          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・置換・差分・ケース変換">
+            <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label">ツール</span>
+          </button>
+          <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール">
+            <button class="menu-item" data-menu-action="sortSave" role="menuitem"
+                    title="行単位で並び替えて結果を新しいタブに開きます。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)">
+              <span class="menu-label">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
+            </button>
+            <button class="menu-item" data-menu-action="replaceSave" role="menuitem"><span class="menu-label">置換して保存</span><span class="menu-key" data-key-action="replaceSave"></span></button>
+            <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字化して保存</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字化して保存</span><span class="menu-key"></span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label">キー設定</span><span class="menu-key"></span></button>
+          </div>
+        </div>
       </header>
 
       <nav id="tabbar">
         <div id="tabs"></div>
-        <button id="new-tab" class="tab-new" title="新規タブ (Ctrl+N)">＋</button>
+        <button id="new-tab" class="tab-new" title="新規タブ (Ctrl+N)" aria-label="新規タブ">
+          <svg class="ay-icon"><use href="#i-plus"></use></svg>
+        </button>
       </nav>
 
       <div id="main">
         <aside id="sidebar" class="hidden">
           <div class="sb-head">
+            <svg class="ay-icon"><use href="#i-sidebar"></use></svg>
             <span class="sb-title">エクスプローラー</span>
-            <button id="sb-openfolder" class="ico" title="フォルダを開く">📂</button>
-            <button id="sb-up" class="ico" title="親フォルダへ">↑</button>
+            <button id="sb-close" class="ico sb-close" title="エクスプローラーを閉じる" aria-label="エクスプローラーを閉じる">×</button>
           </div>
           <div id="sb-root" class="sb-root" title=""></div>
+          <div class="sb-actions" aria-label="エクスプローラー操作">
+            <button id="sb-up" class="cmd sb-action" title="上の階層へ">
+              <svg class="ay-icon"><use href="#i-folder-up"></use></svg><span class="btn-label">上の階層へ</span>
+            </button>
+          </div>
           <div id="tree" class="tree"></div>
         </aside>
 
         <main id="viewport" tabindex="0">
           <div id="ruler"><div id="ruler-inner"></div><div id="ruler-corner"></div></div>
-          <!-- faint pochoir illustration (opacity = --illus; 0 hides it) -->
-          <div id="ambient" aria-hidden="true">
-            <svg viewBox="0 0 250 320" preserveAspectRatio="xMinYMax slice">
-              <path d="M60 330 C 36 268 58 232 88 206 C 116 182 100 146 72 128"
-                    fill="none" stroke="var(--accent)" stroke-width="26"
-                    stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
-              <path d="M136 330 C 124 280 152 256 138 216 C 128 188 150 168 136 142"
-                    fill="none" stroke="var(--gold)" stroke-width="17"
-                    stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
-              <path d="M176 176 C 178 190 182 194 196 196 C 182 198 178 202 176 216
-                       C 174 202 170 198 156 196 C 170 194 174 190 176 176 Z"
-                    fill="var(--gold)" opacity=".85"/>
-              <circle cx="96" cy="164" r="6" fill="var(--accent)" opacity=".7"/>
-            </svg>
-          </div>
+          <!-- faint watercolor iris illustration (opacity = --illus; 0 hides it) -->
+          <div id="ambient" aria-hidden="true"></div>
           <div id="content">
             <div id="sel-layer"></div>
             <div id="caret" aria-hidden="true"></div>
@@ -89,18 +207,39 @@
                       autocomplete="off" autocorrect="off" wrap="off"
                       aria-label="エディタ"></textarea>
           </div>
-          <div id="vscrollbar"><div id="vthumb"></div></div>
+          <div id="vscrollbar"><div id="vticks"></div><div id="vthumb"></div></div>
+          <!-- Floating in-editor search (VS Code style): overlays the top-right
+               of the viewport so the toolbar stays minimal. -->
+          <div class="find-group" role="search" aria-label="検索">
+            <div class="field find">
+              <svg class="ay-icon find-mag"><use href="#i-search"></use></svg>
+              <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
+              <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
+              <button id="opt-word" class="toggle" title="単語単位 (Alt+W)">ab</button>
+              <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
+              <button id="find-prev" class="ico" title="前の一致 (Shift+F3)" aria-label="前の一致">
+                <svg class="ay-icon"><use href="#i-up"></use></svg>
+              </button>
+              <button id="find-next" class="ico" title="次の一致 (F3)" aria-label="次の一致">
+                <svg class="ay-icon"><use href="#i-down"></use></svg>
+              </button>
+              <span id="find-count" class="find-count"></span>
+              <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる">×</button>
+            </div>
+          </div>
           <div id="overlay" class="overlay hidden"></div>
         </main>
       </div>
 
+      <!-- Status bar keeps only the always-useful vitals; totals and sizes
+           live in the explorer / tab tooltips. #st-msg is the single visible
+           home for operation feedback (save results, errors, hints). -->
       <footer id="statusbar">
         <span id="st-pos" class="seg">—</span>
-        <span id="st-lines" class="seg">—</span>
-        <span id="st-size" class="seg">—</span>
         <span id="st-enc" class="seg">—</span>
         <span id="st-eol" class="seg">—</span>
         <span id="st-edit" class="seg">—</span>
+        <span id="st-msg" class="seg msg" role="status" aria-live="polite"></span>
         <div class="spacer"></div>
         <span id="st-index" class="seg dim">—</span>
       </footer>
@@ -113,12 +252,13 @@
         <div class="modal-head">
           <div class="modal-title">
             <img src="/favicon.svg" width="18" height="18" alt="" />
-            ファイルを開く
+            <span id="opener-title">ファイルを開く</span>
           </div>
           <button id="opener-close" class="modal-x" title="閉じる (Esc)">✕</button>
         </div>
 
         <div class="opener-path">
+          <span id="opener-input-label" class="opener-input-label">パス</span>
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" />
           <button id="opener-folder" class="cmd" title="表示中のフォルダをツリーに開く">フォルダ</button>
@@ -129,7 +269,7 @@
         <div id="opener-list" class="opener-list"></div>
         <div id="opener-msg" class="opener-msg"></div>
 
-        <div class="opener-hint">
+        <div id="opener-hint" class="opener-hint">
           ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。
         </div>
       </div>
@@ -186,9 +326,75 @@
             <span class="set-val"></span>
           </label>
           <div class="set-row">
+            <span class="set-label">サイドバー</span>
+            <div class="seg-control" role="group" aria-label="サイドバー位置">
+              <button type="button" id="set-sidebar-left" class="seg" data-sidebar-side="left">左</button>
+              <button type="button" id="set-sidebar-right" class="seg" data-sidebar-side="right">右</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-label">キー設定</span>
+            <button id="keymap-open" class="cmd">編集</button>
+          </div>
+          <div class="set-row">
             <span class="set-label">テーマJSON</span>
             <button id="theme-json-edit" class="cmd">タブで編集</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="keymap-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel keymap-panel" role="dialog" aria-label="キー設定">
+        <div class="modal-head">
+          <div class="modal-title">キー設定</div>
+          <button id="keymap-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="keymap-body">
+          <div class="keymap-hint">入力欄を選んでキーを押すと変更できます。Backspace / Delete で未設定。</div>
+          <div id="keymap-list" class="keymap-list"></div>
+          <div class="keymap-actions">
+            <button id="keymap-json-edit" class="cmd">JSONをタブで編集</button>
+            <button id="keymap-reset" class="cmd">既定に戻す</button>
+            <button id="keymap-done" class="cmd primary">閉じる</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="diff-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel diff-panel" role="dialog" aria-label="差分">
+        <div class="modal-head">
+          <div class="modal-title">差分</div>
+          <button id="diff-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="diff-body">
+          <div id="diff-summary" class="diff-summary"></div>
+          <div class="diff-paths">
+            <div><span>現在</span><strong id="diff-old-path"></strong></div>
+            <div><span>比較先</span><strong id="diff-new-path"></strong></div>
+          </div>
+          <div class="diff-grid-head">
+            <span>現在のファイル</span>
+            <span>比較先ファイル</span>
+          </div>
+          <div id="diff-view" class="diff-view"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generic small form dialog: sort / replace / case-save collect all of
+         their options in one screen instead of chained prompts. -->
+    <div id="form-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel form-panel" role="dialog" aria-label="オプション">
+        <div class="modal-head">
+          <div class="modal-title" id="form-title">オプション</div>
+          <button id="form-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div id="form-body" class="form-body"></div>
+        <div class="form-actions">
+          <button id="form-cancel" class="cmd">キャンセル</button>
+          <button id="form-ok" class="cmd primary">実行</button>
         </div>
       </div>
     </div>

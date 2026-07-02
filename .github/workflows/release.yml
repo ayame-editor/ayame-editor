@@ -87,6 +87,18 @@ jobs:
               mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
               cp "$src" "$app/Contents/MacOS/ayame"
               cp crates/ayame-cli/web/favicon.svg "$app/Contents/Resources/favicon.svg" || true
+              # Dock/Finder icon: build Ayame.icns from the committed master PNG
+              # with macOS-native tools (sips + iconutil).
+              iconset="Ayame.iconset"
+              rm -rf "$iconset"
+              mkdir -p "$iconset"
+              for sz in 16 32 128 256 512; do
+                sips -z "$sz" "$sz" assets/icon-1024.png --out "$iconset/icon_${sz}x${sz}.png" >/dev/null
+                dbl=$((sz * 2))
+                sips -z "$dbl" "$dbl" assets/icon-1024.png --out "$iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+              done
+              iconutil -c icns "$iconset" -o "$app/Contents/Resources/Ayame.icns"
+              rm -rf "$iconset"
               printf '%s\n' \
                 '<?xml version="1.0" encoding="UTF-8"?>' \
                 '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
@@ -98,6 +110,7 @@ jobs:
                 "  <key>CFBundleVersion</key><string>${ver}</string>" \
                 "  <key>CFBundleShortVersionString</key><string>${ver}</string>" \
                 '  <key>CFBundleExecutable</key><string>ayame</string>' \
+                '  <key>CFBundleIconFile</key><string>Ayame</string>' \
                 '  <key>CFBundlePackageType</key><string>APPL</string>' \
                 '  <key>LSMinimumSystemVersion</key><string>10.13</string>' \
                 '  <key>NSHighResolutionCapable</key><true/>' \

@@ -19,15 +19,31 @@
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
+インストール後は、引数なしなら空の新規テキスト、ファイルを渡せばそのファイルをネイティブウィンドウで開きます:
+
+```sh
+ayame
+ayame ./huge.log
+```
+
 ## できること
 
 - **とにかく速い** — 100 億行クラスでも、必要な部分だけを読むので一瞬で開いてスクロールできます。落ちません。
 - **タブ** — 複数のファイルを開いて切り替え。`Ctrl+N` で新規、`Ctrl+W` で閉じる。
-- **エクスプローラー** — `☰`（`Ctrl+B`）でサイドバーを開き、フォルダからファイルをたどれます。
-- **検索** — `Ctrl+F`。大文字小文字・単語単位・正規表現に対応。`F3` / `Shift+F3` で次・前へ。
+- **エクスプローラー** — ツールバー左端のボタン（`Ctrl+B`）で開閉。フォルダからファイルをたどれます。
+- **検索** — `Ctrl+F` でエディタ右上に検索バーが浮かびます。大文字小文字・単語単位・正規表現に対応。`F3` / `Shift+F3` で次・前へ。
+- **ソート** — ツール ▾ の「ソート」。行全体または指定したキー列で、昇順・降順に並び替えて結果を新しいタブに開きます（元ファイルは変更しません）。
+- **2ファイル差分** — ツール ▾ の「2ファイル差分」で、現在のファイルと別ファイルを左右比較。変更行は単語単位でも確認できます。
+- **一括変換** — ツール ▾ から置換・ケース変換を別ファイルへ保存。行境界chunkに分けた並列処理なので巨大ファイルでも有界メモリです。
 - **メモ帳のように編集** — クリックした位置に入力、`Enter` で改行、複数行の貼り付けもそのまま。
-- **範囲選択** — ドラッグや `Shift`＋クリックで複数行を選択し、コピー / カット / 削除。
+- **範囲選択** — ドラッグや `Shift`＋クリックで複数行を選択。`Alt`＋ドラッグで矩形選択。コピー / カット / 削除 / 置換できます。
 - **テーマ** — 明るく静かな **Iris Light**（既定）ほか、Iris Mist / Dawn、Sumi Light、単色の Mono Paper、ダーク／ブラック。背景は水彩か単色を選べ、テーマは JSON で書き出し・自作もできます（⚙ 設定）。
+
+新規テキストの既定名は `AYAME_UNTITLED_NAME` で変えられます。`{date}` / `{time}` / `{datetime}` / `{pid}` が使えます。
+
+```sh
+AYAME_UNTITLED_NAME='memo-{date}-{time}.txt' ayame
+```
 
 ### キーボード
 
@@ -40,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 | 行へ移動 | `Ctrl+G` |
 | コピー / カット / 全選択 | `Ctrl+C` / `Ctrl+X` / `Ctrl+A` |
 | 元に戻す / やり直す | `Ctrl+Z` / `Ctrl+Y` |
-| 別ファイルへ保存 | `Ctrl+S` |
+| 上書き保存 / 別名で保存 | `Ctrl+S` / `Ctrl+Shift+S` |
 
 ## ソースからビルド
 
@@ -49,7 +65,7 @@ cargo build --release --features gui
 ./target/release/ayame
 ```
 
-Linux では `libwebkit2gtk-4.1-dev` と `libgtk-3-dev` が必要です。
+Windows / macOS / Linux それぞれの開発手順は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) にまとめています。
 
 ## ライセンス
 

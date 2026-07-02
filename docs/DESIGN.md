@@ -96,7 +96,7 @@ UI は仮想化テキストリストで CSS 依存が薄く、webview 横断の�
 1. **有界予算で動く ops**（external-merge / partitioned-hash は設計上 RAM 上限 B で動く）。これが**第一の保護**。
 2. **ハードなプロセス境界**。暴走・OOM・abort 級パニック（スタックオーバフロー/二重パニック/FFI）でも、カーネルが当該ワーカーのページを回収し OOM killer はそのワーカーだけを狙う。UI（mmap ビューポート）は生存。
 
-`catch_unwind`（ワーカー内）は**第二線**（unwind 可能な panic を捕捉、`tower-http` CatchPanicLayer を流用 [`serve.rs`](../crates/ayame-cli/src/serve.rs)）。abort 級は捕えられないので、最後の砦は**プロセス境界**。
+`catch_unwind`（ワーカー内）は**第二線**（unwind 可能な panic を捕捉、`tower-http` CatchPanicLayer を流用 [`serve/mod.rs`](../crates/ayame-cli/src/serve/mod.rs)）。abort 級は捕えられないので、最後の砦は**プロセス境界**。
 
 > **cgroup v2 `memory.max` / Windows Job Object による RSS 上限は v1 の保証にしない（レビュー指摘）。** 通常のデスクトップ起動では cgroup への自己移動に権限委譲が要り、いつでも掛けられるとは限らない。v1 は「有界予算ops＋プロセス境界」で守り、RSS 上限は**後段のハードニング**として位置づける。
 
@@ -252,4 +252,4 @@ v1 の方針:
 - **Zed 子プロセステアダウン:** `crates/lsp/src/lsp.rs:429` `.kill_on_drop(true)`。
 - **Zed ハートビート/バックオフ:** `crates/remote/src/remote_client.rs:160-165`（HEARTBEAT_INTERVAL=5s 等）。
 - **Zed の SQLite 設定（踏襲）:** `crates/db/src/db.rs:130-133`（WAL / NORMAL / busy_timeout）。
-- **Ayame コア:** [`crates/ayame-core/src/index.rs`](../crates/ayame-core/src/index.rs)（16B Checkpoint, stride 4096, rayon 並列ビルド, line_ranges/line_of_byte）, [`search.rs`](../crates/ayame-core/src/search.rs)（Matcher）, [`document.rs`](../crates/ayame-core/src/document.rs)（open 統合点）, ルート [`Cargo.toml`](../Cargo.toml)（`panic=abort` 不採用）, [`serve.rs`](../crates/ayame-cli/src/serve.rs)（Shared state + CatchPanicLayer）。
+- **Ayame コア:** [`crates/ayame-core/src/index.rs`](../crates/ayame-core/src/index.rs)（16B Checkpoint, stride 4096, rayon 並列ビルド, line_ranges/line_of_byte）, [`search.rs`](../crates/ayame-core/src/search.rs)（Matcher）, [`document.rs`](../crates/ayame-core/src/document.rs)（open 統合点）, ルート [`Cargo.toml`](../Cargo.toml)（`panic=abort` 不採用）, [`serve/mod.rs`](../crates/ayame-cli/src/serve/mod.rs)（Shared state + CatchPanicLayer）。

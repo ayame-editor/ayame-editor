@@ -1,0 +1,724 @@
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Arc;
+
+use anyhow::Context;
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::Json;
+use ayame_core::{Document, EditSession, Line, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES};
+use serde::{Deserialize, Serialize};
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
+
+use crate::diff::{diff_documents, DiffKind, DiffResult};
+
+use super::{bad_request, default_suffix_path, internal, workspace, SharedState};
+
+const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
+const ARTIFACT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+static REQ_SEQ: AtomicU64 = AtomicU64::new(0);
+
+// ---- dirty-buffer materialization --------------------------------------------
+
+/// The file an op worker subprocess should read: either the document's own
+/// on-disk path (clean session) or a scratch copy with the unsaved edit
+/// overlay applied, so workers see what the user sees. The scratch directory
+/// is removed when this guard drops.
+pub(super) enum WorkerInput {
+    /// The session was clean — workers can read the original file directly.
+    OnDisk(PathBuf),
+    /// Dirty buffer materialized into a scratch file we own.
+    Materialized { path: PathBuf, dir: PathBuf },
+}
+
+impl WorkerInput {
+    pub(super) fn path(&self) -> &Path {
+        match self {
+            WorkerInput::OnDisk(p) => p,
+            WorkerInput::Materialized { path, .. } => path,
+        }
+    }
+}
+
+impl Drop for WorkerInput {
+    fn drop(&mut self) {
+        if let WorkerInput::Materialized { dir, .. } = self {
+            let _ = std::fs::remove_dir_all(&*dir);
+        }
+    }
+}
+
+/// Materialize the current buffer for a worker if (and only if) there are
+/// unsaved edits. Blocking (streams the whole file when dirty) — call from a
+/// blocking context. The temp dir is cleaned up even when the save fails,
+/// because the guard is constructed before the write.
+pub(super) fn materialize_worker_input(
+    doc: &Document,
+    dirty_edits: Option<&EditSession>,
+    kind: &str,
+) -> anyhow::Result<WorkerInput> {
+    let Some(edits) = dirty_edits else {
+        return Ok(WorkerInput::OnDisk(doc.path().to_path_buf()));
+    };
+    let dir = spawn_dir(kind);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join("current.txt");
+    let input = WorkerInput::Materialized {
+        path: path.clone(),
+        dir,
+    };
+    edits
+        .save_to_path(doc, &path)
+        .context("materializing unsaved edits for the worker")?;
+    Ok(input)
+}
+
+/// Snapshot the active document and hand back a worker-readable input path
+/// that reflects unsaved edits, plus the effective (overlay-aware) line count.
+struct WorkerDoc {
+    doc: Arc<Document>,
+    input: WorkerInput,
+    total_lines: u64,
+}
+
+async fn dirty_aware_input(
+    state: &SharedState,
+    kind: &'static str,
+) -> Result<WorkerDoc, (StatusCode, String)> {
+    let (doc, dirty) = state.doc_and_dirty_edits()?;
+    let total_lines = match &dirty {
+        Some(edits) => edits.total_lines(&doc),
+        None => doc.line_count(),
+    };
+    let doc_for_write = doc.clone();
+    let input = tokio::task::spawn_blocking(move || {
+        materialize_worker_input(&doc_for_write, dirty.as_ref(), kind)
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
+    Ok(WorkerDoc {
+        doc,
+        input,
+        total_lines,
+    })
+}
+
+// ---- save-to-artifact endpoints -----------------------------------------------
+
+#[derive(Serialize)]
+pub(super) struct ArtifactResponse {
+    path: PathBuf,
+    bytes: u64,
+    lines: u64,
+}
+
+#[derive(Deserialize)]
+pub(super) struct SortSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    key: Option<usize>,
+    #[serde(default)]
+    numeric: bool,
+    #[serde(default)]
+    reverse: bool,
+    #[serde(default)]
+    delim: Option<String>,
+}
+
+pub(super) async fn api_sort_save(
+    State(state): State<SharedState>,
+    Json(req): Json<SortSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let wd = dirty_aware_input(&state, "sort-save").await?;
+    // No explicit destination: sort into a scratch file (the GUI opens the
+    // result as a new tab instead of asking for a path first).
+    let target = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => default_sorted_temp_path(wd.doc.path()).map_err(internal)?,
+    };
+    let exe = std::env::current_exe().map_err(internal)?;
+    let dir = spawn_dir("sort-save-spill");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("sort")
+        .arg(wd.input.path())
+        .arg("--out")
+        .arg(&target);
+    if let Some(k) = req.key {
+        cmd.arg("--key").arg(k.to_string());
+    }
+    if req.numeric {
+        cmd.arg("--numeric");
+    }
+    if req.reverse {
+        cmd.arg("--reverse");
+    }
+    if let Some(d) = req.delim.as_deref().filter(|d| !d.is_empty()) {
+        cmd.arg("--delim").arg(d);
+    }
+    cmd.arg("--spill-dir").arg(&dir);
+    let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    drop(wd); // remove the materialized input, if any
+    res.map(Json)
+}
+
+/// Where a sort lands when the client didn't pick a destination: a scratch
+/// file under the OS temp dir, named after the source ("app.log" →
+/// "app.sorted.log"), unique within this server's scratch directory.
+fn default_sorted_temp_path(source: &Path) -> std::io::Result<PathBuf> {
+    let dir = workspace::sorted_dir();
+    std::fs::create_dir_all(&dir)?;
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "output".to_string());
+    let ext = source
+        .extension()
+        .map(|s| format!(".{}", s.to_string_lossy()))
+        .unwrap_or_default();
+    Ok(workspace::unique_upload_path(
+        &dir,
+        &format!("{stem}.sorted{ext}"),
+    ))
+}
+
+#[derive(Deserialize)]
+pub(super) struct ReplaceSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    find: String,
+    replacement: String,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+    #[serde(default)]
+    jobs: Option<usize>,
+    #[serde(default)]
+    chunk_lines: Option<u64>,
+}
+
+pub(super) async fn api_replace_save(
+    State(state): State<SharedState>,
+    Json(req): Json<ReplaceSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let wd = dirty_aware_input(&state, "replace-save").await?;
+    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("replace")
+        .arg(wd.input.path())
+        .arg(req.find)
+        .arg(req.replacement)
+        .arg("--out")
+        .arg(&target);
+    if req.regex {
+        cmd.arg("--regex");
+    }
+    if req.ci {
+        cmd.arg("--ignore-case");
+    }
+    cmd.arg("--jobs")
+        .arg(req.jobs.unwrap_or(0).to_string())
+        .arg("--chunk-lines")
+        .arg(
+            req.chunk_lines
+                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
+                .to_string(),
+        );
+    let res = run_artifact_worker("replace", &mut cmd, &target, wd.total_lines).await;
+    drop(wd);
+    res.map(Json)
+}
+
+#[derive(Deserialize)]
+pub(super) struct CaseSaveRequest {
+    #[serde(default)]
+    path: Option<String>,
+    mode: String,
+}
+
+pub(super) async fn api_case_save(
+    State(state): State<SharedState>,
+    Json(req): Json<CaseSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    let mode = req.mode.trim().to_ascii_lowercase();
+    if !matches!(mode.as_str(), "upper" | "lower") {
+        return Err(bad_request("mode must be upper or lower"));
+    }
+    let wd = dirty_aware_input(&state, "case-save").await?;
+    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("case")
+        .arg(wd.input.path())
+        .arg(mode)
+        .arg("--out")
+        .arg(&target);
+    let res = run_artifact_worker("case", &mut cmd, &target, wd.total_lines).await;
+    drop(wd);
+    res.map(Json)
+}
+
+// ---- search -------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct SearchQuery {
+    q: String,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+    #[serde(default)]
+    word: bool,
+    #[serde(default)]
+    start: u64,
+    #[serde(default = "default_max")]
+    max: usize,
+}
+
+fn default_max() -> usize {
+    2000
+}
+
+pub(super) async fn api_search(
+    State(state): State<SharedState>,
+    Query(q): Query<SearchQuery>,
+) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
+    // Search what the user sees: a dirty buffer is materialized so hits (line
+    // numbers, byte anchors) line up with the edited view.
+    let wd = dirty_aware_input(&state, "search").await?;
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("search")
+        .arg(wd.input.path())
+        .arg("--json")
+        .arg("--max")
+        .arg(q.max.min(100_000).to_string())
+        .arg("--start-byte")
+        .arg(q.start.to_string());
+    if q.regex {
+        cmd.arg("--regex");
+    }
+    if q.ci {
+        cmd.arg("--ignore-case");
+    }
+    if q.word {
+        cmd.arg("--whole-word");
+    }
+    cmd.arg("--").arg(q.q);
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let out = wait_worker_output("search", &mut cmd).await;
+    drop(wd);
+    let out = out?;
+    if !out.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "search worker {} - the engine is unaffected",
+                describe_status(out.status)
+            ),
+        ));
+    }
+    let res: ayame_core::SearchResult = serde_json::from_slice(&out.stdout).map_err(internal)?;
+    Ok(Json(res))
+}
+
+// ---- find (incremental next/prev) ----------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct FindQuery {
+    q: String,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+    #[serde(default)]
+    word: bool,
+    /// "next" or "prev".
+    dir: String,
+    /// Anchor byte: search starts at/after (next) or strictly before (prev).
+    #[serde(default)]
+    from: u64,
+}
+
+#[derive(Serialize)]
+pub(super) struct FindResponse {
+    hit: Option<ayame_core::SearchHit>,
+}
+
+pub(super) async fn api_find(
+    State(state): State<SharedState>,
+    Query(q): Query<FindQuery>,
+) -> Result<Json<FindResponse>, (StatusCode, String)> {
+    let doc = state.require_doc()?;
+    // find_prev in particular can scan everything before the anchor; keep that
+    // off the async workers so slow finds never stall unrelated requests.
+    // NOTE: find intentionally searches the ON-DISK file, not the dirty
+    // overlay (the front-end warns about pending edits).
+    let hit = tokio::task::spawn_blocking(move || {
+        if q.dir == "prev" {
+            doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
+        } else {
+            doc.find_next(&q.q, q.regex, !q.ci, q.word, q.from)
+        }
+    })
+    .await
+    .map_err(internal)?
+    .map_err(bad_request)?;
+    Ok(Json(FindResponse { hit }))
+}
+
+// ---- diff ----------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct DiffQuery {
+    path: String,
+    #[serde(default = "diff_max_hunks")]
+    max_hunks: usize,
+    #[serde(default = "diff_max_lines")]
+    max_lines: u64,
+    #[serde(default = "diff_window")]
+    window: u64,
+}
+
+fn diff_max_hunks() -> usize {
+    200
+}
+
+fn diff_window() -> u64 {
+    128
+}
+
+fn diff_max_lines() -> u64 {
+    80
+}
+
+#[derive(Serialize)]
+pub(super) struct WebDiffResponse {
+    old_path: String,
+    new_path: String,
+    current_dirty: bool,
+    old_lines: u64,
+    new_lines: u64,
+    hunks: Vec<WebDiffHunk>,
+    hunk_count: u64,
+    omitted_hunks: u64,
+    added: u64,
+    deleted: u64,
+    modified: u64,
+    max_lines_per_hunk: u64,
+}
+
+#[derive(Serialize)]
+pub(super) struct WebDiffHunk {
+    kind: DiffKind,
+    old_start: u64,
+    old_len: u64,
+    new_start: u64,
+    new_len: u64,
+    old_preview: Vec<Line>,
+    new_preview: Vec<Line>,
+    old_truncated: bool,
+    new_truncated: bool,
+}
+
+pub(super) async fn api_diff(
+    State(state): State<SharedState>,
+    Query(q): Query<DiffQuery>,
+) -> Result<Json<WebDiffResponse>, (StatusCode, String)> {
+    let path = q.path.trim().to_string();
+    if path.is_empty() {
+        return Err(bad_request("path is empty"));
+    }
+    let (old, dirty) = state.doc_and_dirty_edits()?;
+    let current_dirty = dirty.is_some();
+    let old_path = old.path().display().to_string();
+    let new_path = path.clone();
+    let open_options = state.open_options();
+    let max_hunks = q.max_hunks.min(100_000);
+    let max_lines = q.max_lines.clamp(1, 500);
+    let window = q.window.max(1);
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<WebDiffResponse> {
+        let new =
+            Document::open(&path, &open_options).with_context(|| format!("opening '{path}'"))?;
+        let input = materialize_worker_input(old.as_ref(), dirty.as_ref(), "diff-current")?;
+        let response = match &input {
+            WorkerInput::Materialized { path: current, .. } => {
+                // The scratch copy is read once and discarded: skip the index
+                // cache so it doesn't accumulate dead entries.
+                let scratch_opts = ayame_core::OpenOptions {
+                    cache_dir: None,
+                    ..open_options.clone()
+                };
+                let current = Document::open(current, &scratch_opts)
+                    .with_context(|| format!("opening {}", current.display()))?;
+                let diff = diff_documents(&current, &new, max_hunks, window);
+                web_diff_response(
+                    &current,
+                    &new,
+                    diff,
+                    old_path,
+                    new_path,
+                    current_dirty,
+                    max_lines,
+                )
+            }
+            WorkerInput::OnDisk(_) => {
+                let diff = diff_documents(old.as_ref(), &new, max_hunks, window);
+                web_diff_response(
+                    old.as_ref(),
+                    &new,
+                    diff,
+                    old_path,
+                    new_path,
+                    current_dirty,
+                    max_lines,
+                )
+            }
+        };
+        drop(input);
+        Ok(response)
+    })
+    .await
+    .map_err(internal)?
+    .map_err(bad_request)?;
+    Ok(Json(result))
+}
+
+fn web_diff_response(
+    old: &Document,
+    new: &Document,
+    result: DiffResult,
+    old_path: String,
+    new_path: String,
+    current_dirty: bool,
+    max_lines: u64,
+) -> WebDiffResponse {
+    let hunks = result
+        .hunks
+        .iter()
+        .map(|h| {
+            let old_count = h.old_len.min(max_lines);
+            let new_count = h.new_len.min(max_lines);
+            WebDiffHunk {
+                kind: h.kind,
+                old_start: h.old_start,
+                old_len: h.old_len,
+                new_start: h.new_start,
+                new_len: h.new_len,
+                old_preview: old.lines(h.old_start, old_count),
+                new_preview: new.lines(h.new_start, new_count),
+                old_truncated: h.old_len > old_count,
+                new_truncated: h.new_len > new_count,
+            }
+        })
+        .collect();
+    WebDiffResponse {
+        old_path,
+        new_path,
+        current_dirty,
+        old_lines: result.old_lines,
+        new_lines: result.new_lines,
+        hunks,
+        hunk_count: result.hunk_count,
+        omitted_hunks: result.omitted_hunks,
+        added: result.added,
+        deleted: result.deleted,
+        modified: result.modified,
+        max_lines_per_hunk: max_lines,
+    }
+}
+
+// ---- misc ----------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct LineByteQuery {
+    line: u64,
+}
+
+#[derive(Serialize)]
+pub(super) struct LineByteResponse {
+    byte: Option<u64>,
+}
+
+pub(super) async fn api_linebyte(
+    State(state): State<SharedState>,
+    Query(q): Query<LineByteQuery>,
+) -> Json<LineByteResponse> {
+    let byte = state.doc_opt().and_then(|doc| doc.line_start_byte(q.line));
+    Json(LineByteResponse { byte })
+}
+
+fn requested_or_default(path: &Path, requested: Option<&str>, suffix: &str) -> PathBuf {
+    requested
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_suffix_path(path, suffix))
+}
+
+fn spawn_dir(kind: &str) -> PathBuf {
+    let n = REQ_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
+    std::env::temp_dir().join(format!("ayame-srv-{kind}-{}-{}", std::process::id(), n))
+}
+
+async fn run_artifact_worker(
+    kind: &str,
+    cmd: &mut Command,
+    target: &Path,
+    lines: u64,
+) -> Result<ArtifactResponse, (StatusCode, String)> {
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let status = wait_worker_for(kind, cmd, ARTIFACT_TIMEOUT).await?;
+    if !status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "{kind} worker {} - the engine is unaffected",
+                describe_status(status)
+            ),
+        ));
+    }
+    let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
+    Ok(ArtifactResponse {
+        path: target.to_path_buf(),
+        bytes,
+        lines,
+    })
+}
+
+fn describe_status(s: std::process::ExitStatus) -> String {
+    if let Some(c) = s.code() {
+        format!("failed (exit code {c})")
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = s.signal() {
+                return format!("crashed (signal {sig})");
+            }
+        }
+        "terminated abnormally".to_string()
+    }
+}
+
+async fn wait_worker_for(
+    kind: &str,
+    cmd: &mut Command,
+    timeout_after: Duration,
+) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+    let mut child = cmd.spawn().map_err(internal)?;
+    match timeout(timeout_after, child.wait()).await {
+        Ok(waited) => waited.map_err(internal),
+        Err(_) => {
+            let _ = child.kill().await;
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                format!(
+                    "{kind} worker timed out after {}s - the engine is unaffected",
+                    timeout_after.as_secs()
+                ),
+            ))
+        }
+    }
+}
+
+async fn wait_worker_output(
+    kind: &str,
+    cmd: &mut Command,
+) -> Result<std::process::Output, (StatusCode, String)> {
+    let child = cmd.spawn().map_err(internal)?;
+    match timeout(WORKER_TIMEOUT, child.wait_with_output()).await {
+        Ok(waited) => waited.map_err(internal),
+        Err(_) => Err((
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                "{kind} worker timed out after {}s - the engine is unaffected",
+                WORKER_TIMEOUT.as_secs()
+            ),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write as _;
+
+    use ayame_core::OpenOptions;
+
+    use super::*;
+
+    fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ayame-ops-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!(
+            "{}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            name
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn clean_session_uses_the_on_disk_path() {
+        let path = scratch_file("clean.txt", b"a\nb\n");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let input = materialize_worker_input(&doc, None, "test").unwrap();
+        assert_eq!(input.path(), doc.path());
+        assert!(matches!(input, WorkerInput::OnDisk(_)));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn dirty_session_materializes_and_cleans_up() {
+        let path = scratch_file("dirty.txt", b"alpha\nbeta\n");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "BETA".into()).unwrap();
+        assert!(edits.is_dirty());
+
+        let input = materialize_worker_input(&doc, Some(&edits), "test").unwrap();
+        let materialized = input.path().to_path_buf();
+        assert_ne!(materialized, path);
+        assert_eq!(
+            std::fs::read(&materialized).unwrap(),
+            b"alpha\nBETA\n",
+            "the worker must see the overlay, not the stale file"
+        );
+
+        drop(input);
+        assert!(
+            !materialized.exists(),
+            "materialized scratch file must be removed on drop"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sorted_temp_path_is_named_after_the_source() {
+        let p = default_sorted_temp_path(Path::new("/data/app.log")).unwrap();
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        assert!(
+            name.starts_with("app.sorted") && name.ends_with("log"),
+            "unexpected name {name}"
+        );
+        assert!(p.starts_with(std::env::temp_dir()));
+    }
+}

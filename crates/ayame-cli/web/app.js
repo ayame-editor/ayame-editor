@@ -1,9 +1,9 @@
-// Ayame editor front-end.
+// Ayame Editor front-end.
 //
 // Design rule: the browser never holds more than the visible window. Lines are
 // fetched on demand from the local server; vertical position is tracked as a
 // *line number* (not pixels), so navigation is exact for any file size — ten
-// lines or Ayame's minimum ten-billion-line scale. A custom scrollbar maps line
+// lines or Ayame Editor's minimum ten-billion-line scale. A custom scrollbar maps line
 // position to a thumb, side-stepping the browser's ~33M-pixel element-height
 // ceiling entirely.
 
@@ -14,7 +14,7 @@ const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 const SETTINGS_KEY = "ayame.settings.v1";
 const TREE_KEY = "ayame.treeRoot.v1";
-const MAX_COPY_LINES = 20000; // cap for copy/cut/delete of a selection
+const MAX_COPY_LINES = 20000; // clipboard cap: copy warns, cut refuses beyond this
 
 const FONT_STACKS = {
   mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
@@ -26,11 +26,38 @@ const DEFAULT_SETTINGS = {
   font: "mono",
   fontSize: 13,
   sidebar: false,
+  sidebarSide: "left",
   ruler: true,
   bgMode: "watercolor",
   illus: null,
+  keymap: {},
   customThemes: {},
 };
+
+const KEYMAP_ACTIONS = [
+  ["newFile", "新規テキスト", "Ctrl+N"],
+  ["openFile", "開く", "Ctrl+O"],
+  ["saveFile", "保存", "Ctrl+S"],
+  ["saveAs", "別名で保存", "Ctrl+Shift+S"],
+  ["closeTab", "タブを閉じる", "Ctrl+W"],
+  ["toggleSidebar", "エクスプローラー表示", "Ctrl+B"],
+  ["find", "検索", "Ctrl+F"],
+  ["findNext", "次の一致", "F3"],
+  ["findPrev", "前の一致", "Shift+F3"],
+  ["gotoLine", "行へ移動", "Ctrl+G"],
+  ["undo", "元に戻す", "Ctrl+Z"],
+  ["redo", "やり直す", ["Ctrl+Y", "Ctrl+Shift+Z"]],
+  ["selectAll", "すべて選択", "Ctrl+A"],
+  ["copy", "コピー", "Ctrl+C"],
+  ["cut", "切り取り", "Ctrl+X"],
+  ["searchCase", "検索: 大文字小文字", "Alt+C"],
+  ["searchWord", "検索: 単語単位", "Alt+W"],
+  ["searchRegex", "検索: 正規表現", "Alt+R"],
+  ["sortSave", "ソート", ""],
+  ["replaceSave", "置換して保存", ""],
+  ["diffFile", "2ファイル差分", ""],
+];
+const DEFAULT_KEYMAP = Object.fromEntries(KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]));
 
 const state = {
   total: 0,
@@ -50,6 +77,8 @@ const state = {
   lastMatch: null, // { byte, len }
   searchHits: null,
   searchTruncated: false,
+  findOpen: false,
+  dirtyFindWarned: false, // one-shot hint: find jumps target the saved bytes
   history: [],
   historyIndex: -1,
   settings: { ...DEFAULT_SETTINGS },
@@ -57,20 +86,25 @@ const state = {
   treeParent: null, // parent of the current tree root (for the "up" button)
   treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
+  openerMode: "open", // "open" | "save"
+  openerEntries: [],
+  openerResolve: null,
   // ---- caret-based (Notepad-style) editing ----
   caret: { line: 0, col: 0 }, // (line, col) in Unicode scalars, like the backend
   goalCol: 0, // remembered column for vertical caret motion
   editGen: 0, // bumps on every user caret move; lets an in-flight edit detect it
   composing: false, // an IME composition is in progress
   focused: false, // the hidden text input holds focus (draw the caret)
-  sel: null, // selection: { anchor: {line,col}, head: {line,col} } or null
+  sel: null, // selection: { anchor: {line,col}, head: {line,col}, rect?: bool } or null
   dragging: false,
   dragMoved: false,
   dragAnchor: null, // caret at mouse-down, promoted to a selection once it moves
+  dragRect: false,
 };
 
 const pool = [];
 let renderQueued = false;
+let lastNativeTitle = "";
 
 // ---- tiny helpers -----------------------------------------------------------
 
@@ -107,6 +141,279 @@ function humanBytes(n) {
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const APP_MENUS = ["file", "edit", "selection", "view", "tools"];
+
+function fileMenuVisible() {
+  return APP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
+}
+
+function showAppMenu(id) {
+  hideFileMenu();
+  $(`${id}-menu`).classList.remove("hidden");
+  $(`${id}-menu-button`).classList.add("on");
+  $(`${id}-menu-button`).setAttribute("aria-expanded", "true");
+}
+
+function hideFileMenu(focusButton = false) {
+  let focused = false;
+  for (const id of APP_MENUS) {
+    const menu = $(`${id}-menu`);
+    const button = $(`${id}-menu-button`);
+    const wasOpen = !menu.classList.contains("hidden");
+    menu.classList.add("hidden");
+    button.classList.remove("on");
+    button.setAttribute("aria-expanded", "false");
+    if (focusButton && wasOpen && !focused) {
+      button.focus();
+      focused = true;
+    }
+  }
+}
+
+function toggleFileMenu() {
+  fileMenuVisible() ? hideFileMenu() : showAppMenu("file");
+}
+
+function normalizeShortcut(raw) {
+  if (!raw) return "";
+  const parts = String(raw).split("+").map((p) => p.trim()).filter(Boolean);
+  const mods = { Ctrl: false, Shift: false, Alt: false };
+  let key = "";
+  for (const part of parts) {
+    const low = part.toLowerCase();
+    if (low === "ctrl" || low === "control" || low === "cmd" || low === "command" || low === "meta") mods.Ctrl = true;
+    else if (low === "shift") mods.Shift = true;
+    else if (low === "alt" || low === "option") mods.Alt = true;
+    else key = part.length === 1 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1);
+  }
+  if (!key || ["Ctrl", "Shift", "Alt"].includes(key)) return "";
+  return [mods.Ctrl && "Ctrl", mods.Shift && "Shift", mods.Alt && "Alt", key].filter(Boolean).join("+");
+}
+
+function isBindableShortcut(shortcut) {
+  if (!shortcut) return true;
+  const parts = shortcut.split("+");
+  const key = parts[parts.length - 1];
+  return parts.includes("Ctrl") || parts.includes("Alt") || /^F\d+$/i.test(key);
+}
+
+function sanitizeKeymap(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const clean = {};
+  for (const [action] of KEYMAP_ACTIONS) {
+    if (!Object.prototype.hasOwnProperty.call(src, action)) continue;
+    if (Array.isArray(src[action])) {
+      clean[action] = src[action].map(normalizeShortcut).filter((v) => v && isBindableShortcut(v));
+    } else {
+      const v = normalizeShortcut(src[action]);
+      clean[action] = isBindableShortcut(v) ? v : "";
+    }
+  }
+  return clean;
+}
+
+function eventShortcut(e) {
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return "";
+  let key = e.key;
+  if (key.length === 1) key = key.toUpperCase();
+  else if (/^f\d+$/i.test(key)) key = key.toUpperCase();
+  else key = key[0].toUpperCase() + key.slice(1);
+  return [
+    (e.ctrlKey || e.metaKey) && "Ctrl",
+    e.shiftKey && "Shift",
+    e.altKey && "Alt",
+    key,
+  ].filter(Boolean).join("+");
+}
+
+function shortcutList(action) {
+  const custom = state.settings.keymap && Object.prototype.hasOwnProperty.call(state.settings.keymap, action)
+    ? state.settings.keymap[action]
+    : DEFAULT_KEYMAP[action];
+  const list = Array.isArray(custom) ? custom : [custom];
+  return list.map(normalizeShortcut).filter(Boolean);
+}
+
+function shortcutFor(action) {
+  return shortcutList(action)[0] || "";
+}
+
+function displayShortcut(action) {
+  return shortcutFor(action) || "未設定";
+}
+
+function matchesShortcut(e, action) {
+  const ev = eventShortcut(e);
+  return !!ev && shortcutList(action).includes(ev);
+}
+
+function postNativeMessage(msg) {
+  try {
+    if (window.ipc && typeof window.ipc.postMessage === "function") {
+      window.ipc.postMessage(msg);
+    }
+  } catch {
+    // The web build has no native IPC; title/close still work in the browser.
+  }
+}
+
+function setAppTitle(title) {
+  const next = title || "Ayame Editor";
+  document.title = next;
+  if (lastNativeTitle !== next) {
+    lastNativeTitle = next;
+    postNativeMessage(`ayame:title:${next}`);
+  }
+}
+
+function dirtyTabNames() {
+  const names = [];
+  for (const t of state.tabs || []) {
+    if (t.dirty && t.name) names.push(t.name);
+  }
+  if (state.stat?.dirty && names.length === 0) names.push(displayName(state.stat.path));
+  return [...new Set(names)].filter(Boolean);
+}
+
+function hasDirtyDocuments() {
+  return !!state.stat?.dirty || dirtyTabNames().length > 0;
+}
+
+function confirmCloseWorkspace() {
+  const dirty = dirtyTabNames();
+  if (!hasDirtyDocuments()) return true;
+  const shown = dirty.slice(0, 5).join(", ");
+  const more = dirty.length > 5 ? ` ほか ${dirty.length - 5} 件` : "";
+  const suffix = shown ? `\n\n${shown}${more}` : "";
+  return confirm(`未保存の編集があります。保存せず終了しますか?${suffix}`);
+}
+
+// Never let the native window kill the process while a save is in flight; the
+// close request is answered "cancel" and retried once the save settles.
+let savingCount = 0;
+let pendingNativeClose = false;
+window.__ayameNativeCloseRequested = () => {
+  if (savingCount > 0) {
+    pendingNativeClose = true;
+    flashCount("保存処理中です。完了後に閉じます…");
+    postNativeMessage("ayame:close-cancel");
+    return;
+  }
+  postNativeMessage(confirmCloseWorkspace() ? "ayame:close-ok" : "ayame:close-cancel");
+};
+
+function retryPendingNativeClose() {
+  if (pendingNativeClose && savingCount === 0) {
+    pendingNativeClose = false;
+    window.__ayameNativeCloseRequested();
+  }
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (!hasDirtyDocuments()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+function setKeymap(action, shortcut) {
+  const normalized = normalizeShortcut(shortcut);
+  if (normalized && !isBindableShortcut(normalized)) {
+    flashCount("文字入力と衝突するキーは使えません");
+    return;
+  }
+  state.settings = {
+    ...state.settings,
+    keymap: { ...(state.settings.keymap || {}), [action]: normalized },
+  };
+  saveSettings(state.settings);
+  updateKeyHints();
+  renderKeymapRows();
+}
+
+function resetKeymap() {
+  state.settings = { ...state.settings, keymap: {} };
+  saveSettings(state.settings);
+  updateKeyHints();
+  renderKeymapRows();
+}
+
+function updateKeyHints() {
+  document.querySelectorAll("[data-key-action]").forEach((el) => {
+    el.textContent = shortcutFor(el.dataset.keyAction);
+  });
+  const hint = (label, action) => {
+    const key = shortcutFor(action);
+    return key ? `${label} (${key})` : label;
+  };
+  $("toggle-sidebar").title = hint("エクスプローラー", "toggleSidebar");
+  $("undo-edit").title = hint("元に戻す", "undo");
+  $("redo-edit").title = hint("やり直す", "redo");
+  $("find").placeholder = hint("検索", "find");
+  $("find-prev").title = hint("前の一致", "findPrev");
+  $("find-next").title = hint("次の一致", "findNext");
+  $("opt-case").title = hint("大文字小文字を区別", "searchCase");
+  $("opt-word").title = hint("単語単位", "searchWord");
+  $("opt-regex").title = hint("正規表現", "searchRegex");
+  $("new-tab").title = hint("新規タブ", "newFile");
+}
+
+function keymapVisible() {
+  return !$("keymap-modal").classList.contains("hidden");
+}
+
+function showKeymap() {
+  hideSettings();
+  renderKeymapRows();
+  const m = $("keymap-modal");
+  m.classList.remove("hidden");
+  m.setAttribute("aria-hidden", "false");
+  queueMicrotask(() => $("keymap-list").querySelector("input")?.focus());
+}
+
+function hideKeymap() {
+  const m = $("keymap-modal");
+  m.classList.add("hidden");
+  m.setAttribute("aria-hidden", "true");
+  focusEditor();
+}
+
+function renderKeymapRows() {
+  const list = $("keymap-list");
+  if (!list) return;
+  const used = new Map();
+  for (const [action] of KEYMAP_ACTIONS) {
+    for (const key of shortcutList(action)) used.set(key, (used.get(key) || 0) + 1);
+  }
+  list.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const [action, label] of KEYMAP_ACTIONS) {
+    const row = document.createElement("label");
+    const shortcut = shortcutFor(action);
+    row.className = "keymap-row";
+    if (shortcut && used.get(shortcut) > 1) row.classList.add("conflict");
+    const name = document.createElement("span");
+    name.className = "keymap-label";
+    name.textContent = label;
+    const input = document.createElement("input");
+    input.className = "keymap-input";
+    input.readOnly = true;
+    input.value = shortcut;
+    input.placeholder = "未設定";
+    input.dataset.action = action;
+    input.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { hideKeymap(); return; }
+      if (e.key === "Backspace" || e.key === "Delete") { setKeymap(action, ""); return; }
+      const shortcut = eventShortcut(e);
+      if (shortcut) setKeymap(action, shortcut);
+    });
+    row.append(name, input);
+    frag.append(row);
+  }
+  list.append(frag);
 }
 
 function rowsVisible() {
@@ -326,10 +633,26 @@ function selRange() {
   if (!state.sel) return null;
   const { anchor: a, head: h } = state.sel;
   const forward = a.line < h.line || (a.line === h.line && a.col <= h.col);
-  return forward ? { start: a, end: h } : { start: h, end: a };
+  const r = forward ? { start: a, end: h } : { start: h, end: a };
+  r.rect = !!state.sel.rect;
+  return r;
+}
+
+function rectRange() {
+  if (!state.sel?.rect) return null;
+  const a = state.sel.anchor;
+  const h = state.sel.head;
+  return {
+    l0: Math.min(a.line, h.line),
+    l1: Math.max(a.line, h.line),
+    c0: Math.min(a.col, h.col),
+    c1: Math.max(a.col, h.col),
+  };
 }
 
 function hasSelection() {
+  const rr = rectRange();
+  if (rr) return rr.l0 !== rr.l1 || rr.c0 !== rr.c1;
   const r = selRange();
   return !!r && !(r.start.line === r.end.line && r.start.col === r.end.col);
 }
@@ -344,6 +667,23 @@ function clearSelection() {
 function renderSelection() {
   const layer = $("sel-layer");
   layer.textContent = "";
+  const rr = rectRange();
+  if (rr) {
+    const vis = rowsVisible() + OVERSCAN;
+    const from = Math.max(rr.l0, state.first);
+    const to = Math.min(rr.l1, state.first + vis);
+    for (let line = from; line <= to; line++) {
+      const left = caretX(line, rr.c0);
+      const width = Math.max(2, caretX(line, rr.c1) - left);
+      const rect = document.createElement("div");
+      rect.className = "selrect";
+      rect.style.left = `${left}px`;
+      rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
+      rect.style.width = `${width}px`;
+      layer.append(rect);
+    }
+    return;
+  }
   const r = selRange();
   if (!r || (r.start.line === r.end.line && r.start.col === r.end.col)) return;
   const cw = charWidth();
@@ -376,7 +716,7 @@ function initSelection() {
     const p = coordsFromEvent(e);
     if (e.shiftKey) {
       const anchor = state.sel ? state.sel.anchor : { ...state.caret };
-      state.sel = { anchor, head: p };
+      state.sel = { anchor, head: p, rect: e.altKey };
       state.dragAnchor = anchor;
       state.dragMoved = true;
     } else {
@@ -384,6 +724,7 @@ function initSelection() {
       state.dragAnchor = p;
       state.dragMoved = false;
     }
+    state.dragRect = e.altKey;
     setCaret(p.line, p.col);
     state.dragging = true;
     focusEditor();
@@ -394,7 +735,7 @@ function initSelection() {
     const p = coordsFromEvent(e);
     const a = state.dragAnchor;
     if (p.line !== a.line || p.col !== a.col) state.dragMoved = true;
-    if (state.dragMoved) state.sel = { anchor: a, head: p };
+    if (state.dragMoved) state.sel = { anchor: a, head: p, rect: state.dragRect };
     setCaret(p.line, p.col);
     // Auto-scroll when dragging past the top/bottom edge.
     const rect = content.getBoundingClientRect();
@@ -406,6 +747,7 @@ function initSelection() {
   window.addEventListener("mouseup", () => {
     if (!state.dragging) return;
     state.dragging = false;
+    state.dragRect = false;
     if (!state.dragMoved) state.sel = null; // plain click → just the caret
     scheduleRender();
   });
@@ -438,15 +780,32 @@ function selectAll() {
   focusEditor();
 }
 
+function selectionLineCount(r) {
+  const rr = rectRange();
+  if (rr) return rr.l1 - rr.l0 + 1;
+  return r.end.line - r.start.line + 1;
+}
+
 // Fetch the selected text (bounded) and join with newlines.
 async function selectedText(r) {
+  const rr = rectRange();
+  if (rr) {
+    const count = Math.min(rr.l1 - rr.l0 + 1, MAX_COPY_LINES);
+    const res = await api(`/api/lines?start=${rr.l0}&count=${count}`);
+    return res.lines.map((x) => {
+      const chars = Array.from(x.text ?? "");
+      return chars.slice(rr.c0, rr.c1).join("");
+    }).join("\n");
+  }
   const count = Math.min(r.end.line - r.start.line + 1, MAX_COPY_LINES);
   const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
-  const L = res.lines.map((x) => x.text);
-  if (L.length === 1) return (L[0] ?? "").slice(r.start.col, r.end.col);
-  const out = [(L[0] ?? "").slice(r.start.col)];
-  for (let i = 1; i < L.length - 1; i++) out.push(L[i]);
-  out.push((L[L.length - 1] ?? "").slice(0, r.end.col));
+  // Columns are Unicode scalar counts (the server contract); slicing UTF-16
+  // units here would split surrogate pairs (emoji etc.).
+  const L = res.lines.map((x) => Array.from(x.text ?? ""));
+  if (L.length === 1) return L[0].slice(r.start.col, r.end.col).join("");
+  const out = [L[0].slice(r.start.col).join("")];
+  for (let i = 1; i < L.length - 1; i++) out.push(L[i].join(""));
+  out.push(L[L.length - 1].slice(0, r.end.col).join(""));
   return out.join("\n");
 }
 
@@ -473,10 +832,15 @@ async function copySelection() {
   const r = selRange();
   if (!r) return;
   try {
+    const total = selectionLineCount(r);
     await copyToClipboard(await selectedText(r));
-    flashCount("コピーしました");
+    if (total > MAX_COPY_LINES) {
+      flashCount(`選択 ${commas(total)} 行のうち先頭 ${commas(MAX_COPY_LINES)} 行だけコピーしました`, "error");
+    } else {
+      flashCount("コピーしました");
+    }
   } catch (e) {
-    flashCount("コピーエラー");
+    flashCount("コピーエラー", "error");
     console.error(e);
   }
 }
@@ -489,6 +853,13 @@ function deleteSelection() {
 async function cutSelection() {
   const r = selRange();
   if (!r || !hasSelection()) return;
+  // Never delete more than what reached the clipboard: a capped copy followed
+  // by a full delete would silently destroy data.
+  const total = selectionLineCount(r);
+  if (total > MAX_COPY_LINES) {
+    flashCount(`切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。削除だけなら Delete キーを使ってください`, "error");
+    return;
+  }
   await copyToClipboard(await selectedText(r));
   deleteSelection();
 }
@@ -565,6 +936,29 @@ function updateScrollbar() {
   const top = mf > 0 ? (vh - thumbH) * (state.first / mf) : 0;
   thumb.style.height = `${thumbH}px`;
   thumb.style.transform = `translateY(${top}px)`;
+  renderSearchTicks(vh);
+}
+
+function renderSearchTicks(vh) {
+  const ticks = $("vticks");
+  if (!ticks) return;
+  ticks.textContent = "";
+  if (!state.query || !state.searchHits || state.searchHits.length === 0 || state.total <= 1) return;
+  const frag = document.createDocumentFragment();
+  const maxTicks = 700;
+  const step = Math.max(1, Math.ceil(state.searchHits.length / maxTicks));
+  const denom = Math.max(1, state.total - 1);
+  for (let i = 0; i < state.searchHits.length; i += step) {
+    const h = state.searchHits[i];
+    if (typeof h.line !== "number") continue;
+    const t = document.createElement("div");
+    t.className = "vtick";
+    if (state.lastMatch && h.byte === state.lastMatch.byte) t.classList.add("current");
+    const y = Math.max(0, Math.min(vh - 3, (h.line / denom) * (vh - 3)));
+    t.style.transform = `translateY(${y}px)`;
+    frag.append(t);
+  }
+  ticks.append(frag);
 }
 
 function initScrollbar() {
@@ -608,48 +1002,136 @@ function initScrollbar() {
 
 function updateStatusMeta() {
   const s = state.stat;
-  if (!s) return;
+  if (!s) {
+    setAppTitle("Ayame Editor");
+    return;
+  }
   if (!s.open) {
-    $("filename").textContent = "ファイル未選択";
-    $("filename").title = "";
-    for (const id of ["st-lines", "st-size", "st-enc", "st-eol", "st-edit", "st-index"]) {
+    for (const id of ["st-enc", "st-eol", "st-edit", "st-index"]) {
       $(id).textContent = "—";
     }
+    $("st-edit").title = "";
+    $("st-index").title = "";
     $("st-pos").textContent = "行 0";
     $("undo-edit").disabled = true;
     $("redo-edit").disabled = true;
+    $("apply-theme").classList.add("hidden");
+    $("apply-keymap").classList.add("hidden");
+    setAppTitle("Ayame Editor");
     return;
   }
-  $("filename").textContent = `${s.dirty ? "* " : ""}${displayName(s.path)}`;
-  $("filename").title = isUntitled(s.path) ? "untitled" : s.path;
+  const name = displayName(s.path);
+  const dirtyMark = s.dirty ? "* " : "";
+  setAppTitle(`${dirtyMark}${name} - Ayame Editor`);
   $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
+  $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
   const lines = s.view_lines ?? s.lines;
-  $("st-lines").textContent = `${commas(lines)} 行`;
-  $("st-size").textContent = humanBytes(s.bytes);
   $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
   $("st-eol").textContent = eol(s.eol);
-  $("st-edit").textContent = s.dirty
-    ? `編集 +${commas(s.inserted_lines)} ~${commas(s.replaced_lines)} -${commas(s.deleted_lines)}`
-    : "未編集";
+  // Deliberately terse: the bar shows state, the tooltip carries the numbers.
+  $("st-edit").textContent = s.dirty ? "未保存" : "保存済";
+  $("st-edit").title = s.dirty
+    ? `未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`
+    : "すべての編集は保存済みです";
   $("undo-edit").disabled = !s.can_undo;
   $("redo-edit").disabled = !s.can_redo;
-  $("st-index").textContent =
-    `索引 ${commas(s.checkpoints)} 点 / ${humanBytes(s.index_bytes)} / ${s.index_ms} ms`;
-  // Keep the active tab's unsaved-dot in sync as you type (no full refetch).
+  $("st-index").textContent = "索引OK";
+  $("st-index").title =
+    `${commas(lines)} 行 / ${humanBytes(s.bytes)} / 索引 ${commas(s.checkpoints)} 点 (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`;
+  // Keep the active tab's unsaved-dot (and the tabs model behind
+  // beforeunload / close confirmations) in sync as you type.
   const at = $("tabs").querySelector(".tab.active");
   if (at) at.classList.toggle("dirty", !!s.dirty);
+  const activeTab = (state.tabs || []).find((t) => t.active);
+  if (activeTab) activeTab.dirty = !!s.dirty;
 }
 
 function isUntitled(path) {
   return !!path && path.includes("ayame-untitled-");
 }
 
+function untitledName(path) {
+  const base = pathBaseName(path);
+  return base && base !== "untitled.txt" ? base : "untitled";
+}
+
 // Show a short, friendly name in the toolbar (basename, or "untitled").
 function displayName(path) {
   if (!path) return "—";
-  if (isUntitled(path)) return "untitled";
+  if (isUntitled(path)) return untitledName(path);
   const parts = path.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || path;
+}
+
+function pathBaseName(path) {
+  if (!path) return "";
+  const clean = String(path).replace(/^\\\\\?\\/, "");
+  const parts = clean.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || clean;
+}
+
+function pathDirName(path) {
+  if (!path) return null;
+  const clean = String(path).replace(/^\\\\\?\\/, "");
+  const i = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  if (i < 0) return null;
+  if (i === 0) return clean.slice(0, 1);
+  return clean.slice(0, i);
+}
+
+function isAbsolutePath(path) {
+  return /^(?:[A-Za-z]:[\\/]|\/|\\\\)/.test(String(path || ""));
+}
+
+function joinPath(dir, name) {
+  const n = String(name || "").trim();
+  if (!n) return "";
+  if (isAbsolutePath(n)) return n;
+  const d = String(dir || "").replace(/[\\/]+$/, "");
+  if (!d) return n;
+  const sep = d.includes("\\") && !d.includes("/") ? "\\" : "/";
+  return `${d}${sep}${n}`;
+}
+
+function pathCrumbs(path) {
+  const clean = String(path || "").replace(/^\\\\\?\\/, "");
+  if (!clean) return [];
+  const winDrive = clean.match(/^([A-Za-z]:)[\\/](.*)$/);
+  if (winDrive) {
+    const sep = "\\";
+    let acc = `${winDrive[1]}${sep}`;
+    const out = [{ label: winDrive[1], path: acc }];
+    for (const part of winDrive[2].split(/[\\/]+/).filter(Boolean)) {
+      acc = acc.endsWith(sep) ? `${acc}${part}` : `${acc}${sep}${part}`;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
+  if (clean.startsWith("\\\\")) {
+    const parts = clean.split(/[\\/]+/).filter(Boolean);
+    if (parts.length < 2) return [{ label: clean, path: clean }];
+    let acc = `\\\\${parts[0]}\\${parts[1]}`;
+    const out = [{ label: `\\\\${parts[0]}\\${parts[1]}`, path: acc }];
+    for (const part of parts.slice(2)) {
+      acc = `${acc}\\${part}`;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
+  if (clean.startsWith("/")) {
+    let acc = "";
+    const out = [{ label: "/", path: "/" }];
+    for (const part of clean.split("/").filter(Boolean)) {
+      acc += `/${part}`;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
+  let acc = "";
+  return clean.split(/[\\/]+/).filter(Boolean).map((part) => {
+    acc = acc ? `${acc}/${part}` : part;
+    return { label: part, path: acc };
+  });
 }
 
 function enc(e) {
@@ -672,6 +1154,21 @@ function updateStatusPos() {
 
 // ---- search ----------------------------------------------------------------
 
+function showFind() {
+  state.findOpen = true;
+  document.documentElement.classList.add("find-open");
+  const f = $("find");
+  queueMicrotask(() => {
+    f.focus();
+    f.select();
+  });
+}
+
+function hideFind() {
+  state.findOpen = false;
+  document.documentElement.classList.remove("find-open");
+}
+
 function buildMatcher() {
   state.regexError = false;
   $("find").parentElement.classList.remove("error");
@@ -682,7 +1179,16 @@ function buildMatcher() {
   const src = state.regex ? state.query : escapeRegExp(state.query);
   const flags = "g" + (state.ci ? "i" : "");
   try {
-    state.matcher = new RegExp(src, flags);
+    // Mirror the server's whole-word rule so the highlight matches the count.
+    state.matcher = state.word
+      ? new RegExp(`(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`, flags + "u")
+      : new RegExp(src, flags);
+    return;
+  } catch {
+    // The word/unicode wrapper can reject patterns the plain form accepts.
+  }
+  try {
+    state.matcher = new RegExp(src, flags); // fall back: highlight the superset
   } catch {
     state.regexError = true;
     state.matcher = null; // invalid regex while typing — just don't highlight
@@ -698,8 +1204,12 @@ async function findStep(dir) {
   if (!state.query) return;
   buildMatcher();
   if (state.regexError) {
-    flashCount("正規表現エラー");
+    flashCount("正規表現エラー", "error");
     return;
+  }
+  if (state.stat?.dirty && !state.dirtyFindWarned) {
+    state.dirtyFindWarned = true;
+    flashCount("注意: 検索ジャンプは保存済みの内容が対象です (未保存の編集は反映されません)");
   }
   saveSearchHistory(state.query);
   let from;
@@ -738,9 +1248,11 @@ async function updateCount() {
     state.searchHits = res.hits;
     state.searchTruncated = res.truncated;
     updateFindCountLabel();
+    scheduleRender();
   } catch (e) {
     $("find-count").textContent = "正規表現エラー";
     $("find").parentElement.classList.add("error");
+    scheduleRender();
   }
 }
 
@@ -761,9 +1273,24 @@ function updateFindCountLabel() {
   $("find-count").textContent = `${total} 件`;
 }
 
-function flashCount(msg) {
-  const el = $("find-count");
-  el.textContent = msg;
+// Operation feedback goes to the always-visible status bar (aria-live), and is
+// mirrored into the find bar when that is open. Errors stay a little longer.
+let stMsgTimer = 0;
+function flashCount(msg, kind = "") {
+  const isError = kind === "error";
+  const el = $("st-msg");
+  if (el) {
+    el.textContent = msg || "";
+    el.classList.toggle("error", isError);
+    clearTimeout(stMsgTimer);
+    if (msg) {
+      stMsgTimer = setTimeout(() => {
+        el.textContent = "";
+        el.classList.remove("error");
+      }, isError ? 10000 : 6000);
+    }
+  }
+  if (state.findOpen) $("find-count").textContent = msg;
 }
 
 function loadSearchHistory() {
@@ -908,7 +1435,7 @@ function positionCaret() {
 }
 
 function anyModalOpen() {
-  return promptVisible() || settingsVisible() || openerVisible();
+  return promptVisible() || formVisible() || settingsVisible() || keymapVisible() || diffVisible() || openerVisible();
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -976,6 +1503,29 @@ async function applyRange(l0, c0, l1, c1, text) {
   render();
 }
 
+async function applyRect(l0, l1, c0, c1, text) {
+  const gen = state.editGen;
+  const res = await apiPost("/api/edit/replace_rect", { l0, l1, c0, c1, text });
+  state.total = res.stats.total_lines;
+  if (state.editGen === gen) {
+    const line = Math.min(res.caret_line, Math.max(0, state.total - 1));
+    state.sel = null;
+    state.caret = { line, col: res.caret_col };
+    state.activeLine = line;
+    state.goalCol = res.caret_col;
+  }
+  revealCaret();
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-rect-edit refresh failed", e);
+    flashCount("再読込エラー");
+  }
+  revealCaret();
+  render();
+}
+
 // Insert (or replace the selection with) `text`, which may contain newlines.
 // The target range is resolved *inside* the queued step, so a burst of
 // keystrokes each sees the caret left by the previous edit (never a stale one).
@@ -984,6 +1534,10 @@ async function applyRange(l0, c0, l1, c1, text) {
 function typeText(text) {
   if (!state.stat?.open) return;
   enqueueEdit(() => {
+    const rr = rectRange();
+    if (rr) {
+      return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, text);
+    }
     const t = replaceTarget();
     return applyRange(t.l0, t.c0, t.l1, t.c1, text);
   });
@@ -996,6 +1550,8 @@ function insertNewline() {
 function backspace() {
   enqueueEdit(() => {
     if (hasSelection()) {
+      const rr = rectRange();
+      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
       const t = replaceTarget();
       return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
@@ -1009,6 +1565,8 @@ function backspace() {
 function forwardDelete() {
   enqueueEdit(() => {
     if (hasSelection()) {
+      const rr = rectRange();
+      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
       const t = replaceTarget();
       return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
@@ -1025,15 +1583,51 @@ function pasteText(raw) {
 }
 
 async function saveCopy() {
-  const suggested = `${state.stat?.path || "ayame"}.edited`;
-  const path = await askPrompt("別名で保存", "保存先パス", suggested);
-  if (path == null) return;
+  const target = await showSaveDialog("別名で保存", suggestedSaveAsPath());
+  if (!target) return;
+  savingCount++;
   try {
-    const res = await apiPost("/api/edit/save", { path });
-    flashCount(`保存: ${res.path}`);
+    const res = await apiPost("/api/edit/save", target);
+    const stat = await apiPost("/api/open", { path: res.path });
+    onDocumentOpened(stat);
+    flashCount(`保存しました: ${res.path}`);
   } catch (e) {
-    flashCount("保存エラー");
+    flashCount("保存エラー", "error");
     alert(e.message);
+  } finally {
+    savingCount--;
+    retryPendingNativeClose();
+  }
+}
+
+function suggestedSaveAsPath() {
+  const p = state.stat?.path || "";
+  if (!p) return "untitled.txt";
+  if (isUntitled(p)) return pathBaseName(p) || "untitled.txt";
+  return `${p}.edited`;
+}
+
+async function saveFile() {
+  if (!state.stat?.open) return;
+  if (isUntitled(state.stat.path)) {
+    await saveCopy();
+    return;
+  }
+  savingCount++;
+  try {
+    const res = await apiPost("/api/edit/save", { overwrite: true });
+    clearLineCache();
+    state.dirtyFindWarned = false;
+    await refreshStat();
+    await reloadViewport();
+    render();
+    flashCount(`保存しました: ${res.path}`);
+  } catch (e) {
+    flashCount("保存エラー", "error");
+    alert(e.message);
+  } finally {
+    savingCount--;
+    retryPendingNativeClose();
   }
 }
 
@@ -1072,62 +1666,276 @@ async function redoEdit() {
   });
 }
 
+// ソート: no destination prompt — the result opens in a new tab and the
+// original file is left untouched. All options sit in one form.
 async function sortSave() {
-  const base = state.stat?.path || "ayame";
-  const path = await askPrompt("ソートして保存", "保存先パス", `${base}.sorted`);
-  if (path == null) return;
-  const keyText = await askPrompt("ソート", "キー列 (空なら行全体)", "");
-  if (keyText == null) return;
-  const key = keyText.trim() === "" ? null : Number(keyText.trim());
-  if (keyText.trim() !== "" && (!Number.isInteger(key) || key < 1)) {
-    flashCount("キー列エラー");
+  if (!state.stat?.open) return;
+  const f = await askForm("ソート", [
+    { id: "key", type: "text", label: "キー列 (1始まり)", placeholder: "空なら行全体で比較",
+      title: "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較" },
+    { id: "delim", type: "text", label: "区切り文字", value: ",", placeholder: ",",
+      title: "キー列を使うときの列の区切り (例: , やタブ)" },
+    { id: "numeric", type: "check", label: "数値として比較する", value: false,
+      title: "10 と 9 を文字列でなく数値の大小で並べます" },
+    { id: "order", type: "select", label: "並び順",
+      options: [["asc", "昇順 (A→Z, 小→大)"], ["desc", "降順 (Z→A, 大→小)"]] },
+    { id: "_hint", type: "hint", label: "結果は新しいタブに開きます。元のファイルは変更されません。" },
+  ], "ソート");
+  if (!f) return;
+  const keyText = String(f.key || "").trim();
+  const key = keyText === "" ? null : Number(keyText);
+  if (keyText !== "" && (!Number.isInteger(key) || key < 1)) {
+    flashCount("キー列は 1 以上の整数で指定してください", "error");
     return;
   }
-  const numeric = confirm("数値ソートにしますか?");
-  const reverse = confirm("降順にしますか?");
+  showLoading("ソート実行中…");
   try {
-    const res = await apiPost("/api/sort/save", { path, key, numeric, reverse });
-    flashCount(`ソート保存: ${res.path}`);
+    const res = await apiPost("/api/sort/save", {
+      key,
+      numeric: !!f.numeric,
+      reverse: f.order === "desc",
+      delim: key != null && f.delim ? f.delim : null,
+    });
+    onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+    flashCount(`ソート結果を新しいタブに開きました: ${displayName(res.path)}`);
   } catch (e) {
-    flashCount("ソートエラー");
+    flashCount("ソートエラー", "error");
     alert(e.message);
+  } finally {
+    hideLoading();
   }
 }
 
 async function replaceSave() {
+  if (!state.stat?.open) return;
   const base = state.stat?.path || "ayame";
-  const find = await askPrompt("置換", "置換前の文字列", $("find").value || state.query || "");
-  if (find == null || find === "") return;
-  const replacement = await askPrompt("置換", "置換後の文字列", "");
-  if (replacement == null) return;
-  const path = await askPrompt("置換して保存", "保存先パス", `${base}.replaced`);
-  if (path == null) return;
+  const f = await askForm("置換して保存", [
+    { id: "find", type: "text", label: "置換前", value: $("find").value || state.query || "" },
+    { id: "replacement", type: "text", label: "置換後", value: "" },
+    { id: "regex", type: "check", label: "正規表現として解釈する", value: state.regex },
+    { id: "ci", type: "check", label: "大文字小文字を区別しない", value: state.ci },
+    { id: "path", type: "text", label: "保存先パス", value: `${base}.replaced` },
+  ]);
+  if (!f) return;
+  if (!f.find) {
+    flashCount("置換前の文字列を入力してください", "error");
+    return;
+  }
+  showLoading("置換実行中…");
   try {
     const res = await apiPost("/api/replace/save", {
-      path,
-      find,
-      replacement,
-      regex: state.regex,
-      ci: state.ci,
+      path: f.path,
+      find: f.find,
+      replacement: f.replacement,
+      regex: !!f.regex,
+      ci: !!f.ci,
     });
-    flashCount(`置換保存: ${res.path}`);
+    flashCount(`置換して保存しました: ${res.path}`);
   } catch (e) {
-    flashCount("置換エラー");
+    flashCount("置換エラー", "error");
     alert(e.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+function diffVisible() {
+  return !$("diff-modal").classList.contains("hidden");
+}
+
+function hideDiff() {
+  $("diff-modal").classList.add("hidden");
+  $("diff-modal").setAttribute("aria-hidden", "true");
+  focusEditor();
+}
+
+function showDiff(res) {
+  $("diff-summary").textContent =
+    `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}`
+    + (res.current_dirty ? " / 未保存編集込み" : "")
+    + (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
+  $("diff-old-path").textContent = (res.old_path || "現在のファイル") + (res.current_dirty ? " *" : "");
+  $("diff-new-path").textContent = res.new_path || "比較先";
+  renderDiffView(res);
+  $("diff-modal").classList.remove("hidden");
+  $("diff-modal").setAttribute("aria-hidden", "false");
+}
+
+function diffKindLabel(kind) {
+  if (kind === "insert") return "追加";
+  if (kind === "delete") return "削除";
+  return "変更";
+}
+
+const INLINE_DIFF_MAX_CHARS = 2000;
+const INLINE_DIFF_MAX_TOKENS = 260;
+
+function inlineTokens(text) {
+  const tokens = [];
+  const re = /(\s+|[\p{Letter}\p{Number}_]+|[^\s\p{Letter}\p{Number}_]+)/gu;
+  for (const m of String(text || "").matchAll(re)) tokens.push(m[0]);
+  return tokens;
+}
+
+function pushDiffPart(parts, text, changed) {
+  if (!text) return;
+  const last = parts[parts.length - 1];
+  if (last && last.changed === changed) last.text += text;
+  else parts.push({ text, changed });
+}
+
+function inlineWordDiff(oldText, newText) {
+  oldText = String(oldText || "");
+  newText = String(newText || "");
+  if (oldText === newText) return null;
+  if (oldText.length + newText.length > INLINE_DIFF_MAX_CHARS) return null;
+  const oldTokens = inlineTokens(oldText);
+  const newTokens = inlineTokens(newText);
+  if (oldTokens.length + newTokens.length > INLINE_DIFF_MAX_TOKENS) return null;
+
+  const m = oldTokens.length;
+  const n = newTokens.length;
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = oldTokens[i] === newTokens[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const oldParts = [];
+  const newParts = [];
+  let i = 0;
+  let j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && oldTokens[i] === newTokens[j]) {
+      pushDiffPart(oldParts, oldTokens[i], false);
+      pushDiffPart(newParts, newTokens[j], false);
+      i++;
+      j++;
+    } else if (j >= n || (i < m && dp[i + 1][j] >= dp[i][j + 1])) {
+      pushDiffPart(oldParts, oldTokens[i], true);
+      i++;
+    } else {
+      pushDiffPart(newParts, newTokens[j], true);
+      j++;
+    }
+  }
+  return { oldParts, newParts };
+}
+
+function appendDiffText(el, line, parts) {
+  if (!line) return;
+  if (!parts) {
+    el.textContent = line.text;
+    return;
+  }
+  for (const part of parts) {
+    const span = document.createElement("span");
+    span.className = part.changed ? "diff-word changed" : "diff-word";
+    span.textContent = part.text;
+    el.append(span);
+  }
+}
+
+function diffCell(line, cls, parts = null) {
+  const cell = document.createElement("div");
+  cell.className = "diff-cell " + (cls || "");
+  const ln = document.createElement("span");
+  ln.className = "diff-ln";
+  ln.textContent = line ? String(line.number + 1) : "";
+  const tx = document.createElement("span");
+  tx.className = "diff-tx";
+  appendDiffText(tx, line, parts);
+  cell.append(ln, tx);
+  return cell;
+}
+
+function renderDiffView(res) {
+  const view = $("diff-view");
+  view.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const h of res.hunks || []) {
+    const hunk = document.createElement("section");
+    hunk.className = "diff-hunk";
+    const title = document.createElement("div");
+    title.className = "diff-hunk-title";
+    title.textContent =
+      `${diffKindLabel(h.kind)}  現在:${commas(h.old_start + 1)} (${commas(h.old_len)}行)  `
+      + `比較先:${commas(h.new_start + 1)} (${commas(h.new_len)}行)`;
+    hunk.append(title);
+    const oldRows = h.old_preview || [];
+    const newRows = h.new_preview || [];
+    const max = Math.max(oldRows.length, newRows.length, 1);
+    for (let i = 0; i < max; i++) {
+      const row = document.createElement("div");
+      row.className = "diff-row";
+      const oldLine = oldRows[i] || null;
+      const newLine = newRows[i] || null;
+      const oldCls = h.kind === "insert" ? "blank" : h.kind === "delete" ? "del" : oldLine ? "mod" : "blank";
+      const newCls = h.kind === "delete" ? "blank" : h.kind === "insert" ? "add" : newLine ? "mod" : "blank";
+      const wordDiff = h.kind === "replace" && oldLine && newLine
+        ? inlineWordDiff(oldLine.text, newLine.text)
+        : null;
+      row.append(
+        diffCell(oldLine, oldCls, wordDiff?.oldParts),
+        diffCell(newLine, newCls, wordDiff?.newParts)
+      );
+      hunk.append(row);
+    }
+    if (h.old_truncated || h.new_truncated) {
+      const tr = document.createElement("div");
+      tr.className = "diff-truncated";
+      tr.textContent = `このhunkは先頭 ${commas(res.max_lines_per_hunk || 80)} 行だけ表示しています`;
+      hunk.append(tr);
+    }
+    frag.append(hunk);
+  }
+  if (!res.hunks || res.hunks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "diff-truncated";
+    empty.textContent = "差分はありません";
+    frag.append(empty);
+  }
+  view.append(frag);
+}
+
+async function diffFile() {
+  const base = state.stat?.path || "";
+  const path = await askPrompt("2ファイル差分", "比較先ファイルパス", base);
+  if (path == null || path.trim() === "") return;
+  showLoading("差分を計算中…");
+  try {
+    const res = await api(`/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`);
+    flashCount(`差分: ${commas(res.hunk_count)} hunk`);
+    showDiff(res);
+  } catch (e) {
+    flashCount("差分エラー", "error");
+    alert(e.message);
+  } finally {
+    hideLoading();
   }
 }
 
 async function caseSave(mode) {
+  if (!state.stat?.open) return;
   const base = state.stat?.path || "ayame";
   const suffix = mode === "upper" ? "upper" : "lower";
-  const path = await askPrompt(`${mode === "upper" ? "大文字化" : "小文字化"}して保存`, "保存先パス", `${base}.${suffix}`);
-  if (path == null) return;
+  const f = await askForm(`${mode === "upper" ? "大文字化" : "小文字化"}して保存`, [
+    { id: "path", type: "text", label: "保存先パス", value: `${base}.${suffix}` },
+    { id: "_hint", type: "hint", label: "ASCII 英字を変換した内容を別ファイルへ書き出します。元のファイルは変更されません。" },
+  ]);
+  if (!f || !f.path) return;
+  showLoading("変換実行中…");
   try {
-    const res = await apiPost("/api/case/save", { path, mode });
-    flashCount(`保存: ${res.path}`);
+    const res = await apiPost("/api/case/save", { path: f.path, mode });
+    flashCount(`保存しました: ${res.path}`);
   } catch (e) {
-    flashCount("変換エラー");
+    flashCount("変換エラー", "error");
     alert(e.message);
+  } finally {
+    hideLoading();
   }
 }
 
@@ -1173,21 +1981,36 @@ function initEvents() {
         e.preventDefault();
       }
     } else if (e.key === "Escape") {
+      hideFind();
       focusEditor();
     }
   });
 
+  $("find-close").addEventListener("click", () => {
+    hideFind();
+    focusEditor();
+  });
   $("find-next").addEventListener("click", () => findStep("next"));
   $("find-prev").addEventListener("click", () => findStep("prev"));
   $("opt-case").addEventListener("click", () => toggleOpt("ci", "opt-case"));
   $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
-  $("save-copy").addEventListener("click", saveCopy);
+  $("save-file").addEventListener("click", () => {
+    hideFileMenu();
+    saveFile();
+  });
+  $("save-copy").addEventListener("click", () => {
+    hideFileMenu();
+    saveCopy();
+  });
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
+  $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
-  $("sort-save").addEventListener("click", sortSave);
-  $("replace-save").addEventListener("click", replaceSave);
+  $("diff-close").addEventListener("click", hideDiff);
+  $("diff-modal").addEventListener("click", (e) => {
+    if (e.target === $("diff-modal")) hideDiff();
+  });
 
   // Keep the column ruler aligned as the text scrolls horizontally.
   $("content").addEventListener("scroll", () => {
@@ -1250,6 +2073,98 @@ function askPrompt(title, label, value = "") {
   });
 }
 
+// ---- generic small form dialog (sort / replace / case options) ------------
+function formVisible() { return !$("form-modal").classList.contains("hidden"); }
+
+// fields: {id, type: "text"|"check"|"select"|"hint", label, value, placeholder,
+// title, options}. Resolves to {id: value} or null on cancel.
+function askForm(title, fields, okLabel = "実行") {
+  return new Promise((resolve) => {
+    const modal = $("form-modal");
+    const body = $("form-body");
+    $("form-title").textContent = title || "オプション";
+    $("form-ok").textContent = okLabel;
+    body.textContent = "";
+    const readers = {};
+    for (const f of fields) {
+      if (f.type === "hint") {
+        const hint = document.createElement("div");
+        hint.className = "form-hint";
+        hint.textContent = f.label;
+        body.append(hint);
+        continue;
+      }
+      if (f.type === "check") {
+        const lab = document.createElement("label");
+        lab.className = "form-check";
+        if (f.title) lab.title = f.title;
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!f.value;
+        lab.append(cb, document.createTextNode(f.label));
+        body.append(lab);
+        readers[f.id] = () => cb.checked;
+        continue;
+      }
+      const row = document.createElement("label");
+      row.className = "form-row";
+      const span = document.createElement("span");
+      span.textContent = f.label;
+      row.append(span);
+      if (f.type === "select") {
+        const sel = document.createElement("select");
+        for (const [v, text] of f.options || []) {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = text;
+          sel.append(o);
+        }
+        if (f.value != null) sel.value = f.value;
+        row.append(sel);
+        readers[f.id] = () => sel.value;
+      } else {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = f.value ?? "";
+        input.placeholder = f.placeholder ?? "";
+        if (f.title) input.title = f.title;
+        row.append(input);
+        readers[f.id] = () => input.value;
+      }
+      body.append(row);
+    }
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    queueMicrotask(() => body.querySelector("input, select")?.focus());
+    const finish = (val) => {
+      modal.classList.add("hidden");
+      modal.setAttribute("aria-hidden", "true");
+      $("form-ok").removeEventListener("click", onOk);
+      $("form-cancel").removeEventListener("click", onCancel);
+      $("form-close").removeEventListener("click", onCancel);
+      modal.removeEventListener("mousedown", onBackdrop);
+      modal.removeEventListener("keydown", onKey);
+      focusEditor();
+      resolve(val);
+    };
+    const collect = () =>
+      Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
+    const onOk = () => finish(collect());
+    const onCancel = () => finish(null);
+    const onKey = (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter" && ev.target.tagName !== "SELECT") { ev.preventDefault(); finish(collect()); }
+      else if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
+    };
+    const onBackdrop = (ev) => { if (ev.target === modal) finish(null); };
+    $("form-ok").addEventListener("click", onOk);
+    $("form-cancel").addEventListener("click", onCancel);
+    $("form-close").addEventListener("click", onCancel);
+    modal.addEventListener("mousedown", onBackdrop);
+    modal.addEventListener("keydown", onKey);
+  });
+}
+
 // ---- loading overlay ------------------------------------------------------
 function showLoading(text) {
   const o = $("overlay");
@@ -1275,41 +2190,47 @@ function gotoLine(n) {
 // opener / prompt / settings), never the editor's hidden textarea.
 function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
-  const mod = e.ctrlKey || e.metaKey;
-  const k = e.key.toLowerCase();
-  if (promptVisible()) return;
+  if (promptVisible() || formVisible()) return;
+  if (e.key === "Escape" && fileMenuVisible()) { e.preventDefault(); hideFileMenu(true); return; }
+  if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
+  if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
   if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
   if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
   // A modal owns the keyboard: never run editor/clipboard/history/nav commands
   // against the hidden document behind Settings / the Opener / a prompt.
   if (anyModalOpen()) return;
-  if (mod && k === "o") { e.preventDefault(); showOpener(); return; }
-  if (mod && k === "b") { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
-  if (mod && (k === "n" || k === "t")) { e.preventDefault(); newUntitled(); return; }
-  if (mod && k === "g") {
+  if (matchesShortcut(e, "openFile")) { e.preventDefault(); hideFileMenu(); showOpener(); return; }
+  if (matchesShortcut(e, "toggleSidebar")) { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
+  if (matchesShortcut(e, "newFile")) { e.preventDefault(); hideFileMenu(); newUntitled(); return; }
+  if (matchesShortcut(e, "gotoLine")) {
     e.preventDefault();
     askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
     return;
   }
-  if (mod && k === "w") {
+  if (matchesShortcut(e, "closeTab")) {
     e.preventDefault();
     const active = state.tabs.find((t) => t.active);
     if (active) closeTab(active.id);
     return;
   }
-  if (mod && k === "f") { e.preventDefault(); const f = $("find"); f.focus(); f.select(); return; }
-  if (mod && k === "s") { e.preventDefault(); saveCopy(); return; }
-  if (e.key === "F3") { e.preventDefault(); findStep(e.shiftKey ? "prev" : "next"); return; }
-  if (e.altKey && k === "c") { toggleOpt("ci", "opt-case"); return; }
-  if (e.altKey && k === "r") { toggleOpt("regex", "opt-regex"); return; }
-  if (e.altKey && k === "w") { toggleOpt("word", "opt-word"); return; }
+  if (matchesShortcut(e, "find")) { e.preventDefault(); showFind(); return; }
+  if (matchesShortcut(e, "saveAs")) { e.preventDefault(); hideFileMenu(); saveCopy(); return; }
+  if (matchesShortcut(e, "saveFile")) { e.preventDefault(); hideFileMenu(); saveFile(); return; }
+  if (matchesShortcut(e, "findPrev")) { e.preventDefault(); findStep("prev"); return; }
+  if (matchesShortcut(e, "findNext")) { e.preventDefault(); findStep("next"); return; }
+  if (matchesShortcut(e, "searchCase")) { e.preventDefault(); toggleOpt("ci", "opt-case"); return; }
+  if (matchesShortcut(e, "searchRegex")) { e.preventDefault(); toggleOpt("regex", "opt-regex"); return; }
+  if (matchesShortcut(e, "searchWord")) { e.preventDefault(); toggleOpt("word", "opt-word"); return; }
+  if (matchesShortcut(e, "sortSave")) { e.preventDefault(); sortSave(); return; }
+  if (matchesShortcut(e, "replaceSave")) { e.preventDefault(); replaceSave(); return; }
+  if (matchesShortcut(e, "diffFile")) { e.preventDefault(); diffFile(); return; }
   // Editor clipboard / history — not while typing in a search or dialog field.
   if (inField) return;
-  if (mod && k === "a") { e.preventDefault(); selectAll(); return; }
-  if (mod && k === "c") { e.preventDefault(); copySelection(); return; }
-  if (mod && k === "x") { e.preventDefault(); cutSelection(); return; }
-  if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redoEdit() : undoEdit(); return; }
-  if (mod && k === "y") { e.preventDefault(); redoEdit(); return; }
+  if (matchesShortcut(e, "selectAll")) { e.preventDefault(); selectAll(); return; }
+  if (matchesShortcut(e, "copy")) { e.preventDefault(); copySelection(); return; }
+  if (matchesShortcut(e, "cut")) { e.preventDefault(); cutSelection(); return; }
+  if (matchesShortcut(e, "redo")) { e.preventDefault(); redoEdit(); return; }
+  if (matchesShortcut(e, "undo")) { e.preventDefault(); undoEdit(); return; }
 }
 
 // ---- editor keyboard: caret motion + structural edits ----------------------
@@ -1338,6 +2259,8 @@ function wordRight(line, col) {
 function deleteWordBack() {
   enqueueEdit(() => {
     if (hasSelection()) {
+      const rr = rectRange();
+      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
       const t = replaceTarget();
       return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
@@ -1351,6 +2274,8 @@ function deleteWordBack() {
 function deleteWordFwd() {
   enqueueEdit(() => {
     if (hasSelection()) {
+      const rr = rectRange();
+      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
       const t = replaceTarget();
       return applyRange(t.l0, t.c0, t.l1, t.c1, "");
     }
@@ -1522,6 +2447,7 @@ function openerVisible() {
 }
 
 function showOpener() {
+  configureOpener("open");
   const m = $("opener");
   m.classList.remove("hidden");
   m.setAttribute("aria-hidden", "false");
@@ -1531,7 +2457,48 @@ function showOpener() {
   queueMicrotask(() => inp.focus());
 }
 
+function showSaveDialog(title, suggestedPath) {
+  return new Promise((resolve) => {
+    configureOpener("save", title);
+    state.openerResolve = resolve;
+    const m = $("opener");
+    const inp = $("opener-input");
+    const dir = pathDirName(suggestedPath) || localStorage.getItem(TREE_KEY) || ".";
+    inp.value = pathBaseName(suggestedPath) || "untitled.txt";
+    m.classList.remove("hidden");
+    m.setAttribute("aria-hidden", "false");
+    browse(dir);
+    queueMicrotask(() => {
+      inp.focus();
+      inp.select();
+    });
+  });
+}
+
+function configureOpener(mode, title) {
+  state.openerMode = mode;
+  const save = mode === "save";
+  const m = $("opener");
+  m.classList.toggle("save-mode", save);
+  $("opener-title").textContent = title || (save ? "別名で保存" : "ファイルを開く");
+  $("opener-input-label").textContent = save ? "ファイル名" : "パス";
+  $("opener-input").placeholder = save
+    ? "保存するファイル名、またはフルパス"
+    : "ファイルのパスを入力… (例: /var/log/huge.log)";
+  $("opener-open").textContent = save ? "保存" : "開く";
+  $("opener-folder").textContent = save ? "場所" : "フォルダ";
+  $("opener-folder").title = save ? "表示中のフォルダをエクスプローラーに表示" : "表示中のフォルダをツリーに開く";
+  $("opener-hint").textContent = save
+    ? "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。"
+    : "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。";
+  openerMsg("");
+}
+
 function hideOpener() {
+  if (state.openerMode === "save") {
+    finishSaveDialog(null);
+    return;
+  }
   // The opener doubles as the welcome screen: don't let it close while there is
   // no document to fall back to.
   if (!state.stat?.open) return;
@@ -1539,6 +2506,18 @@ function hideOpener() {
   m.classList.add("hidden");
   m.setAttribute("aria-hidden", "true");
   focusEditor();
+}
+
+function finishSaveDialog(value) {
+  const resolve = state.openerResolve;
+  state.openerResolve = null;
+  state.openerMode = "open";
+  const m = $("opener");
+  m.classList.add("hidden");
+  m.setAttribute("aria-hidden", "true");
+  configureOpener("open");
+  focusEditor();
+  if (resolve) resolve(value);
 }
 
 function openerMsg(text, busy = false) {
@@ -1561,8 +2540,8 @@ async function browse(dir) {
 
 function renderBrowse(res) {
   state.openerDir = res.dir;
-  $("opener-cwd").textContent = res.dir.replace(/^\\\\\?\\/, "");
-  $("opener-cwd").title = res.dir;
+  state.openerEntries = res.entries || [];
+  renderCwdCrumbs(res.dir);
   const list = $("opener-list");
   list.textContent = "";
   if (res.parent) {
@@ -1572,12 +2551,35 @@ function renderBrowse(res) {
   list.scrollTop = 0;
 }
 
+function renderCwdCrumbs(path) {
+  const cwd = $("opener-cwd");
+  const clean = String(path || "").replace(/^\\\\\?\\/, "");
+  cwd.textContent = "";
+  cwd.title = clean;
+  for (const [i, crumb] of pathCrumbs(clean).entries()) {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "cwd-sep";
+      sep.textContent = "›";
+      cwd.append(sep);
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cwd-crumb";
+    btn.textContent = crumb.label;
+    btn.title = crumb.path;
+    btn.addEventListener("click", () => browse(crumb.path));
+    cwd.append(btn);
+  }
+}
+
 function browseRow(ent, isUp) {
   const row = document.createElement("button");
   row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
+  row.type = "button";
   const ic = document.createElement("span");
   ic.className = "ic";
-  ic.textContent = isUp ? "↑" : ent.is_dir ? "▸" : "·";
+  ic.textContent = isUp ? "上へ" : ent.is_dir ? "フォルダ" : "ファイル";
   const nm = document.createElement("span");
   nm.className = "nm";
   nm.textContent = isUp ? "上の階層へ" : ent.name;
@@ -1587,9 +2589,46 @@ function browseRow(ent, isUp) {
   row.append(ic, nm, sz);
   row.addEventListener("click", () => {
     if (ent.is_dir) browse(ent.path);
+    else if (state.openerMode === "save") {
+      $("opener-input").value = ent.name;
+      markPickedFile(ent.name);
+      $("opener-input").focus();
+    }
     else openPath(ent.path);
   });
+  row.addEventListener("dblclick", () => {
+    if (!ent.is_dir && state.openerMode === "save") commitOpener();
+  });
   return row;
+}
+
+function markPickedFile(name) {
+  for (const row of $("opener-list").querySelectorAll(".opener-row")) {
+    row.classList.toggle("picked", row.querySelector(".nm")?.textContent === name);
+  }
+}
+
+function saveDialogTarget() {
+  const raw = $("opener-input").value.trim();
+  if (!raw) {
+    openerMsg("保存するファイル名を入力してください");
+    return null;
+  }
+  const path = isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw);
+  const base = pathBaseName(path);
+  const existing = state.openerEntries.find((e) => !e.is_dir && e.name === base);
+  const overwrite = !!existing;
+  if (overwrite && !confirm(`${base} は既に存在します。上書きしますか?`)) return null;
+  return { path, overwrite };
+}
+
+function commitOpener() {
+  if (state.openerMode === "save") {
+    const target = saveDialogTarget();
+    if (target) finishSaveDialog(target);
+    return;
+  }
+  openPath($("opener-input").value);
 }
 
 function confirmDiscardIfDirty() {
@@ -1654,6 +2693,7 @@ function onDocumentOpened(stat) {
   state.lastMatch = null;
   state.searchHits = null;
   state.searchTruncated = false;
+  state.dirtyFindWarned = false;
   $("find-count").textContent = "";
   clearLineCache();
   const m = $("opener");
@@ -1662,6 +2702,7 @@ function onDocumentOpened(stat) {
   updateStatusMeta();
   render();
   refreshTabs();
+  updateTreeActive();
   focusEditor();
 }
 
@@ -1713,24 +2754,39 @@ async function refreshTabs() {
 function renderTabs(list) {
   state.tabs = list;
   const c = $("tabs");
+  c.setAttribute("role", "tablist");
   c.textContent = "";
   for (const t of list) {
     const el = document.createElement("div");
     el.className = "tab" + (t.active ? " active" : "") + (t.dirty ? " dirty" : "");
     el.dataset.id = String(t.id);
     el.title = t.path;
+    el.setAttribute("role", "tab");
+    el.setAttribute("aria-selected", t.active ? "true" : "false");
+    el.tabIndex = 0;
     const dot = document.createElement("span");
     dot.className = "tab-dot";
     const nm = document.createElement("span");
     nm.className = "tab-name";
     nm.textContent = t.name;
-    const x = document.createElement("span");
+    const x = document.createElement("button");
+    x.type = "button";
     x.className = "tab-x";
     x.textContent = "✕";
     x.title = "閉じる";
+    x.setAttribute("aria-label", `${t.name} を閉じる`);
     el.append(dot, nm, x);
     el.addEventListener("click", () => {
       if (!t.active) selectTab(t.id);
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (!t.active) selectTab(t.id);
+      } else if (e.key === "Delete") {
+        e.preventDefault();
+        closeTab(t.id);
+      }
     });
     el.addEventListener("mousedown", (e) => {
       if (e.button === 1) {
@@ -1824,16 +2880,34 @@ function renderTreeEntries(entries, depth) {
 function renderTreeNode(ent, depth) {
   const row = document.createElement("div");
   row.className = "tnode " + (ent.is_dir ? "dir" : "file");
-  row.style.paddingLeft = `${8 + depth * 14}px`;
+  row.dataset.path = ent.path;
+  row.style.setProperty("--depth", String(depth));
+  if (!ent.is_dir && ent.path === state.stat?.path) row.classList.add("active");
+  const indent = document.createElement("span");
+  indent.className = "tindent";
+  for (let i = 0; i < depth; i++) {
+    const guide = document.createElement("span");
+    guide.className = "tguide";
+    indent.append(guide);
+  }
   const chev = document.createElement("span");
   chev.className = "chev";
-  chev.textContent = ent.is_dir ? "▸" : "";
+  chev.setAttribute("aria-hidden", "true");
+  const icon = document.createElement("span");
+  icon.className = "ticon " + (ent.is_dir ? "folder" : `file ${treeFileClass(ent.name)}`);
+  icon.setAttribute("aria-hidden", "true");
   const nm = document.createElement("span");
   nm.className = "tname";
   nm.textContent = ent.name;
-  row.append(chev, nm);
+  row.append(indent, chev, icon, nm);
 
   if (!ent.is_dir) {
+    if (typeof ent.size === "number") {
+      const meta = document.createElement("span");
+      meta.className = "tmeta";
+      meta.textContent = humanBytes(ent.size);
+      row.append(meta);
+    }
     row.title = ent.path;
     row.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1850,6 +2924,7 @@ function renderTreeNode(ent, depth) {
   row.addEventListener("click", async (e) => {
     e.stopPropagation();
     const opening = kids.style.display === "none";
+    row.classList.toggle("open", opening);
     if (opening && !loaded) {
       loaded = true;
       try {
@@ -1860,27 +2935,43 @@ function renderTreeNode(ent, depth) {
       }
     }
     kids.style.display = opening ? "block" : "none";
-    chev.textContent = opening ? "▾" : "▸";
   });
   const frag = document.createDocumentFragment();
   frag.append(row, kids);
   return frag;
 }
 
+function treeFileClass(name) {
+  const ext = String(name || "").split(".").pop()?.toLowerCase() || "";
+  if (ext === "md" || ext === "markdown") return "md";
+  if (ext === "py") return "py";
+  if (ext === "json") return "json";
+  if (ext === "csv" || ext === "tsv" || ext === "xlsx") return "data";
+  return "text";
+}
+
+function updateTreeActive() {
+  const path = state.stat?.path || "";
+  document.querySelectorAll("#tree .tnode.file").forEach((row) => {
+    row.classList.toggle("active", !!path && row.dataset.path === path);
+  });
+}
+
 function initTree() {
   $("toggle-sidebar").addEventListener("click", () => setSidebar(!sidebarOpen()));
+  $("sb-close").addEventListener("click", () => setSidebar(false));
   $("sb-up").addEventListener("click", () => {
     if (state.treeParent) treeSetRoot(state.treeParent);
-  });
-  $("sb-openfolder").addEventListener("click", () => {
-    // Reuse the open dialog to pick a folder for the tree root.
-    showOpener();
   });
   $("opener-folder").addEventListener("click", () => {
     if (!state.openerDir) return;
     if (!sidebarOpen()) setSidebar(true);
     state.treeLoaded = true;
     treeSetRoot(state.openerDir);
+    if (state.openerMode === "save") {
+      openerMsg("現在のフォルダをエクスプローラーに表示しました");
+      return;
+    }
     hideOpener();
   });
   // Apply persisted visibility.
@@ -1901,14 +2992,64 @@ async function newUntitled() {
   }
 }
 
+function runMenuAction(action) {
+  hideFileMenu();
+  if (action === "undo") return undoEdit();
+  if (action === "redo") return redoEdit();
+  if (action === "find") return showFind();
+  if (action === "gotoLine") {
+    askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
+    return;
+  }
+  if (action === "selectAll") return selectAll();
+  if (action === "copy") return copySelection();
+  if (action === "cut") return cutSelection();
+  if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
+  if (action === "settings") return showSettings();
+  if (action === "sortSave") return sortSave();
+  if (action === "replaceSave") return replaceSave();
+  if (action === "diffFile") return diffFile();
+  if (action === "caseUpper") return caseSave("upper");
+  if (action === "caseLower") return caseSave("lower");
+  if (action === "keymap") return showKeymap();
+}
+
+function initMenuBar() {
+  for (const id of APP_MENUS) {
+    const button = $(`${id}-menu-button`);
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = !$(`${id}-menu`).classList.contains("hidden");
+      open ? hideFileMenu() : showAppMenu(id);
+    });
+    button.addEventListener("pointerenter", () => {
+      if (fileMenuVisible()) showAppMenu(id);
+    });
+  }
+  document.querySelectorAll("[data-menu-action]").forEach((item) => {
+    item.addEventListener("click", () => runMenuAction(item.dataset.menuAction));
+  });
+}
+
 function initWorkspace() {
-  $("open-file").addEventListener("click", showOpener);
+  initMenuBar();
+  document.addEventListener("pointerdown", (e) => {
+    if (fileMenuVisible() && !e.target.closest(".menu-shell")) hideFileMenu();
+  });
+  $("new-file").addEventListener("click", () => {
+    hideFileMenu();
+    newUntitled();
+  });
+  $("open-file").addEventListener("click", () => {
+    hideFileMenu();
+    showOpener();
+  });
   $("opener-close").addEventListener("click", hideOpener);
-  $("opener-open").addEventListener("click", () => openPath($("opener-input").value));
+  $("opener-open").addEventListener("click", commitOpener);
   $("opener-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      openPath($("opener-input").value);
+      commitOpener();
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideOpener();
@@ -1927,7 +3068,10 @@ function initWorkspace() {
 function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-    return { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+    const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+    merged.sidebarSide = merged.sidebarSide === "right" ? "right" : "left";
+    merged.keymap = sanitizeKeymap(merged.keymap);
+    return merged;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -1948,7 +3092,7 @@ function saveSettings(s) {
 const THEME_PRESETS = {
   "iris-light": {"name":"Iris Light","type":"light","radius":10,
     "color":{"paper":"#FBF8F1","paper2":"#FDFCF8","ink":"#2A2140","inkDim":"#6E6383","inkFaint":"#A99DBC","accent":"#7A5CC0","accent2":"#6A4CB0","gold":"#C79A2E","edge":"#E7E0D3","err":"#C0506A","markBg":"#FBEBB0","markFg":"#6B5510","markCur":"#E8B84B","markCurFg":"#2A2205"},
-    "acrylic":{"tint":"rgba(255,253,248,0.72)","blur":20},"background":{"mode":"watercolor","solid":"#FBF8F1"},"illustration":0.1,
+    "acrylic":{"tint":"rgba(255,253,248,0.72)","blur":20},"background":{"mode":"watercolor","solid":"#FBF8F1"},"illustration":0.18,
     "watercolor":[{"x":"12%","y":"84%","r":"46vh","color":"rgba(122,92,192,0.12)"},{"x":"88%","y":"14%","r":"42vh","color":"rgba(185,139,214,0.10)"},{"x":"70%","y":"96%","r":"30vh","color":"rgba(231,197,107,0.08)"}]},
   "iris-mist": {"name":"Iris Mist","type":"light","radius":12,
     "color":{"paper":"#F7F9FC","paper2":"#FDFEFF","ink":"#26314A","inkDim":"#5E6E8A","inkFaint":"#9DAAC0","accent":"#5B79C9","accent2":"#4A68B8","gold":"#C9A24E","edge":"#DCE4EF","err":"#C05C74","markBg":"#E3ECFB","markFg":"#2C3E6B","markCur":"#7EC7C0","markCurFg":"#0F2A28"},
@@ -2015,6 +3159,7 @@ function applySettings(s) {
   } else {
     root.dataset.theme = s.theme || "iris-light"; // iris-* | dark | black (unknown → :root)
   }
+  root.dataset.sidebarSide = s.sidebarSide === "right" ? "right" : "left";
   // ---- background mode + illustration (user overrides on top of the theme) ----
   if (s.bgMode === "solid") {
     const flat = getComputedStyle(root).getPropertyValue("--bg").trim() || "#FBF8F1";
@@ -2037,6 +3182,7 @@ function updateSetting(key, value) {
   state.settings = { ...state.settings, [key]: value };
   applySettings(state.settings);
   saveSettings(state.settings);
+  if (key === "sidebarSide") updateSidebarSideButtons();
 }
 
 function settingsVisible() {
@@ -2126,9 +3272,66 @@ function isThemeDoc(path) {
   return !!path && /\.ayame-theme\.json$/i.test(path);
 }
 
+function keymapJSONForEditor() {
+  const out = {};
+  for (const [action] of KEYMAP_ACTIONS) {
+    out[action] = Object.prototype.hasOwnProperty.call(state.settings.keymap || {}, action)
+      ? state.settings.keymap[action]
+      : DEFAULT_KEYMAP[action];
+  }
+  return out;
+}
+
+async function openKeymapJsonDoc() {
+  hideKeymap();
+  try {
+    const r = await fetch("/api/upload?name=" + encodeURIComponent("keymap.ayame-keys.json"), {
+      method: "POST",
+      body: JSON.stringify(keymapJSONForEditor(), null, 2),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    onDocumentOpened(await r.json());
+  } catch (e) {
+    flashCount("キー設定を開けません");
+    console.error(e);
+  }
+}
+
+async function applyKeymapFromBuffer() {
+  try {
+    const count = Math.min(state.total, MAX_COPY_LINES);
+    const r = await api(`/api/lines?start=0&count=${count}`);
+    const text = r.lines.map((l) => l.text).join("\n");
+    const parsed = JSON.parse(text);
+    const clean = sanitizeKeymap(parsed);
+    state.settings = { ...state.settings, keymap: clean };
+    saveSettings(state.settings);
+    updateKeyHints();
+    renderKeymapRows();
+    flashCount("キー設定適用");
+  } catch (e) {
+    flashCount("キー設定 JSON エラー");
+    console.error(e);
+  }
+}
+
+function isKeymapDoc(path) {
+  return !!path && /\.ayame-keys\.json$/i.test(path);
+}
+
+function updateSidebarSideButtons() {
+  const side = state.settings.sidebarSide === "right" ? "right" : "left";
+  document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
+    const on = btn.dataset.sidebarSide === side;
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
 function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
+  updateKeyHints();
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
@@ -2158,9 +3361,20 @@ function initSettings() {
   });
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
+  updateSidebarSideButtons();
+  document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
+    btn.addEventListener("click", () => updateSetting("sidebarSide", btn.dataset.sidebarSide));
+  });
   $("theme-json-edit").addEventListener("click", openThemeJsonDoc);
+  $("keymap-open").addEventListener("click", showKeymap);
+  $("keymap-close").addEventListener("click", hideKeymap);
+  $("keymap-done").addEventListener("click", hideKeymap);
+  $("keymap-reset").addEventListener("click", resetKeymap);
+  $("keymap-json-edit").addEventListener("click", openKeymapJsonDoc);
+  $("keymap-modal").addEventListener("click", (e) => {
+    if (e.target === $("keymap-modal")) hideKeymap();
+  });
 
-  $("open-settings").addEventListener("click", showSettings);
   $("settings-close").addEventListener("click", hideSettings);
   $("settings").addEventListener("click", (e) => {
     if (e.target === $("settings")) hideSettings();
@@ -2168,6 +3382,22 @@ function initSettings() {
 }
 
 // ---- boot ------------------------------------------------------------------
+
+// Native window: open files dropped onto the window (real paths, no copy).
+window.__ayameOpenNativePaths = (paths) => {
+  if (!Array.isArray(paths)) return;
+  (async () => {
+    for (const p of paths) {
+      if (typeof p !== "string" || !p) continue;
+      try {
+        await openPath(p);
+      } catch (e) {
+        flashCount(`開けません: ${p}`, "error");
+        console.error(e);
+      }
+    }
+  })();
+};
 
 async function boot() {
   state.history = loadSearchHistory();
@@ -2183,9 +3413,27 @@ async function boot() {
   } catch (e) {
     $("overlay").classList.remove("hidden");
     $("overlay").textContent = "サーバに接続できません: " + e.message;
+    postNativeMessage("ayame:ready"); // still show the window so the error is visible
     return;
   }
   updateStatusMeta();
+  // Native launch with a FILE argument: the window appears immediately and the
+  // (possibly long) first-index happens behind this progress overlay.
+  const pending = typeof window.__ayamePendingOpen === "string" ? window.__ayamePendingOpen : "";
+  if (!state.stat.open && pending) {
+    showLoading(`開いています: ${displayName(pending)} …`);
+    postNativeMessage("ayame:ready");
+    try {
+      onDocumentOpened(await apiPost("/api/open", { path: pending }));
+    } catch (e) {
+      flashCount(`開けません: ${pending}`, "error");
+      console.error(e);
+      await newUntitled();
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
   if (!state.stat.open) {
     await newUntitled(); // open to a blank untitled page, not the file dialog
   } else {
@@ -2193,6 +3441,7 @@ async function boot() {
     render();
     refreshTabs();
   }
+  postNativeMessage("ayame:ready");
 }
 
 boot();
