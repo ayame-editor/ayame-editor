@@ -160,6 +160,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         )
         .route("/api/edit/replace_rect", post(edit::api_edit_replace_rect))
         .route("/api/edit/save", post(edit::api_edit_save))
+        .route("/api/selection/save", post(edit::api_selection_save))
         .route("/api/edit/undo", post(edit::api_edit_undo))
         .route("/api/edit/redo", post(edit::api_edit_redo))
         .route("/api/edit/revert", post(edit::api_edit_revert))
@@ -186,7 +187,7 @@ async fn serve(
     policy: Arc<NetPolicy>,
     remote_active: bool,
 ) -> Result<()> {
-    let app = router(state, policy);
+    let app = router(state.clone(), policy);
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
         .context("invalid host/port")?;
@@ -211,7 +212,8 @@ async fn serve(
         .await
         .context("server error");
     // Graceful shutdown: drop the scratch this process accumulated (uploads,
-    // untitled buffers, unsaved sort results).
+    // untitled buffers, unsaved sort results, in-place save aside files).
+    state.cleanup_aside_files();
     workspace::cleanup_temp_dirs();
     result
 }
@@ -679,12 +681,206 @@ mod tests {
         assert_eq!(status, 200, "body: {body}");
         assert_eq!(std::fs::read(&f).unwrap(), b"HELLO\nworld\n");
 
-        // After the reload the session is clean and the file is still open.
+        // After the save the session is clean and the file is still open.
         let (status, body) = send(addr, get("/api/stat", &host)).await;
         assert_eq!(status, 200);
         assert!(body.contains("\"open\":true"), "body: {body}");
         assert!(body.contains("\"dirty\":false"), "body: {body}");
 
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// The full undo-across-save contract: an in-place save keeps the undo
+    /// history (clean + can_undo), undo restores the pre-save view while the
+    /// disk keeps the saved bytes, redo returns to the exact saved state, and
+    /// undoing past the save then saving again writes the pre-edit bytes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn undo_crosses_in_place_save_and_second_save_writes_undone_bytes() {
+        let f = scratch_file("undosave.txt", b"one\ntwo\nthree\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":0,"text":"EDIT_"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"EDIT_one\ntwo\nthree\n");
+
+        // 1. Clean after the save, and the history SURVIVED it.
+        let (_, body) = send(addr, get("/api/stat", &host)).await;
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        assert!(body.contains("\"can_undo\":true"), "body: {body}");
+
+        // 2. Undo crosses the save: the view shows the pre-save text, the
+        //    session is dirty again, the disk keeps the saved bytes.
+        let (status, body) =
+            send(addr, post_json("/api/edit/undo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"dirty\":true"), "body: {body}");
+        let (_, body) = send(addr, get("/api/lines?start=0&count=1", &host)).await;
+        assert!(body.contains("\"text\":\"one\""), "body: {body}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"EDIT_one\ntwo\nthree\n");
+
+        // 3. Redo returns to the EXACT saved state: clean again.
+        let (status, body) =
+            send(addr, post_json("/api/edit/redo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+
+        // 4. Undo once more and save again: the disk now holds the pre-edit
+        //    bytes even though the mmap'd document was never reloaded.
+        let (status, _) = send(addr, post_json("/api/edit/undo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200);
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"one\ntwo\nthree\n");
+        let (_, body) = send(addr, get("/api/stat", &host)).await;
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        assert!(body.contains("\"can_redo\":true"), "body: {body}");
+
+        // The aside files both saves created are cleaned up eagerly on Unix
+        // (the live mmap keeps its inode without the name).
+        if cfg!(unix) {
+            let stale: Vec<_> = std::fs::read_dir(f.parent().unwrap())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.contains(".ayame-prev-"))
+                .collect();
+            assert!(stale.is_empty(), "aside files left behind: {stale:?}");
+        }
+
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// `/api/edit/revert` returns to the last SAVED state (a reload from
+    /// disk), not to the content the file was originally opened with.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn revert_returns_to_the_last_saved_state() {
+        let f = scratch_file("revert.txt", b"aaa\nbbb\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        // Edit + save, then a second (unsaved) edit.
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":3,"text":"SAVED"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":1,"c0":0,"l1":1,"c1":3,"text":"UNSAVED"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+
+        let (status, body) = send(
+            addr,
+            post_json("/api/edit/revert", &host, Some(&origin), ""),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        assert!(body.contains("\"can_undo\":false"), "body: {body}");
+
+        // The view is the SAVED text: first edit kept, second edit gone.
+        let (_, body) = send(addr, get("/api/lines?start=0&count=2", &host)).await;
+        assert!(body.contains("SAVED"), "body: {body}");
+        assert!(!body.contains("UNSAVED"), "body: {body}");
+        assert!(body.contains("\"text\":\"bbb\""), "body: {body}");
+
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// A zero-width rectangle (c1 == c0) is a valid caret column: the export
+    /// succeeds and writes one empty piece per line (a newline-only column).
+    /// Only a REVERSED column range is rejected.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn zero_width_rect_selection_saves_a_newline_only_column() {
+        let f = scratch_file("rect0.txt", b"ab\ncd\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let out = f.with_extension("sel");
+        let body = format!(
+            r#"{{"path":"{}","rect":true,"l0":0,"c0":1,"l1":1,"c1":1}}"#,
+            out.display()
+        );
+        let (status, resp) = send(
+            addr,
+            post_json("/api/selection/save", &host, Some(&origin), &body),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {resp}");
+        assert!(resp.contains("\"lines\":2"), "body: {resp}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"\n");
+
+        // A reversed column range is still invalid.
+        let body = format!(
+            r#"{{"path":"{}","overwrite":true,"rect":true,"l0":0,"c0":2,"l1":1,"c1":1}}"#,
+            out.display()
+        );
+        let (status, _) = send(
+            addr,
+            post_json("/api/selection/save", &host, Some(&origin), &body),
+        )
+        .await;
+        assert_eq!(status, 400);
+
+        let _ = std::fs::remove_file(&out);
         let _ = std::fs::remove_file(&f);
     }
 }

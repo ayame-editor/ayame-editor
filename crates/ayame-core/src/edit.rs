@@ -13,12 +13,39 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Document, Error, Result};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EditSession {
     events: BTreeMap<u64, EditEvent>,
-    undo: Vec<UndoRecord>,
-    redo: Vec<UndoRecord>,
+    undo: Vec<HistoryEntry>,
+    redo: Vec<HistoryEntry>,
     revision: u64,
+    /// Identity of the current CONTENT. Unlike `revision` — which increases on
+    /// every state change, undo/redo included, so optimistic save commits can
+    /// detect interleaved changes — this value is RESTORED by undo/redo:
+    /// walking back to a previously seen content reproduces its generation, so
+    /// equality with `saved_gen` answers "is the view exactly the last-saved
+    /// text?" even across undo/redo round-trips over a save.
+    content_gen: u64,
+    /// Allocator for fresh content generations. Never reused, so two distinct
+    /// contents can never share a generation.
+    next_gen: u64,
+    /// The content generation last written to disk (0 = the document as
+    /// opened). See [`EditSession::mark_saved`].
+    saved_gen: u64,
+}
+
+impl Default for EditSession {
+    fn default() -> EditSession {
+        EditSession {
+            events: BTreeMap::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            revision: 0,
+            content_gen: 0,
+            next_gen: 1,
+            saved_gen: 0,
+        }
+    }
 }
 
 const HISTORY_LIMIT: usize = 256;
@@ -30,6 +57,16 @@ const HISTORY_LIMIT: usize = 256;
 /// touched — a keystroke records one small step — never to the size of the
 /// whole overlay (the previous design cloned the entire overlay per edit).
 type UndoRecord = Vec<UndoOp>;
+
+/// A history stack entry: one undo/redo generation plus the content
+/// generation of the state the entry returns to when applied. Undo and redo
+/// restore `EditSession::content_gen` from here, which is what lets dirtiness
+/// (content vs. last save) survive undo/redo round-trips across a save.
+#[derive(Clone, Debug)]
+struct HistoryEntry {
+    ops: UndoRecord,
+    gen: u64,
+}
 
 #[derive(Clone, Debug)]
 enum UndoOp {
@@ -112,12 +149,49 @@ enum LineRef {
 }
 
 impl EditSession {
+    /// Whether the current content differs from the last save — the flag
+    /// editors show as "unsaved changes". Compares content GENERATIONS, not
+    /// overlay emptiness: after a save the (kept) history still allows undo,
+    /// and undoing past the save makes the session dirty again even though the
+    /// overlay may be empty, while redoing back to the exact saved state reads
+    /// clean. A fresh session (generation 0, nothing saved yet) reads clean.
     pub fn is_dirty(&self) -> bool {
+        self.content_gen != self.saved_gen
+    }
+
+    /// Whether the overlay holds any deviation from the RAW document (mmap).
+    /// Distinct from [`EditSession::is_dirty`]: after an in-place save the
+    /// session is clean (content == disk) yet the overlay is non-empty
+    /// (content != the still-mapped pre-save document).
+    pub fn has_edits(&self) -> bool {
         !self.events.is_empty()
     }
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Identity of the current content; restored by undo/redo. Capture this
+    /// alongside a snapshot that will be written to disk, then pass it to
+    /// [`EditSession::mark_saved_at`] once the bytes land.
+    pub fn content_gen(&self) -> u64 {
+        self.content_gen
+    }
+
+    /// Record that the CURRENT content has been written to disk. Leaves the
+    /// overlay and the undo/redo history untouched, so editing history — and
+    /// undo across the save — keeps working.
+    pub fn mark_saved(&mut self) {
+        self.saved_gen = self.content_gen;
+    }
+
+    /// Record that the content identified by `gen` (a value previously
+    /// returned by [`EditSession::content_gen`]) is what reached the disk.
+    /// Use when edits may have arrived between snapshotting and the write
+    /// completing: the session then stays dirty until the user undoes back to
+    /// the generation that was actually saved.
+    pub fn mark_saved_at(&mut self, gen: u64) {
+        self.saved_gen = gen;
     }
 
     pub fn can_undo(&self) -> bool {
@@ -129,30 +203,53 @@ impl EditSession {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(record) = self.undo.pop() else {
+        let Some(entry) = self.undo.pop() else {
             return false;
         };
-        let inverse = self.apply_record(record);
-        push_history(&mut self.redo, inverse);
+        let inverse = self.apply_record(entry.ops);
+        push_history(
+            &mut self.redo,
+            HistoryEntry {
+                ops: inverse,
+                gen: self.content_gen,
+            },
+        );
+        self.content_gen = entry.gen;
         self.bump();
         true
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(record) = self.redo.pop() else {
+        let Some(entry) = self.redo.pop() else {
             return false;
         };
-        let inverse = self.apply_record(record);
-        push_history(&mut self.undo, inverse);
+        let inverse = self.apply_record(entry.ops);
+        push_history(
+            &mut self.undo,
+            HistoryEntry {
+                ops: inverse,
+                gen: self.content_gen,
+            },
+        );
+        self.content_gen = entry.gen;
         self.bump();
         true
     }
 
+    /// Discard the overlay and the whole history: the content returns to the
+    /// document as opened (generation 0). `saved_gen` is deliberately kept —
+    /// if a save has happened since open, the disk holds that saved content,
+    /// so a cleared session correctly reads dirty until saved again.
     pub fn clear(&mut self) {
-        if !self.events.is_empty() || !self.undo.is_empty() || !self.redo.is_empty() {
+        if !self.events.is_empty()
+            || !self.undo.is_empty()
+            || !self.redo.is_empty()
+            || self.content_gen != 0
+        {
             self.events.clear();
             self.undo.clear();
             self.redo.clear();
+            self.content_gen = 0;
             self.bump();
         }
     }
@@ -846,8 +943,16 @@ impl EditSession {
         if record.is_empty() {
             return;
         }
-        push_history(&mut self.undo, record);
+        push_history(
+            &mut self.undo,
+            HistoryEntry {
+                ops: record,
+                gen: self.content_gen,
+            },
+        );
         self.redo.clear();
+        self.content_gen = self.next_gen;
+        self.next_gen += 1;
         self.bump();
     }
 
@@ -931,11 +1036,11 @@ impl EditSession {
     }
 }
 
-fn push_history(stack: &mut Vec<UndoRecord>, record: UndoRecord) {
+fn push_history(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
     if stack.len() == HISTORY_LIMIT {
         stack.remove(0);
     }
-    stack.push(record);
+    stack.push(entry);
 }
 
 /// Copy original lines `[start, end)` (with their terminators) as one
@@ -1061,17 +1166,114 @@ mod tests {
     }
 
     #[test]
-    fn replacing_with_original_text_clears_dirty_state() {
+    fn retyping_original_text_clears_the_overlay_but_not_dirtiness() {
         let (f, doc) = doc_from(b"a\nb\n");
         let out = f.path().with_extension("same");
         let mut edits = EditSession::default();
         edits.replace_line(&doc, 1, "B".into()).unwrap();
         assert!(edits.is_dirty());
+        assert!(edits.has_edits());
         edits.replace_line(&doc, 1, "b".into()).unwrap();
-        assert!(!edits.is_dirty());
+        // The overlay collapsed (the text equals the original), but the
+        // content generation moved twice: only undo — or a save — makes the
+        // session clean again. Saving streams the original bytes.
+        assert!(!edits.has_edits());
+        assert!(edits.is_dirty());
         edits.save_to_path(&doc, &out).unwrap();
+        edits.mark_saved();
+        assert!(!edits.is_dirty());
         assert_eq!(std::fs::read(&out).unwrap(), b"a\nb\n");
         let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn mark_saved_keeps_history_and_dirtiness_survives_undo_redo() {
+        let (_f, doc) = doc_from(b"one\ntwo\n");
+        let mut edits = EditSession::default();
+        assert!(!edits.is_dirty(), "fresh session is clean");
+        edits.replace_line(&doc, 0, "ONE".into()).unwrap();
+        edits.replace_line(&doc, 1, "TWO".into()).unwrap();
+        assert!(edits.is_dirty());
+
+        // Save: clean, but the FULL history survives.
+        edits.mark_saved();
+        assert!(!edits.is_dirty());
+        assert!(edits.can_undo(), "history survives the save");
+        assert_eq!(texts(&edits, &doc), vec!["ONE", "TWO"]);
+
+        // Undo crosses the save point: dirty again, view is the older text.
+        assert!(edits.undo());
+        assert!(edits.is_dirty());
+        assert_eq!(texts(&edits, &doc), vec!["ONE", "two"]);
+
+        // Redo returns to the EXACT saved content: clean again.
+        assert!(edits.redo());
+        assert!(!edits.is_dirty());
+        assert_eq!(texts(&edits, &doc), vec!["ONE", "TWO"]);
+
+        // A new edit after the save is dirty; undoing it is clean again.
+        edits.replace_line(&doc, 0, "one!".into()).unwrap();
+        assert!(edits.is_dirty());
+        assert!(edits.undo());
+        assert!(!edits.is_dirty());
+
+        // Both original generations are still walkable.
+        assert!(edits.undo());
+        assert!(edits.undo());
+        assert!(!edits.can_undo());
+        assert_eq!(texts(&edits, &doc), vec!["one", "two"]);
+        assert!(edits.is_dirty(), "as-opened content is not the saved one");
+    }
+
+    #[test]
+    fn undo_past_save_then_saving_again_reads_clean() {
+        let (_f, doc) = doc_from(b"x\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 0, "X".into()).unwrap();
+        edits.mark_saved();
+        assert!(edits.undo());
+        assert!(edits.is_dirty());
+        assert!(!edits.has_edits(), "overlay is empty, content still dirty");
+        // Second save (of the undone content): clean at generation 0.
+        edits.mark_saved();
+        assert!(!edits.is_dirty());
+        assert!(edits.can_redo(), "redo history survives too");
+        assert!(edits.redo());
+        assert!(edits.is_dirty(), "redo past the new save point is dirty");
+    }
+
+    #[test]
+    fn mark_saved_at_pins_the_snapshotted_generation() {
+        let (_f, doc) = doc_from(b"a\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 0, "b".into()).unwrap();
+        let staged = edits.content_gen();
+        // An edit slips in while the staged content is being written to disk.
+        edits.replace_line(&doc, 0, "c".into()).unwrap();
+        edits.mark_saved_at(staged);
+        assert!(edits.is_dirty(), "the racing edit is not on disk");
+        assert!(edits.undo());
+        assert!(
+            !edits.is_dirty(),
+            "undo back to the staged content is clean"
+        );
+    }
+
+    #[test]
+    fn clear_returns_to_opened_content_but_keeps_saved_marker() {
+        let (_f, doc) = doc_from(b"a\n");
+        let mut edits = EditSession::default();
+        edits.clear();
+        assert!(!edits.is_dirty(), "clearing a fresh session stays clean");
+        edits.replace_line(&doc, 0, "b".into()).unwrap();
+        edits.mark_saved();
+        edits.clear();
+        assert!(!edits.has_edits());
+        assert!(!edits.can_undo());
+        assert!(
+            edits.is_dirty(),
+            "the disk holds the saved text, not the as-opened text"
+        );
     }
 
     #[test]

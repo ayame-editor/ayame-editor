@@ -396,7 +396,7 @@ await label(menus, "menu map subtitle", "Native text editor actions: open, edit,
 // Mirrors the web UI exactly: 4 right-aligned menubar menus + the toolbar
 // ツール ▾ dropdown. Gestures (Alt+Drag) are listed once, in 選択.
 const menuGroups = [
-  ["ファイル", [["新規テキスト", "Ctrl+N"], ["開く...", "Ctrl+O"], ["保存", "Ctrl+S"], ["別名で保存...", "Ctrl+Shift+S"]]],
+  ["ファイル", [["新規テキスト", "Ctrl+N"], ["開く...", "Ctrl+O"], ["保存", "Ctrl+S"], ["別名で保存...", "Ctrl+Shift+S"], ["保存時の状態に戻す", ""]]],
   ["編集", [["元に戻す", "Ctrl+Z"], ["やり直す", "Ctrl+Y"], ["検索", "Ctrl+F"], ["行へ移動", "Ctrl+G"]]],
   ["選択", [["すべて選択", "Ctrl+A"], ["コピー", "Ctrl+C"], ["切り取り", "Ctrl+X"], ["矩形選択", "Alt+Drag"], ["カーソルを上に追加", "Ctrl+Alt+↑"], ["カーソルを下に追加", "Ctrl+Alt+↓"]]],
   ["表示", [["エクスプローラー", "Ctrl+B"], ["検索バー", "Ctrl+F"], ["設定", ""]]],
@@ -549,6 +549,13 @@ box(components, "component diff delete", 540, 274, 420, 34, C.dangerSoft, C.dang
 await label(components, "component diff delete text", "- pending -> active", 558, 274, 240, 34, 12, C.code, monoRegular);
 box(components, "component diff add", 540, 318, 420, 34, C.greenSoft, C.green, 5);
 await label(components, "component diff add text", "+ disabled -> active", 558, 318, 240, 34, 12, C.code, monoRegular);
+await label(components, "ctx label", "Context menu (right-click)", 36, 452, 260, 28, 16, C.ink, uiMedium);
+const ctxItems = [["切り取り", "Ctrl+X"], ["コピー", "Ctrl+C"], ["貼り付け", "Ctrl+V"], ["すべて選択", "Ctrl+A"], ["選択箇所をファイルに保存…", ""], ["検索", "Ctrl+F"], ["ソート / 置換 / 差分 / 分割", ""]];
+box(components, "ctx panel", 36, 490, 268, 16 + ctxItems.length * 30, C.panel, C.borderStrong, 8);
+for (let i = 0; i < ctxItems.length; i++) {
+  await label(components, `ctx item ${i}`, ctxItems[i][0], 52, 498 + i * 30, 190, 28, 12, i === 4 ? C.accent2 : C.ink, i === 4 ? uiMedium : uiRegular);
+  if (ctxItems[i][1]) await label(components, `ctx key ${i}`, ctxItems[i][1], 214, 498 + i * 30, 80, 28, 11, C.muted, uiRegular, "RIGHT");
+}
 await label(components, "tree label", "Explorer rows", 540, 392, 220, 28, 16, C.ink, uiMedium);
 await treeRow(components, 0, "workspace", "", 520, 432, 430, true);
 await treeRow(components, 1, "huge-file.log", "9.8TB", 520, 466, 430);

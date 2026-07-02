@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::extract::{Query, State};
@@ -208,42 +209,69 @@ pub(super) async fn api_edit_save(
     .map_err(internal)?
     .map_err(bad_request)?;
 
-    // Phase 2 — commit. Serialized against every other doc-slot transition;
-    // rejected with 409 (stage discarded) if edits or the tab changed while
-    // phase 1 was streaming, so nothing is ever silently thrown away.
+    // Phase 2 — commit WITHOUT reloading. Serialized against every other
+    // doc-slot transition; rejected with 409 (stage discarded) if edits or the
+    // tab changed while phase 1 was streaming, so nothing is ever silently
+    // thrown away. The current file is renamed to a hidden aside sibling —
+    // renaming an open/mmap'd file works on Unix and on Windows, and the live
+    // mmap keeps reading the old inode through the new name — then the stage
+    // takes over the target name. The document handle, the overlay and the
+    // undo history all stay untouched: the view is unchanged and undo keeps
+    // working ACROSS the save; only the saved-content marker moves.
     let _transitions = state.lock_transitions().await;
-    if let Err(e) = state.detach_for_overwrite(&snap) {
+    if let Err(e) = state.confirm_overwrite(&snap) {
         let _ = tokio::fs::remove_file(&stage).await;
         return Err(e);
     }
-    drop(snap); // release our mmap handle before replacing the file (Windows)
 
-    let stage_for_replace = stage.clone();
-    let target_for_replace = target.clone();
-    let replaced = tokio::task::spawn_blocking(move || {
-        replace_existing_file(&stage_for_replace, &target_for_replace)
+    let aside = super::workspace::aside_path(&target);
+    let stage_for_swap = stage.clone();
+    let target_for_swap = target.clone();
+    let swapped = tokio::task::spawn_blocking(move || {
+        swap_in_staged_file(&stage_for_swap, &target_for_swap, aside)
     })
     .await
     .map_err(internal)?;
-    match replaced {
-        Ok(bytes) => {
-            // The edited bytes are on disk: the overlay is no longer pending.
-            state.mark_edits_saved();
-            state.install_reloaded(target.clone()).await?;
+    match swapped {
+        Ok(aside_used) => {
+            state.commit_in_place_save(&snap, aside_used);
             Ok(Json(SaveResult {
                 path: target,
-                bytes,
+                bytes: saved.bytes,
                 lines: saved.lines,
             }))
         }
-        Err(e) => {
-            // Best effort: reopen the original document. The overlay was left
-            // untouched by the detach, so the user's edits are still pending
-            // (and the staged bytes are preserved on disk for recovery).
-            let _ = state.install_reloaded(active_path).await;
-            Err(internal(e))
-        }
+        // The swap either rolled back (target intact) or kept the stage (its
+        // path is in the error). The session is untouched either way — the
+        // user's edits are still pending, nothing was lost.
+        Err(e) => Err(internal(e)),
     }
+}
+
+/// Move the fully-written stage file onto `target`, preserving the current
+/// target file under `aside` so a live mmap of it stays readable. Returns the
+/// aside path when the target existed (`None` when there was nothing to move
+/// aside). On failure `target` is restored where possible and the stage file
+/// is KEPT (its path is in the error) — it holds the freshly saved bytes.
+fn swap_in_staged_file(
+    stage: &Path,
+    target: &Path,
+    aside: PathBuf,
+) -> std::io::Result<Option<PathBuf>> {
+    let aside_used = match std::fs::rename(target, &aside) {
+        Ok(()) => Some(aside),
+        // The target vanished externally; nothing to preserve.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(keep_stage_error(e, stage)),
+    };
+    if let Err(e) = std::fs::rename(stage, target) {
+        // Never leave the target name dangling: put the old file back.
+        if let Some(aside) = &aside_used {
+            let _ = std::fs::rename(aside, target);
+        }
+        return Err(keep_stage_error(e, stage));
+    }
+    Ok(aside_used)
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -309,12 +337,18 @@ fn keep_stage_error(e: std::io::Error, stage: &Path) -> std::io::Error {
     )
 }
 
+/// Revert to the last SAVED state. Since in-place saves leave the on-disk
+/// file holding exactly the saved bytes (the mmap'd pre-save inode lives on
+/// under an aside name), "revert" is a reload from disk: fresh document,
+/// empty overlay, empty history, clean saved marker.
 pub(super) async fn api_edit_revert(
     State(state): State<SharedState>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {
-    state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        edits.clear();
+    let _transitions = state.lock_transitions().await;
+    let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;
+    state.reload_reverted(path).await?;
+    state.read(|ws| {
+        let (doc, edits) = ws.doc_and_edits()?;
         Ok(Json(edits.stats(doc)))
     })
 }
@@ -337,4 +371,233 @@ pub(super) async fn api_edit_redo(
         edits.redo();
         Ok(Json(edits.stats(doc)))
     })
+}
+
+/// Save the current selection (normal range or rectangle) to a file. Streams
+/// in batches so the size is NOT limited by the clipboard cap; every batch
+/// revalidates the pinned generation (document identity + edit revision) so a
+/// concurrent edit or tab change aborts the write (409) instead of producing
+/// a mixed-generation file. Output is the same text the clipboard copy would
+/// produce: decoded view lines joined with '\n'.
+#[derive(Deserialize)]
+pub(super) struct SelectionSaveRequest {
+    path: String,
+    #[serde(default)]
+    overwrite: bool,
+    #[serde(default)]
+    rect: bool,
+    l0: u64,
+    c0: usize,
+    l1: u64,
+    c1: usize,
+}
+
+#[derive(Serialize)]
+pub(super) struct SelectionSaveResponse {
+    path: String,
+    lines: u64,
+    bytes: u64,
+}
+
+const SELECTION_BATCH: u64 = 8192;
+
+pub(super) async fn api_selection_save(
+    State(state): State<SharedState>,
+    Json(req): Json<SelectionSaveRequest>,
+) -> Result<Json<SelectionSaveResponse>, (StatusCode, String)> {
+    if req.path.trim().is_empty() {
+        return Err(bad_request("保存先パスが空です"));
+    }
+    if req.l1 < req.l0 {
+        return Err(bad_request("選択範囲が不正です"));
+    }
+    // A zero-width rectangle (c1 == c0) is a valid caret column: every line
+    // contributes an empty piece, i.e. a newline-only column. Only a reversed
+    // column range is rejected.
+    if req.rect && req.c1 < req.c0 {
+        return Err(bad_request("矩形選択の列範囲が不正です"));
+    }
+    let target = PathBuf::from(req.path.trim());
+    if target.exists() && !req.overwrite {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("{} は既に存在します", target.display()),
+        ));
+    }
+    tokio::task::spawn_blocking(move || write_selection_to_file(&state, &req, &target))
+        .await
+        .map_err(internal)?
+        .map(Json)
+}
+
+/// The exact state a selection export's coordinates refer to: the document
+/// (by identity), the edit revision, and the view's total line count.
+struct SelectionPin {
+    doc: Arc<ayame_core::Document>,
+    revision: u64,
+    total: u64,
+}
+
+/// Pin the current view generation for a selection export.
+fn pin_selection(ws: &super::state::Workspace) -> Option<SelectionPin> {
+    let doc = ws.doc()?;
+    Some(SelectionPin {
+        doc: doc.clone(),
+        revision: ws.edits.revision(),
+        total: ws.edits.total_lines(doc),
+    })
+}
+
+/// One batch of view lines, re-validated against the pin: same document
+/// IDENTITY (a tab switch/open swaps the doc but starts a fresh session whose
+/// revision and line count can coincide), same revision, same total. `None`
+/// means the view moved under the export and the caller must abort.
+fn pinned_selection_batch(
+    ws: &super::state::Workspace,
+    pin: &SelectionPin,
+    start: u64,
+    count: u64,
+) -> Option<Vec<EditLine>> {
+    let doc = ws.doc()?;
+    if !Arc::ptr_eq(doc, &pin.doc)
+        || ws.edits.revision() != pin.revision
+        || ws.edits.total_lines(doc) != pin.total
+    {
+        return None;
+    }
+    Some(ws.edits.lines(doc, start, count))
+}
+
+fn write_selection_to_file(
+    state: &SharedState,
+    req: &SelectionSaveRequest,
+    target: &Path,
+) -> Result<SelectionSaveResponse, (StatusCode, String)> {
+    use std::io::Write as _;
+    // Pin the generation the selection coordinates refer to.
+    let Some(pin) = state.read(pin_selection) else {
+        return Err(bad_request("ファイルが開かれていません"));
+    };
+    let total0 = pin.total;
+    if total0 == 0 || req.l0 >= total0 {
+        return Err(bad_request("選択範囲が不正です (行が範囲外)"));
+    }
+    let last = req.l1.min(total0 - 1);
+    // If the requested end line got clamped, take the (new) last line whole.
+    let eff_c1 = if last == req.l1 { req.c1 } else { usize::MAX };
+
+    let stage = overwrite_stage_path(target);
+    let file =
+        std::fs::File::create(&stage).map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+    let mut out = std::io::BufWriter::new(file);
+    let mut bytes: u64 = 0;
+    let mut first = true;
+    let mut start = req.l0;
+    while start <= last {
+        let count = SELECTION_BATCH.min(last - start + 1);
+        let batch = state.read(|ws| pinned_selection_batch(ws, &pin, start, count));
+        let Some(batch) = batch else {
+            let _ = std::fs::remove_file(&stage);
+            return Err((
+                StatusCode::CONFLICT,
+                "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください"
+                    .into(),
+            ));
+        };
+        for (i, line) in batch.iter().enumerate() {
+            let no = start + i as u64;
+            let piece: String = if req.rect {
+                line.text
+                    .chars()
+                    .skip(req.c0)
+                    .take(req.c1.saturating_sub(req.c0))
+                    .collect()
+            } else {
+                let from = if no == req.l0 { req.c0 } else { 0 };
+                let to = if no == last { eff_c1 } else { usize::MAX };
+                line.text
+                    .chars()
+                    .skip(from)
+                    .take(to.saturating_sub(from))
+                    .collect()
+            };
+            if !first {
+                out.write_all(b"\n")
+                    .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+                bytes += 1;
+            }
+            first = false;
+            out.write_all(piece.as_bytes())
+                .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+            bytes += piece.len() as u64;
+        }
+        start += count;
+    }
+    out.flush()
+        .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+    drop(out);
+    replace_existing_file(&stage, target)
+        .map_err(|e| internal(format!("{}: {e}", target.display())))?;
+    Ok(SelectionSaveResponse {
+        path: target.display().to_string(),
+        lines: last - req.l0 + 1,
+        bytes,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use ayame_core::{Document, OpenOptions};
+
+    use super::super::state::AppState;
+    use super::*;
+
+    fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ayame-edit-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!(
+            "{}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            name
+        ));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn selection_batch_rejects_a_swapped_document_with_matching_generation() {
+        let fa = scratch_file("sel-pin-a.txt", b"a\nb\n");
+        let fb = scratch_file("sel-pin-b.txt", b"x\ny\n");
+        let doc = Document::open(&fa, &OpenOptions::default()).unwrap();
+        let state: SharedState = Arc::new(AppState::new(Some(doc), OpenOptions::default()));
+
+        let pin = state.read(pin_selection).expect("a document is open");
+        assert_eq!((pin.revision, pin.total), (0, 2));
+        assert!(
+            state
+                .read(|ws| pinned_selection_batch(ws, &pin, 0, 2))
+                .is_some(),
+            "the pinned document itself answers the batch"
+        );
+
+        // Swap in a DIFFERENT document whose fresh session has the same
+        // revision (0) and the same total line count (2): only the identity
+        // check can tell the two views apart.
+        state
+            .open_path(fb.to_string_lossy().to_string())
+            .await
+            .unwrap();
+        assert!(
+            state
+                .read(|ws| pinned_selection_batch(ws, &pin, 0, 2))
+                .is_none(),
+            "a swapped document must abort the export even when revision and total coincide"
+        );
+
+        let _ = std::fs::remove_file(&fa);
+        let _ = std::fs::remove_file(&fb);
+    }
 }

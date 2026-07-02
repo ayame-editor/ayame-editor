@@ -145,12 +145,27 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
 
     // Keep the webview alive for the lifetime of the window.
     let mut close_pending = false;
+    let mut close_deadline: Option<Instant> = None;
     let mut shown = false;
+    // Latest NON-maximized geometry seen this session, so quitting while
+    // maximized still remembers where the normal window lived (the loaded
+    // state would otherwise be written back, losing this session's moves).
+    let mut last_normal: Option<WindowState> = saved_state.clone();
     // Show even if the page never reports ready (server error, slow webview),
     // so the user always gets a window to look at.
     let show_deadline = Instant::now() + Duration::from_millis(2000);
+    let close_timeout = Duration::from_secs(5);
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = if shown {
+        let now = Instant::now();
+        if close_pending && close_deadline.is_some_and(|deadline| now >= deadline) {
+            eprintln!("ayame: close confirmation timed out; exiting");
+            save_window_state(&window, last_normal.as_ref());
+            *control_flow = ControlFlow::Exit;
+            return;
+        }
+        *control_flow = if let Some(deadline) = close_deadline {
+            ControlFlow::WaitUntil(deadline)
+        } else if shown {
             ControlFlow::Wait
         } else {
             ControlFlow::WaitUntil(show_deadline)
@@ -169,6 +184,26 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 }
             }
             Event::WindowEvent {
+                event: WindowEvent::Moved(_) | WindowEvent::Resized(_),
+                ..
+            } => {
+                // Track the un-maximized geometry as it changes; maximized
+                // bounds are useless for restore and are skipped.
+                if !window.is_maximized() {
+                    let size = window.inner_size();
+                    if size.width > 0 && size.height > 0 {
+                        let pos = window.outer_position().ok();
+                        last_normal = Some(WindowState {
+                            x: pos.map(|p| p.x),
+                            y: pos.map(|p| p.y),
+                            width: size.width,
+                            height: size.height,
+                            maximized: false,
+                        });
+                    }
+                }
+            }
+            Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
@@ -176,17 +211,19 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     return;
                 }
                 close_pending = true;
+                close_deadline = Some(Instant::now() + close_timeout);
                 if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
-                    save_window_state(&window, saved_state.as_ref());
+                    save_window_state(&window, last_normal.as_ref());
                     *control_flow = ControlFlow::Exit;
                 }
             }
             Event::UserEvent(GuiEvent::CloseConfirmed) => {
-                save_window_state(&window, saved_state.as_ref());
+                save_window_state(&window, last_normal.as_ref());
                 *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(GuiEvent::CloseCanceled) => {
                 close_pending = false;
+                close_deadline = None;
             }
             Event::UserEvent(GuiEvent::SetTitle(title)) => {
                 window.set_title(&title);
@@ -209,8 +246,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                         return;
                     }
                     close_pending = true;
+                    close_deadline = Some(Instant::now() + close_timeout);
                     if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
-                        save_window_state(&window, saved_state.as_ref());
+                        save_window_state(&window, last_normal.as_ref());
                         *control_flow = ControlFlow::Exit;
                     }
                 } else if let Ok(id_json) = serde_json::to_string(&id) {
@@ -416,12 +454,14 @@ impl WindowState {
     /// Clamp restored bounds so a stale or corrupt file can never produce an
     /// unusable window: size within [min window size, 8192] and a position
     /// that is at least partially reachable on a plausible monitor layout.
+    /// The x lower bound is generous (-32768) because monitors placed left of
+    /// the primary have genuinely negative origins (e.g. x = -2560).
     fn sanitized(mut self) -> Self {
         self.width = self.width.clamp(900, 8192);
         self.height = self.height.clamp(560, 8192);
         let pos_ok = matches!(
             (self.x, self.y),
-            (Some(x), Some(y)) if (-2000..=20_000).contains(&x) && (-200..=20_000).contains(&y)
+            (Some(x), Some(y)) if (-32_768..=20_000).contains(&x) && (-200..=20_000).contains(&y)
         );
         if !pos_ok {
             self.x = None;

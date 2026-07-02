@@ -35,6 +35,8 @@ pub(super) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 struct InactiveTab {
     doc: Shared,
     edits: EditSession,
+    /// Aside files (see [`Workspace::aside_files`]) travelling with the tab.
+    aside_files: Vec<PathBuf>,
 }
 
 #[derive(Default)]
@@ -51,6 +53,12 @@ struct TabList {
 pub(super) struct Workspace {
     doc: Option<Shared>,
     pub(super) edits: EditSession,
+    /// Aside files left behind by in-place saves of the ACTIVE document: the
+    /// pre-save file is renamed to a hidden sibling so the live mmap keeps its
+    /// inode readable. Each save best-effort deletes the accumulated entries
+    /// (only a still-mapped file on Windows survives that); whatever remains
+    /// is removed when the document is closed or replaced, and on shutdown.
+    aside_files: Vec<PathBuf>,
     tabs: TabList,
 }
 
@@ -87,20 +95,33 @@ impl Workspace {
         if let Some(aid) = self.tabs.active {
             if let Some(doc) = self.doc.clone() {
                 let edits = std::mem::take(&mut self.edits);
-                self.tabs.inactive.insert(aid, InactiveTab { doc, edits });
+                let aside_files = std::mem::take(&mut self.aside_files);
+                self.tabs.inactive.insert(
+                    aid,
+                    InactiveTab {
+                        doc,
+                        edits,
+                        aside_files,
+                    },
+                );
             }
         }
     }
 
     /// Make `doc` a brand-new tab and focus it (used by open / new / upload).
-    fn install_new_tab(&mut self, doc: Shared) {
+    /// Returns aside files orphaned by the transition (an active tab whose
+    /// document was gone cannot be parked); the caller deletes them outside
+    /// the workspace lock.
+    fn install_new_tab(&mut self, doc: Shared) -> Vec<PathBuf> {
         self.park_active();
+        let orphaned = std::mem::take(&mut self.aside_files);
         let id = self.tabs.next_id;
         self.tabs.next_id += 1;
         self.tabs.order.push(id);
         self.tabs.active = Some(id);
         self.doc = Some(doc);
         self.edits = EditSession::default();
+        orphaned
     }
 }
 
@@ -120,6 +141,11 @@ pub(super) struct EditSnapshot {
     pub(super) doc: Shared,
     pub(super) edits: EditSession,
     revision: u64,
+    /// Content generation the snapshot carries — what
+    /// [`AppState::commit_in_place_save`] records as "on disk" after the
+    /// staged bytes land, so a save stays correct even if edits (or undo)
+    /// arrive between the commit-point validation and the marker update.
+    content_gen: u64,
 }
 
 impl EditSnapshot {
@@ -211,6 +237,7 @@ impl AppState {
             ws: RwLock::new(Workspace {
                 doc: shared,
                 edits: EditSession::default(),
+                aside_files: Vec::new(),
                 tabs,
             }),
             transitions: tokio::sync::Mutex::new(()),
@@ -293,6 +320,7 @@ impl AppState {
                 Some(t) => {
                     ws.doc = Some(t.doc);
                     ws.edits = t.edits;
+                    ws.aside_files = t.aside_files;
                 }
                 None => {
                     // The tab exists but its state is gone (e.g. a failed
@@ -310,16 +338,23 @@ impl AppState {
     pub(super) async fn close_tab(&self, id: u64) {
         let _transitions = self.transitions.lock().await;
         self.invalidate_dirty_snapshot();
-        self.write(|ws| {
+        let asides = self.write(|ws| {
             let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
-                return;
+                return Vec::new();
             };
             ws.tabs.order.remove(idx);
-            ws.tabs.inactive.remove(&id);
+            let mut asides = ws
+                .tabs
+                .inactive
+                .remove(&id)
+                .map(|t| t.aside_files)
+                .unwrap_or_default();
             if ws.tabs.active != Some(id) {
-                return; // closed a background tab; active state untouched
+                return asides; // closed a background tab; active state untouched
             }
-            // The closed tab was active — pick the neighbor at the same slot.
+            // The closed tab was active: its document goes away with it.
+            asides.append(&mut ws.aside_files);
+            // Pick the neighbor at the same slot.
             let next = ws
                 .tabs
                 .order
@@ -331,13 +366,19 @@ impl AppState {
                 Some(t) => {
                     ws.doc = Some(t.doc);
                     ws.edits = t.edits;
+                    ws.aside_files = t.aside_files;
                 }
                 None => {
                     ws.doc = None;
                     ws.edits = EditSession::default();
                 }
             }
+            asides
         });
+        // The closed tab's document handle is gone (or going): its aside
+        // files are deletable now. Outside the lock; failures are retried at
+        // shutdown via the pid-scoped sweep on the next open.
+        remove_aside_files(asides);
     }
 
     /// Snapshot every open tab for the tab bar.
@@ -385,19 +426,24 @@ impl AppState {
                 doc: doc.clone(),
                 edits: edits.clone(),
                 revision: edits.revision(),
+                content_gen: edits.content_gen(),
             })
         })
     }
 
-    /// The active document plus a clone of the edit overlay ONLY when it is
-    /// dirty — what worker materialization and diff need. Clean sessions skip
-    /// the copy entirely.
+    /// The active document plus a clone of the edit overlay when the view
+    /// cannot be answered by the document alone — what worker materialization
+    /// and diff need. `None` guarantees BOTH stand-ins are faithful: the
+    /// mmap'd document object (overlay empty) and the file at its path (the
+    /// session is not dirty against the last save, and after an in-place save
+    /// that path holds exactly the saved view). Sessions passing both checks
+    /// skip the copy entirely.
     pub(super) fn doc_and_dirty_edits(
         &self,
     ) -> Result<(Shared, Option<EditSession>), (StatusCode, String)> {
         self.read(|ws| {
             let (doc, edits) = ws.doc_and_edits()?;
-            let dirty = edits.is_dirty().then(|| edits.clone());
+            let dirty = (edits.has_edits() || edits.is_dirty()).then(|| edits.clone());
             Ok((doc.clone(), dirty))
         })
     }
@@ -443,15 +489,73 @@ impl AppState {
 
     /// The staged bytes reached the target file: the pending edits are now on
     /// disk, so clear the overlay (the reloaded document IS the edited text).
+    /// Used by full-reload commits (in-place sort); the in-place SAVE keeps
+    /// the overlay and history via [`AppState::commit_in_place_save`] instead.
     pub(super) fn mark_edits_saved(&self) {
         self.write(|ws| ws.edits = EditSession::default());
         self.invalidate_dirty_snapshot(); // clean session: the snapshot temp can go
     }
 
+    /// Commit point of an in-place save WITHOUT a reload: verify the workspace
+    /// still matches `snap` (same document identity, same edit revision) so
+    /// the staged bytes are known to be the current view. The document, the
+    /// overlay and the undo/redo history stay untouched — that is what lets
+    /// undo cross the save. Caller must hold the transitions lock and, on Ok,
+    /// finish with [`AppState::commit_in_place_save`] after the file swap.
+    pub(super) fn confirm_overwrite(
+        &self,
+        snap: &EditSnapshot,
+    ) -> Result<(), (StatusCode, String)> {
+        self.read(|ws| {
+            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
+            if !same_doc || ws.edits.revision() != snap.revision {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "the document changed while saving — nothing was overwritten; save again"
+                        .to_string(),
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    /// The staged bytes replaced the target file (the pre-save file lives on
+    /// under `aside`, if the target existed): record that the SNAPSHOTTED
+    /// content generation is what's on disk — edits that raced the rename
+    /// simply leave the session dirty — and register the aside file with the
+    /// active tab. All accumulated aside files are then deleted best-effort
+    /// (on Unix they all go, the mmap keeps its inode; on Windows the mapped
+    /// one refuses and stays tracked for the close/shutdown hooks).
+    ///
+    /// Caller must hold the transitions lock (the active tab cannot change
+    /// between [`AppState::confirm_overwrite`] and this call).
+    pub(super) fn commit_in_place_save(&self, snap: &EditSnapshot, aside: Option<PathBuf>) {
+        let pending = self.write(|ws| {
+            ws.edits.mark_saved_at(snap.content_gen);
+            if let Some(aside) = aside {
+                ws.aside_files.push(aside);
+            }
+            std::mem::take(&mut ws.aside_files)
+        });
+        let survivors = remove_aside_files(pending);
+        if !survivors.is_empty() {
+            self.write(|ws| {
+                let mut kept = survivors;
+                kept.append(&mut ws.aside_files);
+                ws.aside_files = kept;
+            });
+        }
+        // NOTE: no snapshot invalidation — the view, the document identity and
+        // the revision are all unchanged by a save, so a cached dirty snapshot
+        // is still exactly the view.
+    }
+
     /// Open `path` (blocking work off the async runtime) and install it in the
-    /// detached active slot. Used by the in-place save to reload the saved
-    /// file, and to restore the original document when the replace failed.
-    /// Never touches the edit overlay. Caller must hold the transitions lock.
+    /// detached active slot. Used by the in-place sort to reload the sorted
+    /// file, and to restore the original document when a replace failed.
+    /// Never touches the edit overlay. The replaced document's aside files are
+    /// deleted (its mmap is gone with it). Caller must hold the transitions
+    /// lock.
     pub(super) async fn install_reloaded(&self, path: PathBuf) -> Result<(), (StatusCode, String)> {
         let opts = self.open_opts.clone();
         let p = path.clone();
@@ -459,7 +563,32 @@ impl AppState {
             .await
             .map_err(internal)?
             .map_err(|e| bad_request(format!("reopening '{}': {e}", path.display())))?;
-        self.write(|ws| ws.doc = Some(Arc::new(doc)));
+        let asides = self.write(|ws| {
+            ws.doc = Some(Arc::new(doc));
+            std::mem::take(&mut ws.aside_files)
+        });
+        remove_aside_files(asides);
+        self.invalidate_dirty_snapshot(); // the doc identity changed
+        Ok(())
+    }
+
+    /// Revert the active document to its last SAVED state: reload from disk
+    /// (the file on disk IS the saved state, in-place saves included) with a
+    /// fresh, clean edit session, and drop the old document's aside files.
+    /// Caller must hold the transitions lock.
+    pub(super) async fn reload_reverted(&self, path: PathBuf) -> Result<(), (StatusCode, String)> {
+        let opts = self.open_opts.clone();
+        let p = path.clone();
+        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
+            .await
+            .map_err(internal)?
+            .map_err(|e| bad_request(format!("reopening '{}': {e}", path.display())))?;
+        let asides = self.write(|ws| {
+            ws.doc = Some(Arc::new(doc));
+            ws.edits = EditSession::default();
+            std::mem::take(&mut ws.aside_files)
+        });
+        remove_aside_files(asides);
         self.invalidate_dirty_snapshot(); // the doc identity changed
         Ok(())
     }
@@ -467,19 +596,48 @@ impl AppState {
     /// Open `path` with the workspace's options and make it the active document
     /// in a brand-new tab. The blocking open/index runs off the async runtime;
     /// the install itself is one atomic workspace mutation, serialized against
-    /// other transitions.
+    /// other transitions. Stale aside files of `path` (crash leftovers from
+    /// any previous session) are swept before opening.
     pub(super) async fn open_path(&self, path: String) -> Result<(), (StatusCode, String)> {
         let opts = self.open_opts.clone();
         let p = path.clone();
-        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
-            .await
-            .map_err(internal)?
-            .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
+        let doc = tokio::task::spawn_blocking(move || {
+            super::workspace::sweep_stale_asides(Path::new(&p));
+            Document::open(&p, &opts)
+        })
+        .await
+        .map_err(internal)?
+        .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
         let _transitions = self.transitions.lock().await;
-        self.write(|ws| ws.install_new_tab(Arc::new(doc)));
+        let orphaned = self.write(|ws| ws.install_new_tab(Arc::new(doc)));
+        remove_aside_files(orphaned);
         self.invalidate_dirty_snapshot(); // a different tab is active now
         Ok(())
     }
+
+    /// Best-effort deletion of every tracked aside file (all tabs), for the
+    /// graceful-shutdown path. Failures are ignored — mapped files refuse
+    /// deletion on Windows; the on-open sweep collects them next time.
+    pub(super) fn cleanup_aside_files(&self) {
+        let all = self.write(|ws| {
+            let mut v = std::mem::take(&mut ws.aside_files);
+            for tab in ws.tabs.inactive.values_mut() {
+                v.append(&mut tab.aside_files);
+            }
+            v
+        });
+        remove_aside_files(all);
+    }
+}
+
+/// Best-effort deletion of aside files; returns the ones that still exist but
+/// could not be deleted (e.g. mapped on Windows) so the caller can keep
+/// tracking them.
+fn remove_aside_files(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .filter(|p| std::fs::remove_file(p).is_err() && p.exists())
+        .collect()
 }
 
 /// Friendly tab label: "untitled" for scratch buffers, else the file's basename.

@@ -15,20 +15,6 @@
         <path d="M9 4.5v15" />
         <path d="M11.8 15.5v-4.2c0-.5.3-.8.8-.8h2.2l.8 1h3.1c.5 0 .8.3.8.8v3.2h-7.7Z" />
       </symbol>
-      <symbol id="i-open" viewBox="0 0 24 24">
-        <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
-        <path d="M3.8 18.5 6 11h14.2l-2.1 7.5H3.8Z" />
-      </symbol>
-      <symbol id="i-save" viewBox="0 0 24 24">
-        <path d="M5 4.5h11.6l2.4 2.4v12.6H5V4.5Z" />
-        <path d="M8 4.5v5h7v-5M8 15.2h8" />
-        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M17.2 11.2c1.1 1.2 1.1 2.2 0 3.4-1.1-1.2-1.1-2.2 0-3.4Z" />
-      </symbol>
-      <symbol id="i-save-as" viewBox="0 0 24 24">
-        <path d="M5 4.5h10.5l3.5 3.5v11.5H5V4.5Z" />
-        <path d="M8 4.5v5h6.5M8 16h4.8" />
-        <path d="M15 16.7 19.2 12.5l1.3 1.3-4.2 4.2-2 .7.7-2Z" />
-      </symbol>
       <symbol id="i-undo" viewBox="0 0 24 24">
         <path d="M9 8H5V4" />
         <path d="M5.4 8.3a8 8 0 1 1 2.1 8.1" />
@@ -36,18 +22,6 @@
       <symbol id="i-redo" viewBox="0 0 24 24">
         <path d="M15 8h4V4" />
         <path d="M18.6 8.3a8 8 0 1 0-2.1 8.1" />
-      </symbol>
-      <symbol id="i-sort" viewBox="0 0 24 24">
-        <path d="M7 5v14M7 19l-3-3M7 19l3-3M13 6h7M13 12h5M13 18h3" />
-        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M10.5 4.6c1.1 1.3 1.1 2.3 0 3.6-1.1-1.3-1.1-2.3 0-3.6Z" />
-      </symbol>
-      <symbol id="i-replace" viewBox="0 0 24 24">
-        <path d="M7 7h8.5a3.5 3.5 0 0 1 0 7H14" />
-        <path d="M10 4 7 7l3 3M17 20l3-3-3-3M20 17H8.5a3.5 3.5 0 0 1 0-7H10" />
-      </symbol>
-      <symbol id="i-diff" viewBox="0 0 24 24">
-        <path d="M6 5v14M18 5v14M9 8h6M9 16h6" />
-        <path class="petal" fill="currentColor" stroke="none" opacity=".88" d="M12 9.8c1.2 1.4 1.2 2.6 0 4-1.2-1.4-1.2-2.6 0-4Z" />
       </symbol>
       <symbol id="i-search" viewBox="0 0 24 24">
         <circle cx="10.5" cy="10.5" r="5.8" />
@@ -61,11 +35,6 @@
       </symbol>
       <symbol id="i-plus" viewBox="0 0 24 24">
         <path d="M12 5v14M5 12h14" />
-      </symbol>
-      <symbol id="i-settings" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.3" />
-        <path d="M12 3.8v2.4M12 17.8v2.4M4.9 7.9 7 9.1M17 14.9l2.1 1.2M4.9 16.1 7 14.9M17 9.1l2.1-1.2" />
-        <path d="M8.4 4.8 9.6 7M14.4 17l1.2 2.2M4.8 12h2.4M16.8 12h2.4M8.4 19.2 9.6 17M14.4 7l1.2-2.2" />
       </symbol>
       <symbol id="i-folder-up" viewBox="0 0 24 24">
         <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
@@ -97,6 +66,11 @@
             </button>
             <button id="save-copy" class="menu-item" role="menuitem">
               <span class="menu-label">別名で保存...</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
+            </button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="revert" role="menuitem"
+                    title="未保存の編集をすべて破棄して、ディスク上の内容に戻します">
+              <span class="menu-label">保存時の状態に戻す</span><span class="menu-key"></span>
             </button>
           </div>
         </div>
@@ -157,7 +131,7 @@
         <div class="tb-sep"></div>
 
         <div class="menu-shell">
-          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・置換・差分・ケース変換">
+          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・置換・差分・分割・ケース変換">
             <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール">
@@ -423,6 +397,28 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Right-click context menu for the editor viewport. Selection-dependent
+         items disable themselves; 選択箇所をファイルに保存 streams server-side
+         so it is not limited by the clipboard cap. -->
+    <div id="ctx-menu" class="file-menu ctx-menu hidden" role="menu" aria-label="コンテキストメニュー">
+      <button class="menu-item" data-ctx="cut" role="menuitem"><span class="menu-label">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
+      <button class="menu-item" data-ctx="copy" role="menuitem"><span class="menu-label">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
+      <button class="menu-item" data-ctx="paste" role="menuitem"><span class="menu-label">貼り付け</span><span class="menu-key">Ctrl+V</span></button>
+      <div class="menu-sep" aria-hidden="true"></div>
+      <button class="menu-item" data-ctx="selectAll" role="menuitem"><span class="menu-label">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
+      <button class="menu-item" data-ctx="saveSelection" role="menuitem"
+              title="選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません">
+        <span class="menu-label">選択箇所をファイルに保存…</span><span class="menu-key"></span>
+      </button>
+      <div class="menu-sep" aria-hidden="true"></div>
+      <button class="menu-item" data-ctx="find" role="menuitem"><span class="menu-label">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+      <div class="menu-sep" aria-hidden="true"></div>
+      <button class="menu-item" data-ctx="sortSave" role="menuitem"><span class="menu-label">ソート</span><span class="menu-key"></span></button>
+      <button class="menu-item" data-ctx="replaceSave" role="menuitem"><span class="menu-label">置換して保存</span><span class="menu-key"></span></button>
+      <button class="menu-item" data-ctx="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key"></span></button>
+      <button class="menu-item" data-ctx="splitFile" role="menuitem"><span class="menu-label">ファイルを分割</span><span class="menu-key"></span></button>
     </div>
 
     <!-- Full-window drop hint, shown while dragging a file over the page. -->

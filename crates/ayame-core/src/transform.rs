@@ -94,82 +94,11 @@ pub fn replace_to_path(
             "replace pattern must not be empty".into(),
         ));
     }
-
-    if can_use_raw_literal_fast_path(doc.encoding(), opts) {
-        let needle = doc.encoding().encode_text(&opts.find).ok_or_else(|| {
-            Error::Unsupported(format!(
-                "replace pattern cannot be encoded as {}",
-                doc.encoding().label()
-            ))
-        })?;
-        let replacement = doc
-            .encoding()
-            .encode_text(&opts.replacement)
-            .ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "replacement cannot be encoded as {}",
-                    doc.encoding().label()
-                ))
-            })?;
-        let finder = memmem::Finder::new(&needle).into_owned();
-        return stream_to_new_file(doc, target, |raw, term, w| {
-            let (changed, count) = write_raw_replaced(raw, &finder, &needle, &replacement, w)?;
-            w.write_all(term)?;
-            Ok((changed, count))
-        });
-    }
-
-    let regex = if opts.regex || !opts.case_sensitive {
-        let pat = if opts.regex {
-            opts.find.clone()
-        } else {
-            regex::escape(&opts.find)
-        };
-        Some(
-            regex::RegexBuilder::new(&pat)
-                .case_insensitive(!opts.case_sensitive)
-                .build()
-                .map_err(|e| Error::Unsupported(format!("invalid regex: {e}")))?,
-        )
-    } else {
-        None
-    };
-
+    // The same raw-literal / regex / decoded-literal plan the parallel path
+    // uses, streamed through a single writer.
+    let plan = ReplacePlan::new(doc, opts)?;
     stream_to_new_file(doc, target, |raw, term, w| {
-        let text = doc.encoding().decode_line(raw);
-        let (changed, count, replaced) = if let Some(re) = &regex {
-            let count = re.find_iter(&text).count() as u64;
-            if count == 0 {
-                (false, 0, String::new())
-            } else {
-                (
-                    true,
-                    count,
-                    re.replace_all(&text, opts.replacement.as_str())
-                        .into_owned(),
-                )
-            }
-        } else if text.contains(&opts.find) {
-            (
-                true,
-                text.matches(&opts.find).count() as u64,
-                text.replace(&opts.find, &opts.replacement),
-            )
-        } else {
-            (false, 0, String::new())
-        };
-
-        if changed {
-            let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "replacement result cannot be encoded as {}",
-                    doc.encoding().label()
-                ))
-            })?;
-            w.write_all(&bytes)?;
-        } else {
-            w.write_all(raw)?;
-        }
+        let (changed, count) = write_replaced_line(doc, &plan, raw, w)?;
         w.write_all(term)?;
         Ok((changed, count))
     })

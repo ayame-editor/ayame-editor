@@ -361,7 +361,7 @@ fn print_diff_result(
     Ok(())
 }
 
-fn print_diff_hunk(old: &Document, new: &Document, h: &DiffHunk, max_lines: u64) {
+fn print_hunk_header(h: &DiffHunk) {
     println!(
         "@@ -{},{} +{},{} {:?} @@",
         h.old_start + 1,
@@ -370,6 +370,10 @@ fn print_diff_hunk(old: &Document, new: &Document, h: &DiffHunk, max_lines: u64)
         h.new_len,
         h.kind
     );
+}
+
+fn print_diff_hunk(old: &Document, new: &Document, h: &DiffHunk, max_lines: u64) {
+    print_hunk_header(h);
     let old_shown = h.old_len.min(max_lines);
     for n in h.old_start..h.old_start + old_shown {
         println!("-{}", old.line(n).unwrap_or_default());
@@ -395,14 +399,7 @@ fn print_side_by_side_hunk(
 ) {
     let width = width.max(60);
     let column = ((width - 7) / 2).clamp(20, 120);
-    println!(
-        "@@ -{},{} +{},{} {:?} @@",
-        h.old_start + 1,
-        h.old_len,
-        h.new_start + 1,
-        h.new_len,
-        h.kind
-    );
+    print_hunk_header(h);
     let shown = h.old_len.max(h.new_len).min(max_lines);
     for offset in 0..shown {
         let old_present = offset < h.old_len;

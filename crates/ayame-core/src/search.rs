@@ -137,22 +137,6 @@ pub fn search(
     let mut hits = Vec::new();
     let mut truncated = false;
 
-    let push = |abs: usize, mlen: usize, hits: &mut Vec<SearchHit>| {
-        let byte = abs as u64;
-        let line = index.line_of_byte(buf, byte);
-        let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-        let column = enc
-            .decode_line(&buf[ls as usize..byte as usize])
-            .chars()
-            .count() as u64;
-        hits.push(SearchHit {
-            line,
-            column,
-            byte,
-            byte_len: mlen as u64,
-        });
-    };
-
     match matcher {
         Matcher::Literal(finder) => {
             let check_boundary = is_legacy_multibyte(enc);
@@ -168,7 +152,7 @@ pub fn search(
                     truncated = true;
                     break;
                 }
-                push(start + pos, finder.needle().len(), &mut hits);
+                hits.push(hit_at(buf, index, enc, start + pos, finder.needle().len()));
             }
         }
         Matcher::Regex(re) => {
@@ -186,7 +170,13 @@ pub fn search(
                     truncated = true;
                     break;
                 }
-                push(start + m.start(), m.end() - m.start(), &mut hits);
+                hits.push(hit_at(
+                    buf,
+                    index,
+                    enc,
+                    start + m.start(),
+                    m.end() - m.start(),
+                ));
             }
         }
         Matcher::DecodeLine(re) => {
@@ -328,21 +318,25 @@ pub fn find_prev(
             return Ok(best);
         }
     }
-    Ok(last.map(|(abs, mlen)| {
-        let byte = abs as u64;
-        let line = index.line_of_byte(buf, byte);
-        let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-        let column = enc
-            .decode_line(&buf[ls as usize..byte as usize])
-            .chars()
-            .count() as u64;
-        SearchHit {
-            line,
-            column,
-            byte,
-            byte_len: mlen as u64,
-        }
-    }))
+    Ok(last.map(|(abs, mlen)| hit_at(buf, index, enc, abs, mlen)))
+}
+
+/// Build a [`SearchHit`] for a raw byte match at `abs` spanning `mlen` bytes,
+/// resolving its line and decoded character column via the sparse index.
+fn hit_at(buf: &[u8], index: &LineIndex, enc: Encoding, abs: usize, mlen: usize) -> SearchHit {
+    let byte = abs as u64;
+    let line = index.line_of_byte(buf, byte);
+    let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
+    let column = enc
+        .decode_line(&buf[ls as usize..byte as usize])
+        .chars()
+        .count() as u64;
+    SearchHit {
+        line,
+        column,
+        byte,
+        byte_len: mlen as u64,
+    }
 }
 
 #[inline]

@@ -94,6 +94,7 @@ const state = {
   caret: { line: 0, col: 0 }, // (line, col) in Unicode scalars, like the backend
   goalCol: 0, // remembered column for vertical caret motion
   editGen: 0, // bumps on every user caret move; lets an in-flight edit detect it
+  docGen: 0, // bumps whenever the active document/tab changes; cancels stale queued edits
   composing: false, // an IME composition is in progress
   focused: false, // the hidden text input holds focus (draw the caret)
   sel: null, // selection: { anchor: {line,col}, head: {line,col}, rect?: bool } or null
@@ -145,6 +146,13 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Show/hide one modal element, keeping the .hidden class and aria-hidden in
+// step (every modal in the app pairs the two).
+function setModalOpen(modal, open) {
+  modal.classList.toggle("hidden", !open);
+  modal.setAttribute("aria-hidden", open ? "false" : "true");
+}
+
 const APP_MENUS = ["file", "edit", "selection", "view", "tools"];
 
 function fileMenuVisible() {
@@ -172,10 +180,6 @@ function hideFileMenu(focusButton = false) {
       focused = true;
     }
   }
-}
-
-function toggleFileMenu() {
-  fileMenuVisible() ? hideFileMenu() : showAppMenu("file");
 }
 
 function normalizeShortcut(raw) {
@@ -242,10 +246,6 @@ function shortcutFor(action) {
   return shortcutList(action)[0] || "";
 }
 
-function displayShortcut(action) {
-  return shortcutFor(action) || "未設定";
-}
-
 function matchesShortcut(e, action) {
   const ev = eventShortcut(e);
   return !!ev && shortcutList(action).includes(ev);
@@ -294,13 +294,23 @@ function confirmCloseWorkspace() {
 
 // Never let the native window kill the process while a save is in flight; the
 // close request is answered "cancel" and retried once the save settles.
-// While saving: edits are blocked (enqueueEdit / onEditKey) and the status bar
-// shows a spinner so the block reads as "busy", not "broken".
+// While saving: key edits are blocked (onEditKey) and IME/beforeinput commits
+// wait inside enqueueEdit so confirmed text is delayed, not lost.
 let savingCount = 0;
+let savingWaiters = [];
 function setSavingUI() {
   const on = savingCount > 0;
   document.documentElement.classList.toggle("saving", on);
   $("st-saving")?.classList.toggle("hidden", !on);
+  if (!on && savingWaiters.length) {
+    const waiters = savingWaiters;
+    savingWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+}
+function waitForSavingDone() {
+  if (savingCount === 0) return Promise.resolve();
+  return new Promise((resolve) => savingWaiters.push(resolve));
 }
 let pendingNativeClose = false;
 window.__ayameNativeCloseRequested = () => {
@@ -375,16 +385,12 @@ function keymapVisible() {
 function showKeymap() {
   hideSettings();
   renderKeymapRows();
-  const m = $("keymap-modal");
-  m.classList.remove("hidden");
-  m.setAttribute("aria-hidden", "false");
+  setModalOpen($("keymap-modal"), true);
   queueMicrotask(() => $("keymap-list").querySelector("input")?.focus());
 }
 
 function hideKeymap() {
-  const m = $("keymap-modal");
-  m.classList.add("hidden");
-  m.setAttribute("aria-hidden", "true");
+  setModalOpen($("keymap-modal"), false);
   focusEditor();
 }
 
@@ -668,11 +674,13 @@ function hasSelection() {
   return !!r && !(r.start.line === r.end.line && r.start.col === r.end.col);
 }
 
-function clearSelection() {
-  if (state.sel) {
-    state.sel = null;
-    scheduleRender();
-  }
+// Like hasSelection(), but a zero-width rect (c0 == c1 across several lines)
+// counts as empty: it selects no characters, so text-producing actions
+// (copy / cut / save-selection) treat it as "no selection".
+function hasTextSelection() {
+  const rr = rectRange();
+  if (rr) return rr.c0 !== rr.c1;
+  return hasSelection();
 }
 
 function renderSelection() {
@@ -814,6 +822,135 @@ function selectLineAt(line) {
   scheduleRender();
 }
 
+// ---- editor context menu ----------------------------------------------------
+
+function ctxMenuVisible() {
+  return !$("ctx-menu").classList.contains("hidden");
+}
+
+function hideCtxMenu() {
+  $("ctx-menu").classList.add("hidden");
+}
+
+function posInsideSelection(p) {
+  const rr = rectRange();
+  if (rr) return p.line >= rr.l0 && p.line <= rr.l1 && p.col >= rr.c0 && p.col <= rr.c1;
+  const r = selRange();
+  if (!r) return false;
+  if (p.line < r.start.line || p.line > r.end.line) return false;
+  if (p.line === r.start.line && p.col < r.start.col) return false;
+  if (p.line === r.end.line && p.col > r.end.col) return false;
+  return true;
+}
+
+async function pasteFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) pasteText(text);
+  } catch {
+    // Clipboard read needs a permission some webviews withhold; the keyboard
+    // path (paste event on the hidden textarea) always works.
+    flashCount("ここからは貼り付けできません — Ctrl+V を使ってください", "error");
+  }
+  focusEditor();
+}
+
+// Save the selected lines to a file server-side: streamed in batches, so the
+// clipboard cap does not apply. Output matches what copy would produce.
+async function saveSelectionToFile() {
+  const rr = rectRange();
+  const r = selRange();
+  if ((!rr && !r) || !hasTextSelection()) {
+    // A zero-width rect selects no characters — nothing to write out.
+    flashCount("選択がありません", "error");
+    return;
+  }
+  const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
+  const base = state.stat?.path || "selection";
+  const f = await askForm("選択箇所をファイルに保存", [
+    { id: "path", type: "text", label: "保存先パス", value: `${base}.selection.txt` },
+    { id: "_hint", type: "hint",
+      label: `選択中の ${commas(total)} 行を UTF-8 / LF で書き出します。コピーの行数上限 (${commas(MAX_COPY_LINES)} 行) はかかりません。` },
+  ], "保存");
+  if (!f || !f.path.trim()) return;
+  const body = rr
+    ? { path: f.path.trim(), rect: true, l0: rr.l0, c0: rr.c0, l1: rr.l1, c1: rr.c1 }
+    : { path: f.path.trim(), rect: false, l0: r.start.line, c0: r.start.col, l1: r.end.line, c1: r.end.col };
+  showLoading("選択を書き出し中…");
+  try {
+    const res = await apiPost("/api/selection/save", body);
+    flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${res.path}`);
+  } catch (e) {
+    if (String(e.message || "").includes("既に存在")) {
+      if (confirm(`${f.path.trim()} は既に存在します。上書きしますか?`)) {
+        try {
+          const res = await apiPost("/api/selection/save", { ...body, overwrite: true });
+          flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${res.path}`);
+        } catch (e2) {
+          flashCount("選択の保存エラー", "error");
+          alert(e2.message);
+        }
+      }
+    } else {
+      flashCount("選択の保存エラー", "error");
+      alert(e.message);
+    }
+  } finally {
+    hideLoading();
+  }
+}
+
+function runCtxAction(action) {
+  hideCtxMenu();
+  // Only the two context-menu-specific actions live here; everything else
+  // (cut / copy / selectAll / find / sortSave / replaceSave / diffFile /
+  // splitFile) shares the menu dispatcher.
+  let out;
+  if (action === "paste") out = pasteFromClipboard();
+  else if (action === "saveSelection") out = saveSelectionToFile();
+  else out = runMenuAction(action);
+  // A context-menu click leaves focus on the (now hidden) menu item, killing
+  // keyboard input after cut/copy etc. Put focus back in the editor once the
+  // action settles — unless it opened its own focus target (a modal, or the
+  // find bar).
+  return Promise.resolve(out).finally(() => {
+    if (!anyModalOpen() && !state.findOpen) focusEditor();
+  });
+}
+
+function initContextMenu() {
+  const menu = $("ctx-menu");
+  $("viewport").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!state.stat?.open || anyModalOpen()) return;
+    // Right-click inside the selection keeps it as the action target;
+    // outside it, the caret moves to the click point first (editor standard).
+    const p = coordsFromEvent(e);
+    if (!posInsideSelection(p)) {
+      state.sel = null;
+      setCaret(p.line, p.col);
+      scheduleRender();
+    }
+    // Zero-width rect selections count as empty for the text actions.
+    const hasSel = hasTextSelection();
+    menu.querySelectorAll("[data-ctx]").forEach((el) => {
+      const a = el.dataset.ctx;
+      el.disabled = (a === "cut" || a === "copy" || a === "saveSelection") && !hasSel;
+    });
+    menu.classList.remove("hidden");
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    menu.style.left = `${Math.max(4, Math.min(e.clientX, window.innerWidth - mw - 8))}px`;
+    menu.style.top = `${Math.max(4, Math.min(e.clientY, window.innerHeight - mh - 8))}px`;
+  });
+  menu.querySelectorAll("[data-ctx]").forEach((el) => {
+    el.addEventListener("click", () => runCtxAction(el.dataset.ctx));
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (ctxMenuVisible() && !e.target.closest("#ctx-menu")) hideCtxMenu();
+  });
+}
+
 function selectAll() {
   if (state.total === 0) return;
   const last = state.total - 1;
@@ -880,7 +1017,10 @@ async function copySelection() {
     const total = selectionLineCount(r);
     await copyToClipboard(await selectedText(r));
     if (total > MAX_COPY_LINES) {
-      flashCount(`選択 ${commas(total)} 行のうち先頭 ${commas(MAX_COPY_LINES)} 行だけコピーしました`, "error");
+      flashCount(
+        `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます`,
+        "error"
+      );
     } else {
       flashCount("コピーしました");
     }
@@ -902,7 +1042,10 @@ async function cutSelection() {
   // by a full delete would silently destroy data.
   const total = selectionLineCount(r);
   if (total > MAX_COPY_LINES) {
-    flashCount(`切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。削除だけなら Delete キーを使ってください`, "error");
+    flashCount(
+      `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー`,
+      "error"
+    );
     return;
   }
   await copyToClipboard(await selectedText(r));
@@ -1488,22 +1631,25 @@ function addExtraCursorAt(line, col) {
 }
 
 // Ctrl+Alt+ArrowUp / ArrowDown: grow the cursor column one line beyond the
-// topmost / bottommost cursor, preserving its column (clamped to the line).
-function addCursorAbove() {
+// topmost / bottommost cursor, preserving its column — clamped to the target
+// line's REAL length, which may need a fetch when it is outside the cache.
+async function addCursorAbove() {
   if (!state.stat?.open || state.total === 0) return;
   const top = allCursors()[0];
   if (top.line <= 0) return;
   const line = top.line - 1;
-  addExtraCursorAt(line, Math.min(top.col, lineLen(line)));
+  const lens = await lineLensFor([line]);
+  addExtraCursorAt(line, Math.min(top.col, lens.get(line) ?? 0));
 }
 
-function addCursorBelow() {
+async function addCursorBelow() {
   if (!state.stat?.open || state.total === 0) return;
   const cs = allCursors();
   const bottom = cs[cs.length - 1];
   if (bottom.line >= state.total - 1) return;
   const line = bottom.line + 1;
-  addExtraCursorAt(line, Math.min(bottom.col, lineLen(line)));
+  const lens = await lineLensFor([line]);
+  addExtraCursorAt(line, Math.min(bottom.col, lens.get(line) ?? 0));
 }
 
 function focusEditor() {
@@ -1589,14 +1735,26 @@ function anyModalOpen() {
 // ---- the serialized edit queue --------------------------------------------
 
 let editChain = Promise.resolve();
+function editContext() {
+  return { docGen: state.docGen };
+}
+function sameEditContext(ctx) {
+  return !!state.stat?.open && state.docGen === ctx.docGen;
+}
+async function settleEditQueue() {
+  await editChain;
+}
 function enqueueEdit(fn) {
-  // Saving intentionally blocks edits (user decision): simpler than merging
-  // mid-save changes, and the status-bar spinner makes the block visible.
-  if (savingCount > 0) {
-    flashCount("保存中です — 完了までお待ちください");
-    return editChain;
-  }
-  editChain = editChain.then(fn).catch((e) => {
+  const ctx = editContext();
+  editChain = editChain.then(async () => {
+    if (!sameEditContext(ctx)) return null;
+    if (savingCount > 0) {
+      flashCount("保存中です — 完了後に入力します");
+      await waitForSavingDone();
+      if (!sameEditContext(ctx)) return null;
+    }
+    return fn();
+  }).catch((e) => {
     flashCount("編集エラー");
     console.error(e);
   });
@@ -1628,8 +1786,10 @@ function replaceTarget() {
 // from going stale while the document advanced, and lets the next queued edit
 // resolve its range against a correct caret even if the refresh below fails.
 async function applyRange(l0, c0, l1, c1, text) {
+  const ctx = editContext();
   const gen = state.editGen;
   const res = await apiPost("/api/edit/replace_range", { l0, c0, l1, c1, text });
+  if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
     // No user navigation happened during the round-trip: honor the edit caret.
@@ -1653,13 +1813,16 @@ async function applyRange(l0, c0, l1, c1, text) {
     console.error("post-edit refresh failed", e);
     flashCount("再読込エラー");
   }
+  if (!sameEditContext(ctx)) return;
   revealCaret();
   render();
 }
 
 async function applyRect(l0, l1, c0, c1, text) {
+  const ctx = editContext();
   const gen = state.editGen;
   const res = await apiPost("/api/edit/replace_rect", { l0, l1, c0, c1, text });
+  if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
     const line = Math.min(res.caret_line, Math.max(0, state.total - 1));
@@ -1676,6 +1839,7 @@ async function applyRect(l0, l1, c0, c1, text) {
     console.error("post-rect-edit refresh failed", e);
     flashCount("再読込エラー");
   }
+  if (!sameEditContext(ctx)) return;
   revealCaret();
   render();
 }
@@ -1686,8 +1850,10 @@ async function applyRect(l0, l1, c0, c1, text) {
 // in `edits`, or -1 when the cursor contributed no edit (only possible at the
 // document origin, whose position an edit batch cannot move).
 async function applyBatch(edits, cursors, editOf) {
+  const ctx = editContext();
   const gen = state.editGen;
   const res = await apiPost("/api/edit/replace_batch", { edits });
+  if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
     const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
@@ -1711,14 +1877,24 @@ async function applyBatch(edits, cursors, editOf) {
     state.caret = { line, col: state.caret.col };
     state.activeLine = line;
     if (state.extraCursors.length) {
-      // Plain caret motion / cursor-adds keep the extras alive mid-flight;
-      // remap the ones this batch owned onto their post-edit positions.
+      // Plain caret motion / cursor-adds keep the extras alive mid-flight.
+      // Remap ONLY the cursors this batch owned (matched by their batch-start
+      // position) onto their post-edit positions; cursors the user added or
+      // removed while the batch was in flight are left exactly as they are.
       const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
-      state.extraCursors = cursors.flatMap((c, i) => {
-        if (c.primary) return [];
+      const moved = new Map();
+      cursors.forEach((c, i) => {
         const k = editOf[i];
         const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
-        return [{ line: clampLine(p.line), col: p.col }];
+        moved.set(`${c.line}:${c.col}`, { line: clampLine(p.line), col: p.col });
+      });
+      const seen = new Set();
+      state.extraCursors = state.extraCursors.flatMap((c) => {
+        const next = moved.get(`${c.line}:${c.col}`) || { line: clampLine(c.line), col: c.col };
+        const key = `${next.line}:${next.col}`;
+        if (seen.has(key)) return []; // two cursors landing together collapse
+        seen.add(key);
+        return [next];
       });
     }
   }
@@ -1730,6 +1906,7 @@ async function applyBatch(edits, cursors, editOf) {
     console.error("post-batch-edit refresh failed", e);
     flashCount("再読込エラー");
   }
+  if (!sameEditContext(ctx)) return;
   revealCaret();
   render();
 }
@@ -1768,49 +1945,94 @@ function insertNewline() {
   typeText("\n");
 }
 
+// Decoded length (in Unicode scalars) of each requested line, as a Map. Lines
+// inside the local cache are read from it; anything else is fetched, because
+// lineLen() silently reads 0 for uncached lines — and multi-cursor edits can
+// reference lines far outside the viewport±PAD cache window, where a guessed 0
+// would turn a delete edge into "delete the whole line". Lines whose length
+// cannot be resolved are absent from the map; callers must skip those edits.
+async function lineLensFor(lineNumbers) {
+  const out = new Map();
+  const missing = new Set();
+  for (const l of lineNumbers) {
+    if (l < 0 || l >= state.total || out.has(l) || missing.has(l)) continue;
+    const rec = cachedLine(l);
+    if (rec != null) out.set(l, Array.from(rec.text ?? "").length);
+    else missing.add(l);
+  }
+  await Promise.all([...missing].map(async (l) => {
+    try {
+      const res = await api(`/api/lines?start=${l}&count=1`);
+      const text = res.lines?.[0]?.text;
+      if (text != null) out.set(l, Array.from(text).length);
+    } catch {
+      // Leave the line out: the caller drops that cursor's edit, never guesses.
+    }
+  }));
+  return out;
+}
+
+// The shared "a selection is active" arm of every delete command: remove the
+// rect or range selection as one edit. Returns null when nothing is selected
+// (callers then handle their caret-relative case). Call inside enqueueEdit.
+function deleteSelectionEdit() {
+  if (!hasSelection()) return null;
+  const rr = rectRange();
+  if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
+  const t = replaceTarget();
+  return applyRange(t.l0, t.c0, t.l1, t.c1, "");
+}
+
 function backspace() {
-  enqueueEdit(() => {
+  enqueueEdit(async () => {
     if (state.extraCursors.length) {
       // Per cursor: delete one char before the caret (line-join at col 0).
       // allCursors() dedupes positions, so ranges may touch but never overlap;
-      // a cursor at the document origin contributes no edit.
+      // a cursor at the document origin contributes no edit. Join edges need
+      // the previous line's REAL length, which may live outside the cache.
       const cursors = allCursors();
+      const lens = await lineLensFor(
+        cursors.filter((c) => c.col === 0 && c.line > 0).map((c) => c.line - 1)
+      );
       const edits = [];
       const editOf = cursors.map((c) => {
         if (c.col > 0) {
           edits.push({ l0: c.line, c0: c.col - 1, l1: c.line, c1: c.col, text: "" });
-        } else if (c.line > 0) {
-          edits.push({ l0: c.line - 1, c0: lineLen(c.line - 1), l1: c.line, c1: 0, text: "" });
+        } else if (c.line > 0 && lens.has(c.line - 1)) {
+          edits.push({ l0: c.line - 1, c0: lens.get(c.line - 1), l1: c.line, c1: 0, text: "" });
         } else {
-          return -1;
+          return -1; // document origin, or an unresolvable line length
         }
         return edits.length - 1;
       });
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    if (hasSelection()) {
-      const rr = rectRange();
-      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
-      const t = replaceTarget();
-      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
-    }
+    const del = deleteSelectionEdit();
+    if (del) return del;
     const { line, col } = state.caret;
     if (col > 0) return applyRange(line, col - 1, line, col, "");
-    if (line > 0) return applyRange(line - 1, lineLen(line - 1), line, 0, "");
+    if (line > 0) {
+      const lens = await lineLensFor([line - 1]);
+      if (!lens.has(line - 1)) return null;
+      return applyRange(line - 1, lens.get(line - 1), line, 0, "");
+    }
     return null;
   });
 }
 
 function forwardDelete() {
-  enqueueEdit(() => {
+  enqueueEdit(async () => {
     if (state.extraCursors.length) {
       // Per cursor: delete one char after the caret (line-join at EOL). Same
       // dedupe rule as backspace; the very end of the document yields no edit.
+      // The char-vs-join decision needs each cursor line's REAL length.
       const cursors = allCursors();
+      const lens = await lineLensFor(cursors.map((c) => c.line));
       const edits = [];
       const editOf = cursors.map((c) => {
-        if (c.col < lineLen(c.line)) {
+        if (!lens.has(c.line)) return -1; // unresolvable length: never guess 0
+        if (c.col < lens.get(c.line)) {
           edits.push({ l0: c.line, c0: c.col, l1: c.line, c1: c.col + 1, text: "" });
         } else if (c.line < state.total - 1) {
           edits.push({ l0: c.line, c0: c.col, l1: c.line + 1, c1: 0, text: "" });
@@ -1822,14 +2044,12 @@ function forwardDelete() {
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    if (hasSelection()) {
-      const rr = rectRange();
-      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
-      const t = replaceTarget();
-      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
-    }
+    const del = deleteSelectionEdit();
+    if (del) return del;
     const { line, col } = state.caret;
-    if (col < lineLen(line)) return applyRange(line, col, line, col + 1, "");
+    const lens = await lineLensFor([line]);
+    if (!lens.has(line)) return null;
+    if (col < lens.get(line)) return applyRange(line, col, line, col + 1, "");
     if (line < state.total - 1) return applyRange(line, col, line + 1, 0, "");
     return null;
   });
@@ -1858,6 +2078,11 @@ function pasteText(raw) {
 }
 
 async function saveCopy() {
+  if (savingCount > 0) {
+    flashCount("保存中です — 完了までお待ちください");
+    return;
+  }
+  await settleEditQueue();
   const target = await showSaveDialog("別名で保存", suggestedSaveAsPath());
   if (!target) return;
   savingCount++;
@@ -1886,6 +2111,11 @@ function suggestedSaveAsPath() {
 
 async function saveFile() {
   if (!state.stat?.open) return;
+  if (savingCount > 0) {
+    flashCount("保存中です — 完了までお待ちください");
+    return;
+  }
+  await settleEditQueue();
   if (isUntitled(state.stat.path)) {
     await saveCopy();
     return;
@@ -1909,15 +2139,29 @@ async function saveFile() {
   }
 }
 
+// ファイルメニュー「保存時の状態に戻す」: discard every unsaved edit and go
+// back to the document as it exists on disk (/api/edit/revert reloads it).
 async function revertEdits() {
-  if (!state.stat?.dirty) return;
-  if (!confirm("未保存の編集を破棄しますか?")) return;
-  await apiPost("/api/edit/revert", {});
-  clearLineCache();
-  state.sel = null;
-  setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), 0);
-  await refreshStat();
-  render();
+  if (!state.stat?.dirty) {
+    flashCount("未保存の編集はありません");
+    return;
+  }
+  if (!confirm("未保存の編集をすべて破棄して、保存時の状態に戻しますか?")) return;
+  try {
+    await apiPost("/api/edit/revert", {});
+    clearLineCache();
+    state.sel = null;
+    state.extraCursors = [];
+    await refreshStat();
+    await reloadViewport();
+    // Re-clamp the caret against the reverted document's real line count.
+    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), 0);
+    render();
+    flashCount("保存時の状態に戻しました");
+  } catch (e) {
+    flashCount("元に戻せません", "error");
+    alert(e.message);
+  }
 }
 
 async function undoEdit() {
@@ -2062,8 +2306,7 @@ function diffVisible() {
 }
 
 function hideDiff() {
-  $("diff-modal").classList.add("hidden");
-  $("diff-modal").setAttribute("aria-hidden", "true");
+  setModalOpen($("diff-modal"), false);
   focusEditor();
 }
 
@@ -2075,8 +2318,7 @@ function showDiff(res) {
   $("diff-old-path").textContent = (res.old_path || "現在のファイル") + (res.current_dirty ? " *" : "");
   $("diff-new-path").textContent = res.new_path || "比較先";
   renderDiffView(res);
-  $("diff-modal").classList.remove("hidden");
-  $("diff-modal").setAttribute("aria-hidden", "false");
+  setModalOpen($("diff-modal"), true);
 }
 
 function diffKindLabel(kind) {
@@ -2361,12 +2603,10 @@ function askPrompt(title, label, value = "") {
     $("prompt-label").textContent = label || "";
     const input = $("prompt-input");
     input.value = value;
-    modal.classList.remove("hidden");
-    modal.setAttribute("aria-hidden", "false");
+    setModalOpen(modal, true);
     setTimeout(() => { input.focus(); input.select(); }, 0);
     const finish = (val) => {
-      modal.classList.add("hidden");
-      modal.setAttribute("aria-hidden", "true");
+      setModalOpen(modal, false);
       input.removeEventListener("keydown", onKey);
       $("prompt-ok").removeEventListener("click", onOk);
       $("prompt-cancel").removeEventListener("click", onCancel);
@@ -2451,12 +2691,10 @@ function askForm(title, fields, okLabel = "実行") {
       }
       body.append(row);
     }
-    modal.classList.remove("hidden");
-    modal.setAttribute("aria-hidden", "false");
+    setModalOpen(modal, true);
     queueMicrotask(() => body.querySelector("input, select")?.focus());
     const finish = (val) => {
-      modal.classList.add("hidden");
-      modal.setAttribute("aria-hidden", "true");
+      setModalOpen(modal, false);
       $("form-ok").removeEventListener("click", onOk);
       $("form-cancel").removeEventListener("click", onCancel);
       $("form-close").removeEventListener("click", onCancel);
@@ -2509,6 +2747,7 @@ function gotoLine(n) {
 function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
   if (promptVisible() || formVisible()) return;
+  if (e.key === "Escape" && ctxMenuVisible()) { e.preventDefault(); hideCtxMenu(); return; }
   if (e.key === "Escape" && fileMenuVisible()) { e.preventDefault(); hideFileMenu(true); return; }
   if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
   if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
@@ -2577,12 +2816,8 @@ function wordRight(line, col) {
 function deleteWordBack() {
   enqueueEdit(() => {
     clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
-    if (hasSelection()) {
-      const rr = rectRange();
-      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
-      const t = replaceTarget();
-      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
-    }
+    const del = deleteSelectionEdit();
+    if (del) return del;
     const c = state.caret;
     const [l, col] = wordLeft(c.line, c.col);
     if (l === c.line && col === c.col) return null;
@@ -2593,12 +2828,8 @@ function deleteWordBack() {
 function deleteWordFwd() {
   enqueueEdit(() => {
     clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
-    if (hasSelection()) {
-      const rr = rectRange();
-      if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
-      const t = replaceTarget();
-      return applyRange(t.l0, t.c0, t.l1, t.c1, "");
-    }
+    const del = deleteSelectionEdit();
+    if (del) return del;
     const c = state.caret;
     const [l, col] = wordRight(c.line, c.col);
     if (l === c.line && col === c.col) return null;
@@ -2782,9 +3013,7 @@ function openerVisible() {
 
 function showOpener() {
   configureOpener("open");
-  const m = $("opener");
-  m.classList.remove("hidden");
-  m.setAttribute("aria-hidden", "false");
+  setModalOpen($("opener"), true);
   browse(null);
   const inp = $("opener-input");
   inp.value = "";
@@ -2795,12 +3024,10 @@ function showSaveDialog(title, suggestedPath) {
   return new Promise((resolve) => {
     configureOpener("save", title);
     state.openerResolve = resolve;
-    const m = $("opener");
     const inp = $("opener-input");
     const dir = pathDirName(suggestedPath) || localStorage.getItem(TREE_KEY) || ".";
     inp.value = pathBaseName(suggestedPath) || "untitled.txt";
-    m.classList.remove("hidden");
-    m.setAttribute("aria-hidden", "false");
+    setModalOpen($("opener"), true);
     browse(dir);
     queueMicrotask(() => {
       inp.focus();
@@ -2836,9 +3063,7 @@ function hideOpener() {
   // The opener doubles as the welcome screen: don't let it close while there is
   // no document to fall back to.
   if (!state.stat?.open) return;
-  const m = $("opener");
-  m.classList.add("hidden");
-  m.setAttribute("aria-hidden", "true");
+  setModalOpen($("opener"), false);
   focusEditor();
 }
 
@@ -2846,9 +3071,7 @@ function finishSaveDialog(value) {
   const resolve = state.openerResolve;
   state.openerResolve = null;
   state.openerMode = "open";
-  const m = $("opener");
-  m.classList.add("hidden");
-  m.setAttribute("aria-hidden", "true");
+  setModalOpen($("opener"), false);
   configureOpener("open");
   focusEditor();
   if (resolve) resolve(value);
@@ -2973,6 +3196,7 @@ function confirmDiscardIfDirty() {
 async function openPath(path) {
   const p = (path || "").trim();
   if (!p) return;
+  await settleEditQueue();
   if (!confirmDiscardIfDirty()) return;
   openerMsg("開いています…", true);
   try {
@@ -2984,6 +3208,7 @@ async function openPath(path) {
 }
 
 async function uploadFile(file) {
+  await settleEditQueue();
   if (!confirmDiscardIfDirty()) return;
   openerMsg(`読み込み中… (${file.name})`, true);
   showLoading(`読み込み中… ${file.name}`);
@@ -3016,6 +3241,8 @@ function reportOpenError(msg) {
 }
 
 function onDocumentOpened(stat) {
+  state.docGen++;
+  state.editGen++; // stale in-flight edit responses must not reposition this tab
   state.stat = stat;
   state.total = stat.view_lines ?? stat.lines ?? 0;
   // Fresh document: reset navigation, search, and caret state.
@@ -3030,9 +3257,7 @@ function onDocumentOpened(stat) {
   state.searchTruncated = false;
   $("find-count").textContent = "";
   clearLineCache();
-  const m = $("opener");
-  m.classList.add("hidden");
-  m.setAttribute("aria-hidden", "true");
+  setModalOpen($("opener"), false);
   updateStatusMeta();
   render();
   refreshTabs();
@@ -3138,6 +3363,7 @@ function renderTabs(list) {
 
 async function selectTab(id) {
   try {
+    await settleEditQueue();
     onDocumentOpened(await apiPost("/api/tabs/select", { id }));
   } catch (e) {
     flashCount("タブ切替エラー");
@@ -3146,6 +3372,7 @@ async function selectTab(id) {
 }
 
 async function closeTab(id) {
+  await settleEditQueue();
   const t = state.tabs.find((x) => x.id === id);
   if (t && t.dirty && !confirm(`${t.name} の未保存の編集を破棄して閉じますか?`)) return;
   try {
@@ -3316,6 +3543,7 @@ function initTree() {
 // the app opens to a usable page (like Notepad) instead of a dialog.
 async function newUntitled() {
   try {
+    await settleEditQueue();
     onDocumentOpened(await apiPost("/api/new", {}));
     // The buffer already has one empty line; drop the caret in, Notepad-style.
     setCaret(0, 0);
@@ -3328,6 +3556,11 @@ async function newUntitled() {
 
 function runMenuAction(action) {
   hideFileMenu();
+  // A modal owns the UI. Every menu action either opens a dialog or acts on
+  // the document hidden behind the modal, and the native macOS menu can fire
+  // at any time — so ALL actions are ignored while a modal is open. (In-page
+  // menus are unreachable then; this guards the native path.)
+  if (anyModalOpen()) return;
   if (action === "undo") return undoEdit();
   if (action === "redo") return redoEdit();
   if (action === "find") return showFind();
@@ -3349,19 +3582,14 @@ function runMenuAction(action) {
   if (action === "caseUpper") return caseSave("upper");
   if (action === "caseLower") return caseSave("lower");
   if (action === "keymap") return showKeymap();
-  // File-level actions (also reachable from the native macOS menu below): a
-  // modal owns the UI, so they are ignored while one is open.
-  if (["newFile", "openFile", "saveFile", "saveAs", "closeTab"].includes(action)) {
-    if (anyModalOpen()) return;
-    if (action === "newFile") return newUntitled();
-    if (action === "openFile") return showOpener();
-    if (action === "saveFile") return saveFile();
-    if (action === "saveAs") return saveCopy();
-    if (action === "closeTab") {
-      const active = state.tabs.find((t) => t.active);
-      if (active) closeTab(active.id);
-      return;
-    }
+  if (action === "revert") return revertEdits();
+  if (action === "newFile") return newUntitled();
+  if (action === "openFile") return showOpener();
+  if (action === "saveFile") return saveFile();
+  if (action === "saveAs") return saveCopy();
+  if (action === "closeTab") {
+    const active = state.tabs.find((t) => t.active);
+    if (active) closeTab(active.id);
   }
 }
 
@@ -3544,14 +3772,10 @@ function settingsVisible() {
   return !$("settings").classList.contains("hidden");
 }
 function showSettings() {
-  const m = $("settings");
-  m.classList.remove("hidden");
-  m.setAttribute("aria-hidden", "false");
+  setModalOpen($("settings"), true);
 }
 function hideSettings() {
-  const m = $("settings");
-  m.classList.add("hidden");
-  m.setAttribute("aria-hidden", "true");
+  setModalOpen($("settings"), false);
   focusEditor();
 }
 
@@ -3595,6 +3819,7 @@ async function openThemeJsonDoc() {
   const base = (id ? id.replace(/^custom:/, "") : "theme") || "theme";
   hideSettings();
   try {
+    await settleEditQueue();
     const r = await fetch("/api/upload?name=" + encodeURIComponent(base + ".ayame-theme.json"),
                           { method: "POST", body: jsonText });
     if (!r.ok) throw new Error(await r.text());
@@ -3640,6 +3865,7 @@ function keymapJSONForEditor() {
 async function openKeymapJsonDoc() {
   hideKeymap();
   try {
+    await settleEditQueue();
     const r = await fetch("/api/upload?name=" + encodeURIComponent("keymap.ayame-keys.json"), {
       method: "POST",
       body: JSON.stringify(keymapJSONForEditor(), null, 2),
@@ -3763,6 +3989,7 @@ async function boot() {
   initSelection();
   initWorkspace();
   initTree();
+  initContextMenu();
   try {
     await refreshStat();
   } catch (e) {

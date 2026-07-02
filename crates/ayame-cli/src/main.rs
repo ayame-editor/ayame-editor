@@ -401,10 +401,7 @@ fn cmd_sort(args: &[String]) -> Result<()> {
     let key_column = parse_key(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
     let reverse = has_flag(&flags, &["--reverse", "-r"]);
-    let budget_bytes = match first_opt(&opts, &["--budget"]) {
-        Some(s) => parse_size(s)?,
-        None => 256 * 1024 * 1024,
-    };
+    let budget_bytes = parse_budget(&opts)?;
     let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
     let spill_dir = custom_spill
         .clone()
@@ -428,8 +425,7 @@ fn cmd_sort(args: &[String]) -> Result<()> {
 
     if let Some(outp) = first_opt(&opts, &["--out-order"]) {
         // Move the ordering (u64 line numbers) out before the spill dir is cleaned.
-        std::fs::rename(&res.ordering_path, outp)
-            .or_else(|_| std::fs::copy(&res.ordering_path, outp).map(|_| ()))
+        rename_or_copy(&res.ordering_path, Path::new(outp))
             .with_context(|| format!("writing ordering to '{outp}'"))?;
         eprintln!(
             "ordering ({} u64 line numbers) -> {outp}",
@@ -500,11 +496,16 @@ where
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    std::fs::rename(&tmp, out_path)
-        .or_else(|_| std::fs::copy(&tmp, out_path).map(|_| ()))
-        .with_context(|| format!("writing {}", out_path.display()))?;
+    rename_or_copy(&tmp, out_path).with_context(|| format!("writing {}", out_path.display()))?;
     let _ = std::fs::remove_file(&tmp);
     Ok(())
+}
+
+/// Move `from` to `to`, falling back to a copy when the rename fails (e.g. a
+/// cross-device destination). The source may remain when the fallback ran;
+/// callers that care remove it afterwards.
+fn rename_or_copy(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to).or_else(|_| std::fs::copy(from, to).map(|_| ()))
 }
 
 /// Byte-preserving line writer: raw bytes + raw terminator per line. The one
@@ -558,10 +559,7 @@ fn sort_document_to_utf8_file(
     spill_dir: PathBuf,
     out_path: &Path,
 ) -> Result<()> {
-    let budget_bytes = match first_opt(opts, &["--budget"]) {
-        Some(s) => parse_size(s)?,
-        None => 256 * 1024 * 1024,
-    };
+    let budget_bytes = parse_budget(opts)?;
     let sopts = SortOptions {
         key_column: parse_key(opts)?,
         fields: field_spec(opts, flags),
@@ -696,10 +694,7 @@ fn cmd_group(args: &[String]) -> Result<()> {
         Some(s) => Some(s.parse().context("--value must be a number")?),
         None => None,
     };
-    let budget_bytes = match first_opt(&opts, &["--budget"]) {
-        Some(s) => parse_size(s)?,
-        None => 256 * 1024 * 1024,
-    };
+    let budget_bytes = parse_budget(&opts)?;
     let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
     let spill_dir = custom_spill.clone().unwrap_or_else(|| {
         std::env::temp_dir().join(format!("ayame-group-{}", std::process::id()))
@@ -777,8 +772,7 @@ fn write_group_artifact(
     drop(w);
     match result {
         Ok(stats) => {
-            std::fs::rename(&tmp, out_path)
-                .or_else(|_| std::fs::copy(&tmp, out_path).map(|_| ()))
+            rename_or_copy(&tmp, out_path)
                 .with_context(|| format!("writing {}", out_path.display()))?;
             let _ = std::fs::remove_file(&tmp);
             Ok(stats)
@@ -837,6 +831,14 @@ fn parse_key(opts: &HashMap<String, String>) -> Result<Option<usize>> {
     match first_opt(opts, &["--key", "-k"]) {
         Some(s) => Ok(Some(s.parse().context("--key must be a number")?)),
         None => Ok(None),
+    }
+}
+
+/// `--budget` memory bound for the spill-to-disk ops (default 256 MiB).
+fn parse_budget(opts: &HashMap<String, String>) -> Result<usize> {
+    match first_opt(opts, &["--budget"]) {
+        Some(s) => parse_size(s),
+        None => Ok(256 * 1024 * 1024),
     }
 }
 

@@ -247,6 +247,53 @@ pub(super) fn cleanup_temp_dirs() {
     }
 }
 
+// ---- in-place save aside files --------------------------------------------------
+
+/// Marker in every aside-file name, so stale siblings are recognizable.
+const ASIDE_MARKER: &str = ".ayame-prev-";
+
+/// A unique hidden sibling of `target` that the CURRENT file is renamed to
+/// during an in-place save, so the live mmap keeps reading its (old) inode
+/// through the new name while the staged bytes take over the target name.
+/// Same directory as the target, hence the rename never crosses a volume.
+pub(super) fn aside_path(target: &Path) -> PathBuf {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_else(|| "ayame-save".into());
+    parent.join(format!(
+        ".{name}{ASIDE_MARKER}{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ))
+}
+
+/// Delete stale `.{name}.ayame-prev-*.tmp` siblings of `target` — leftovers of
+/// in-place saves that never got cleaned up (crash, or a Windows session where
+/// the mapped file could not be deleted). Best effort: a sibling still mapped
+/// by another live process simply refuses deletion (Windows) or lives on
+/// through its open mapping (Unix), so this can never break a reader.
+pub(super) fn sweep_stale_asides(target: &Path) {
+    let Some(name) = target.file_name().map(|s| s.to_string_lossy().to_string()) else {
+        return;
+    };
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let Ok(rd) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let prefix = format!(".{name}{ASIDE_MARKER}");
+    for ent in rd.flatten() {
+        let file = ent.file_name().to_string_lossy().to_string();
+        if file.starts_with(&prefix) && file.ends_with(".tmp") {
+            let _ = std::fs::remove_file(ent.path());
+        }
+    }
+}
+
 /// Reduce an untrusted upload name to a bare, separator-free file name so a
 /// dropped file can never escape the uploads directory.
 fn sanitize_filename(raw: &str) -> String {

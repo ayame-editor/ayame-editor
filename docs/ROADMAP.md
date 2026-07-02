@@ -6,11 +6,11 @@
 
 ## ✅ v0.1（実装済み）
 
-- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト107件（core 81 + cli 26、CIで常時実行）。
+- `ayame-core`: mmap、疎行インデックス（並列構築）、エンコーディング判定（UTF-8/Shift_JIS/EUC-JP）、ストリーミング検索、差分編集レイヤ、ストリーミング変換/置換。100億行容量ガード込み。ユニットテスト115件（core 85 + cli 30、CIで常時実行）。
 - `ayame` CLI: `stat`/`head`/`tail`/`line`/`lines`/`search`/`gen`。
 - `ayame serve`: ローカル Web エディタ（仮想化、行ジャンプ、検索、ステータスバー）。
 - `ayame serve`: 行単位編集（置換/挿入/削除/undo/redo）、上書き保存 / 保存コピー、通常範囲選択、矩形選択、選択範囲置換。元ファイルを全読み込みせず、mmap base + 差分だけを保持。
-- `ayame sort --out`、`sortdiff`、`replace --out`（`--jobs`/`--chunk-lines` による行境界chunk並列一括置換）、`case upper|lower --out`。Web エディタからもソート/置換/ケース変換を別ファイル保存。
+- `ayame sort --out`、`sortdiff`、`replace --out`（`--jobs`/`--chunk-lines` による行境界chunk並列一括置換）、`case upper|lower --out`。Web エディタではソートを現在ファイルへ上書き、置換/ケース変換を別ファイル保存。
 - ベンチ: 3億行/14 GiB を 2.3 秒で索引、索引 2 MiB、ランダム行 0.61 ms。
 
 ## 🎯 v1 最小増分（次の4ステップ）

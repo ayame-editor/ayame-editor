@@ -323,8 +323,7 @@ fn sort_command(
     req: &SortSaveRequest,
     spill_dir: &Path,
 ) -> Result<Command, (StatusCode, String)> {
-    let exe = std::env::current_exe().map_err(internal)?;
-    let mut cmd = Command::new(exe);
+    let mut cmd = worker_command()?;
     cmd.arg("sort").arg(input).arg("--out").arg(out);
     if let Some(k) = req.key {
         cmd.arg("--key").arg(k.to_string());
@@ -385,8 +384,7 @@ pub(super) async fn api_replace_save(
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
     let wd = dirty_aware_input(&state, "replace-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
-    let exe = std::env::current_exe().map_err(internal)?;
-    let mut cmd = Command::new(&exe);
+    let mut cmd = worker_command()?;
     cmd.arg("replace")
         .arg(wd.input.path())
         .arg(req.find)
@@ -429,8 +427,7 @@ pub(super) async fn api_case_save(
     }
     let wd = dirty_aware_input(&state, "case-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
-    let exe = std::env::current_exe().map_err(internal)?;
-    let mut cmd = Command::new(&exe);
+    let mut cmd = worker_command()?;
     cmd.arg("case")
         .arg(wd.input.path())
         .arg(mode)
@@ -480,8 +477,7 @@ pub(super) async fn api_split_save(
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string());
-    let exe = std::env::current_exe().map_err(internal)?;
-    let mut cmd = Command::new(&exe);
+    let mut cmd = worker_command()?;
     cmd.arg("split")
         .arg(wd.input.path())
         .arg("--lines")
@@ -496,23 +492,10 @@ pub(super) async fn api_split_save(
         // persistent cache.
         cmd.arg("--no-cache");
     }
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
 
     let out = wait_worker_output("split", &mut cmd, ARTIFACT_TIMEOUT).await;
     drop(wd); // remove the materialized input, if any
-    let out = out?;
-    if !out.status.success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "split worker {} - the engine is unaffected",
-                describe_status(out.status)
-            ),
-        ));
-    }
-    let res: ayame_core::SplitResult = serde_json::from_slice(&out.stdout).map_err(internal)?;
+    let res: ayame_core::SplitResult = parse_worker_json("split", &out?)?;
     Ok(Json(res))
 }
 
@@ -555,8 +538,7 @@ pub(super) async fn api_search(
     // materialized snapshot so hits (line numbers, byte anchors) line up with
     // the edited view — and repeated searches reuse one materialization.
     let view = dirty_view(&state).await?;
-    let exe = std::env::current_exe().map_err(internal)?;
-    let mut cmd = Command::new(&exe);
+    let mut cmd = worker_command()?;
     cmd.arg("search")
         .arg(view.path())
         .arg("--json")
@@ -574,23 +556,10 @@ pub(super) async fn api_search(
         cmd.arg("--whole-word");
     }
     cmd.arg("--").arg(q.q);
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
 
     let out = wait_worker_output("search", &mut cmd, WORKER_TIMEOUT).await;
     drop(view); // the snapshot guard must outlive the worker child
-    let out = out?;
-    if !out.status.success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "search worker {} - the engine is unaffected",
-                describe_status(out.status)
-            ),
-        ));
-    }
-    let res: ayame_core::SearchResult = serde_json::from_slice(&out.stdout).map_err(internal)?;
+    let res: ayame_core::SearchResult = parse_worker_json("search", &out?)?;
     Ok(Json(res))
 }
 
@@ -718,10 +687,11 @@ pub(super) async fn api_diff(
         let response = match &input {
             WorkerInput::Materialized { path: current, .. } => {
                 // The scratch copy is read once and discarded: skip the index
-                // cache so it doesn't accumulate dead entries.
+                // cache so it doesn't accumulate dead entries. (`open_options`
+                // has no later use, so it can be moved rather than cloned.)
                 let scratch_opts = ayame_core::OpenOptions {
                     cache_dir: None,
-                    ..open_options.clone()
+                    ..open_options
                 };
                 let current = Document::open(current, &scratch_opts)
                     .with_context(|| format!("opening {}", current.display()))?;
@@ -835,6 +805,35 @@ fn spawn_dir(kind: &str) -> PathBuf {
     std::env::temp_dir().join(format!("ayame-srv-{kind}-{}-{}", std::process::id(), n))
 }
 
+/// A [`Command`] re-invoking this same binary — every op worker is an isolated
+/// `ayame <subcommand>` child process.
+fn worker_command() -> Result<Command, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    Ok(Command::new(exe))
+}
+
+/// The 502 every endpoint returns when its worker child exits unsuccessfully.
+fn worker_failed(kind: &str, status: std::process::ExitStatus) -> (StatusCode, String) {
+    (
+        StatusCode::BAD_GATEWAY,
+        format!(
+            "{kind} worker {} - the engine is unaffected",
+            describe_status(status)
+        ),
+    )
+}
+
+/// Check a JSON-printing worker's exit status and parse its stdout.
+fn parse_worker_json<T: serde::de::DeserializeOwned>(
+    kind: &str,
+    out: &std::process::Output,
+) -> Result<T, (StatusCode, String)> {
+    if !out.status.success() {
+        return Err(worker_failed(kind, out.status));
+    }
+    serde_json::from_slice(&out.stdout).map_err(internal)
+}
+
 async fn run_artifact_worker(
     kind: &str,
     cmd: &mut Command,
@@ -846,13 +845,7 @@ async fn run_artifact_worker(
         .kill_on_drop(true);
     let status = wait_worker_for(kind, cmd, ARTIFACT_TIMEOUT).await?;
     if !status.success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "{kind} worker {} - the engine is unaffected",
-                describe_status(status)
-            ),
-        ));
+        return Err(worker_failed(kind, status));
     }
     let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
     Ok(ArtifactResponse {
@@ -898,11 +891,16 @@ async fn wait_worker_for(
     }
 }
 
+/// Spawn a JSON-printing worker (stdout piped, stderr discarded) and wait for
+/// its output, killing it on timeout.
 async fn wait_worker_output(
     kind: &str,
     cmd: &mut Command,
     timeout_after: Duration,
 ) -> Result<std::process::Output, (StatusCode, String)> {
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
     let child = cmd.spawn().map_err(internal)?;
     match timeout(timeout_after, child.wait_with_output()).await {
         Ok(waited) => waited.map_err(internal),
