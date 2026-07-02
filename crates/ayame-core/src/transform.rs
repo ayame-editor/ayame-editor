@@ -605,7 +605,7 @@ fn ensure_new_target(target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn temp_path(target: &Path) -> PathBuf {
+pub(crate) fn temp_path(target: &Path) -> PathBuf {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()

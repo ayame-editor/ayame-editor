@@ -24,7 +24,7 @@ use anyhow::{bail, Context, Result};
 use ayame_core::{
     CaseMode, CaseOptions, DistinctOptions, Document, Encoding, FieldSpec, GroupOptions, GroupRow,
     OpenOptions, OrderingReader, ParallelReplaceOptions, ReplaceOptions, SearchOptions,
-    SortOptions, TopOptions, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
+    SortOptions, SplitOptions, TopOptions, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 const HELP: &str = "\
 ayame — edit, transform, search and navigate text files of any size
@@ -44,6 +44,7 @@ COMMANDS:
     sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
     replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
     case   <FILE> <upper|lower>   Streaming ASCII case conversion (--out FILE)
+    split  <FILE> --lines N       Split into N-line parts (<stem>.partNNNN<.ext>)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
     distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
@@ -76,6 +77,11 @@ TRANSFORM OPTIONS:
     -e, --regex        Regex replace pattern
     --jobs <N>         Parallel replace workers (replace only; 0 = Rayon default)
     --chunk-lines <N>  Lines per parallel replace chunk (default 4000000)
+
+SPLIT OPTIONS:
+    --lines <N>        Lines per output part (required, at least 1)
+    --out-dir <DIR>    Output directory (default: the source file's directory)
+    --name <NAME>      Base file name for the parts (default: input file name)
 
 SEARCH OPTIONS:
     --start-byte <N>   Begin search at a byte offset (for worker/API resume)
@@ -172,6 +178,7 @@ fn run(args: Vec<String>) -> Result<()> {
         "sortdiff" | "sort-diff" => diff::cmd_sortdiff(rest),
         "replace" => cmd_replace(rest),
         "case" => cmd_case(rest),
+        "split" => cmd_split(rest),
         "group" => cmd_group(rest),
         "top" => cmd_top(rest),
         "distinct" => cmd_distinct(rest),
@@ -203,6 +210,7 @@ fn should_open_path_in_gui(cmd: &str) -> bool {
             | "sort-diff"
             | "replace"
             | "case"
+            | "split"
             | "group"
             | "top"
             | "distinct"
@@ -628,6 +636,41 @@ fn cmd_case(args: &[String]) -> Result<()> {
         commas(res.changed_lines),
         human_bytes(res.bytes),
         res.path.display()
+    );
+    Ok(())
+}
+
+/// `ayame split <FILE> --lines N [--out-dir DIR] [--name NAME] [--json]` — a
+/// thin wrapper over [`ayame_core::split_by_lines`]. `--name` lets the serve
+/// worker split a materialized scratch snapshot while naming the parts after
+/// the original file; `--json` prints the result for that worker to parse.
+fn cmd_split(args: &[String]) -> Result<()> {
+    maybe_crash();
+    let (doc, _pos, opts, flags) = open_doc(args, &["--lines", "--out-dir", "--name"])?;
+    let lines: u64 = first_opt(&opts, &["--lines"])
+        .context("split requires --lines <N>")?
+        .parse()
+        .context("--lines must be a number")?;
+    let split_opts = SplitOptions {
+        dir: first_opt(&opts, &["--out-dir"]).map(PathBuf::from),
+        file_name: first_opt(&opts, &["--name"]).map(str::to_string),
+    };
+    let res = ayame_core::split_by_lines(&doc, lines, &split_opts)?;
+    if has_flag(&flags, &["--json"]) {
+        println!("{}", serde_json::to_string(&res)?);
+        return Ok(());
+    }
+    for f in &res.files {
+        println!("{}", f.display());
+    }
+    if res.count > res.files.len() as u64 {
+        println!("… and {} more part(s)", res.count - res.files.len() as u64);
+    }
+    eprintln!(
+        "{} line(s) split into {} part(s) of up to {} line(s)",
+        commas(res.total_lines),
+        commas(res.count),
+        commas(lines),
     );
     Ok(())
 }

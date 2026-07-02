@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
 use ayame_core::{Document, EditSession, OpenOptions};
 use serde::Serialize;
 
+use super::ops::WorkerInput;
 use super::{bad_request, internal};
 
 type Shared = Arc<Document>;
@@ -129,6 +131,27 @@ impl EditSnapshot {
     }
 }
 
+/// A materialized snapshot of the dirty buffer, keyed by (document identity,
+/// edit revision). `/api/find` (and `/api/search`) run against this so hits
+/// line up with the edited view, without re-streaming the whole overlay on
+/// every incremental call: the snapshot is built once per revision and reused
+/// until an edit, save, or tab change makes it stale.
+pub(super) struct DirtySnapshotCache {
+    /// Identity of the live document the snapshot was taken from — compared
+    /// with `Arc::ptr_eq`, the same identity basis `detach_for_overwrite` uses.
+    pub(super) doc: Arc<Document>,
+    /// Edit revision the snapshot reflects.
+    pub(super) revision: u64,
+    /// Guard keeping the materialized temp file alive. `Arc` so a request can
+    /// hold the file open (e.g. across a search worker child) even if the
+    /// cache slot is invalidated mid-flight; the temp dir is removed when the
+    /// last holder drops.
+    pub(super) input: Arc<WorkerInput>,
+    /// An `ayame_core::Document` opened over the materialized file (no index
+    /// cache dir — throwaway snapshots must not pollute the on-disk cache).
+    pub(super) snapshot: Arc<Document>,
+}
+
 pub(crate) struct AppState {
     /// The whole mutable workspace behind a single `RwLock`.
     ///
@@ -158,6 +181,17 @@ pub(crate) struct AppState {
     /// The open options (encoding/stride/cache) picked on the command line,
     /// reused whenever a new file is opened from the browser.
     open_opts: OpenOptions,
+    /// Revision-keyed snapshot of the dirty buffer for find/search (see
+    /// [`DirtySnapshotCache`]).
+    ///
+    /// LOCKING: this is a LEAF lock, strictly below both `transitions` and
+    /// `ws` in the `transitions → ws` order: it is never held while `ws` is
+    /// taken (accessors read the workspace first, drop that guard, then touch
+    /// this slot), never held across an `.await`, and nothing else is locked
+    /// while it is held.
+    find_snapshot: Mutex<Option<DirtySnapshotCache>>,
+    /// How many snapshots have been materialized+opened (test observability).
+    snapshot_builds: AtomicU64,
 }
 
 impl AppState {
@@ -181,7 +215,53 @@ impl AppState {
             }),
             transitions: tokio::sync::Mutex::new(()),
             open_opts,
+            find_snapshot: Mutex::new(None),
+            snapshot_builds: AtomicU64::new(0),
         }
+    }
+
+    /// The cached dirty snapshot, if it still matches (same document identity,
+    /// same edit revision). A stale entry is dropped on the spot — checking on
+    /// every use is the invalidation strategy — which also removes its temp
+    /// file (unless a request still holds the guard).
+    pub(super) fn cached_dirty_snapshot(
+        &self,
+        doc: &Arc<Document>,
+        revision: u64,
+    ) -> Option<(Arc<Document>, Arc<WorkerInput>)> {
+        let mut slot = self.find_snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        match slot.as_ref() {
+            Some(c) if Arc::ptr_eq(&c.doc, doc) && c.revision == revision => {
+                Some((c.snapshot.clone(), c.input.clone()))
+            }
+            Some(_) => {
+                *slot = None; // stale: revision bumped or the tab changed
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Install a freshly built snapshot (replacing whatever was cached).
+    pub(super) fn store_dirty_snapshot(&self, cache: DirtySnapshotCache) {
+        self.snapshot_builds.fetch_add(1, AtomicOrdering::Relaxed);
+        let mut slot = self.find_snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        *slot = Some(cache);
+    }
+
+    /// Drop the cached snapshot (and, with it, the materialized temp file).
+    /// Called from the natural staleness hooks — tab switch/close, open,
+    /// reload after save — so temps never linger; correctness never depends
+    /// on it because every use re-validates identity + revision anyway.
+    pub(super) fn invalidate_dirty_snapshot(&self) {
+        let mut slot = self.find_snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        *slot = None;
+    }
+
+    /// Number of dirty snapshots built so far (asserted by serve tests).
+    #[cfg(test)]
+    pub(super) fn dirty_snapshot_builds(&self) -> u64 {
+        self.snapshot_builds.load(AtomicOrdering::Relaxed)
     }
 
     /// Run `f` with a consistent read-only view of the workspace. The guard
@@ -198,6 +278,8 @@ impl AppState {
     /// Focus an already-open tab.
     pub(super) async fn switch_tab(&self, id: u64) -> Result<(), (StatusCode, String)> {
         let _transitions = self.transitions.lock().await;
+        // Leaf lock, taken while no ws guard is held (see `find_snapshot`).
+        self.invalidate_dirty_snapshot();
         self.write(|ws| {
             if ws.tabs.active == Some(id) {
                 return Ok(());
@@ -227,6 +309,7 @@ impl AppState {
     /// Close a tab; if it was active, focus a neighbor (or empty the workspace).
     pub(super) async fn close_tab(&self, id: u64) {
         let _transitions = self.transitions.lock().await;
+        self.invalidate_dirty_snapshot();
         self.write(|ws| {
             let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
                 return;
@@ -290,13 +373,6 @@ impl AppState {
     /// The open document, if any (cheap `Arc` clone).
     pub(super) fn doc_opt(&self) -> Option<Shared> {
         self.read(|ws| ws.doc.clone())
-    }
-
-    /// The open document, or a 409 if the workspace is empty. Handlers that
-    /// need a file use this so an empty workspace answers cleanly instead of
-    /// panicking.
-    pub(super) fn require_doc(&self) -> Result<Shared, (StatusCode, String)> {
-        self.doc_opt().ok_or_else(no_document)
     }
 
     /// Owned snapshot of the active document + edits + revision, taken under
@@ -369,6 +445,7 @@ impl AppState {
     /// disk, so clear the overlay (the reloaded document IS the edited text).
     pub(super) fn mark_edits_saved(&self) {
         self.write(|ws| ws.edits = EditSession::default());
+        self.invalidate_dirty_snapshot(); // clean session: the snapshot temp can go
     }
 
     /// Open `path` (blocking work off the async runtime) and install it in the
@@ -383,6 +460,7 @@ impl AppState {
             .map_err(internal)?
             .map_err(|e| bad_request(format!("reopening '{}': {e}", path.display())))?;
         self.write(|ws| ws.doc = Some(Arc::new(doc)));
+        self.invalidate_dirty_snapshot(); // the doc identity changed
         Ok(())
     }
 
@@ -399,6 +477,7 @@ impl AppState {
             .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
         let _transitions = self.transitions.lock().await;
         self.write(|ws| ws.install_new_tab(Arc::new(doc)));
+        self.invalidate_dirty_snapshot(); // a different tab is active now
         Ok(())
     }
 }

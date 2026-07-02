@@ -116,6 +116,9 @@
             <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
             <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
             <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="addCursorAbove" role="menuitem"><span class="menu-label">カーソルを上に追加</span><span class="menu-key" data-key-action="addCursorAbove">Ctrl+Alt+ArrowUp</span></button>
+            <button class="menu-item" data-menu-action="addCursorBelow" role="menuitem"><span class="menu-label">カーソルを下に追加</span><span class="menu-key" data-key-action="addCursorBelow">Ctrl+Alt+ArrowDown</span></button>
           </div>
         </div>
         <div class="menu-shell">
@@ -133,8 +136,8 @@
            floats inside the editor viewport instead. -->
       <header id="toolbar">
         <div class="tb-group">
-          <button id="toggle-sidebar" class="cmd nav-toggle" title="エクスプローラー (Ctrl+B)" aria-label="エクスプローラー">
-            <svg class="ay-icon"><use href="#i-sidebar"></use></svg><span class="btn-label">エクスプローラー</span>
+          <button id="toggle-sidebar" class="ico" title="エクスプローラー (Ctrl+B)" aria-label="エクスプローラー">
+            <svg class="ay-icon"><use href="#i-sidebar"></use></svg>
           </button>
           <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用">テーマ適用</button>
           <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用">キー設定適用</button>
@@ -159,11 +162,15 @@
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール">
             <button class="menu-item" data-menu-action="sortSave" role="menuitem"
-                    title="行単位で並び替えて結果を新しいタブに開きます。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)">
+                    title="行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)">
               <span class="menu-label">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
             </button>
             <button class="menu-item" data-menu-action="replaceSave" role="menuitem"><span class="menu-label">置換して保存</span><span class="menu-key" data-key-action="replaceSave"></span></button>
             <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
+            <button class="menu-item" data-menu-action="splitFile" role="menuitem"
+                    title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)">
+              <span class="menu-label">ファイルを分割</span><span class="menu-key"></span>
+            </button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字化して保存</span><span class="menu-key"></span></button>
             <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字化して保存</span><span class="menu-key"></span></button>
@@ -239,6 +246,7 @@
         <span id="st-enc" class="seg">—</span>
         <span id="st-eol" class="seg">—</span>
         <span id="st-edit" class="seg">—</span>
+        <span id="st-saving" class="seg saving-seg hidden" role="status">保存中…</span>
         <span id="st-msg" class="seg msg" role="status" aria-live="polite"></span>
         <div class="spacer"></div>
         <span id="st-index" class="seg dim">—</span>

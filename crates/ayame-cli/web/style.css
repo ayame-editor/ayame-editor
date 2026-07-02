@@ -338,9 +338,6 @@ button {
   white-space: nowrap;
 }
 button.cmd { min-width: 46px; padding: 0 11px; }
-.nav-toggle {
-  min-width: 142px;
-}
 .menu-shell {
   position: relative;
   display: inline-flex;
@@ -783,18 +780,18 @@ html[data-sidebar-side="right"] #sidebar::after {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* The fluid text caret: a thin blinking bar positioned by transform. */
+/* The fluid text caret: a thin blinking bar positioned by transform.
+   Deliberately slim — a 2px bar with only a hairline paper halo; the old
+   3px bar + accent glow read as "too fat". */
 #caret {
   position: absolute;
-  top: 0;
+  top: 1px;
   left: 0;
-  width: 3px;
-  height: var(--line-height);
+  width: 2px;
+  height: calc(var(--line-height) - 2px);
   background: var(--fg);
-  border-radius: 2px;
-  box-shadow:
-    0 0 0 1px var(--edit-bg),
-    0 0 0 3px color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
   pointer-events: none;
   display: none;
   will-change: transform;
@@ -806,6 +803,31 @@ html[data-sidebar-side="right"] #sidebar::after {
 }
 @keyframes caret-blink {
   0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* Multi-cursor: extra carets look like #caret at 75% strength and blink on
+   the same clock (same duration/steps, own keyframes for the dimmed phase). */
+.caret.extra {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  width: 2px;
+  height: calc(var(--line-height) - 2px);
+  background: var(--fg);
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
+  pointer-events: none;
+  display: none;
+  will-change: transform;
+  z-index: 8;
+}
+.caret.extra.on {
+  display: block;
+  animation: caret-blink-extra 1.06s steps(1) infinite;
+}
+@keyframes caret-blink-extra {
+  0%, 50% { opacity: 0.75; }
   50.01%, 100% { opacity: 0; }
 }
 
@@ -1016,6 +1038,31 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
 }
 #statusbar .seg.msg.error { color: var(--danger); }
 #statusbar .seg.msg:empty { display: none; }
+/* Save-in-progress: a small spinner so the (deliberate) edit block reads as
+   "busy", not "broken". */
+#statusbar .saving-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-bright);
+}
+#statusbar .saving-seg.hidden { display: none; }
+#statusbar .saving-seg::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent-bright);
+  animation: ayame-spin 0.9s linear infinite;
+}
+@keyframes ayame-spin {
+  to { transform: rotate(360deg); }
+}
+/* Dim the text area slightly while saving so the block is visible in place. */
+html.saving #content { opacity: 0.75; }
+html.saving #caret,
+html.saving .caret.extra { visibility: hidden; }
 
 /* ---- modals (open dialog + settings) ---------------------------------- */
 
@@ -1621,9 +1668,6 @@ button { border-radius: var(--radius); }
   }
   button.cmd .btn-label {
     display: none;
-  }
-  .nav-toggle {
-    min-width: 34px;
   }
   .menu-button {
     min-width: 54px;

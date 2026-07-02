@@ -48,6 +48,8 @@ const KEYMAP_ACTIONS = [
   ["undo", "元に戻す", "Ctrl+Z"],
   ["redo", "やり直す", ["Ctrl+Y", "Ctrl+Shift+Z"]],
   ["selectAll", "すべて選択", "Ctrl+A"],
+  ["addCursorAbove", "カーソルを上に追加", "Ctrl+Alt+ArrowUp"],
+  ["addCursorBelow", "カーソルを下に追加", "Ctrl+Alt+ArrowDown"],
   ["copy", "コピー", "Ctrl+C"],
   ["cut", "切り取り", "Ctrl+X"],
   ["searchCase", "検索: 大文字小文字", "Alt+C"],
@@ -78,7 +80,6 @@ const state = {
   searchHits: null,
   searchTruncated: false,
   findOpen: false,
-  dirtyFindWarned: false, // one-shot hint: find jumps target the saved bytes
   history: [],
   historyIndex: -1,
   settings: { ...DEFAULT_SETTINGS },
@@ -96,6 +97,7 @@ const state = {
   composing: false, // an IME composition is in progress
   focused: false, // the hidden text input holds focus (draw the caret)
   sel: null, // selection: { anchor: {line,col}, head: {line,col}, rect?: bool } or null
+  extraCursors: [], // multi-cursor: additional carets [{line,col}]; primary is state.caret
   dragging: false,
   dragMoved: false,
   dragAnchor: null, // caret at mouse-down, promoted to a selection once it moves
@@ -292,7 +294,14 @@ function confirmCloseWorkspace() {
 
 // Never let the native window kill the process while a save is in flight; the
 // close request is answered "cancel" and retried once the save settles.
+// While saving: edits are blocked (enqueueEdit / onEditKey) and the status bar
+// shows a spinner so the block reads as "busy", not "broken".
 let savingCount = 0;
+function setSavingUI() {
+  const on = savingCount > 0;
+  document.documentElement.classList.toggle("saving", on);
+  $("st-saving")?.classList.toggle("hidden", !on);
+}
 let pendingNativeClose = false;
 window.__ayameNativeCloseRequested = () => {
   if (savingCount > 0) {
@@ -534,7 +543,9 @@ function fillRow(row, line, rec, gutterWidth) {
   } else {
     tx.textContent = rec.text;
   }
-  row.classList.toggle("active", line === state.activeLine);
+  // Hide the current-line highlight while a selection exists — the two
+  // washes stack otherwise and the selection becomes hard to read.
+  row.classList.toggle("active", line === state.activeLine && !hasSelection());
 }
 
 function fillEofRow(row) {
@@ -714,6 +725,17 @@ function initSelection() {
     if (e.button !== 0) return;
     e.preventDefault(); // keep focus on the hidden input, not the div
     const p = coordsFromEvent(e);
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      // Ctrl+Click (Cmd+Click on mac): toggle an extra cursor at the point.
+      if (state.stat?.open) toggleExtraCursorAt(p.line, p.col);
+      focusEditor();
+      return;
+    }
+    if (e.detail >= 3) {
+      // Triple-click: select the whole line (newline included when possible).
+      selectLineAt(p.line);
+      return;
+    }
     if (e.shiftKey) {
       const anchor = state.sel ? state.sel.anchor : { ...state.caret };
       state.sel = { anchor, head: p, rect: e.altKey };
@@ -752,21 +774,44 @@ function initSelection() {
     scheduleRender();
   });
 
-  // Double-click selects the word under the caret.
+  // Double-click selects the run under the caret: a word, or (on symbols /
+  // whitespace) the contiguous run of the same class, editor-style.
   content.addEventListener("dblclick", (e) => {
     e.preventDefault();
     const p = coordsFromEvent(e);
     const cs = lineChars(p.line);
-    const isWord = (ch) => /[\p{L}\p{N}_]/u.test(ch || "");
-    if (!isWord(cs[p.col]) && !isWord(cs[p.col - 1])) return;
-    let a = p.col,
-      b = p.col;
-    while (a > 0 && isWord(cs[a - 1])) a--;
-    while (b < cs.length && isWord(cs[b])) b++;
+    if (cs.length === 0) return;
+    const classOf = (ch) => {
+      if (ch == null) return null;
+      if (/[\p{L}\p{N}_]/u.test(ch)) return "word";
+      if (/\s/.test(ch)) return "space";
+      return "punct";
+    };
+    // Prefer the char at the caret, else the one before it (click at run end).
+    const pivot = cs[p.col] != null ? p.col : p.col - 1;
+    const cls = classOf(cs[pivot]);
+    if (cls == null) return;
+    let a = pivot,
+      b = pivot + 1;
+    while (a > 0 && classOf(cs[a - 1]) === cls) a--;
+    while (b < cs.length && classOf(cs[b]) === cls) b++;
     state.sel = { anchor: { line: p.line, col: a }, head: { line: p.line, col: b } };
     setCaret(p.line, b);
     focusEditor();
   });
+}
+
+// Select one whole line; the newline is included by anchoring the head at the
+// start of the next line (matches VS Code's triple-click).
+function selectLineAt(line) {
+  if (state.total === 0) return;
+  const l = Math.max(0, Math.min(line, state.total - 1));
+  const hasNext = l + 1 < state.total;
+  const head = hasNext ? { line: l + 1, col: 0 } : { line: l, col: lineLen(l) };
+  state.sel = { anchor: { line: l, col: 0 }, head };
+  setCaret(head.line, head.col);
+  focusEditor();
+  scheduleRender();
 }
 
 function selectAll() {
@@ -1149,7 +1194,9 @@ function updateStatusPos() {
     $("st-pos").textContent = "行 0";
     return;
   }
-  $("st-pos").textContent = `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`;
+  const pos = `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`;
+  const n = state.extraCursors.length;
+  $("st-pos").textContent = n ? `${pos} · ${n + 1} カーソル` : pos;
 }
 
 // ---- search ----------------------------------------------------------------
@@ -1206,10 +1253,6 @@ async function findStep(dir) {
   if (state.regexError) {
     flashCount("正規表現エラー", "error");
     return;
-  }
-  if (state.stat?.dirty && !state.dirtyFindWarned) {
-    state.dirtyFindWarned = true;
-    flashCount("注意: 検索ジャンプは保存済みの内容が対象です (未保存の編集は反映されません)");
   }
   saveSearchHistory(state.query);
   let from;
@@ -1368,6 +1411,7 @@ function setCaret(line, col) {
   col = Math.max(0, Math.min(col, lineLen(line)));
   state.caret = { line, col };
   state.activeLine = line;
+  state.extraCursors = []; // any explicit caret placement collapses multi-cursor
   state.editGen++; // user-driven caret placement (click, search, open, …)
 }
 
@@ -1378,6 +1422,7 @@ function moveCaret(line, col, extend) {
   if (extend) {
     const anchor = state.sel ? state.sel.anchor : { ...state.caret };
     state.sel = { anchor, head: { line, col } };
+    state.extraCursors = []; // entering a selection collapses multi-cursor
   } else {
     state.sel = null;
   }
@@ -1386,6 +1431,79 @@ function moveCaret(line, col, extend) {
   state.editGen++; // user-driven caret motion (arrows, Home/End, PageUp/Down)
   revealCaret();
   scheduleRender();
+}
+
+// ---- multi-cursor (MVP: extra insertion carets, no per-cursor selections) ---
+
+// Primary caret plus the extra cursors, deduped and in document order. The
+// entry carrying `primary: true` mirrors state.caret.
+function allCursors() {
+  const out = [];
+  const seen = new Set();
+  const push = (c, primary) => {
+    const k = `${c.line}:${c.col}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ line: c.line, col: c.col, primary });
+  };
+  push(state.caret, true);
+  for (const c of state.extraCursors) push(c, false);
+  out.sort((a, b) => a.line - b.line || a.col - b.col);
+  return out;
+}
+
+function clearExtraCursors() {
+  if (state.extraCursors.length) {
+    state.extraCursors = [];
+    scheduleRender();
+  }
+}
+
+// Ctrl+Click: add a caret; clicking an existing extra caret removes it; the
+// primary caret is left alone.
+function toggleExtraCursorAt(line, col) {
+  if (line === state.caret.line && col === state.caret.col) return;
+  const i = state.extraCursors.findIndex((c) => c.line === line && c.col === col);
+  if (i >= 0) state.extraCursors.splice(i, 1);
+  else {
+    state.sel = null; // extra cursors and range selections are exclusive
+    state.extraCursors.push({ line, col });
+  }
+  state.editGen++; // user cursor action: an in-flight edit must not clobber it
+  scheduleRender();
+}
+
+function addExtraCursorAt(line, col) {
+  if (line === state.caret.line && col === state.caret.col) return;
+  if (state.extraCursors.some((c) => c.line === line && c.col === col)) return;
+  state.sel = null;
+  state.extraCursors.push({ line, col });
+  state.editGen++; // user cursor action: an in-flight edit must not clobber it
+  // Keep the newest cursor visible, like revealCaret does for the primary.
+  const vis = rowsVisible();
+  if (line < state.first) setFirst(line);
+  else if (line >= state.first + vis) setFirst(line - vis + 1);
+  focusEditor();
+  scheduleRender();
+}
+
+// Ctrl+Alt+ArrowUp / ArrowDown: grow the cursor column one line beyond the
+// topmost / bottommost cursor, preserving its column (clamped to the line).
+function addCursorAbove() {
+  if (!state.stat?.open || state.total === 0) return;
+  const top = allCursors()[0];
+  if (top.line <= 0) return;
+  const line = top.line - 1;
+  addExtraCursorAt(line, Math.min(top.col, lineLen(line)));
+}
+
+function addCursorBelow() {
+  if (!state.stat?.open || state.total === 0) return;
+  const cs = allCursors();
+  const bottom = cs[cs.length - 1];
+  if (bottom.line >= state.total - 1) return;
+  const line = bottom.line + 1;
+  addExtraCursorAt(line, Math.min(bottom.col, lineLen(line)));
 }
 
 function focusEditor() {
@@ -1421,6 +1539,8 @@ function positionCaret() {
   const hi = $("hidden-input");
   if (!caretEl || !hi) return;
   const vis = rowsVisible();
+  const focusVisible = state.focused && !anyModalOpen() && !state.composing;
+  positionExtraCarets(vis, focusVisible);
   const onScreen =
     !!state.stat?.open &&
     state.caret.line >= state.first &&
@@ -1434,6 +1554,34 @@ function positionCaret() {
   hi.style.transform = `translate(${x}px, ${y}px)`;
 }
 
+// Mirror #caret for every extra cursor: same transform math and the same
+// visibility rules (focus, modal open, IME composition, offscreen). The divs
+// live in a small pool inside #content and are trimmed when cursors go away.
+const extraCaretPool = [];
+function positionExtraCarets(vis, focusVisible) {
+  const cursors = state.extraCursors;
+  while (extraCaretPool.length < cursors.length) {
+    const el = document.createElement("div");
+    el.className = "caret extra";
+    el.setAttribute("aria-hidden", "true");
+    $("content").append(el);
+    extraCaretPool.push(el);
+  }
+  while (extraCaretPool.length > cursors.length) extraCaretPool.pop().remove();
+  for (let i = 0; i < cursors.length; i++) {
+    const c = cursors[i];
+    const el = extraCaretPool[i];
+    const onScreen =
+      !!state.stat?.open && c.line >= state.first && c.line < state.first + vis;
+    el.classList.toggle("on", onScreen && focusVisible);
+    if (onScreen) {
+      const x = caretX(c.line, c.col);
+      const y = (c.line - state.first) * LINE_HEIGHT;
+      el.style.transform = `translate(${x}px, ${y}px)`;
+    }
+  }
+}
+
 function anyModalOpen() {
   return promptVisible() || formVisible() || settingsVisible() || keymapVisible() || diffVisible() || openerVisible();
 }
@@ -1442,6 +1590,12 @@ function anyModalOpen() {
 
 let editChain = Promise.resolve();
 function enqueueEdit(fn) {
+  // Saving intentionally blocks edits (user decision): simpler than merging
+  // mid-save changes, and the status-bar spinner makes the block visible.
+  if (savingCount > 0) {
+    flashCount("保存中です — 完了までお待ちください");
+    return editChain;
+  }
   editChain = editChain.then(fn).catch((e) => {
     flashCount("編集エラー");
     console.error(e);
@@ -1526,6 +1680,69 @@ async function applyRect(l0, l1, c0, c1, text) {
   render();
 }
 
+// Multi-cursor edits: send every cursor's replacement as ONE batch (the server
+// records it as a single undo step) and adopt the returned carets. `cursors`
+// is the sorted allCursors() list; `editOf[i]` is the index of cursor i's edit
+// in `edits`, or -1 when the cursor contributed no edit (only possible at the
+// document origin, whose position an edit batch cannot move).
+async function applyBatch(edits, cursors, editOf) {
+  const gen = state.editGen;
+  const res = await apiPost("/api/edit/replace_batch", { edits });
+  state.total = res.stats.total_lines;
+  if (state.editGen === gen) {
+    const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
+    const next = cursors.map((c, i) => {
+      const k = editOf[i];
+      const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
+      return { line: clampLine(p.line), col: p.col, primary: c.primary };
+    });
+    const primary = next.find((c) => c.primary) || next[0];
+    state.sel = null;
+    state.caret = { line: primary.line, col: primary.col };
+    state.activeLine = primary.line;
+    state.goalCol = primary.col;
+    state.extraCursors = next
+      .filter((c) => c !== primary)
+      .map((c) => ({ line: c.line, col: c.col }));
+  } else {
+    // The user moved the caret mid-edit: keep their position, re-clamped to
+    // the new line count (don't clobber it with the edit's caret).
+    const line = Math.min(state.caret.line, Math.max(0, state.total - 1));
+    state.caret = { line, col: state.caret.col };
+    state.activeLine = line;
+    if (state.extraCursors.length) {
+      // Plain caret motion / cursor-adds keep the extras alive mid-flight;
+      // remap the ones this batch owned onto their post-edit positions.
+      const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
+      state.extraCursors = cursors.flatMap((c, i) => {
+        if (c.primary) return [];
+        const k = editOf[i];
+        const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
+        return [{ line: clampLine(p.line), col: p.col }];
+      });
+    }
+  }
+  revealCaret();
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-batch-edit refresh failed", e);
+    flashCount("再読込エラー");
+  }
+  revealCaret();
+  render();
+}
+
+// One same-shaped insertion per cursor. `textFor(i)` is the string inserted at
+// cursor i (document order) — a constant for typing, per-line for paste.
+function multiInsert(cursors, textFor) {
+  const edits = cursors.map((c, i) => ({
+    l0: c.line, c0: c.col, l1: c.line, c1: c.col, text: textFor(i),
+  }));
+  return applyBatch(edits, cursors, cursors.map((_, i) => i));
+}
+
 // Insert (or replace the selection with) `text`, which may contain newlines.
 // The target range is resolved *inside* the queued step, so a burst of
 // keystrokes each sees the caret left by the previous edit (never a stale one).
@@ -1534,6 +1751,10 @@ async function applyRect(l0, l1, c0, c1, text) {
 function typeText(text) {
   if (!state.stat?.open) return;
   enqueueEdit(() => {
+    if (state.extraCursors.length) {
+      // Multi-cursor: the same text goes in at every caret, as one undo step.
+      return multiInsert(allCursors(), () => text);
+    }
     const rr = rectRange();
     if (rr) {
       return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, text);
@@ -1549,6 +1770,25 @@ function insertNewline() {
 
 function backspace() {
   enqueueEdit(() => {
+    if (state.extraCursors.length) {
+      // Per cursor: delete one char before the caret (line-join at col 0).
+      // allCursors() dedupes positions, so ranges may touch but never overlap;
+      // a cursor at the document origin contributes no edit.
+      const cursors = allCursors();
+      const edits = [];
+      const editOf = cursors.map((c) => {
+        if (c.col > 0) {
+          edits.push({ l0: c.line, c0: c.col - 1, l1: c.line, c1: c.col, text: "" });
+        } else if (c.line > 0) {
+          edits.push({ l0: c.line - 1, c0: lineLen(c.line - 1), l1: c.line, c1: 0, text: "" });
+        } else {
+          return -1;
+        }
+        return edits.length - 1;
+      });
+      if (!edits.length) return null;
+      return applyBatch(edits, cursors, editOf);
+    }
     if (hasSelection()) {
       const rr = rectRange();
       if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
@@ -1564,6 +1804,24 @@ function backspace() {
 
 function forwardDelete() {
   enqueueEdit(() => {
+    if (state.extraCursors.length) {
+      // Per cursor: delete one char after the caret (line-join at EOL). Same
+      // dedupe rule as backspace; the very end of the document yields no edit.
+      const cursors = allCursors();
+      const edits = [];
+      const editOf = cursors.map((c) => {
+        if (c.col < lineLen(c.line)) {
+          edits.push({ l0: c.line, c0: c.col, l1: c.line, c1: c.col + 1, text: "" });
+        } else if (c.line < state.total - 1) {
+          edits.push({ l0: c.line, c0: c.col, l1: c.line + 1, c1: 0, text: "" });
+        } else {
+          return -1;
+        }
+        return edits.length - 1;
+      });
+      if (!edits.length) return null;
+      return applyBatch(edits, cursors, editOf);
+    }
     if (hasSelection()) {
       const rr = rectRange();
       if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
@@ -1579,13 +1837,31 @@ function forwardDelete() {
 
 function pasteText(raw) {
   const text = raw.replace(/\r\n?/g, "\n");
-  typeText(text);
+  if (!state.extraCursors.length) {
+    typeText(text);
+    return;
+  }
+  if (!state.stat?.open) return;
+  enqueueEdit(() => {
+    if (!state.extraCursors.length) {
+      // Collapsed while the paste was queued: normal single-caret insert.
+      const t = replaceTarget();
+      return applyRange(t.l0, t.c0, t.l1, t.c1, text);
+    }
+    // VS Code rule: N clipboard lines onto N cursors paste line i at cursor i
+    // (document order); any other shape inserts the whole text at every caret.
+    const cursors = allCursors();
+    const lines = text.split("\n");
+    const perCursor = lines.length === cursors.length ? lines : null;
+    return multiInsert(cursors, (i) => (perCursor ? perCursor[i] : text));
+  });
 }
 
 async function saveCopy() {
   const target = await showSaveDialog("別名で保存", suggestedSaveAsPath());
   if (!target) return;
   savingCount++;
+  setSavingUI();
   try {
     const res = await apiPost("/api/edit/save", target);
     const stat = await apiPost("/api/open", { path: res.path });
@@ -1596,6 +1872,7 @@ async function saveCopy() {
     alert(e.message);
   } finally {
     savingCount--;
+    setSavingUI();
     retryPendingNativeClose();
   }
 }
@@ -1614,10 +1891,10 @@ async function saveFile() {
     return;
   }
   savingCount++;
+  setSavingUI();
   try {
     const res = await apiPost("/api/edit/save", { overwrite: true });
     clearLineCache();
-    state.dirtyFindWarned = false;
     await refreshStat();
     await reloadViewport();
     render();
@@ -1627,6 +1904,7 @@ async function saveFile() {
     alert(e.message);
   } finally {
     savingCount--;
+    setSavingUI();
     retryPendingNativeClose();
   }
 }
@@ -1646,6 +1924,8 @@ async function undoEdit() {
   enqueueEdit(async () => {
     await apiPost("/api/edit/undo", {});
     state.sel = null;
+    state.extraCursors = []; // a multi-cursor batch undoes as one step
+
     await refreshStat();
     await reloadViewport();
     setCaret(state.caret.line, state.caret.col); // re-clamp into the new bounds
@@ -1658,6 +1938,8 @@ async function redoEdit() {
   enqueueEdit(async () => {
     await apiPost("/api/edit/redo", {});
     state.sel = null;
+    state.extraCursors = []; // a multi-cursor batch redoes as one step
+
     await refreshStat();
     await reloadViewport();
     setCaret(state.caret.line, state.caret.col);
@@ -1666,8 +1948,8 @@ async function redoEdit() {
   });
 }
 
-// ソート: no destination prompt — the result opens in a new tab and the
-// original file is left untouched. All options sit in one form.
+// ソート: sorts the current tab in place — unsaved edits included — and
+// overwrites the original file on disk. All options sit in one form.
 async function sortSave() {
   if (!state.stat?.open) return;
   const f = await askForm("ソート", [
@@ -1679,7 +1961,7 @@ async function sortSave() {
       title: "10 と 9 を文字列でなく数値の大小で並べます" },
     { id: "order", type: "select", label: "並び順",
       options: [["asc", "昇順 (A→Z, 小→大)"], ["desc", "降順 (Z→A, 大→小)"]] },
-    { id: "_hint", type: "hint", label: "結果は新しいタブに開きます。元のファイルは変更されません。" },
+    { id: "_hint", type: "hint", label: "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。" },
   ], "ソート");
   if (!f) return;
   const keyText = String(f.key || "").trim();
@@ -1690,16 +1972,52 @@ async function sortSave() {
   }
   showLoading("ソート実行中…");
   try {
-    const res = await apiPost("/api/sort/save", {
+    await apiPost("/api/sort/save", {
+      in_place: true,
       key,
       numeric: !!f.numeric,
       reverse: f.order === "desc",
       delim: key != null && f.delim ? f.delim : null,
     });
-    onDocumentOpened(await apiPost("/api/open", { path: res.path }));
-    flashCount(`ソート結果を新しいタブに開きました: ${displayName(res.path)}`);
+    state.sel = null;
+    state.extraCursors = [];
+    setCaret(0, 0);
+    clearLineCache();
+    await refreshStat();
+    await reloadViewport();
+    render();
+    flashCount("ソートして上書きしました");
   } catch (e) {
     flashCount("ソートエラー", "error");
+    alert(e.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+// ファイル分割: writes the current document (unsaved edits included) out as
+// multiple files of at most N lines each; the original file is untouched.
+async function splitFile() {
+  if (!state.stat?.open) return;
+  const f = await askForm("ファイルを分割", [
+    { id: "lines", type: "text", label: "1ファイルあたりの行数", value: "1000000" },
+    { id: "dir", type: "text", label: "出力先フォルダ", value: "",
+      placeholder: "空なら元ファイルと同じ場所" },
+    { id: "_hint", type: "hint", label: "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。" },
+  ], "分割");
+  if (!f) return;
+  const lines = Number(String(f.lines || "").trim());
+  if (!Number.isInteger(lines) || lines < 1) {
+    flashCount("行数は 1 以上の整数で指定してください", "error");
+    return;
+  }
+  showLoading("分割実行中…");
+  try {
+    const dir = String(f.dir || "").trim();
+    const res = await apiPost("/api/split/save", { lines, dir: dir || null });
+    flashCount(`${res.count} 個に分割しました: 最初のファイル ${res.files[0]}`);
+  } catch (e) {
+    flashCount("分割エラー", "error");
     alert(e.message);
   } finally {
     hideLoading();
@@ -2258,6 +2576,7 @@ function wordRight(line, col) {
 
 function deleteWordBack() {
   enqueueEdit(() => {
+    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     if (hasSelection()) {
       const rr = rectRange();
       if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
@@ -2273,6 +2592,7 @@ function deleteWordBack() {
 
 function deleteWordFwd() {
   enqueueEdit(() => {
+    clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
     if (hasSelection()) {
       const rr = rectRange();
       if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, "");
@@ -2289,10 +2609,21 @@ function deleteWordFwd() {
 function onEditKey(e) {
   if (state.composing || e.isComposing) return; // IME owns the keyboard
   if (anyModalOpen()) return; // a dialog is up; don't edit behind it
+  if (savingCount > 0) {
+    // Edits are blocked while a save is in flight; swallow the key so the
+    // hidden textarea can't buffer text that would never be applied.
+    e.preventDefault();
+    flashCount("保存中です — 完了までお待ちください");
+    return;
+  }
   const mod = e.ctrlKey || e.metaKey;
   const shift = e.shiftKey;
   const c = state.caret;
   const take = () => { e.preventDefault(); e.stopPropagation(); };
+  // Multi-cursor: add a caret above/below (default Ctrl+Alt+ArrowUp/Down).
+  // Checked before the switch so the plain-arrow cases never swallow them.
+  if (matchesShortcut(e, "addCursorAbove")) { take(); addCursorAbove(); return; }
+  if (matchesShortcut(e, "addCursorBelow")) { take(); addCursorBelow(); return; }
   switch (e.key) {
     case "ArrowLeft":
       take();
@@ -2355,6 +2686,9 @@ function onEditKey(e) {
       typeText("\t");
       return;
     case "Escape":
+      // Collapsing multi-cursor wins over every other Escape meaning here
+      // (modals/find never reach this handler — see the guards above).
+      if (state.extraCursors.length) { take(); clearExtraCursors(); return; }
       if (state.sel) { take(); state.sel = null; scheduleRender(); }
       return;
     default:
@@ -2690,10 +3024,10 @@ function onDocumentOpened(stat) {
   state.goalCol = 0;
   state.activeLine = 0;
   state.sel = null;
+  state.extraCursors = [];
   state.lastMatch = null;
   state.searchHits = null;
   state.searchTruncated = false;
-  state.dirtyFindWarned = false;
   $("find-count").textContent = "";
   clearLineCache();
   const m = $("opener");
@@ -3002,6 +3336,8 @@ function runMenuAction(action) {
     return;
   }
   if (action === "selectAll") return selectAll();
+  if (action === "addCursorAbove") return addCursorAbove();
+  if (action === "addCursorBelow") return addCursorBelow();
   if (action === "copy") return copySelection();
   if (action === "cut") return cutSelection();
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
@@ -3009,10 +3345,29 @@ function runMenuAction(action) {
   if (action === "sortSave") return sortSave();
   if (action === "replaceSave") return replaceSave();
   if (action === "diffFile") return diffFile();
+  if (action === "splitFile") return splitFile();
   if (action === "caseUpper") return caseSave("upper");
   if (action === "caseLower") return caseSave("lower");
   if (action === "keymap") return showKeymap();
+  // File-level actions (also reachable from the native macOS menu below): a
+  // modal owns the UI, so they are ignored while one is open.
+  if (["newFile", "openFile", "saveFile", "saveAs", "closeTab"].includes(action)) {
+    if (anyModalOpen()) return;
+    if (action === "newFile") return newUntitled();
+    if (action === "openFile") return showOpener();
+    if (action === "saveFile") return saveFile();
+    if (action === "saveAs") return saveCopy();
+    if (action === "closeTab") {
+      const active = state.tabs.find((t) => t.active);
+      if (active) closeTab(active.id);
+      return;
+    }
+  }
 }
+
+// Native menu dispatcher: the macOS (Rust) side calls this via evaluate_script
+// with the same action ids the in-page menus use.
+window.__ayameMenu = runMenuAction;
 
 function initMenuBar() {
   for (const id of APP_MENUS) {

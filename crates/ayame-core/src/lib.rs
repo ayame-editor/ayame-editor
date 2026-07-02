@@ -38,10 +38,11 @@ mod fields;
 pub mod index;
 pub mod ops;
 pub mod search;
+pub mod split;
 pub mod transform;
 
 pub use document::{Document, FileStat, Line, OpenOptions};
-pub use edit::{EditLine, EditSession, EditStats, SaveResult};
+pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
 pub use ops::{
@@ -49,6 +50,7 @@ pub use ops::{
     SortOptions, SortResult, TopOptions,
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
+pub use split::{split_by_lines, SplitOptions, SplitResult, SPLIT_RESULT_MAX_FILES};
 pub use transform::{
     case_to_path, replace_to_path, replace_to_path_parallel, CaseMode, CaseOptions,
     ParallelReplaceOptions, ReplaceOptions, TransformResult, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,

@@ -154,6 +154,10 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
             "/api/edit/replace_range",
             post(edit::api_edit_replace_range),
         )
+        .route(
+            "/api/edit/replace_batch",
+            post(edit::api_edit_replace_batch),
+        )
         .route("/api/edit/replace_rect", post(edit::api_edit_replace_rect))
         .route("/api/edit/save", post(edit::api_edit_save))
         .route("/api/edit/undo", post(edit::api_edit_undo))
@@ -162,6 +166,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/sort/save", post(ops::api_sort_save))
         .route("/api/replace/save", post(ops::api_replace_save))
         .route("/api/case/save", post(ops::api_case_save))
+        .route("/api/split/save", post(ops::api_split_save))
         .route("/api/search", get(ops::api_search))
         .route("/api/find", get(ops::api_find))
         .route("/api/diff", get(ops::api_diff))
@@ -386,15 +391,21 @@ mod tests {
 
     /// Serve the real router (loopback policy) on an ephemeral port.
     async fn start_server(path: &Path) -> SocketAddr {
+        start_server_with_state(path).await.0
+    }
+
+    /// Like [`start_server`], but also hands back the shared state so a test
+    /// can assert on internals (e.g. how often the dirty snapshot was built).
+    async fn start_server_with_state(path: &Path) -> (SocketAddr, SharedState) {
         let doc = Document::open(path, &OpenOptions::default()).unwrap();
         let state = Arc::new(AppState::new(Some(doc), OpenOptions::default()));
-        let app = router(state, Arc::new(NetPolicy::loopback()));
+        let app = router(state.clone(), Arc::new(NetPolicy::loopback()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        addr
+        (addr, state)
     }
 
     /// Minimal raw HTTP/1.1 client (avoids extra dev-dependencies): returns
@@ -479,6 +490,152 @@ mod tests {
         let (status, _) = send(addr, post_json("/api/edit/undo", &host, None, "")).await;
         assert_eq!(status, 200);
 
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn replace_batch_applies_all_carets_as_one_undo_step() {
+        let f = scratch_file("batch.txt", b"aaa\nbbb\nccc\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_batch",
+                &host,
+                Some(&origin),
+                r#"{"edits":[{"l0":0,"c0":1,"l1":0,"c1":1,"text":"X"},{"l0":2,"c0":3,"l1":2,"c1":3,"text":"Y"}]}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"dirty\":true"), "body: {body}");
+        assert!(
+            body.contains(r#""carets":[{"line":0,"col":2},{"line":2,"col":4}]"#),
+            "body: {body}"
+        );
+
+        let (_, body) = send(addr, get("/api/lines?start=0&count=10", &host)).await;
+        assert!(
+            body.contains("aXaa") && body.contains("cccY"),
+            "body: {body}"
+        );
+
+        // A single undo reverts every caret's edit at once.
+        let (status, body) =
+            send(addr, post_json("/api/edit/undo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        let (_, body) = send(addr, get("/api/lines?start=0&count=10", &host)).await;
+        assert!(
+            body.contains("aaa") && !body.contains("aXaa"),
+            "body: {body}"
+        );
+
+        // Overlapping ranges are rejected without touching the text.
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_batch",
+                &host,
+                Some(&origin),
+                r#"{"edits":[{"l0":0,"c0":0,"l1":0,"c1":2,"text":"x"},{"l0":0,"c0":1,"l1":0,"c1":3,"text":"y"}]}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 400);
+
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn find_sees_unsaved_edits_through_a_cached_snapshot() {
+        let f = scratch_file("find.txt", b"alpha\nbeta\ngamma\n");
+        let (addr, state) = start_server_with_state(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        // Clean session: the needle doesn't exist on disk, and no snapshot is built.
+        let (status, body) = send(addr, get("/api/find?q=NEEDLE&dir=next&from=0", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"hit\":null"), "body: {body}");
+        assert_eq!(state.dirty_snapshot_builds(), 0);
+
+        // Insert a line "NEEDLE" after "alpha" — an UNSAVED edit only.
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":5,"l1":0,"c1":5,"text":"\nNEEDLE"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"dirty\":true"), "body: {body}");
+
+        // Find now hits the edited text at its VIEW position (line 1, byte 6
+        // of "alpha\nNEEDLE\nbeta\ngamma\n") — the on-disk file is unchanged.
+        let (status, body) = send(addr, get("/api/find?q=NEEDLE&dir=next&from=0", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"line\":1"), "body: {body}");
+        assert!(body.contains("\"byte\":6"), "body: {body}");
+        assert_eq!(state.dirty_snapshot_builds(), 1, "first dirty find builds");
+
+        // A second find at the same revision reuses the cached snapshot.
+        let (status, body2) = send(addr, get("/api/find?q=NEEDLE&dir=next&from=0", &host)).await;
+        assert_eq!(status, 200);
+        assert_eq!(body, body2, "cached snapshot answers identically");
+        assert_eq!(
+            state.dirty_snapshot_builds(),
+            1,
+            "no rebuild at same revision"
+        );
+
+        // Another edit bumps the revision: prepend "NEEDLE " to "beta" (view
+        // line 2). A stale-cache find must see the NEW view, not the old snapshot.
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":2,"c0":0,"l1":2,"c1":0,"text":"NEEDLE "}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+
+        let (status, body) = send(addr, get("/api/find?q=NEEDLE&dir=next&from=7", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"line\":2"), "body: {body}");
+        assert_eq!(
+            state.dirty_snapshot_builds(),
+            2,
+            "revision bump rebuilds once"
+        );
+
+        // On disk nothing changed throughout.
+        assert_eq!(std::fs::read(&f).unwrap(), b"alpha\nbeta\ngamma\n");
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn split_save_rejects_zero_lines() {
+        let f = scratch_file("split-zero.txt", b"a\nb\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, body) = send(
+            addr,
+            post_json("/api/split/save", &host, Some(&origin), r#"{"lines":0}"#),
+        )
+        .await;
+        assert_eq!(status, 400, "body: {body}");
         let _ = std::fs::remove_file(&f);
     }
 

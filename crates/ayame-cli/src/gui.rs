@@ -7,15 +7,16 @@
 //! bundled browser — so the desktop app stays small and reuses the entire web
 //! front-end and every `/api/*` endpoint unchanged.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tao::dpi::LogicalSize;
+use serde::{Deserialize, Serialize};
+use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::{Icon, WindowBuilder};
+use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebViewBuilder};
 
 use crate::parse;
@@ -52,14 +53,26 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     let ipc_proxy = proxy.clone();
     // Created hidden: the page reveals it with "ayame:ready" (fallback timer
     // below), which removes the white flash before first paint.
-    let window = WindowBuilder::new()
+    let saved_state = load_window_state();
+    let start_maximized = saved_state.as_ref().is_some_and(|s| s.maximized);
+    let builder = WindowBuilder::new()
         .with_title(title)
         .with_window_icon(app_icon())
-        .with_inner_size(LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(LogicalSize::new(900.0, 560.0))
-        .with_visible(false)
-        .build(&event_loop)
-        .context("creating window")?;
+        .with_visible(false);
+    // Restore last session's geometry. Saved bounds are physical pixels (the
+    // same units `save_window_state` captures), already sanity-clamped on load.
+    let builder = match &saved_state {
+        Some(s) => {
+            let b = builder.with_inner_size(PhysicalSize::new(s.width, s.height));
+            match (s.x, s.y) {
+                (Some(x), Some(y)) => b.with_position(PhysicalPosition::new(x, y)),
+                _ => b,
+            }
+        }
+        None => builder.with_inner_size(LogicalSize::new(1280.0, 800.0)),
+    };
+    let window = builder.build(&event_loop).context("creating window")?;
 
     let init_script = match &pending_open {
         Some(p) => {
@@ -125,6 +138,11 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         builder.build_gtk(vbox).context("creating webview")?
     };
 
+    // The native menu bar must exist before the loop runs and must stay alive
+    // for the whole app lifetime, so it is created here and captured below.
+    #[cfg(target_os = "macos")]
+    let macos_menu = setup_macos_menu(&proxy);
+
     // Keep the webview alive for the lifetime of the window.
     let mut close_pending = false;
     let mut shown = false;
@@ -138,11 +156,16 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             ControlFlow::WaitUntil(show_deadline)
         };
         let _ = &webview;
+        #[cfg(target_os = "macos")]
+        let _ = &macos_menu;
         match event {
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
                 if !shown {
                     shown = true;
                     window.set_visible(true);
+                    if start_maximized {
+                        window.set_maximized(true);
+                    }
                 }
             }
             Event::WindowEvent {
@@ -154,10 +177,12 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 }
                 close_pending = true;
                 if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
+                    save_window_state(&window, saved_state.as_ref());
                     *control_flow = ControlFlow::Exit;
                 }
             }
             Event::UserEvent(GuiEvent::CloseConfirmed) => {
+                save_window_state(&window, saved_state.as_ref());
                 *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(GuiEvent::CloseCanceled) => {
@@ -170,6 +195,27 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 if !shown {
                     shown = true;
                     window.set_visible(true);
+                    if start_maximized {
+                        window.set_maximized(true);
+                    }
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Event::UserEvent(GuiEvent::Menu(id)) => {
+                if id == "quit" {
+                    // Cmd+Q takes the same path as the window close button so
+                    // unsaved changes get the same confirmation dialog.
+                    if close_pending {
+                        return;
+                    }
+                    close_pending = true;
+                    if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
+                        save_window_state(&window, saved_state.as_ref());
+                        *control_flow = ControlFlow::Exit;
+                    }
+                } else if let Ok(id_json) = serde_json::to_string(&id) {
+                    let js = format!("window.__ayameMenu && window.__ayameMenu({id_json});");
+                    let _ = webview.evaluate_script(&js);
                 }
             }
             Event::UserEvent(GuiEvent::OpenPaths(paths)) => {
@@ -192,6 +238,117 @@ enum GuiEvent {
     SetTitle(String),
     Ready,
     OpenPaths(Vec<String>),
+    /// A native menu item was activated; carries the muda item id, which is
+    /// the frozen action name understood by `window.__ayameMenu` in the page.
+    #[cfg(target_os = "macos")]
+    Menu(String),
+}
+
+/// Registers the muda event forwarder and attaches the menu bar to NSApp.
+///
+/// Returns the menu so the caller keeps it (and every item hanging off it)
+/// alive for the app's lifetime; muda items are refcounted and dropping the
+/// root would tear the bar down. `None` (menu construction failed) simply
+/// leaves the app without a menu bar — everything else still works.
+#[cfg(target_os = "macos")]
+fn setup_macos_menu(proxy: &tao::event_loop::EventLoopProxy<GuiEvent>) -> Option<muda::Menu> {
+    let proxy = proxy.clone();
+    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
+        let _ = proxy.send_event(GuiEvent::Menu(event.id.0));
+    }));
+    let menu = build_macos_menu()?;
+    // tao's macOS event loop drives NSApp itself, so attaching here — on the
+    // main thread, after the event loop exists and before `run` — is the
+    // whole interop story.
+    menu.init_for_nsapp();
+    Some(menu)
+}
+
+/// The native macOS menu bar. Beyond convention, this is what makes
+/// Cmd+C/V/X/A work inside WKWebView: AppKit only routes the standard edit
+/// selectors to the focused view when NSMenu items carry those key
+/// equivalents. Windows/Linux use the in-page menubar instead.
+#[cfg(target_os = "macos")]
+fn build_macos_menu() -> Option<muda::Menu> {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+    let cmd = Modifiers::SUPER;
+    let shift_cmd = Modifiers::SUPER | Modifiers::SHIFT;
+    let key = |mods: Modifiers, code: Code| Some(Accelerator::new(Some(mods), code));
+    // Ids are the frozen `window.__ayameMenu` action names, except "quit"
+    // which is intercepted natively in the event loop.
+    let item = |id: &str, text: &str, accel| MenuItem::with_id(id, text, true, accel);
+
+    let app = Submenu::with_items(
+        "Ayame Editor",
+        true,
+        &[
+            &PredefinedMenuItem::about(
+                Some("Ayame Editor について"),
+                Some(AboutMetadata {
+                    name: Some("Ayame Editor".into()),
+                    version: Some(env!("CARGO_PKG_VERSION").into()),
+                    ..Default::default()
+                }),
+            ),
+            &PredefinedMenuItem::separator(),
+            &item("settings", "設定…", key(cmd, Code::Comma)),
+            &PredefinedMenuItem::separator(),
+            // Not PredefinedMenuItem::quit: quitting must go through the same
+            // unsaved-changes confirmation as closing the window.
+            &item("quit", "Ayame Editor を終了", key(cmd, Code::KeyQ)),
+        ],
+    )
+    .ok()?;
+
+    let file = Submenu::with_items(
+        "ファイル",
+        true,
+        &[
+            &item("newFile", "新規テキスト", key(cmd, Code::KeyN)),
+            &item("openFile", "開く…", key(cmd, Code::KeyO)),
+            &PredefinedMenuItem::separator(),
+            &item("saveFile", "保存", key(cmd, Code::KeyS)),
+            &item("saveAs", "別名で保存…", key(shift_cmd, Code::KeyS)),
+            &PredefinedMenuItem::separator(),
+            &item("closeTab", "タブを閉じる", key(cmd, Code::KeyW)),
+        ],
+    )
+    .ok()?;
+
+    let edit = Submenu::with_items(
+        "編集",
+        true,
+        &[
+            &item("undo", "元に戻す", key(cmd, Code::KeyZ)),
+            &item("redo", "やり直す", key(shift_cmd, Code::KeyZ)),
+            &PredefinedMenuItem::separator(),
+            &item("cut", "切り取り", key(cmd, Code::KeyX)),
+            &item("copy", "コピー", key(cmd, Code::KeyC)),
+            // Paste stays a native selector so the DOM paste event (the only
+            // sanctioned clipboard-read path) reaches the hidden textarea.
+            &PredefinedMenuItem::paste(Some("貼り付け")),
+            &item("selectAll", "すべて選択", key(cmd, Code::KeyA)),
+            &PredefinedMenuItem::separator(),
+            &item("find", "検索", key(cmd, Code::KeyF)),
+        ],
+    )
+    .ok()?;
+
+    let window = Submenu::with_items(
+        "ウインドウ",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(Some("しまう")),
+            &PredefinedMenuItem::maximize(Some("拡大/縮小")),
+        ],
+    )
+    .ok()?;
+    // Let AppKit append the standard window list to this submenu.
+    window.set_as_windows_menu_for_nsapp();
+
+    Menu::with_items(&[&app, &file, &edit, &window]).ok()
 }
 
 const NATIVE_CLOSE_SCRIPT: &str = r#"
@@ -227,6 +384,98 @@ fn clean_window_title(title: &str) -> String {
         "Ayame Editor".to_string()
     } else {
         clean
+    }
+}
+
+/// Last session's window geometry, persisted in the index-cache directory.
+/// Everything is optional-with-defaults so a corrupt or hand-edited file
+/// degrades to "open like a fresh install" instead of failing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct WindowState {
+    x: Option<i32>,
+    y: Option<i32>,
+    width: u32,
+    height: u32,
+    maximized: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            x: None,
+            y: None,
+            width: 1280,
+            height: 800,
+            maximized: false,
+        }
+    }
+}
+
+impl WindowState {
+    /// Clamp restored bounds so a stale or corrupt file can never produce an
+    /// unusable window: size within [min window size, 8192] and a position
+    /// that is at least partially reachable on a plausible monitor layout.
+    fn sanitized(mut self) -> Self {
+        self.width = self.width.clamp(900, 8192);
+        self.height = self.height.clamp(560, 8192);
+        let pos_ok = matches!(
+            (self.x, self.y),
+            (Some(x), Some(y)) if (-2000..=20_000).contains(&x) && (-200..=20_000).contains(&y)
+        );
+        if !pos_ok {
+            self.x = None;
+            self.y = None;
+        }
+        self
+    }
+}
+
+fn window_state_path() -> Option<PathBuf> {
+    crate::default_cache_dir().map(|dir| dir.join("window-state.json"))
+}
+
+/// `None` when there is nothing to restore (first run, unreadable cache dir);
+/// unparseable JSON falls back to the defaults rather than being an error.
+fn load_window_state() -> Option<WindowState> {
+    let bytes = std::fs::read(window_state_path()?).ok()?;
+    let state: WindowState = serde_json::from_slice(&bytes).unwrap_or_default();
+    Some(state.sanitized())
+}
+
+/// Best-effort save on close. Failures are silently ignored: the close path
+/// must never break over a full disk or read-only cache directory.
+fn save_window_state(window: &Window, previous: Option<&WindowState>) {
+    let Some(path) = window_state_path() else {
+        return;
+    };
+    let state = if window.is_maximized() {
+        // Maximized bounds are useless for restore; keep the last known
+        // un-maximized geometry and only remember the maximized flag.
+        let mut state = previous.cloned().unwrap_or_default();
+        state.maximized = true;
+        state
+    } else {
+        let pos = window.outer_position().ok();
+        let size = window.inner_size();
+        WindowState {
+            x: pos.map(|p| p.x),
+            y: pos.map(|p| p.y),
+            width: size.width,
+            height: size.height,
+            maximized: false,
+        }
+    };
+    let Ok(json) = serde_json::to_vec(&state) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Write-then-rename so a crash mid-write can't leave a truncated file.
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, &json).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
     }
 }
 

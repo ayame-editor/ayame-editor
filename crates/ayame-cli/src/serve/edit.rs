@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use ayame_core::{EditLine, EditStats, SaveResult};
+use ayame_core::{BatchEdit, EditLine, EditStats, SaveResult};
 use serde::{Deserialize, Serialize};
 
 use super::{bad_request, default_save_copy_path, internal, SharedState, MAX_VIEW};
@@ -79,6 +79,44 @@ pub(super) async fn api_edit_replace_range(
             stats: edits.stats(doc),
             caret_line,
             caret_col,
+        }))
+    })
+}
+
+/// Apply one edit per caret — a multi-cursor commit — as a single undo step.
+/// Every range refers to the view BEFORE the batch and the ranges must not
+/// overlap; the response returns the post-batch caret for each edit in
+/// request order.
+#[derive(Deserialize)]
+pub(super) struct ReplaceBatchRequest {
+    edits: Vec<BatchEdit>,
+}
+
+#[derive(Serialize)]
+pub(super) struct CaretPosition {
+    line: u64,
+    col: usize,
+}
+
+#[derive(Serialize)]
+pub(super) struct ReplaceBatchResponse {
+    stats: EditStats,
+    carets: Vec<CaretPosition>,
+}
+
+pub(super) async fn api_edit_replace_batch(
+    State(state): State<SharedState>,
+    Json(req): Json<ReplaceBatchRequest>,
+) -> Result<Json<ReplaceBatchResponse>, (StatusCode, String)> {
+    state.write(|ws| {
+        let (doc, edits) = ws.doc_and_edits_mut()?;
+        let carets = edits.replace_batch(doc, &req.edits).map_err(bad_request)?;
+        Ok(Json(ReplaceBatchResponse {
+            stats: edits.stats(doc),
+            carets: carets
+                .into_iter()
+                .map(|(line, col)| CaretPosition { line, col })
+                .collect(),
         }))
     })
 }
@@ -218,7 +256,10 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn overwrite_stage_path(target: &Path) -> PathBuf {
+/// A unique sibling path of `target` for staging a full rewrite (shared with
+/// the in-place sort in `ops`): same directory, hence same volume, so the
+/// final rename is atomic.
+pub(super) fn overwrite_stage_path(target: &Path) -> PathBuf {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()
@@ -241,7 +282,7 @@ fn unique_suffix() -> u128 {
 /// Move the fully-written stage file onto `target`. On failure the stage file
 /// is deliberately KEPT (its path is in the error) — it holds the only copy of
 /// the user's saved data at that point.
-fn replace_existing_file(stage: &Path, target: &Path) -> std::io::Result<u64> {
+pub(super) fn replace_existing_file(stage: &Path, target: &Path) -> std::io::Result<u64> {
     match std::fs::rename(stage, target) {
         Ok(()) => {}
         Err(first) if target.exists() => {

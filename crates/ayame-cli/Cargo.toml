@@ -15,7 +15,7 @@ path = "src/main.rs"
 # no webview dependency. The native desktop window is opt-in so CLI releases
 # stay small and dependency-free.
 default = []
-gui = ["dep:wry", "dep:tao"]
+gui = ["dep:wry", "dep:tao", "dep:muda"]
 
 [dependencies]
 ayame-core = { path = "../ayame-core" }
@@ -31,3 +31,9 @@ futures-util = { version = "0.3", default-features = false }
 # WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.
 wry = { version = "0.52", optional = true }
 tao = { version = "0.34", optional = true }
+
+# Native menu bar, macOS only: WKWebView swallows Cmd+C/V/X/A unless real
+# NSMenu items carry those key equivalents. Windows/Linux use the in-page
+# menubar instead, so the dependency exists solely on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.19", optional = true }

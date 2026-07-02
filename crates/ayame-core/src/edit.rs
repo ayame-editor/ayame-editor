@@ -9,7 +9,7 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Document, Error, Result};
 
@@ -90,6 +90,19 @@ pub struct SaveResult {
     pub path: PathBuf,
     pub bytes: u64,
     pub lines: u64,
+}
+
+/// One caret's edit inside a [`EditSession::replace_batch`] call: the span
+/// (l0,c0)..(l1,c1) is replaced by `text`, with exactly the semantics of
+/// [`EditSession::replace_range`]. All coordinates refer to the shared view
+/// BEFORE the batch; columns are Unicode scalar (char) counts.
+#[derive(Clone, Debug, Deserialize)]
+pub struct BatchEdit {
+    pub l0: u64,
+    pub c0: usize,
+    pub l1: u64,
+    pub c1: usize,
+    pub text: String,
 }
 
 enum LineRef {
@@ -406,6 +419,27 @@ impl EditSession {
         c1: usize,
         text: &str,
     ) -> Result<(u64, usize)> {
+        let mut record = UndoRecord::new();
+        let caret = self.replace_range_inner(doc, l0, c0, l1, c1, text, &mut record)?;
+        self.finish_change(record);
+        Ok(caret)
+    }
+
+    /// The body of [`EditSession::replace_range`] without the history commit:
+    /// every inverse is appended to `record`, so several range replacements
+    /// (one per caret) can be composed into a single undo step.
+    // Mirrors the public 7-argument signature plus the composed record.
+    #[allow(clippy::too_many_arguments)]
+    fn replace_range_inner(
+        &mut self,
+        doc: &Document,
+        l0: u64,
+        c0: usize,
+        l1: u64,
+        c1: usize,
+        text: &str,
+        record: &mut UndoRecord,
+    ) -> Result<(u64, usize)> {
         let total = self.total_lines(doc);
         // An empty document has no lines at all; the only valid edit is an
         // insertion at the very start, which seeds the first line(s).
@@ -415,12 +449,10 @@ impl EditSession {
                     "the document is empty; only an insertion at line 1 is valid".into(),
                 ));
             }
-            let mut record = UndoRecord::new();
             let parts: Vec<String> = text.split('\n').map(String::from).collect();
             for (k, p) in parts.iter().enumerate() {
-                self.insert_line_before_inner(doc, k as u64, p.clone(), &mut record)?;
+                self.insert_line_before_inner(doc, k as u64, p.clone(), record)?;
             }
-            self.finish_change(record);
             let last = parts.len() - 1;
             return Ok((last as u64, parts[last].chars().count()));
         }
@@ -448,22 +480,136 @@ impl EditSession {
         parts[0] = format!("{head}{}", parts[0]);
         parts[li] = format!("{}{tail}", parts[li]);
 
-        // One undo step: collect every inverse into one record, commit once.
         // Delete the interior lines descending so anchors above the cursor
         // don't shift under us.
-        let mut record = UndoRecord::new();
-        self.replace_line_inner(doc, l0, parts[0].clone(), &mut record)?;
+        self.replace_line_inner(doc, l0, parts[0].clone(), record)?;
         for l in ((l0 + 1)..=l1).rev() {
-            self.delete_line_inner(doc, l, &mut record)?;
+            self.delete_line_inner(doc, l, record)?;
         }
         for (k, p) in parts[1..].iter().enumerate() {
-            self.insert_line_before_inner(doc, l0 + 1 + k as u64, p.clone(), &mut record)?;
+            self.insert_line_before_inner(doc, l0 + 1 + k as u64, p.clone(), record)?;
         }
-        self.finish_change(record);
 
         let caret_line = l0 + (n as u64 - 1);
         let caret_col = parts[li].chars().count() - tail.chars().count();
         Ok((caret_line, caret_col))
+    }
+
+    /// Apply one edit per caret — a multi-cursor commit — as a SINGLE undo
+    /// step. Each entry replaces its span exactly like
+    /// [`EditSession::replace_range`]; all coordinates refer to the shared
+    /// view BEFORE the batch (the caller's simultaneous carets), and the
+    /// ranges must not overlap. Returns the post-batch caret for every edit
+    /// in request order: the position just past that edit's inserted text
+    /// once every edit has been applied. The revision bumps once for the
+    /// whole batch; a batch with no visible effect records nothing, exactly
+    /// like the single-edit no-op detection.
+    pub fn replace_batch(
+        &mut self,
+        doc: &Document,
+        edits: &[BatchEdit],
+    ) -> Result<Vec<(u64, usize)>> {
+        if edits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let total = self.total_lines(doc);
+        // Validate and clamp every range against the shared pre-batch view
+        // up front, so the overlap check and the caret math below agree on
+        // one coordinate space and nothing mutates until all edits are known
+        // to be applicable.
+        let mut clamped: Vec<(u64, usize, u64, usize)> = Vec::with_capacity(edits.len());
+        for e in edits {
+            if total == 0 {
+                if e.l0 != 0 || e.c0 != 0 || e.l1 != 0 || e.c1 != 0 {
+                    return Err(Error::Unsupported(
+                        "the document is empty; only an insertion at line 1 is valid".into(),
+                    ));
+                }
+                clamped.push((0, 0, 0, 0));
+                continue;
+            }
+            if e.l0 > e.l1 || e.l1 >= total {
+                return Err(Error::Unsupported(format!(
+                    "range spans lines {}..{} outside the document",
+                    e.l0 + 1,
+                    e.l1 + 1
+                )));
+            }
+            let first_len = self.line_text(doc, e.l0)?.chars().count();
+            let last_len = if e.l1 == e.l0 {
+                first_len
+            } else {
+                self.line_text(doc, e.l1)?.chars().count()
+            };
+            let c0 = e.c0.min(first_len);
+            let c1 = e.c1.min(last_len);
+            if e.l0 == e.l1 && c0 > c1 {
+                return Err(Error::Unsupported(format!(
+                    "range on line {} is reversed (column {} comes after {})",
+                    e.l0 + 1,
+                    e.c0 + 1,
+                    e.c1 + 1
+                )));
+            }
+            clamped.push((e.l0, c0, e.l1, c1));
+        }
+        let mut order: Vec<usize> = (0..edits.len()).collect();
+        order.sort_by_key(|&i| clamped[i]);
+        for w in order.windows(2) {
+            let (.., al1, ac1) = clamped[w[0]];
+            let (bl0, bc0, ..) = clamped[w[1]];
+            if (bl0, bc0) < (al1, ac1) {
+                return Err(Error::Unsupported(format!(
+                    "batch edits overlap around line {}",
+                    bl0 + 1
+                )));
+            }
+        }
+
+        // Apply bottom-most first: an application only touches text at or
+        // after its own start, so the still-pending (smaller) coordinates
+        // keep meaning what the caller meant. Every inverse lands in ONE
+        // record, making the whole batch a single undo generation.
+        let mut record = UndoRecord::new();
+        for &i in order.iter().rev() {
+            let (l0, c0, l1, c1) = clamped[i];
+            if let Err(e) =
+                self.replace_range_inner(doc, l0, c0, l1, c1, &edits[i].text, &mut record)
+            {
+                // Unreachable after the validation above, but never leave a
+                // half-applied batch behind: unwind the partial record (the
+                // overlay returns to its pre-batch state, no history entry).
+                let _ = self.apply_record(record);
+                return Err(e);
+            }
+        }
+        self.finish_change(record);
+
+        // Map each caret into post-batch coordinates by replaying ascending:
+        // `line_delta` accumulates the line-count change of everything above,
+        // and the previous edit's end point carries the column shift for a
+        // following edit that starts on the same original line.
+        let mut carets = vec![(0u64, 0usize); edits.len()];
+        let mut line_delta: i64 = 0;
+        let mut prev_end: Option<((u64, usize), (u64, usize))> = None; // (old pos, new pos)
+        for &i in &order {
+            let (l0, c0, l1, c1) = clamped[i];
+            let (start_line, start_col) = match prev_end {
+                Some(((ol, oc), (nl, nc))) if ol == l0 => (nl, nc + (c0 - oc)),
+                _ => ((l0 as i64 + line_delta) as u64, c0),
+            };
+            let parts: Vec<&str> = edits[i].text.split('\n').collect();
+            let end_line = start_line + (parts.len() as u64 - 1);
+            let end_col = if parts.len() == 1 {
+                start_col + parts[0].chars().count()
+            } else {
+                parts[parts.len() - 1].chars().count()
+            };
+            carets[i] = (end_line, end_col);
+            line_delta += parts.len() as i64 - 1 - (l1 as i64 - l0 as i64);
+            prev_end = Some(((l1, c1), (end_line, end_col)));
+        }
+        Ok(carets)
     }
 
     /// Replace the same column span on every line in `[l0, l1]` as one undo
@@ -1132,6 +1278,139 @@ mod tests {
         let (_f3, doc3) = doc_from(b"");
         let mut e3 = EditSession::default();
         assert!(e3.replace_range(&doc3, 0, 0, 1, 0, "x").is_err());
+    }
+
+    fn batch_edit(l0: u64, c0: usize, l1: u64, c1: usize, text: &str) -> BatchEdit {
+        BatchEdit {
+            l0,
+            c0,
+            l1,
+            c1,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn replace_batch_three_carets_is_one_undo_step() {
+        let (_f, doc) = doc_from(b"aaa\nbbb\nccc\n");
+        let mut edits = EditSession::default();
+        let rev0 = edits.revision();
+        let carets = edits
+            .replace_batch(
+                &doc,
+                &[
+                    batch_edit(0, 1, 0, 1, "X"),
+                    batch_edit(1, 2, 1, 2, "X"),
+                    batch_edit(2, 3, 2, 3, "X"),
+                ],
+            )
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["aXaa", "bbXb", "cccX"]);
+        assert_eq!(carets, vec![(0, 2), (1, 3), (2, 4)]);
+        assert_eq!(edits.revision(), rev0 + 1, "one revision bump per batch");
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["aaa", "bbb", "ccc"]);
+        assert!(!edits.can_undo(), "one undo reverts the whole batch");
+        assert!(edits.redo());
+        assert_eq!(texts(&edits, &doc), vec!["aXaa", "bbXb", "cccX"]);
+    }
+
+    #[test]
+    fn replace_batch_same_line_carets_shift_later_columns() {
+        let (_f, doc) = doc_from(b"hello world\n");
+        let mut edits = EditSession::default();
+        // Request order is deliberately right-to-left: the returned carets
+        // must map back by request index, with the right caret shifted by
+        // the width the left insertion added earlier on the same line.
+        let carets = edits
+            .replace_batch(
+                &doc,
+                &[batch_edit(0, 11, 0, 11, "!"), batch_edit(0, 5, 0, 5, "XX")],
+            )
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["helloXX world!"]);
+        assert_eq!(carets, vec![(0, 14), (0, 7)]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["hello world"]);
+    }
+
+    #[test]
+    fn replace_batch_multiline_insert_shifts_lines_below() {
+        let (_f, doc) = doc_from(b"one\ntwo\n");
+        let mut edits = EditSession::default();
+        let carets = edits
+            .replace_batch(
+                &doc,
+                &[batch_edit(0, 3, 0, 3, "A\nB"), batch_edit(1, 0, 1, 0, "C")],
+            )
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["oneA", "B", "Ctwo"]);
+        // The caret below moved down by the line the first edit added.
+        assert_eq!(carets, vec![(1, 1), (2, 1)]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["one", "two"]);
+    }
+
+    #[test]
+    fn replace_batch_rejects_overlapping_or_invalid_ranges() {
+        let (_f, doc) = doc_from(b"abcdef\n");
+        let mut edits = EditSession::default();
+        let err = edits
+            .replace_batch(
+                &doc,
+                &[batch_edit(0, 1, 0, 4, "x"), batch_edit(0, 3, 0, 5, "y")],
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("overlap"), "err: {err}");
+        assert!(
+            !edits.is_dirty(),
+            "a rejected batch must not touch the text"
+        );
+        assert!(!edits.can_undo());
+        // Out-of-bounds ranges reuse the replace_range validation.
+        assert!(edits
+            .replace_batch(&doc, &[batch_edit(0, 0, 5, 0, "x")])
+            .is_err());
+    }
+
+    #[test]
+    fn replace_batch_backspace_at_each_caret_is_one_undo_step() {
+        let (_f, doc) = doc_from(b"abc\ndef\nghi\n");
+        let mut edits = EditSession::default();
+        // Backspace at carets (0,2), (1,3), (2,1): each deletes the char
+        // before its caret.
+        let carets = edits
+            .replace_batch(
+                &doc,
+                &[
+                    batch_edit(0, 1, 0, 2, ""),
+                    batch_edit(1, 2, 1, 3, ""),
+                    batch_edit(2, 0, 2, 1, ""),
+                ],
+            )
+            .unwrap();
+        assert_eq!(texts(&edits, &doc), vec!["ac", "de", "hi"]);
+        assert_eq!(carets, vec![(0, 1), (1, 2), (2, 0)]);
+        assert!(edits.undo());
+        assert_eq!(texts(&edits, &doc), vec!["abc", "def", "ghi"]);
+        assert!(!edits.can_undo());
+    }
+
+    #[test]
+    fn replace_batch_without_effect_records_nothing() {
+        let (_f, doc) = doc_from(b"a\n");
+        let mut edits = EditSession::default();
+        let rev = edits.revision();
+        assert_eq!(edits.replace_batch(&doc, &[]).unwrap(), Vec::new());
+        // Replacing a span with its own text is detected as a no-op, exactly
+        // like the single-edit path: carets are still answered, but no undo
+        // generation is pushed and the revision stays put.
+        let carets = edits
+            .replace_batch(&doc, &[batch_edit(0, 0, 0, 1, "a")])
+            .unwrap();
+        assert_eq!(carets, vec![(0, 1)]);
+        assert_eq!(edits.revision(), rev);
+        assert!(!edits.can_undo());
     }
 
     #[test]

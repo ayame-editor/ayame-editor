@@ -14,7 +14,8 @@ use tokio::time::{timeout, Duration};
 
 use crate::diff::{diff_documents, DiffKind, DiffResult};
 
-use super::{bad_request, default_suffix_path, internal, workspace, SharedState};
+use super::state::DirtySnapshotCache;
+use super::{bad_request, default_suffix_path, edit, internal, workspace, SharedState};
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 const ARTIFACT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -106,6 +107,85 @@ async fn dirty_aware_input(
     })
 }
 
+/// What a dirty-aware *read* (find/search) runs against: the live document
+/// when the session is clean, or the revision-keyed materialized snapshot
+/// (built at most once per revision, cached in the app state) when it is
+/// dirty. Hit line numbers / byte offsets are then view-accurate, because the
+/// materialized file IS the view.
+enum DirtyView {
+    Clean(Arc<Document>),
+    Snapshot {
+        doc: Arc<Document>,
+        /// Keeps the materialized temp alive for this request, even if the
+        /// cache slot is invalidated while a search worker child still reads it.
+        _input: Arc<WorkerInput>,
+    },
+}
+
+impl DirtyView {
+    fn doc(&self) -> &Arc<Document> {
+        match self {
+            DirtyView::Clean(doc) => doc,
+            DirtyView::Snapshot { doc, .. } => doc,
+        }
+    }
+
+    /// The on-disk file a worker child should read for this view.
+    fn path(&self) -> &Path {
+        self.doc().path()
+    }
+}
+
+/// Get (or build) the [`DirtyView`] for the active session. Building = one
+/// materialization + one `Document::open` (no index-cache dir, so throwaway
+/// snapshots never pollute the on-disk cache), inside `spawn_blocking`.
+/// Staleness is checked on every call: a revision bump or doc change drops
+/// the old snapshot. Two racing builders at the same revision produce
+/// equivalent snapshots; the last store wins and the loser's temp is cleaned
+/// up when its guard drops.
+async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, String)> {
+    let (doc, dirty) = state.doc_and_dirty_edits()?;
+    let Some(edits) = dirty else {
+        // Clean session: any cached snapshot is stale by definition (its
+        // revision can't match a future dirty one) — drop it so its temp goes.
+        state.invalidate_dirty_snapshot();
+        return Ok(DirtyView::Clean(doc));
+    };
+    let revision = edits.revision();
+    if let Some((snapshot, input)) = state.cached_dirty_snapshot(&doc, revision) {
+        return Ok(DirtyView::Snapshot {
+            doc: snapshot,
+            _input: input,
+        });
+    }
+    let scratch_opts = ayame_core::OpenOptions {
+        cache_dir: None,
+        ..state.open_options()
+    };
+    let doc_for_build = doc.clone();
+    let (input, snapshot) = tokio::task::spawn_blocking(
+        move || -> anyhow::Result<(Arc<WorkerInput>, Arc<Document>)> {
+            let input = materialize_worker_input(&doc_for_build, Some(&edits), "dirty-view")?;
+            let snapshot = Document::open(input.path(), &scratch_opts)
+                .with_context(|| format!("opening snapshot {}", input.path().display()))?;
+            Ok((Arc::new(input), Arc::new(snapshot)))
+        },
+    )
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
+    state.store_dirty_snapshot(DirtySnapshotCache {
+        doc,
+        revision,
+        input: input.clone(),
+        snapshot: snapshot.clone(),
+    });
+    Ok(DirtyView::Snapshot {
+        doc: snapshot,
+        _input: input,
+    })
+}
+
 // ---- save-to-artifact endpoints -----------------------------------------------
 
 #[derive(Serialize)]
@@ -119,6 +199,11 @@ pub(super) struct ArtifactResponse {
 pub(super) struct SortSaveRequest {
     #[serde(default)]
     path: Option<String>,
+    /// Sort the open file onto itself (the `path` field is ignored): the sort
+    /// output atomically replaces the file, the document reloads, and the
+    /// (already incorporated) edit overlay is cleared.
+    #[serde(default)]
+    in_place: bool,
     #[serde(default)]
     key: Option<usize>,
     #[serde(default)]
@@ -133,6 +218,9 @@ pub(super) async fn api_sort_save(
     State(state): State<SharedState>,
     Json(req): Json<SortSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    if req.in_place {
+        return sort_save_in_place(state, req).await;
+    }
     let wd = dirty_aware_input(&state, "sort-save").await?;
     // No explicit destination: sort into a scratch file (the GUI opens the
     // result as a new tab instead of asking for a path first).
@@ -140,14 +228,104 @@ pub(super) async fn api_sort_save(
         Some(p) => PathBuf::from(p),
         None => default_sorted_temp_path(wd.doc.path()).map_err(internal)?,
     };
-    let exe = std::env::current_exe().map_err(internal)?;
     let dir = spawn_dir("sort-save-spill");
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
-    let mut cmd = Command::new(&exe);
-    cmd.arg("sort")
-        .arg(wd.input.path())
-        .arg("--out")
-        .arg(&target);
+    let mut cmd = sort_command(wd.input.path(), &target, &req, &dir)?;
+    let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    drop(wd); // remove the materialized input, if any
+    res.map(Json)
+}
+
+/// Sort the active document onto itself. Phase 1 runs the ordinary
+/// dirty-aware sort worker into a stage file next to the target without
+/// holding any lock; phase 2 commits with exactly the machinery (and the
+/// guarantees) of the in-place save in [`edit`]: serialized against other
+/// doc-slot transitions, revalidated against the snapshot's revision — edits
+/// that arrived while the worker ran get a 409 and the stage is discarded —
+/// then atomic replace, reload, and the overlay (already baked into the
+/// sorted bytes) is cleared.
+async fn sort_save_in_place(
+    state: SharedState,
+    req: SortSaveRequest,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    // Consistent snapshot (doc + edits + revision) under one lock acquisition.
+    let mut snap = state.edit_snapshot()?;
+    let target = snap.doc.path().to_path_buf();
+    let total_lines = snap.edits.total_lines(&snap.doc);
+    let dirty = snap.edits.is_dirty().then(|| snap.take_edits());
+    let doc_for_input = snap.doc.clone();
+    let input = tokio::task::spawn_blocking(move || {
+        materialize_worker_input(&doc_for_input, dirty.as_ref(), "sort-save")
+    })
+    .await
+    .map_err(internal)?
+    .map_err(internal)?;
+
+    // Phase 1 — sort into a stage sibling of the target (same volume, so the
+    // final rename is atomic). No lock is held: typing stays live.
+    let stage = edit::overwrite_stage_path(&target);
+    let dir = spawn_dir("sort-save-spill");
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let mut cmd = sort_command(input.path(), &stage, &req, &dir)?;
+    let res = run_artifact_worker("sort", &mut cmd, &stage, total_lines).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    drop(input); // remove the materialized input, if any
+    if let Err(e) = res {
+        let _ = tokio::fs::remove_file(&stage).await;
+        return Err(e);
+    }
+
+    // Phase 2 — commit. Serialized against every other doc-slot transition;
+    // rejected with 409 (stage discarded) if edits or the tab changed while
+    // the worker was sorting, so nothing is ever silently thrown away.
+    let _transitions = state.lock_transitions().await;
+    if let Err(e) = state.detach_for_overwrite(&snap) {
+        let _ = tokio::fs::remove_file(&stage).await;
+        return Err(e);
+    }
+    drop(snap); // release our mmap handle before replacing the file (Windows)
+
+    let stage_for_replace = stage.clone();
+    let target_for_replace = target.clone();
+    let replaced = tokio::task::spawn_blocking(move || {
+        edit::replace_existing_file(&stage_for_replace, &target_for_replace)
+    })
+    .await
+    .map_err(internal)?;
+    match replaced {
+        Ok(bytes) => {
+            // The sorted bytes on disk already include the pending overlay
+            // (the worker read the materialized buffer), so the reloaded
+            // document IS the edited text: clear the overlay.
+            state.mark_edits_saved();
+            state.install_reloaded(target.clone()).await?;
+            Ok(Json(ArtifactResponse {
+                path: target,
+                bytes,
+                lines: total_lines,
+            }))
+        }
+        Err(e) => {
+            // Best effort: reopen the original document. The overlay was left
+            // untouched by the detach, so the user's edits are still pending
+            // (and the staged bytes are preserved on disk for recovery).
+            let _ = state.install_reloaded(target).await;
+            Err(internal(e))
+        }
+    }
+}
+
+/// Build the `ayame sort` worker invocation shared by both sort modes.
+fn sort_command(
+    input: &Path,
+    out: &Path,
+    req: &SortSaveRequest,
+    spill_dir: &Path,
+) -> Result<Command, (StatusCode, String)> {
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(exe);
+    cmd.arg("sort").arg(input).arg("--out").arg(out);
     if let Some(k) = req.key {
         cmd.arg("--key").arg(k.to_string());
     }
@@ -160,11 +338,8 @@ pub(super) async fn api_sort_save(
     if let Some(d) = req.delim.as_deref().filter(|d| !d.is_empty()) {
         cmd.arg("--delim").arg(d);
     }
-    cmd.arg("--spill-dir").arg(&dir);
-    let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
-    let _ = tokio::fs::remove_dir_all(&dir).await;
-    drop(wd); // remove the materialized input, if any
-    res.map(Json)
+    cmd.arg("--spill-dir").arg(spill_dir);
+    Ok(cmd)
 }
 
 /// Where a sort lands when the client didn't pick a destination: a scratch
@@ -266,6 +441,91 @@ pub(super) async fn api_case_save(
     res.map(Json)
 }
 
+// ---- split --------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct SplitSaveRequest {
+    /// Lines per output part (must be >= 1).
+    lines: u64,
+    /// Output directory; null/absent = the source file's directory.
+    #[serde(default)]
+    dir: Option<String>,
+}
+
+/// `POST /api/split/save` — split the active document (unsaved edits included)
+/// into `lines`-line part files. Runs as an isolated worker child, like sort:
+/// the worker prints the created file list as JSON (`ayame split --json`) and
+/// the response relays it verbatim: `{"files": [...], "count", "total_lines"}`
+/// (`files` capped at the first [`ayame_core::SPLIT_RESULT_MAX_FILES`] paths;
+/// `count` is the real total).
+pub(super) async fn api_split_save(
+    State(state): State<SharedState>,
+    Json(req): Json<SplitSaveRequest>,
+) -> Result<Json<ayame_core::SplitResult>, (StatusCode, String)> {
+    if req.lines == 0 {
+        return Err(bad_request("lines must be at least 1"));
+    }
+    let wd = dirty_aware_input(&state, "split-save").await?;
+    // Both the default output directory and the part-name stem come from the
+    // ORIGINAL document path — never from the materialized temp snapshot.
+    let source = wd.doc.path().to_path_buf();
+    let out_dir = req
+        .dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_split_dir(&source));
+    let name = source
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "output".to_string());
+    let exe = std::env::current_exe().map_err(internal)?;
+    let mut cmd = Command::new(&exe);
+    cmd.arg("split")
+        .arg(wd.input.path())
+        .arg("--lines")
+        .arg(req.lines.to_string())
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .arg("--name")
+        .arg(&name)
+        .arg("--json");
+    if matches!(wd.input, WorkerInput::Materialized { .. }) {
+        // The snapshot is read once and discarded: keep its index out of the
+        // persistent cache.
+        cmd.arg("--no-cache");
+    }
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let out = wait_worker_output("split", &mut cmd, ARTIFACT_TIMEOUT).await;
+    drop(wd); // remove the materialized input, if any
+    let out = out?;
+    if !out.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "split worker {} - the engine is unaffected",
+                describe_status(out.status)
+            ),
+        ));
+    }
+    let res: ayame_core::SplitResult = serde_json::from_slice(&out.stdout).map_err(internal)?;
+    Ok(Json(res))
+}
+
+/// Where parts land when the client didn't pick a directory: next to the
+/// source file.
+fn default_split_dir(source: &Path) -> PathBuf {
+    source
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 // ---- search -------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -291,13 +551,14 @@ pub(super) async fn api_search(
     State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
-    // Search what the user sees: a dirty buffer is materialized so hits (line
-    // numbers, byte anchors) line up with the edited view.
-    let wd = dirty_aware_input(&state, "search").await?;
+    // Search what the user sees: a dirty buffer runs against the cached
+    // materialized snapshot so hits (line numbers, byte anchors) line up with
+    // the edited view — and repeated searches reuse one materialization.
+    let view = dirty_view(&state).await?;
     let exe = std::env::current_exe().map_err(internal)?;
     let mut cmd = Command::new(&exe);
     cmd.arg("search")
-        .arg(wd.input.path())
+        .arg(view.path())
         .arg("--json")
         .arg("--max")
         .arg(q.max.min(100_000).to_string())
@@ -317,8 +578,8 @@ pub(super) async fn api_search(
         .stderr(Stdio::null())
         .kill_on_drop(true);
 
-    let out = wait_worker_output("search", &mut cmd).await;
-    drop(wd);
+    let out = wait_worker_output("search", &mut cmd, WORKER_TIMEOUT).await;
+    drop(view); // the snapshot guard must outlive the worker child
     let out = out?;
     if !out.status.success() {
         return Err((
@@ -360,11 +621,13 @@ pub(super) async fn api_find(
     State(state): State<SharedState>,
     Query(q): Query<FindQuery>,
 ) -> Result<Json<FindResponse>, (StatusCode, String)> {
-    let doc = state.require_doc()?;
+    // Find what the user sees: a dirty session runs against the revision-keyed
+    // materialized snapshot (built once, cached), so returned line numbers and
+    // byte offsets are view-accurate even with unsaved edits.
+    let view = dirty_view(&state).await?;
+    let doc = view.doc().clone();
     // find_prev in particular can scan everything before the anchor; keep that
     // off the async workers so slow finds never stall unrelated requests.
-    // NOTE: find intentionally searches the ON-DISK file, not the dirty
-    // overlay (the front-end warns about pending edits).
     let hit = tokio::task::spawn_blocking(move || {
         if q.dir == "prev" {
             doc.find_prev(&q.q, q.regex, !q.ci, q.word, q.from)
@@ -638,15 +901,16 @@ async fn wait_worker_for(
 async fn wait_worker_output(
     kind: &str,
     cmd: &mut Command,
+    timeout_after: Duration,
 ) -> Result<std::process::Output, (StatusCode, String)> {
     let child = cmd.spawn().map_err(internal)?;
-    match timeout(WORKER_TIMEOUT, child.wait_with_output()).await {
+    match timeout(timeout_after, child.wait_with_output()).await {
         Ok(waited) => waited.map_err(internal),
         Err(_) => Err((
             StatusCode::GATEWAY_TIMEOUT,
             format!(
                 "{kind} worker timed out after {}s - the engine is unaffected",
-                WORKER_TIMEOUT.as_secs()
+                timeout_after.as_secs()
             ),
         )),
     }

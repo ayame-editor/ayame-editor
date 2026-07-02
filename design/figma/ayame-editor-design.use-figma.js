@@ -287,10 +287,12 @@ for (let i = 0; i < menuNames.length; i++) {
 // Toolbar stays minimal: explorer is only an open/close toggle, sort/diff/replace
 // live behind the ツール entry, and search floats inside the editor viewport.
 box(main, "toolbar", 0, 34, 1440, 52, C.panel2, C.border, 0);
-await iconButton(main, "tool explorer", ICONS.panelLeft, "Explorer", 14, 44, 116, 32, true);
-await iconButton(main, "tool undo", ICONS.undo, "Undo", 142, 44, 88, 32);
-await iconButton(main, "tool redo", ICONS.redo, "Redo", 238, 44, 88, 32);
-await iconButton(main, "tool tools", ICONS.wrench, "ツール", 334, 44, 96, 32);
+// Explorer toggle is icon-only (user decision: no text label).
+box(main, "tool explorer bg", 14, 44, 36, 32, C.accentSoft, C.accent, 7);
+icon(main, "tool explorer icon", ICONS.panelLeft, 24, 52, 16, C.accent2);
+await iconButton(main, "tool undo", ICONS.undo, "Undo", 62, 44, 88, 32);
+await iconButton(main, "tool redo", ICONS.redo, "Redo", 158, 44, 88, 32);
+await iconButton(main, "tool tools", ICONS.wrench, "ツール", 254, 44, 96, 32);
 
 box(main, "tabs", 0, 86, 1440, 36, C.panel, C.border, 0);
 box(main, "active tab", 14, 92, 188, 30, C.panel, C.accent, 7);
@@ -396,9 +398,9 @@ await label(menus, "menu map subtitle", "Native text editor actions: open, edit,
 const menuGroups = [
   ["ファイル", [["新規テキスト", "Ctrl+N"], ["開く...", "Ctrl+O"], ["保存", "Ctrl+S"], ["別名で保存...", "Ctrl+Shift+S"]]],
   ["編集", [["元に戻す", "Ctrl+Z"], ["やり直す", "Ctrl+Y"], ["検索", "Ctrl+F"], ["行へ移動", "Ctrl+G"]]],
-  ["選択", [["すべて選択", "Ctrl+A"], ["コピー", "Ctrl+C"], ["切り取り", "Ctrl+X"], ["矩形選択", "Alt+Drag"]]],
+  ["選択", [["すべて選択", "Ctrl+A"], ["コピー", "Ctrl+C"], ["切り取り", "Ctrl+X"], ["矩形選択", "Alt+Drag"], ["カーソルを上に追加", "Ctrl+Alt+↑"], ["カーソルを下に追加", "Ctrl+Alt+↓"]]],
   ["表示", [["エクスプローラー", "Ctrl+B"], ["検索バー", "Ctrl+F"], ["設定", ""]]],
-  ["ツール ▾", [["ソート", ""], ["置換して保存", ""], ["2ファイル差分", ""], ["大文字化して保存", ""], ["小文字化して保存", ""], ["キー設定", ""]]],
+  ["ツール ▾", [["ソート", ""], ["置換して保存", ""], ["2ファイル差分", ""], ["ファイルを分割", ""], ["大文字化して保存", ""], ["小文字化して保存", ""], ["キー設定", ""]]],
 ];
 for (let i = 0; i < menuGroups.length; i++) {
   const x = 32 + i * 276;
@@ -493,6 +495,7 @@ const keyRows = [
   ["edit.undo", "Ctrl+Z", "元に戻す"],
   ["edit.redo", "Ctrl+Y", "やり直す"],
   ["selection.rectangle", "Alt+Drag", "矩形選択"],
+  ["selection.addCursorBelow", "Ctrl+Alt+↓", "カーソルを下に追加"],
   ["tools.sort", "", "ソート"],
   ["tools.diff", "", "2ファイル差分"],
   ["tools.case.upper", "", "大文字化して保存"],
