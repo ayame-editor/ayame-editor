@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   sidebar: false,
   sidebarSide: "left",
   ruler: true,
+  showWhitespace: false,
   bgMode: "watercolor",
   illus: null,
   keymap: {},
@@ -194,6 +195,14 @@ function fileMenuVisible() {
 
 function showAppMenu(id) {
   hideFileMenu();
+  if (id === "view") {
+    const ws = $("menu-toggle-ws");
+    if (ws) {
+      const on = !!state.settings.showWhitespace;
+      ws.classList.toggle("checked", on);
+      ws.setAttribute("aria-checked", String(on));
+    }
+  }
   $(`${id}-menu`).classList.remove("hidden");
   $(`${id}-menu-button`).classList.add("on");
   $(`${id}-menu-button`).setAttribute("aria-expanded", "true");
@@ -716,9 +725,12 @@ function fillRow(row, line, rec, gutterWidth) {
     tx.textContent = "⋯";
   } else if (state.matcher) {
     appendHighlighted(tx, rec.text);
+  } else if (state.settings.showWhitespace) {
+    appendText(tx, rec.text);
   } else {
     tx.textContent = rec.text;
   }
+  if (rec != null && state.settings.showWhitespace) appendEol(tx);
   // Hide the current-line highlight while a selection exists — the two
   // washes stack otherwise and the selection becomes hard to read.
   row.classList.toggle("active", line === state.activeLine && !hasSelection());
@@ -1262,6 +1274,36 @@ async function cutSelection() {
   deleteSelection();
 }
 
+// Append plain text to a row, rendering tabs as a faint arrow glyph when
+// "空白・改行を表示" is on. The real \t stays in the DOM (the arrow is an
+// absolutely-positioned ::before), so glyph widths — and therefore caret and
+// selection geometry, which are measured from the logical text — never shift.
+function appendText(container, str) {
+  if (!state.settings.showWhitespace || str.indexOf("\t") === -1) {
+    if (str) container.appendChild(document.createTextNode(str));
+    return;
+  }
+  const parts = str.split("\t");
+  parts.forEach((p, i) => {
+    if (p) container.appendChild(document.createTextNode(p));
+    if (i < parts.length - 1) {
+      const t = document.createElement("span");
+      t.className = "ws-tab";
+      t.textContent = "\t";
+      container.appendChild(t);
+    }
+  });
+}
+
+// A faint end-of-line marker (↵) drawn after the text. It sits past every
+// column, so it adds no width before any caret position.
+function appendEol(container) {
+  const el = document.createElement("span");
+  el.className = "ws-eol";
+  el.textContent = "↵";
+  container.appendChild(el);
+}
+
 function appendHighlighted(container, text) {
   const re = state.matcher;
   re.lastIndex = 0;
@@ -1269,16 +1311,16 @@ function appendHighlighted(container, text) {
   let m;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) {
-      container.appendChild(document.createTextNode(text.slice(last, m.index)));
+      appendText(container, text.slice(last, m.index));
     }
     const mk = document.createElement("mark");
-    mk.textContent = m[0];
+    appendText(mk, m[0]);
     container.appendChild(mk);
     last = m.index + m[0].length;
     if (m[0].length === 0) re.lastIndex++; // never stall on empty matches
   }
   if (last < text.length) {
-    container.appendChild(document.createTextNode(text.slice(last)));
+    appendText(container, text.slice(last));
   }
 }
 
@@ -4280,6 +4322,7 @@ function runMenuAction(action) {
   if (action === "copy") return copySelection();
   if (action === "cut") return cutSelection();
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
+  if (action === "toggleWhitespace") return updateSetting("showWhitespace", !state.settings.showWhitespace);
   if (action === "settings") return showSettings();
   if (action === "sortSave") return sortSave();
   if (action === "diffFile") return diffFile();
