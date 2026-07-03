@@ -65,7 +65,7 @@
               <span class="menu-label">名前を付けて保存</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
             </button>
             <button id="convert-save-item" class="menu-item" role="menuitem">
-              <span class="menu-label">文字コード・改行を変換…</span><span class="menu-key"></span>
+              <span class="menu-label">文字コード / 改行コード…</span><span class="menu-key"></span>
             </button>
           </div>
         </div>
@@ -332,9 +332,9 @@
 
     <!-- 変換して保存: rewrite the file in a chosen 文字コード / 改行コード. -->
     <div id="convert-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-panel settings-panel" role="dialog" aria-label="変換して保存">
+      <div class="modal-panel settings-panel" role="dialog" aria-label="文字コード / 改行コード">
         <div class="modal-head">
-          <div class="modal-title">文字コード・改行を変換して保存</div>
+          <div class="modal-title">文字コード / 改行コード</div>
           <button id="convert-close" class="modal-x" title="閉じる (Esc)">✕</button>
         </div>
         <div class="settings-body">
@@ -354,9 +354,10 @@
               <option value="cr">CR (旧 Mac)</option>
             </select>
           </label>
-          <div class="convert-note">現在のファイルを上書き保存します。表せない文字があると中止します。</div>
+          <div class="convert-note">「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。<br>「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。</div>
           <div class="form-actions">
             <button id="convert-cancel" class="cmd">キャンセル</button>
+            <button id="reopen-go" class="cmd">開き直す</button>
             <button id="convert-go" class="cmd primary">変換して保存</button>
           </div>
         </div>

@@ -85,25 +85,40 @@ pub(crate) fn open_opts(
     Ok(o)
 }
 
-/// Default index-cache directory: $AYAME_CACHE_DIR, else $XDG_CACHE_HOME/ayame,
-/// else $HOME/.cache/ayame. `None` if none can be determined (caching disabled).
+/// Default index-cache directory, in the OS-natural per-user cache location:
+/// `%LOCALAPPDATA%\ayame` on Windows, `~/Library/Caches/ayame` on macOS,
+/// `$XDG_CACHE_HOME/ayame` (else `~/.cache/ayame`) elsewhere. `$AYAME_CACHE_DIR`
+/// overrides all of it. `None` only when even the home dir is unknown (caching
+/// then stays off rather than scattering files next to the executable).
 pub(crate) fn default_cache_dir() -> Option<PathBuf> {
-    if let Ok(d) = std::env::var("AYAME_CACHE_DIR") {
-        if !d.is_empty() {
-            return Some(PathBuf::from(d));
-        }
+    if let Some(d) = non_empty_var_os("AYAME_CACHE_DIR") {
+        return Some(PathBuf::from(d));
     }
-    if let Ok(d) = std::env::var("XDG_CACHE_HOME") {
-        if !d.is_empty() {
-            return Some(PathBuf::from(d).join("ayame"));
-        }
+    os_cache_root().map(|root| root.join("ayame"))
+}
+
+fn non_empty_var_os(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(name).filter(|v| !v.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn os_cache_root() -> Option<PathBuf> {
+    non_empty_var_os("LOCALAPPDATA")
+        .or_else(|| non_empty_var_os("APPDATA"))
+        .map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn os_cache_root() -> Option<PathBuf> {
+    non_empty_var_os("HOME").map(|h| PathBuf::from(h).join("Library").join("Caches"))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn os_cache_root() -> Option<PathBuf> {
+    if let Some(d) = non_empty_var_os("XDG_CACHE_HOME") {
+        return Some(PathBuf::from(d));
     }
-    if let Ok(h) = std::env::var("HOME") {
-        if !h.is_empty() {
-            return Some(PathBuf::from(h).join(".cache").join("ayame"));
-        }
-    }
-    None
+    non_empty_var_os("HOME").map(|h| PathBuf::from(h).join(".cache"))
 }
 
 pub(crate) fn open_doc(

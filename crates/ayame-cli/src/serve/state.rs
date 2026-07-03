@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
-use ayame_core::{Document, EditSession, OpenOptions};
+use ayame_core::{Document, EditSession, Encoding, OpenOptions};
 use serde::Serialize;
 
 use super::ops::WorkerInput;
@@ -590,6 +590,32 @@ impl AppState {
         });
         remove_aside_files(asides);
         self.invalidate_dirty_snapshot(); // the doc identity changed
+        Ok(())
+    }
+
+    /// Reopen `path` as the active document, forcing `enc` instead of detecting
+    /// the encoding — the recovery path when auto-detection guessed wrong and
+    /// the file shows mojibake. Any pending edit session is dropped (the caller
+    /// warns first). Caller must hold the transitions lock.
+    pub(super) async fn reload_with_encoding(
+        &self,
+        path: PathBuf,
+        enc: Encoding,
+    ) -> Result<(), (StatusCode, String)> {
+        let mut opts = self.open_opts.clone();
+        opts.encoding = Some(enc);
+        let p = path.clone();
+        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
+            .await
+            .map_err(internal)?
+            .map_err(|e| bad_request(format!("reopening '{}' as {}: {e}", path.display(), enc.label())))?;
+        let asides = self.write(|ws| {
+            ws.doc = Some(Arc::new(doc));
+            ws.edits = EditSession::default();
+            std::mem::take(&mut ws.aside_files)
+        });
+        remove_aside_files(asides);
+        self.invalidate_dirty_snapshot();
         Ok(())
     }
 

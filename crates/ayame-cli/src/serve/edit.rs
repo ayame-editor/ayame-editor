@@ -445,6 +445,33 @@ pub(super) async fn api_edit_revert(
     })
 }
 
+#[derive(Deserialize)]
+pub(super) struct ReopenRequest {
+    encoding: String,
+}
+
+/// Reopen the active file forcing a specific 文字コード — the recovery path when
+/// auto-detection guessed wrong and the file reads as mojibake. Drops any
+/// pending edits (the client confirms first).
+pub(super) async fn api_reopen_encoding(
+    State(state): State<SharedState>,
+    Json(req): Json<ReopenRequest>,
+) -> Result<Json<EditStats>, (StatusCode, String)> {
+    let enc = Encoding::parse(&req.encoding)
+        .map(|e| if e == Encoding::Ascii { Encoding::Utf8 } else { e })
+        .ok_or_else(|| bad_request(format!("unknown encoding '{}'", req.encoding)))?;
+    if enc.is_wide() {
+        return Err(bad_request(format!("{} での再読込は未対応です", enc.label())));
+    }
+    let _transitions = state.lock_transitions().await;
+    let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;
+    state.reload_with_encoding(path, enc).await?;
+    state.read(|ws| {
+        let (doc, edits) = ws.doc_and_edits()?;
+        Ok(Json(edits.stats(doc)))
+    })
+}
+
 pub(super) async fn api_edit_undo(
     State(state): State<SharedState>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {

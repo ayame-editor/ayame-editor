@@ -2693,6 +2693,41 @@ async function convertSave(encoding, lineEnding) {
   }
 }
 
+// Re-read the current file forcing a 文字コード — recovery when auto-detection
+// guessed wrong and the text shows mojibake. Non-destructive to the file, but
+// drops any unsaved edits, so confirm first.
+async function reopenWithEncoding(encoding) {
+  if (!state.stat?.open) return;
+  if (isUntitled(state.stat.path)) {
+    flashCount("保存されたファイルがありません");
+    return;
+  }
+  if (state.stat.dirty) {
+    const ok = await askConfirm(
+      "開き直す",
+      "未保存の編集を破棄して開き直しますか?",
+      { okLabel: "破棄して開き直す", danger: true }
+    );
+    if (!ok) return;
+  }
+  await settleEditQueue();
+  try {
+    await apiPost("/api/reopen_encoding", { encoding });
+    state.docGen++;
+    state.editGen++;
+    clearLineCache();
+    await refreshStat();
+    await reloadViewport();
+    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+    render();
+    refreshTabs();
+    flashCount(`${enc(encoding)} で開き直しました`);
+  } catch (e) {
+    flashCount("開き直しエラー", "error");
+    showMessage("開き直す", e.message);
+  }
+}
+
 async function undoEdit() {
   enqueueEdit(async () => {
     await apiPost("/api/edit/undo", {});
@@ -3292,6 +3327,11 @@ function initEvents() {
     const eolVal = $("convert-eol").value;
     hideConvert();
     convertSave(encoding, eolVal);
+  });
+  $("reopen-go").addEventListener("click", () => {
+    const encoding = $("convert-enc").value;
+    hideConvert();
+    reopenWithEncoding(encoding);
   });
   $("convert-modal").addEventListener("click", (e) => {
     if (e.target === $("convert-modal")) hideConvert();
@@ -4201,12 +4241,20 @@ async function selectTab(id) {
 async function closeTab(id) {
   await settleEditQueue();
   const t = state.tabs.find((x) => x.id === id);
+  const isLast = (state.tabs || []).length <= 1;
   if (t && t.dirty) {
     const ok = await askConfirm(
       "タブを閉じる",
       `${t.name} の未保存の編集を破棄して閉じますか?`,
       { okLabel: "破棄して閉じる", danger: true }
     );
+    if (!ok) return;
+  } else if (isLast) {
+    // Closing the last tab resets to a blank page — confirm first so it is
+    // never a surprise.
+    const ok = await askConfirm("タブを閉じる", "最後のタブを閉じますか?", {
+      okLabel: "閉じる",
+    });
     if (!ok) return;
   }
   try {

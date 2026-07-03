@@ -165,6 +165,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/undo", post(edit::api_edit_undo))
         .route("/api/edit/redo", post(edit::api_edit_redo))
         .route("/api/edit/revert", post(edit::api_edit_revert))
+        .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
         .route("/api/sort/save", post(ops::api_sort_save))
         .route("/api/replace/save", post(ops::api_replace_save))
         .route("/api/case/save", post(ops::api_case_save))
