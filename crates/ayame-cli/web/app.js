@@ -54,6 +54,10 @@ const KEYMAP_ACTIONS = [
   ["selectNextOccurrence", "次の一致を選択", "Ctrl+D"],
   ["addCursorAbove", "カーソルを上に追加", "Ctrl+Alt+ArrowUp"],
   ["addCursorBelow", "カーソルを下に追加", "Ctrl+Alt+ArrowDown"],
+  ["duplicateLine", "行を複製", "Ctrl+Shift+D"],
+  ["moveLineUp", "行を上へ移動", "Alt+ArrowUp"],
+  ["moveLineDown", "行を下へ移動", "Alt+ArrowDown"],
+  ["deleteLine", "行を削除", "Ctrl+Shift+K"],
   ["copy", "コピー", "Ctrl+C"],
   ["cut", "切り取り", "Ctrl+X"],
   ["searchCase", "検索: 大文字小文字", "Alt+C"],
@@ -3243,6 +3247,163 @@ async function applyBatchPlain(edits) {
   render();
 }
 
+// ---- whole-line operations (行を複製 / 移動 / 削除) -------------------------
+// Each command edits whole lines as ONE batch edit (a single undo step) built
+// against the pre-edit view, then commits through applyLineEdit so the caret —
+// and, for a selection, the covered block — follows the lines to their new home.
+// A multi-line selection acts on every line it covers; multi-cursor collapses to
+// the primary caret, like the word-delete commands.
+
+// The whole-line span a line op acts on: the lines the selection covers, or the
+// caret's line when there is no selection. A selection ending exactly at column
+// 0 of a line does not pull that trailing line in.
+function lineOpSpan() {
+  const r = selRange();
+  if (r && !rangeEmpty(r)) {
+    let l0 = r.start.line;
+    let l1 = r.end.line;
+    if (!r.rect && l1 > l0 && r.end.col === 0) l1 -= 1;
+    return { l0, l1 };
+  }
+  return { l0: state.caret.line, l1: state.caret.line };
+}
+
+// Decoded text of one line — from the cache when resident, else a targeted
+// fetch (a selection can reach past the cached window).
+async function oneLineText(line) {
+  const c = cachedLine(line);
+  if (c != null) return c.text ?? "";
+  const res = await api(`/api/lines?start=${line}&count=1`);
+  return res.lines[0]?.text ?? "";
+}
+
+async function lineLenAt(line) {
+  return charLenOf(await oneLineText(line));
+}
+
+// Decoded text of the lines [start, start+count) as a plain string array.
+async function lineTextsFor(start, count) {
+  const res = await api(`/api/lines?start=${start}&count=${count}`);
+  return res.lines.map((r) => r.text ?? "");
+}
+
+// Shift a (non-rect) selection's endpoints by `delta` whole lines so it keeps
+// hugging the block it covered after a move.
+function shiftLineSelection(sel, delta) {
+  if (!sel) return null;
+  return {
+    anchor: { line: sel.anchor.line + delta, col: sel.anchor.col },
+    head: { line: sel.head.line + delta, col: sel.head.col },
+  };
+}
+
+// Commit a line op's batch edit, refresh the view, then place the caret and
+// (optionally) restore the selection. Mirrors applyBatchPlain but positions the
+// caret/selection deliberately instead of collapsing to the pre-edit caret.
+async function applyLineEdit(edits, caret, sel) {
+  const ctx = editContext();
+  await apiPost("/api/edit/replace_batch", { edits });
+  if (!sameEditContext(ctx)) return;
+  state.extraCursors = []; // line ops are single-caret
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-line-edit refresh failed", e);
+    flashCount("再読込エラー");
+  }
+  if (!sameEditContext(ctx)) return;
+  const last = Math.max(0, state.total - 1);
+  const place = (p) => {
+    const line = Math.min(Math.max(0, p.line), last);
+    const cached = cachedLine(line);
+    const col = cached ? Math.min(p.col, charLenOf(cached.text ?? "")) : Math.max(0, p.col);
+    return { line, col };
+  };
+  const c = place(caret);
+  state.caret = c;
+  state.activeLine = c.line;
+  state.goalCol = c.col;
+  state.sel = sel ? { anchor: place(sel.anchor), head: place(sel.head) } : null;
+  revealCaret();
+  render();
+}
+
+// 行を複製: duplicate the covered line block just below itself.
+function duplicateLines() {
+  if (!state.stat?.open || state.total === 0) return;
+  const { l0, l1 } = lineOpSpan();
+  if (l1 - l0 + 1 > MAX_COPY_LINES) {
+    flashCount(`複製は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    return;
+  }
+  const caret = { ...state.caret }; // the copy lands below; the caret stays put
+  const sel = cloneSelection(state.sel && !state.sel.rect ? state.sel : null);
+  enqueueEdit(async () => {
+    const texts = await lineTextsFor(l0, l1 - l0 + 1);
+    const endCol = charLenOf(texts[texts.length - 1]);
+    const edit = { l0: l1, c0: endCol, l1, c1: endCol, text: "\n" + texts.join("\n") };
+    return applyLineEdit([edit], caret, sel);
+  });
+}
+
+// 行を上へ / 下へ移動: swap the covered block with its neighbouring line.
+function moveLines(dir) {
+  if (!state.stat?.open || state.total === 0) return;
+  const { l0, l1 } = lineOpSpan();
+  if (dir < 0 ? l0 === 0 : l1 >= state.total - 1) return; // already at the edge
+  if (l1 - l0 + 1 > MAX_COPY_LINES) {
+    flashCount(`行の移動は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    return;
+  }
+  const caret = { line: state.caret.line + dir, col: state.caret.col };
+  const sel = shiftLineSelection(cloneSelection(state.sel && !state.sel.rect ? state.sel : null), dir);
+  enqueueEdit(async () => {
+    const block = await lineTextsFor(l0, l1 - l0 + 1);
+    if (dir < 0) {
+      // Up: line (l0-1) drops below the block.
+      const above = await oneLineText(l0 - 1);
+      const edit = {
+        l0: l0 - 1, c0: 0, l1, c1: charLenOf(block[block.length - 1]),
+        text: block.join("\n") + "\n" + above,
+      };
+      return applyLineEdit([edit], caret, sel);
+    }
+    // Down: line (l1+1) rises above the block.
+    const below = await oneLineText(l1 + 1);
+    const edit = {
+      l0, c0: 0, l1: l1 + 1, c1: charLenOf(below),
+      text: below + "\n" + block.join("\n"),
+    };
+    return applyLineEdit([edit], caret, sel);
+  });
+}
+
+// 行を削除: drop the covered line block entirely.
+function deleteLines() {
+  if (!state.stat?.open || state.total === 0) return;
+  const { l0, l1 } = lineOpSpan();
+  enqueueEdit(async () => {
+    let edit;
+    let caret;
+    if (l1 < state.total - 1) {
+      // Lines survive below: drop the block; the next line slides up to l0.
+      edit = { l0, c0: 0, l1: l1 + 1, c1: 0, text: "" };
+      caret = { line: l0, col: 0 };
+    } else if (l0 === 0) {
+      // The whole document: collapse to a single empty line.
+      edit = { l0: 0, c0: 0, l1, c1: await lineLenAt(l1), text: "" };
+      caret = { line: 0, col: 0 };
+    } else {
+      // The block runs to EOF: fold it into the previous line's tail.
+      const prevLen = await lineLenAt(l0 - 1);
+      edit = { l0: l0 - 1, c0: prevLen, l1, c1: await lineLenAt(l1), text: "" };
+      caret = { line: l0 - 1, col: prevLen };
+    }
+    return applyLineEdit([edit], caret, null);
+  });
+}
+
 // ---- input wiring ----------------------------------------------------------
 
 function setQueryFromInput() {
@@ -3693,6 +3854,12 @@ function onEditKey(e) {
   if (matchesShortcut(e, "addCursorAbove")) { take(); addCursorAbove(); return; }
   if (matchesShortcut(e, "addCursorBelow")) { take(); addCursorBelow(); return; }
   if (matchesShortcut(e, "selectNextOccurrence")) { take(); selectNextOccurrence(); return; }
+  // Whole-line ops: checked before the switch so the plain-arrow cases never
+  // swallow 行を上へ/下へ移動 (default Alt+ArrowUp/Down).
+  if (matchesShortcut(e, "duplicateLine")) { take(); duplicateLines(); return; }
+  if (matchesShortcut(e, "moveLineUp")) { take(); moveLines(-1); return; }
+  if (matchesShortcut(e, "moveLineDown")) { take(); moveLines(1); return; }
+  if (matchesShortcut(e, "deleteLine")) { take(); deleteLines(); return; }
   switch (e.key) {
     case "ArrowLeft":
       take();
@@ -4458,6 +4625,10 @@ function runMenuAction(action) {
   if (action === "selectNextOccurrence") return selectNextOccurrence();
   if (action === "addCursorAbove") return addCursorAbove();
   if (action === "addCursorBelow") return addCursorBelow();
+  if (action === "duplicateLine") return duplicateLines();
+  if (action === "moveLineUp") return moveLines(-1);
+  if (action === "moveLineDown") return moveLines(1);
+  if (action === "deleteLine") return deleteLines();
   if (action === "copy") return copySelection();
   if (action === "cut") return cutSelection();
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
