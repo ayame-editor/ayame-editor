@@ -1,5 +1,19 @@
 # Release
 
+## One command
+
+Everything below (gate → artifact → smoke → tag → push → watch the workflow)
+is scripted:
+
+```sh
+scripts/release.sh                  # release the version already in Cargo.toml
+scripts/release.sh --bump patch     # bump + commit "release: vX.Y.Z" + release
+scripts/release.sh --dry-run        # run every check, stop before tag/push
+```
+
+The sections below document what the script does, and the manual platform
+checks it cannot automate.
+
 ## Local Gate
 
 Run the same checks CI protects, plus the GUI release build because the

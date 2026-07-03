@@ -681,7 +681,13 @@ impl AppState {
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
             .await
             .map_err(internal)?
-            .map_err(|e| bad_request(format!("reopening '{}' as {}: {e}", path.display(), enc.label())))?;
+            .map_err(|e| {
+                bad_request(format!(
+                    "reopening '{}' as {}: {e}",
+                    path.display(),
+                    enc.label()
+                ))
+            })?;
         let asides = self.write(|ws| {
             ws.doc = Some(Arc::new(doc));
             ws.edits = EditSession::default();

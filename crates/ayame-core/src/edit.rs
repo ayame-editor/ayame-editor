@@ -1148,7 +1148,7 @@ fn commit_temp_file(tmp: &Path, target: &Path, overwrite: bool) -> Result<()> {
 /// save knows whether to write a trailing line ending after the final line.
 fn document_ends_with_newline(doc: &Document) -> bool {
     let n = doc.line_count();
-    n != 0 && doc.line_terminator(n - 1).map_or(false, |t| !t.is_empty())
+    n != 0 && doc.line_terminator(n - 1).is_some_and(|t| !t.is_empty())
 }
 
 fn temp_path(target: &Path) -> PathBuf {

@@ -222,7 +222,13 @@ pub(super) async fn api_edit_save(
         let cur = snap.doc.stat();
         let enc = match req.encoding.as_deref() {
             Some(name) => Encoding::parse(name)
-                .map(|e| if e == Encoding::Ascii { Encoding::Utf8 } else { e })
+                .map(|e| {
+                    if e == Encoding::Ascii {
+                        Encoding::Utf8
+                    } else {
+                        e
+                    }
+                })
                 .ok_or_else(|| bad_request(format!("unknown encoding '{name}'")))?,
             None => cur.encoding,
         };
@@ -230,9 +236,8 @@ pub(super) async fn api_edit_save(
             return Err(bad_request(format!("{} での保存は未対応です", enc.label())));
         }
         let eol = match req.eol.as_deref() {
-            Some(name) => {
-                Eol::parse(name).ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?
-            }
+            Some(name) => Eol::parse(name)
+                .ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?,
             None => match cur.eol {
                 Eol::Mixed | Eol::None => Eol::Lf,
                 other => other,
@@ -246,8 +251,14 @@ pub(super) async fn api_edit_save(
         let doc_for_save = snap.doc.clone();
         let edits_for_save = snap.take_edits();
         let res = tokio::task::spawn_blocking(move || {
-            edits_for_save
-                .save_converted(&doc_for_save, target_for_save, enc, eol, with_bom, overwrite)
+            edits_for_save.save_converted(
+                &doc_for_save,
+                target_for_save,
+                enc,
+                eol,
+                with_bom,
+                overwrite,
+            )
         })
         .await
         .map_err(internal)?
@@ -467,10 +478,19 @@ pub(super) async fn api_reopen_encoding(
     Json(req): Json<ReopenRequest>,
 ) -> Result<Json<EditStats>, (StatusCode, String)> {
     let enc = Encoding::parse(&req.encoding)
-        .map(|e| if e == Encoding::Ascii { Encoding::Utf8 } else { e })
+        .map(|e| {
+            if e == Encoding::Ascii {
+                Encoding::Utf8
+            } else {
+                e
+            }
+        })
         .ok_or_else(|| bad_request(format!("unknown encoding '{}'", req.encoding)))?;
     if enc.is_wide() {
-        return Err(bad_request(format!("{} での再読込は未対応です", enc.label())));
+        return Err(bad_request(format!(
+            "{} での再読込は未対応です",
+            enc.label()
+        )));
     }
     let _transitions = state.lock_transitions().await;
     let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;

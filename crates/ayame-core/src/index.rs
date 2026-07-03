@@ -148,7 +148,10 @@ impl LineIndex {
             let last = self.line_count - 1;
             // `last`'s start lies in the immutable prefix, so resolving it against
             // the new (longer) buffer yields the same offset the old index had.
-            let off = self.line_range(buf, last).map(|(s, _)| s).unwrap_or(self.base);
+            let off = self
+                .line_range(buf, last)
+                .map(|(s, _)| s)
+                .unwrap_or(self.base);
             // Drop the lone checkpoint that might sit on the final line; we
             // re-derive it (and everything after) below.
             let keep = self.checkpoints.partition_point(|c| c.line < last);
@@ -674,9 +677,9 @@ mod tests {
 
         let appends: &[&[u8]] = &[
             b"row-0\nrow-1\nrow-2\n", // empty -> content
-            b"row-3\n",              // whole-line append
-            b"row-4",                // append without a terminator
-            b"\nrow-5\nrow-6\n",     // finish the dangling line, add more
+            b"row-3\n",               // whole-line append
+            b"row-4",                 // append without a terminator
+            b"\nrow-5\nrow-6\n",      // finish the dangling line, add more
         ];
         let mut cut = 0usize;
         for chunk in appends {
