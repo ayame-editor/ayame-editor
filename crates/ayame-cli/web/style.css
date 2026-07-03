@@ -989,6 +989,27 @@ html[data-sidebar-side="right"] #sidebar {
   opacity: 0.6;
   pointer-events: none;
 }
+/* "全角空白を下線で表示": swap the box for a full-width underline drawn along
+   the bottom of the cell. The real 　 stays for width, so caret geometry is
+   unchanged. */
+.zenkaku-underline .ws-zsp::before {
+  content: "";
+  border-bottom: 1px solid var(--fg-faint);
+  bottom: 0.12em;
+}
+/* Trailing half-width spaces before a line end: keep the real space for width,
+   overlay a faint middle dot (one per space) so they are noticeable. */
+.ws-trail { position: relative; }
+.ws-trail::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--fg-faint);
+  opacity: 0.6;
+  pointer-events: none;
+}
 .convert-note {
   margin: 4px 2px 2px;
   font-size: 12px;

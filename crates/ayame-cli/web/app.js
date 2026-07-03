@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS = {
   sidebarSide: "left",
   ruler: true,
   showWhitespace: false,
+  zenkakuUnderline: false,
   bgMode: "watercolor",
   illus: null,
   keymap: {},
@@ -207,6 +208,12 @@ function showAppMenu(id) {
       const on = !!state.settings.showWhitespace;
       ws.classList.toggle("checked", on);
       ws.setAttribute("aria-checked", String(on));
+    }
+    const zu = $("menu-toggle-zsp-underline");
+    if (zu) {
+      const zon = !!state.settings.zenkakuUnderline;
+      zu.classList.toggle("checked", zon);
+      zu.setAttribute("aria-checked", String(zon));
     }
   }
   $(`${id}-menu`).classList.remove("hidden");
@@ -732,7 +739,7 @@ function fillRow(row, line, rec, gutterWidth) {
   } else if (state.matcher) {
     appendHighlighted(tx, rec.text);
   } else if (state.settings.showWhitespace) {
-    appendText(tx, rec.text);
+    appendText(tx, rec.text, true);
   } else {
     tx.textContent = rec.text;
   }
@@ -1284,14 +1291,23 @@ async function cutSelection() {
 // "空白・改行を表示" is on. The real \t stays in the DOM (the arrow is an
 // absolutely-positioned ::before), so glyph widths — and therefore caret and
 // selection geometry, which are measured from the logical text — never shift.
-function appendText(container, str) {
-  if (!state.settings.showWhitespace || !/[\t　]/.test(str)) {
+// `endsLine` marks the final piece of a line so its trailing ASCII spaces get
+// a middle-dot overlay (only meaningful at a real line end).
+function appendText(container, str, endsLine) {
+  // Count the run of trailing half-width spaces so a line made purely of ASCII
+  // spaces still gets dots (and so the fast path below is skipped when needed).
+  let trail = 0;
+  if (endsLine && state.settings.showWhitespace) {
+    while (trail < str.length && str.charCodeAt(str.length - 1 - trail) === 0x20) trail++;
+  }
+  if (!state.settings.showWhitespace || (!/[\t　]/.test(str) && trail === 0)) {
     if (str) container.appendChild(document.createTextNode(str));
     return;
   }
+  const body = trail ? str.slice(0, str.length - trail) : str;
   // Split keeping tabs and full-width (zenkaku) spaces as their own pieces so
   // each can be wrapped in a width-preserving overlay span.
-  for (const p of str.split(/(\t|　)/)) {
+  for (const p of body.split(/(\t|　)/)) {
     if (p === "") continue;
     if (p === "\t") {
       const t = document.createElement("span");
@@ -1306,6 +1322,14 @@ function appendText(container, str) {
     } else {
       container.appendChild(document.createTextNode(p));
     }
+  }
+  // Trailing spaces before the line end: one dot overlay per space, real space
+  // kept so caret columns are unchanged.
+  for (let i = 0; i < trail; i++) {
+    const s = document.createElement("span");
+    s.className = "ws-trail";
+    s.textContent = " ";
+    container.appendChild(s);
   }
 }
 
@@ -1334,7 +1358,7 @@ function appendHighlighted(container, text) {
     if (m[0].length === 0) re.lastIndex++; // never stall on empty matches
   }
   if (last < text.length) {
-    appendText(container, text.slice(last));
+    appendText(container, text.slice(last), true);
   }
 }
 
@@ -4722,6 +4746,7 @@ function runMenuAction(action) {
   if (action === "cut") return cutSelection();
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
   if (action === "toggleWhitespace") return updateSetting("showWhitespace", !state.settings.showWhitespace);
+  if (action === "toggleZenkakuUnderline") return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
   if (action === "settings") return showSettings();
   if (action === "sortSave") return sortSave();
   if (action === "diffFile") return diffFile();
@@ -4889,6 +4914,8 @@ function applySettings(s) {
     root.dataset.theme = s.theme || "iris-light"; // iris-* | dark | black (unknown → :root)
   }
   root.dataset.sidebarSide = s.sidebarSide === "right" ? "right" : "left";
+  // ---- whitespace glyphs: swap the zenkaku-space box for an underline ----
+  root.classList.toggle("zenkaku-underline", !!s.zenkakuUnderline);
   // ---- background mode + illustration (user overrides on top of the theme) ----
   if (s.bgMode === "solid") {
     const flat = getComputedStyle(root).getPropertyValue("--bg").trim() || "#FBF8F1";
