@@ -939,6 +939,27 @@ html[data-sidebar-side="right"] #sidebar {
 .row.eof { cursor: default; }
 .row.eof .tx { color: var(--fg-faint); font-family: var(--ui); font-style: italic; }
 
+/* ---- 折り返し (word wrap) --------------------------------------------------
+   A conservative, CSS-only wrap toggle (state.settings.wordWrap → #content.wrap
+   in applySettings). Rows switch to pre-wrap and are allowed to grow past one
+   LINE_HEIGHT, so long lines wrap instead of scrolling horizontally; the
+   horizontal scroll container is pinned so no h-scrollbar appears.
+
+   LIMITATIONS (by design — full variable-height virtualization is out of scope):
+   the virtual scroll and the caret/selection layers still assume 1 logical line
+   == 1 LINE_HEIGHT screen row (see positionCaret/renderSelection). So on lines
+   that actually wrap, the caret/selection rectangles and the on-screen line
+   count drift, and a very long single line can push later rows off the bottom
+   (overflow-y is hidden). Files whose lines fit the viewport wrap trivially and
+   stay pixel-exact. */
+#content.wrap { overflow-x: hidden; }
+#content.wrap .row {
+  white-space: pre-wrap;
+  height: auto;
+  min-height: var(--line-height);
+  overflow-wrap: anywhere; /* break even unbroken runs so nothing overflows */
+}
+
 .ln {
   position: sticky;
   left: 0;

@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
   ruler: true,
   showWhitespace: false,
   zenkakuUnderline: false,
+  wordWrap: false,
   bgMode: "watercolor",
   illus: null,
   keymap: {},
@@ -215,6 +216,12 @@ function showAppMenu(id) {
       const zon = !!state.settings.zenkakuUnderline;
       zu.classList.toggle("checked", zon);
       zu.setAttribute("aria-checked", String(zon));
+    }
+    const wrap = $("menu-toggle-wrap");
+    if (wrap) {
+      const on = !!state.settings.wordWrap;
+      wrap.classList.toggle("checked", on);
+      wrap.setAttribute("aria-checked", String(on));
     }
   }
   $(`${id}-menu`).classList.remove("hidden");
@@ -4910,6 +4917,7 @@ function runMenuAction(action) {
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
   if (action === "toggleWhitespace") return updateSetting("showWhitespace", !state.settings.showWhitespace);
   if (action === "toggleZenkakuUnderline") return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
+  if (action === "toggleWordWrap") return updateSetting("wordWrap", !state.settings.wordWrap);
   if (action === "settings") return showSettings();
   if (action === "sortSave") return sortSave();
   if (action === "diffFile") return diffFile();
@@ -5095,6 +5103,13 @@ function applySettings(s) {
   LINE_HEIGHT = lh; // keep virtualization math in sync with the CSS
   _charW = 0; // font metrics changed → remeasure on next click
   _rulerKey = ""; // force the ruler to rebuild against the new metrics
+  // ---- long-line wrapping (折り返し) ----
+  // Purely a CSS switch on #content: rows go white-space:pre-wrap and grow past
+  // one LINE_HEIGHT so long lines wrap instead of scrolling horizontally. The
+  // virtual scroll still steps one *logical* line per row, so files whose lines
+  // fit the viewport render (and caret/select) exactly as before. See style.css
+  // #content.wrap for the documented limitations on genuinely wrapped lines.
+  $("content").classList.toggle("wrap", !!s.wordWrap);
   scheduleRender();
 }
 
