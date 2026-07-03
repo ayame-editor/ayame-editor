@@ -1279,20 +1279,28 @@ async function cutSelection() {
 // absolutely-positioned ::before), so glyph widths — and therefore caret and
 // selection geometry, which are measured from the logical text — never shift.
 function appendText(container, str) {
-  if (!state.settings.showWhitespace || str.indexOf("\t") === -1) {
+  if (!state.settings.showWhitespace || !/[\t　]/.test(str)) {
     if (str) container.appendChild(document.createTextNode(str));
     return;
   }
-  const parts = str.split("\t");
-  parts.forEach((p, i) => {
-    if (p) container.appendChild(document.createTextNode(p));
-    if (i < parts.length - 1) {
+  // Split keeping tabs and full-width (zenkaku) spaces as their own pieces so
+  // each can be wrapped in a width-preserving overlay span.
+  for (const p of str.split(/(\t|　)/)) {
+    if (p === "") continue;
+    if (p === "\t") {
       const t = document.createElement("span");
       t.className = "ws-tab";
       t.textContent = "\t";
       container.appendChild(t);
+    } else if (p === "　") {
+      const s = document.createElement("span");
+      s.className = "ws-zsp";
+      s.textContent = "　";
+      container.appendChild(s);
+    } else {
+      container.appendChild(document.createTextNode(p));
     }
-  });
+  }
 }
 
 // A faint end-of-line marker (↵) drawn after the text. It sits past every
@@ -1575,8 +1583,9 @@ function pathCrumbs(path) {
 }
 
 function enc(e) {
+  // Keys match the core Encoding enum's kebab-case serialization (Utf8 → "utf8").
   return (
-    { "utf-8": "UTF-8", "shift-jis": "Shift_JIS", "euc-jp": "EUC-JP", ascii: "ASCII" }[e] ||
+    { utf8: "UTF-8", "utf-8": "UTF-8", "shift-jis": "Shift_JIS", "euc-jp": "EUC-JP", ascii: "ASCII" }[e] ||
     String(e)
   );
 }
@@ -2172,7 +2181,7 @@ function positionExtraCarets(vis, focusVisible) {
 }
 
 function anyModalOpen() {
-  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible();
+  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible() || convertVisible();
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -2610,6 +2619,73 @@ async function saveFile() {
   } catch (e) {
     flashCount("保存エラー", "error");
     showMessage("保存エラー", e.message);
+  } finally {
+    savingCount--;
+    setSavingUI();
+    retryPendingNativeClose();
+  }
+}
+
+// ---- 変換して保存 (文字コード / 改行コード) --------------------------------
+
+function convertVisible() {
+  return !$("convert-modal").classList.contains("hidden");
+}
+
+function showConvert() {
+  if (!state.stat?.open) return;
+  if (isUntitled(state.stat.path)) {
+    // Nothing on disk to convert yet — save it first.
+    flashCount("先に保存してください");
+    saveCopy();
+    return;
+  }
+  hideFileMenu();
+  // Prefill the pickers with the file's current encoding / line ending. The
+  // stat strings are the core enum's kebab-case (Utf8 → "utf8"); map them onto
+  // the select's option values.
+  const encOpt = { utf8: "utf-8", "utf-8": "utf-8", "shift-jis": "shift-jis", "euc-jp": "euc-jp" };
+  $("convert-enc").value = encOpt[state.stat.encoding] || "utf-8";
+  const l = state.stat.eol;
+  $("convert-eol").value = ["lf", "crlf", "cr"].includes(l) ? l : "lf";
+  setModalOpen($("convert-modal"), true);
+  queueMicrotask(() => $("convert-enc").focus());
+}
+
+function hideConvert() {
+  setModalOpen($("convert-modal"), false);
+  focusEditor();
+}
+
+// Rewrite the current file in the chosen 文字コード / 改行コード. Every line is
+// re-encoded server-side, so the active tab reloads the converted bytes.
+async function convertSave(encoding, lineEnding) {
+  if (!state.stat?.open) return;
+  if (savingCount > 0) {
+    flashCount("保存中です — 完了までお待ちください");
+    return;
+  }
+  await settleEditQueue();
+  savingCount++;
+  setSavingUI();
+  try {
+    const res = await apiPost("/api/edit/save", { overwrite: true, encoding, eol: lineEnding });
+    if (res.switched) {
+      state.docGen++;
+      state.editGen++;
+      clearLineCache();
+      await refreshStat();
+      await reloadViewport();
+      setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+      render();
+      refreshTabs();
+    } else {
+      onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+    }
+    flashCount(`${enc(encoding)} / ${eol(lineEnding)} で保存しました`);
+  } catch (e) {
+    flashCount("変換保存エラー", "error");
+    showMessage("変換して保存", e.message);
   } finally {
     savingCount--;
     setSavingUI();
@@ -3208,6 +3284,20 @@ function initEvents() {
     hideFileMenu();
     saveCopy();
   });
+  $("convert-save-item").addEventListener("click", showConvert);
+  $("convert-close").addEventListener("click", hideConvert);
+  $("convert-cancel").addEventListener("click", hideConvert);
+  $("convert-go").addEventListener("click", () => {
+    const encoding = $("convert-enc").value;
+    const eolVal = $("convert-eol").value;
+    hideConvert();
+    convertSave(encoding, eolVal);
+  });
+  $("convert-modal").addEventListener("click", (e) => {
+    if (e.target === $("convert-modal")) hideConvert();
+  });
+  $("st-enc").addEventListener("click", showConvert);
+  $("st-eol").addEventListener("click", showConvert);
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
@@ -3448,6 +3538,7 @@ function onGlobalKey(e) {
   if (e.key === "Escape" && commandPaletteVisible()) { e.preventDefault(); hideCommandPalette(); return; }
   if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
   if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
+  if (e.key === "Escape" && convertVisible()) { e.preventDefault(); hideConvert(); return; }
   if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
   if (!anyModalOpen() && matchesShortcut(e, "commandPalette")) {
     e.preventDefault();

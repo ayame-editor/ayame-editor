@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use ayame_core::{BatchEdit, EditLine, EditStats, SaveResult};
+use ayame_core::{BatchEdit, EditLine, EditStats, Encoding, Eol, SaveResult};
 use serde::{Deserialize, Serialize};
 
 use super::{bad_request, default_save_copy_path, internal, SharedState, MAX_VIEW};
@@ -159,6 +159,14 @@ pub(super) struct EditSaveRequest {
     /// opening the saved copy as a second tab).
     #[serde(default)]
     switch_to_saved: bool,
+    /// 変換して保存: target 文字コード (e.g. "shift_jis"). When either this or
+    /// `eol` is set the whole file is re-encoded, so the save runs as a
+    /// rewrite-then-reload rather than the fast incremental path.
+    #[serde(default)]
+    encoding: Option<String>,
+    /// 変換して保存: target 改行コード ("lf" / "crlf" / "cr").
+    #[serde(default)]
+    eol: Option<String>,
 }
 
 /// [`SaveResult`] plus whether the active tab now shows the saved file.
@@ -201,6 +209,49 @@ pub(super) async fn api_edit_save(
                 default_save_copy_path(&active_path)
             }
         });
+    // ---- 変換して保存: re-encode every line to a chosen 文字コード / 改行コード.
+    // This rewrites the whole file (the fast path copies untouched lines raw),
+    // so it runs as save-then-reload: the active tab reopens the converted
+    // bytes, refreshing the encoding/eol shown in the status bar.
+    if req.encoding.is_some() || req.eol.is_some() {
+        let cur = snap.doc.stat();
+        let enc = match req.encoding.as_deref() {
+            Some(name) => Encoding::parse(name)
+                .map(|e| if e == Encoding::Ascii { Encoding::Utf8 } else { e })
+                .ok_or_else(|| bad_request(format!("unknown encoding '{name}'")))?,
+            None => cur.encoding,
+        };
+        if enc.is_wide() {
+            return Err(bad_request(format!("{} での保存は未対応です", enc.label())));
+        }
+        let eol = match req.eol.as_deref() {
+            Some(name) => {
+                Eol::parse(name).ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?
+            }
+            None => match cur.eol {
+                Eol::Mixed | Eol::None => Eol::Lf,
+                other => other,
+            },
+        };
+        let overwrite = req.overwrite || same_path(&target, &active_path);
+        let target_for_save = target.clone();
+        let doc_for_save = snap.doc.clone();
+        let edits_for_save = snap.take_edits();
+        let res = tokio::task::spawn_blocking(move || {
+            edits_for_save.save_converted(&doc_for_save, target_for_save, enc, eol, overwrite)
+        })
+        .await
+        .map_err(internal)?
+        .map_err(bad_request)?;
+        // Refresh the active tab from the converted file. Skipped (switched =
+        // false) if edits landed while the rewrite was streaming, so no newer
+        // edit is dropped — the client then falls back to a normal open.
+        let _transitions = state.lock_transitions().await;
+        let switched = state.confirm_overwrite(&snap).is_ok()
+            && state.reload_reverted(res.path.clone()).await.is_ok();
+        return Ok(Json(EditSaveResponse::from_result(res, switched)));
+    }
+
     let reload_active = req.overwrite && same_path(&target, &active_path);
     if !reload_active {
         // Saving a copy elsewhere never mutates workspace state, so the

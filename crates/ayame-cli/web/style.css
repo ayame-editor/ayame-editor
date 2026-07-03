@@ -931,6 +931,11 @@ html[data-sidebar-side="right"] #sidebar {
 }
 .row.active { background: var(--bg-active-line); }
 .row.active .ln { color: var(--fg); }
+/* Hover affordance: the row under the pointer gets a faint wash so the text
+   reads as selectable. Kept lighter than the active-line and selection washes
+   so they still win when they apply. */
+.row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.row.active:hover { background: var(--bg-active-line); }
 .row.eof { cursor: default; }
 .row.eof .tx { color: var(--fg-faint); font-family: var(--ui); font-style: italic; }
 
@@ -970,6 +975,24 @@ html[data-sidebar-side="right"] #sidebar {
 .ws-eol {
   color: var(--fg-faint);
   opacity: 0.55;
+}
+/* Full-width (zenkaku) space: keep the real 　 for width, overlay a box so it
+   is not mistaken for an ASCII run of spaces. */
+.ws-zsp { position: relative; }
+.ws-zsp::before {
+  content: "□";
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--fg-faint);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.convert-note {
+  margin: 4px 2px 2px;
+  font-size: 12px;
+  color: var(--fg-dim);
 }
 
 mark {
@@ -1064,6 +1087,20 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
   color: var(--accent-bright);
 }
 #statusbar .seg.dim { color: color-mix(in srgb, var(--status-fg) 82%, transparent); }
+/* Encoding / line-ending segments double as the entry point for 変換して保存. */
+#statusbar button.seg-btn {
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#statusbar button.seg-btn:hover {
+  background: var(--hover);
+  color: var(--accent-bright);
+}
 #statusbar .spacer { flex: 1; }
 /* Single visible home for operation feedback (save results, errors, hints):
    always on screen, announced politely to screen readers. */

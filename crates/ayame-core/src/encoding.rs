@@ -192,6 +192,22 @@ impl Eol {
             Eol::Lf | Eol::Mixed | Eol::None => b"\n",
         }
     }
+
+    /// Parse a user-supplied line-ending name (API / UI). Only the three
+    /// concrete styles are selectable for a converting save.
+    pub fn parse(name: &str) -> Option<Eol> {
+        match name
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', '_', ' '], "")
+            .as_str()
+        {
+            "lf" | "n" | "unix" => Some(Eol::Lf),
+            "crlf" | "rn" | "dos" | "windows" => Some(Eol::Crlf),
+            "cr" | "r" | "mac" => Some(Eol::Cr),
+            _ => None,
+        }
+    }
 }
 
 /// Detect the dominant line ending from a bounded prefix of `content`.

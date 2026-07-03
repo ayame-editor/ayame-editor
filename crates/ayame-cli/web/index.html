@@ -64,6 +64,9 @@
             <button id="save-copy" class="menu-item" role="menuitem">
               <span class="menu-label">名前を付けて保存</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
             </button>
+            <button id="convert-save-item" class="menu-item" role="menuitem">
+              <span class="menu-label">文字コード・改行を変換…</span><span class="menu-key"></span>
+            </button>
           </div>
         </div>
         <div class="menu-shell">
@@ -222,8 +225,8 @@
         <div class="spacer"></div>
         <span id="st-pos" class="seg">—</span>
         <span id="st-edit" class="seg">—</span>
-        <span id="st-enc" class="seg">—</span>
-        <span id="st-eol" class="seg">—</span>
+        <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存">—</button>
+        <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存">—</button>
         <span id="st-index" class="seg dim">—</span>
       </footer>
     </div>
@@ -322,6 +325,39 @@
           <div class="set-row">
             <span class="set-label">テーマJSON</span>
             <button id="theme-json-edit" class="cmd">タブで編集</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 変換して保存: rewrite the file in a chosen 文字コード / 改行コード. -->
+    <div id="convert-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel settings-panel" role="dialog" aria-label="変換して保存">
+        <div class="modal-head">
+          <div class="modal-title">文字コード・改行を変換して保存</div>
+          <button id="convert-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="settings-body">
+          <label class="set-row">
+            <span class="set-label">文字コード</span>
+            <select id="convert-enc">
+              <option value="utf-8">UTF-8</option>
+              <option value="shift-jis">Shift_JIS</option>
+              <option value="euc-jp">EUC-JP</option>
+            </select>
+          </label>
+          <label class="set-row">
+            <span class="set-label">改行コード</span>
+            <select id="convert-eol">
+              <option value="lf">LF (Unix / macOS)</option>
+              <option value="crlf">CRLF (Windows)</option>
+              <option value="cr">CR (旧 Mac)</option>
+            </select>
+          </label>
+          <div class="convert-note">現在のファイルを上書き保存します。表せない文字があると中止します。</div>
+          <div class="form-actions">
+            <button id="convert-cancel" class="cmd">キャンセル</button>
+            <button id="convert-go" class="cmd primary">変換して保存</button>
           </div>
         </div>
       </div>

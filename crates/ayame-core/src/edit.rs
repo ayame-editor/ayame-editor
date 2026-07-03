@@ -781,6 +781,62 @@ impl EditSession {
         self.save_to_path_inner(doc, target.as_ref(), true)
     }
 
+    /// Save the logical document (edits applied) to `target`, re-encoding every
+    /// line to `enc` and terminating each with `eol`.
+    ///
+    /// Unlike [`Edits::save_to_path`], which copies untouched lines out of the
+    /// mmap as raw bytes, this decodes and re-encodes every line — O(total
+    /// bytes) — so it can change the file's 文字コード (encoding) and 改行コード
+    /// (line ending). Whether the last line gets a terminator mirrors the
+    /// source file. Fails if a line holds a character `enc` cannot represent,
+    /// rather than writing a lossy file.
+    pub fn save_converted(
+        &self,
+        doc: &Document,
+        target: impl AsRef<Path>,
+        enc: crate::Encoding,
+        eol: crate::Eol,
+        overwrite: bool,
+    ) -> Result<SaveResult> {
+        let target = target.as_ref();
+        if target.exists() && !overwrite {
+            return Err(Error::Unsupported(format!(
+                "'{}' already exists; choose another save path",
+                target.display()
+            )));
+        }
+        let tmp = temp_path(target);
+        let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut w = BufWriter::new(file);
+        let term = eol.bytes();
+        let total = self.total_lines(doc);
+        let ends_nl = document_ends_with_newline(doc);
+        for logical in 0..total {
+            let text = self.line_text(doc, logical)?;
+            let bytes = enc.encode_text(&text).ok_or_else(|| {
+                Error::Unsupported(format!(
+                    "line {} has characters that cannot be written as {}",
+                    logical + 1,
+                    enc.label()
+                ))
+            })?;
+            w.write_all(&bytes)?;
+            if logical + 1 < total || ends_nl {
+                w.write_all(term)?;
+            }
+        }
+        w.flush()?;
+        w.get_ref().sync_all()?;
+        drop(w);
+        commit_temp_file(&tmp, target, overwrite)?;
+        let bytes = std::fs::metadata(target)?.len();
+        Ok(SaveResult {
+            path: target.to_path_buf(),
+            bytes,
+            lines: total,
+        })
+    }
+
     fn save_to_path_inner(
         &self,
         doc: &Document,
@@ -904,24 +960,7 @@ impl EditSession {
         w.flush()?;
         w.get_ref().sync_all()?;
         drop(w);
-        match std::fs::rename(&tmp, target) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                if overwrite && target.exists() {
-                    std::fs::remove_file(target)?;
-                    match std::fs::rename(&tmp, target) {
-                        Ok(()) => Ok(()),
-                        Err(e) => {
-                            let _ = std::fs::remove_file(&tmp);
-                            Err(Error::Io(e))
-                        }
-                    }
-                } else {
-                    let _ = std::fs::remove_file(&tmp);
-                    Err(Error::Io(e))
-                }
-            }
-        }
+        commit_temp_file(&tmp, target, overwrite)
     }
 
     fn clean_anchor(&mut self, anchor: u64) {
@@ -1077,6 +1116,33 @@ fn write_edited_line(
     Ok(())
 }
 
+/// Rename the fully-written temp file onto `target`. When `overwrite` is set and
+/// the plain rename fails because `target` exists (Windows), remove and retry.
+/// The temp file is cleaned up on any failure.
+fn commit_temp_file(tmp: &Path, target: &Path, overwrite: bool) -> Result<()> {
+    match std::fs::rename(tmp, target) {
+        Ok(()) => Ok(()),
+        Err(_) if overwrite && target.exists() => {
+            std::fs::remove_file(target)?;
+            std::fs::rename(tmp, target).map_err(|e| {
+                let _ = std::fs::remove_file(tmp);
+                Error::Io(e)
+            })
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(tmp);
+            Err(Error::Io(e))
+        }
+    }
+}
+
+/// True when the source file's last line carries a terminator, so a converting
+/// save knows whether to write a trailing line ending after the final line.
+fn document_ends_with_newline(doc: &Document) -> bool {
+    let n = doc.line_count();
+    n != 0 && doc.line_terminator(n - 1).map_or(false, |t| !t.is_empty())
+}
+
 fn temp_path(target: &Path) -> PathBuf {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
@@ -1105,6 +1171,7 @@ mod tests {
 
     use super::*;
     use crate::Encoding;
+    use crate::Eol;
     use crate::OpenOptions as AyameOpenOptions;
 
     fn doc_from(bytes: &[u8]) -> (NamedTempFile, Document) {
@@ -1139,6 +1206,57 @@ mod tests {
         assert_eq!(st.replaced_lines, 1);
         assert_eq!(st.inserted_lines, 1);
         assert_eq!(st.deleted_lines, 1);
+    }
+
+    #[test]
+    fn save_converted_changes_encoding_and_eol() {
+        // UTF-8 source with LF endings → Shift_JIS with CRLF endings.
+        let (_f, doc) = doc_from("あ\nいう\n".as_bytes());
+        let edits = EditSession::default();
+        let out = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Crlf, true)
+            .unwrap();
+        let mut expect = Vec::new();
+        expect.extend_from_slice(&Encoding::ShiftJis.encode_text("あ").unwrap());
+        expect.extend_from_slice(b"\r\n");
+        expect.extend_from_slice(&Encoding::ShiftJis.encode_text("いう").unwrap());
+        expect.extend_from_slice(b"\r\n");
+        assert_eq!(std::fs::read(out.path()).unwrap(), expect);
+    }
+
+    #[test]
+    fn save_converted_preserves_missing_final_newline() {
+        let (_f, doc) = doc_from(b"a\nb");
+        let edits = EditSession::default();
+        let out = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Crlf, true)
+            .unwrap();
+        assert_eq!(std::fs::read(out.path()).unwrap(), b"a\r\nb");
+    }
+
+    #[test]
+    fn save_converted_applies_pending_edits() {
+        let (_f, doc) = doc_from(b"a\nb\nc\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "B".into()).unwrap();
+        let out = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Lf, true)
+            .unwrap();
+        assert_eq!(std::fs::read(out.path()).unwrap(), b"a\nB\nc\n");
+    }
+
+    #[test]
+    fn save_converted_rejects_unrepresentable_chars() {
+        // An emoji has no Shift_JIS mapping: the save must fail, not corrupt.
+        let (_f, doc) = doc_from("hi 😀\n".as_bytes());
+        let edits = EditSession::default();
+        let out = NamedTempFile::new().unwrap();
+        assert!(edits
+            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Lf, true)
+            .is_err());
     }
 
     #[test]
