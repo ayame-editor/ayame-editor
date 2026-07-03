@@ -171,6 +171,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/case/save", post(ops::api_case_save))
         .route("/api/split/save", post(ops::api_split_save))
         .route("/api/search", get(ops::api_search))
+        .route("/api/grep", post(ops::api_grep))
         .route("/api/find", get(ops::api_find))
         .route("/api/diff", get(ops::api_diff))
         .route("/api/linebyte", get(ops::api_linebyte))

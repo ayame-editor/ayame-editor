@@ -1015,6 +1015,9 @@ html[data-sidebar-side="right"] #sidebar {
   font-size: 12px;
   color: var(--fg-dim);
 }
+/* BOM row hint; dims with the row when the target encoding is not UTF-8. */
+.set-hint { flex: 1; color: var(--fg-dim); font-size: 12px; }
+#convert-bom-row.disabled { opacity: 0.5; }
 
 mark {
   background: var(--mark-bg);
@@ -1739,6 +1742,89 @@ button { border-radius: var(--radius); }
   font-family: var(--ui);
   font-size: 12px;
   border-top: 1px dashed var(--border);
+}
+
+/* フォルダ内検索 (Grep) results panel — modeled on the diff view */
+.grep-panel {
+  width: min(920px, 96vw);
+  max-height: min(820px, 90vh);
+}
+.grep-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 14px 14px;
+}
+.grep-summary {
+  font-size: 13px;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+.grep-results {
+  min-height: 0;
+  max-height: min(64vh, 640px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--edit-bg);
+}
+.grep-empty {
+  padding: 14px 12px;
+  color: var(--fg-dim);
+  font-family: var(--ui);
+  font-size: 13px;
+}
+.grep-file + .grep-file { border-top: 1px solid var(--border); }
+.grep-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bg-toolbar) 92%, transparent);
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--ui);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grep-hit {
+  display: grid;
+  grid-template-columns: 7ch minmax(0, 1fr);
+  width: 100%;
+  min-height: var(--line-height);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  color: var(--fg);
+}
+.grep-hit:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.grep-ln {
+  padding: 0 10px 0 6px;
+  text-align: right;
+  color: var(--gutter-fg);
+  background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+.grep-tx {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  padding: 0 8px;
+}
+.grep-match {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--gold) 30%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 30%, transparent);
 }
 
 /* generic confirm / message modal (replaces window.confirm / window.alert) */

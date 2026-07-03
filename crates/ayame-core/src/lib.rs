@@ -35,6 +35,7 @@ pub mod document;
 pub mod edit;
 pub mod encoding;
 mod fields;
+pub mod grep;
 pub mod index;
 pub mod ops;
 pub mod search;
@@ -44,6 +45,7 @@ pub mod transform;
 pub use document::{Document, FileStat, Line, OpenOptions};
 pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
+pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
 pub use ops::{
     DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats, OrderingReader,

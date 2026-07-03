@@ -153,6 +153,10 @@
                     title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)">
               <span class="menu-label">ファイルを分割</span><span class="menu-key" data-key-action="splitFile"></span>
             </button>
+            <button class="menu-item" data-menu-action="grepFolder" role="menuitem"
+                    title="フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)">
+              <span class="menu-label">フォルダ内検索</span><span class="menu-key" data-key-action="grepFolder"></span>
+            </button>
           </div>
         </div>
       </header>
@@ -361,6 +365,11 @@
               <option value="cr">CR (旧 Mac)</option>
             </select>
           </label>
+          <label class="set-row" id="convert-bom-row">
+            <span class="set-label">BOM</span>
+            <input id="convert-bom" type="checkbox" />
+            <span class="set-hint">BOMを付ける（UTF-8のみ）</span>
+          </label>
           <div class="convert-note">「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。<br>「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。</div>
           <div class="form-actions">
             <button id="convert-cancel" class="cmd">キャンセル</button>
@@ -419,6 +428,21 @@
             <span>比較先ファイル</span>
           </div>
           <div id="diff-view" class="diff-view"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- フォルダ内検索 (Grep): recursive multi-file search results. Each hit is
+         a button that opens its file and jumps to the line. -->
+    <div id="grep-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel grep-panel" role="dialog" aria-label="フォルダ内検索">
+        <div class="modal-head">
+          <div class="modal-title">フォルダ内検索</div>
+          <button id="grep-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="grep-body">
+          <div id="grep-summary" class="grep-summary"></div>
+          <div id="grep-results" class="grep-results"></div>
         </div>
       </div>
     </div>

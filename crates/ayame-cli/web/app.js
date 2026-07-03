@@ -69,6 +69,7 @@ const KEYMAP_ACTIONS = [
   ["sortSave", "ソート", ""],
   ["diffFile", "2ファイル差分", ""],
   ["splitFile", "ファイルを分割", ""],
+  ["grepFolder", "フォルダ内検索", ""],
   ["caseUpper", "大文字に変換", ""],
   ["caseLower", "小文字に変換", ""],
   ["settings", "設定", ""],
@@ -2211,7 +2212,7 @@ function positionExtraCarets(vis, focusVisible) {
 }
 
 function anyModalOpen() {
-  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible() || convertVisible();
+  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || grepVisible() || openerVisible() || convertVisible();
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -2678,8 +2679,19 @@ function showConvert() {
   $("convert-enc").value = encOpt[state.stat.encoding] || "utf-8";
   const l = state.stat.eol;
   $("convert-eol").value = ["lf", "crlf", "cr"].includes(l) ? l : "lf";
+  // Prefill 「BOMを付ける」 from the file's current BOM, then gray it out unless
+  // the chosen 文字コード is UTF-8 (a UTF-8 BOM is the only one we can write).
+  $("convert-bom").checked = state.stat.bom_bytes > 0;
+  syncConvertBom();
   setModalOpen($("convert-modal"), true);
   queueMicrotask(() => $("convert-enc").focus());
+}
+
+// The BOM option only applies to UTF-8 output; disable it otherwise.
+function syncConvertBom() {
+  const isUtf8 = $("convert-enc").value === "utf-8";
+  $("convert-bom").disabled = !isUtf8;
+  $("convert-bom-row").classList.toggle("disabled", !isUtf8);
 }
 
 function hideConvert() {
@@ -2689,7 +2701,7 @@ function hideConvert() {
 
 // Rewrite the current file in the chosen 文字コード / 改行コード. Every line is
 // re-encoded server-side, so the active tab reloads the converted bytes.
-async function convertSave(encoding, lineEnding) {
+async function convertSave(encoding, lineEnding, bom) {
   if (!state.stat?.open) return;
   if (savingCount > 0) {
     flashCount("保存中です — 完了までお待ちください");
@@ -2699,7 +2711,7 @@ async function convertSave(encoding, lineEnding) {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", { overwrite: true, encoding, eol: lineEnding });
+    const res = await apiPost("/api/edit/save", { overwrite: true, encoding, eol: lineEnding, bom });
     if (res.switched) {
       state.docGen++;
       state.editGen++;
@@ -3203,6 +3215,148 @@ async function diffFile() {
   }
 }
 
+// ---- フォルダ内検索 (Grep): recursive multi-file search -------------------
+// Prompts for a query + options, streams the hits from /api/grep, and shows
+// them in a results panel modeled on the diff view. Clicking a hit opens that
+// file and jumps to the line.
+let lastGrep = { query: "", dir: "", glob: "", ci: false, word: false, regex: false };
+
+function grepVisible() {
+  return !$("grep-modal").classList.contains("hidden");
+}
+
+function hideGrep() {
+  setModalOpen($("grep-modal"), false);
+  focusEditor();
+}
+
+async function grepFolder() {
+  if (anyModalOpen()) return;
+  const base = lastGrep.dir
+    || localStorage.getItem(TREE_KEY)
+    || pathDirName(state.stat?.path || "")
+    || "";
+  const form = await askForm(
+    "フォルダ内検索",
+    [
+      { id: "query", type: "text", label: "検索語", value: lastGrep.query, placeholder: "検索する文字列 / 正規表現" },
+      { id: "dir", type: "text", label: "対象フォルダ", value: base, placeholder: "空欄で開いているファイルのフォルダ" },
+      { id: "glob", type: "text", label: "ファイル名フィルタ", value: lastGrep.glob, placeholder: "例: *.rs, *.txt (空欄で全て)" },
+      { id: "ci", type: "check", label: "大文字小文字を区別しない", value: lastGrep.ci },
+      { id: "word", type: "check", label: "単語単位", value: lastGrep.word },
+      { id: "regex", type: "check", label: "正規表現", value: lastGrep.regex },
+    ],
+    "検索"
+  );
+  if (!form) return;
+  const query = (form.query || "").trim();
+  if (!query) return;
+  lastGrep = {
+    query: form.query,
+    dir: (form.dir || "").trim(),
+    glob: form.glob || "",
+    ci: !!form.ci,
+    word: !!form.word,
+    regex: !!form.regex,
+  };
+  showLoading("フォルダ内を検索中…");
+  try {
+    const res = await apiPost("/api/grep", {
+      query,
+      dir: lastGrep.dir,
+      glob: (form.glob || "").trim(),
+      ci: lastGrep.ci,
+      word: lastGrep.word,
+      regex: lastGrep.regex,
+    });
+    flashCount(`フォルダ内検索: ${commas(res.hits.length)} 件`);
+    showGrep(res, query, lastGrep.regex);
+  } catch (e) {
+    flashCount("フォルダ内検索エラー", "error");
+    showMessage("フォルダ内検索エラー", e.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+function showGrep(res, query, regex) {
+  const files = new Set(res.hits.map((h) => h.path)).size;
+  $("grep-summary").textContent =
+    `${commas(res.hits.length)} 件 / ${commas(files)} ファイル`
+    + (res.truncated ? `（上限 ${commas(res.hits.length)} 件で打ち切り）` : "")
+    + (res.files_truncated ? " / 走査ファイル数の上限に達しました" : "");
+  renderGrepResults(res, query, regex);
+  setModalOpen($("grep-modal"), true);
+}
+
+// Highlight the literal match inside a preview line ([col, col+queryChars]).
+// Regex matches have a variable span we don't return, so those aren't marked.
+function appendGrepText(el, text, col, query, regex) {
+  const chars = Array.from(text);
+  const qlen = regex ? 0 : Array.from(query).length;
+  if (!qlen || col < 0 || col > chars.length) {
+    el.textContent = text;
+    return;
+  }
+  const before = chars.slice(0, col).join("");
+  const mid = chars.slice(col, col + qlen).join("");
+  const after = chars.slice(col + qlen).join("");
+  if (before) el.append(document.createTextNode(before));
+  const mark = document.createElement("span");
+  mark.className = "grep-match";
+  mark.textContent = mid;
+  el.append(mark);
+  if (after) el.append(document.createTextNode(after));
+}
+
+function renderGrepResults(res, query, regex) {
+  const view = $("grep-results");
+  view.textContent = "";
+  const hits = res.hits || [];
+  if (hits.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "grep-empty";
+    empty.textContent = "一致はありません";
+    view.append(empty);
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  let group = null;
+  let currentPath = null;
+  for (const h of hits) {
+    if (h.path !== currentPath) {
+      currentPath = h.path;
+      group = document.createElement("section");
+      group.className = "grep-file";
+      const head = document.createElement("div");
+      head.className = "grep-file-head";
+      head.textContent = displayPath(h.path);
+      head.title = displayPath(h.path);
+      group.append(head);
+      frag.append(group);
+    }
+    const row = document.createElement("button");
+    row.className = "grep-hit";
+    row.type = "button";
+    const ln = document.createElement("span");
+    ln.className = "grep-ln";
+    ln.textContent = commas(h.line + 1);
+    const tx = document.createElement("span");
+    tx.className = "grep-tx";
+    appendGrepText(tx, h.text, h.col, query, regex);
+    row.append(ln, tx);
+    row.addEventListener("click", () => openGrepHit(h.path, h.line));
+    group.append(row);
+  }
+  view.append(frag);
+}
+
+async function openGrepHit(path, line) {
+  hideGrep();
+  await openPath(path);
+  gotoLine(line + 1);
+}
+
 // 選択メニュー「大文字に変換 / 小文字に変換」: transform the selection in the
 // editor as one undoable edit — nothing is written to disk until 保存.
 async function transformSelection(mode) {
@@ -3509,11 +3663,14 @@ function initEvents() {
   $("convert-save-item").addEventListener("click", showConvert);
   $("convert-close").addEventListener("click", hideConvert);
   $("convert-cancel").addEventListener("click", hideConvert);
+  $("convert-enc").addEventListener("change", syncConvertBom);
   $("convert-go").addEventListener("click", () => {
     const encoding = $("convert-enc").value;
     const eolVal = $("convert-eol").value;
+    // A UTF-8 BOM is the only one we emit; force it off for other encodings.
+    const bom = encoding === "utf-8" && $("convert-bom").checked;
     hideConvert();
-    convertSave(encoding, eolVal);
+    convertSave(encoding, eolVal, bom);
   });
   $("reopen-go").addEventListener("click", () => {
     const encoding = $("convert-enc").value;
@@ -3532,6 +3689,10 @@ function initEvents() {
   $("diff-close").addEventListener("click", hideDiff);
   $("diff-modal").addEventListener("click", (e) => {
     if (e.target === $("diff-modal")) hideDiff();
+  });
+  $("grep-close").addEventListener("click", hideGrep);
+  $("grep-modal").addEventListener("click", (e) => {
+    if (e.target === $("grep-modal")) hideGrep();
   });
 
   // Keep the column ruler aligned as the text scrolls horizontally.
@@ -3764,6 +3925,7 @@ function onGlobalKey(e) {
   if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
   if (e.key === "Escape" && commandPaletteVisible()) { e.preventDefault(); hideCommandPalette(); return; }
   if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
+  if (e.key === "Escape" && grepVisible()) { e.preventDefault(); hideGrep(); return; }
   if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
   if (e.key === "Escape" && convertVisible()) { e.preventDefault(); hideConvert(); return; }
   if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
@@ -3801,6 +3963,7 @@ function onGlobalKey(e) {
   if (matchesShortcut(e, "sortSave")) { e.preventDefault(); sortSave(); return; }
   if (matchesShortcut(e, "diffFile")) { e.preventDefault(); diffFile(); return; }
   if (matchesShortcut(e, "splitFile")) { e.preventDefault(); splitFile(); return; }
+  if (matchesShortcut(e, "grepFolder")) { e.preventDefault(); grepFolder(); return; }
   if (matchesShortcut(e, "settings")) { e.preventDefault(); showSettings(); return; }
   if (matchesShortcut(e, "keymap")) { e.preventDefault(); showKeymap(); return; }
   // Editor clipboard / history — not while typing in a search or dialog field.
@@ -4751,6 +4914,7 @@ function runMenuAction(action) {
   if (action === "sortSave") return sortSave();
   if (action === "diffFile") return diffFile();
   if (action === "splitFile") return splitFile();
+  if (action === "grepFolder") return grepFolder();
   if (action === "caseUpper") return transformSelection("upper");
   if (action === "caseLower") return transformSelection("lower");
   if (action === "keymap") return showKeymap();

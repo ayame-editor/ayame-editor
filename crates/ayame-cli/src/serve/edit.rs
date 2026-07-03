@@ -167,6 +167,11 @@ pub(super) struct EditSaveRequest {
     /// 変換して保存: target 改行コード ("lf" / "crlf" / "cr").
     #[serde(default)]
     eol: Option<String>,
+    /// 変換して保存: whether a UTF-8 target file gets a leading BOM. Only
+    /// meaningful when the target 文字コード is UTF-8 (ignored otherwise). When
+    /// omitted the file's current BOM state is preserved.
+    #[serde(default)]
+    bom: Option<bool>,
 }
 
 /// [`SaveResult`] plus whether the active tab now shows the saved file.
@@ -233,12 +238,16 @@ pub(super) async fn api_edit_save(
                 other => other,
             },
         };
+        // A UTF-8 BOM is only meaningful for UTF-8 output; default to the
+        // file's current BOM state so an unspecified request round-trips it.
+        let with_bom = req.bom.unwrap_or(cur.bom_bytes > 0);
         let overwrite = req.overwrite || same_path(&target, &active_path);
         let target_for_save = target.clone();
         let doc_for_save = snap.doc.clone();
         let edits_for_save = snap.take_edits();
         let res = tokio::task::spawn_blocking(move || {
-            edits_for_save.save_converted(&doc_for_save, target_for_save, enc, eol, overwrite)
+            edits_for_save
+                .save_converted(&doc_for_save, target_for_save, enc, eol, with_bom, overwrite)
         })
         .await
         .map_err(internal)?

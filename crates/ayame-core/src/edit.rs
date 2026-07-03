@@ -790,12 +790,17 @@ impl EditSession {
     /// (line ending). Whether the last line gets a terminator mirrors the
     /// source file. Fails if a line holds a character `enc` cannot represent,
     /// rather than writing a lossy file.
+    ///
+    /// When `with_bom` is set and `enc` is UTF-8 a byte-order mark
+    /// (0xEF 0xBB 0xBF) is written at the very start; the flag is ignored for
+    /// every other encoding (a UTF-8 BOM is the only one this path emits).
     pub fn save_converted(
         &self,
         doc: &Document,
         target: impl AsRef<Path>,
         enc: crate::Encoding,
         eol: crate::Eol,
+        with_bom: bool,
         overwrite: bool,
     ) -> Result<SaveResult> {
         let target = target.as_ref();
@@ -808,6 +813,9 @@ impl EditSession {
         let tmp = temp_path(target);
         let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         let mut w = BufWriter::new(file);
+        if with_bom && enc == crate::Encoding::Utf8 {
+            w.write_all(&[0xEF, 0xBB, 0xBF])?;
+        }
         let term = eol.bytes();
         let total = self.total_lines(doc);
         let ends_nl = document_ends_with_newline(doc);
@@ -1215,7 +1223,7 @@ mod tests {
         let edits = EditSession::default();
         let out = NamedTempFile::new().unwrap();
         edits
-            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Crlf, true)
+            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Crlf, false, true)
             .unwrap();
         let mut expect = Vec::new();
         expect.extend_from_slice(&Encoding::ShiftJis.encode_text("あ").unwrap());
@@ -1231,7 +1239,7 @@ mod tests {
         let edits = EditSession::default();
         let out = NamedTempFile::new().unwrap();
         edits
-            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Crlf, true)
+            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Crlf, false, true)
             .unwrap();
         assert_eq!(std::fs::read(out.path()).unwrap(), b"a\r\nb");
     }
@@ -1243,7 +1251,7 @@ mod tests {
         edits.replace_line(&doc, 1, "B".into()).unwrap();
         let out = NamedTempFile::new().unwrap();
         edits
-            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Lf, true)
+            .save_converted(&doc, out.path(), Encoding::Utf8, Eol::Lf, false, true)
             .unwrap();
         assert_eq!(std::fs::read(out.path()).unwrap(), b"a\nB\nc\n");
     }
@@ -1255,8 +1263,30 @@ mod tests {
         let edits = EditSession::default();
         let out = NamedTempFile::new().unwrap();
         assert!(edits
-            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Lf, true)
+            .save_converted(&doc, out.path(), Encoding::ShiftJis, Eol::Lf, false, true)
             .is_err());
+    }
+
+    #[test]
+    fn save_converted_prepends_utf8_bom_only_for_utf8() {
+        let (_f, doc) = doc_from(b"a\nb\n");
+        let edits = EditSession::default();
+        // UTF-8 target with the flag: a leading BOM precedes the content.
+        let utf8 = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, utf8.path(), Encoding::Utf8, Eol::Lf, true, true)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(utf8.path()).unwrap(),
+            b"\xEF\xBB\xBFa\nb\n".to_vec()
+        );
+        // A UTF-8 BOM is meaningless for other encodings, so the flag is
+        // ignored — no stray 0xEF 0xBB 0xBF is written.
+        let sjis = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, sjis.path(), Encoding::ShiftJis, Eol::Lf, true, true)
+            .unwrap();
+        assert_eq!(std::fs::read(sjis.path()).unwrap(), b"a\nb\n".to_vec());
     }
 
     #[test]

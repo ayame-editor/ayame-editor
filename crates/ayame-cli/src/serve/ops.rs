@@ -564,6 +564,82 @@ pub(super) async fn api_search(
     Ok(Json(res))
 }
 
+// ---- grep (recursive directory search) -----------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct GrepRequest {
+    query: String,
+    /// Root directory to search; null/absent = the open file's directory.
+    #[serde(default)]
+    dir: Option<String>,
+    /// Comma/space separated filename globs (`*.rs, *.toml`); empty = every file.
+    #[serde(default)]
+    glob: Option<String>,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+    #[serde(default)]
+    word: bool,
+    #[serde(default = "grep_default_max")]
+    max: usize,
+}
+
+fn grep_default_max() -> usize {
+    2000
+}
+
+/// `POST /api/grep` — recursive multi-file search. Like `/api/diff`, the heavy
+/// work (a directory walk + a search over each file) runs inside
+/// `spawn_blocking` and the structured hits are returned as JSON. This searches
+/// on-disk files, so it does not see the active buffer's unsaved edits.
+pub(super) async fn api_grep(
+    State(state): State<SharedState>,
+    Json(req): Json<GrepRequest>,
+) -> Result<Json<ayame_core::GrepResult>, (StatusCode, String)> {
+    let query = req.query.trim().to_string();
+    if query.is_empty() {
+        return Err(bad_request("query is empty"));
+    }
+    // Default the root to the open file's directory so フォルダ内検索 works
+    // without picking a folder first.
+    let dir = match req.dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => PathBuf::from(d),
+        None => grep_default_dir(&state),
+    };
+    let glob = req.glob.unwrap_or_default();
+    let regex = req.regex;
+    let case_sensitive = !req.ci;
+    let whole_word = req.word;
+    let max = req.max.clamp(1, 20_000);
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<ayame_core::GrepResult> {
+        let opts = ayame_core::GrepOptions {
+            query,
+            regex,
+            case_sensitive,
+            whole_word,
+            glob,
+            max_hits: max,
+            ..Default::default()
+        };
+        ayame_core::grep_dir(&dir, &opts).with_context(|| format!("searching {}", dir.display()))
+    })
+    .await
+    .map_err(internal)?
+    .map_err(bad_request)?;
+    Ok(Json(result))
+}
+
+/// The directory a grep with no explicit root searches: the open file's parent,
+/// else the server's current working directory.
+fn grep_default_dir(state: &SharedState) -> PathBuf {
+    state
+        .doc_opt()
+        .and_then(|doc| doc.path().parent().map(Path::to_path_buf))
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
 // ---- find (incremental next/prev) ----------------------------------------------
 
 #[derive(Deserialize)]
