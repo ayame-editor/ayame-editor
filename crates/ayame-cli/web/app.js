@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
   sidebar: false,
   sidebarSide: "left",
   ruler: true,
+  confirmLastTabClose: true,
   showWhitespace: false,
   zenkakuUnderline: false,
   wordWrap: false,
@@ -359,6 +360,33 @@ function dirtyCloseMessage() {
   const more = dirty.length > 5 ? ` ほか ${dirty.length - 5} 件` : "";
   const suffix = shown ? `\n\n${shown}${more}` : "";
   return `未保存の編集があります。保存せずに終了しますか?${suffix}`;
+}
+
+function isNativeApp() {
+  return !!(window.ipc && typeof window.ipc.postMessage === "function");
+}
+
+function requestEditorClose() {
+  if (isNativeApp()) {
+    postNativeMessage("ayame:close-ok");
+    return true;
+  }
+  window.close();
+  return false;
+}
+
+async function confirmCloseLastTab(t) {
+  if (t?.dirty) {
+    return askConfirm(
+      "終了の確認",
+      `${t.name} の未保存の編集があります。保存せずに Ayame Editor を終了しますか?`,
+      { okLabel: "保存せずに終了", danger: true }
+    );
+  }
+  if (state.settings.confirmLastTabClose === false) return true;
+  return askConfirm("終了の確認", "最後のタブを閉じると Ayame Editor を終了します。終了しますか?", {
+    okLabel: "終了",
+  });
 }
 
 // Never let the native window kill the process while a save is in flight; the
@@ -4787,19 +4815,19 @@ async function closeTab(id) {
   await settleEditQueue();
   const t = state.tabs.find((x) => x.id === id);
   const isLast = (state.tabs || []).length <= 1;
-  if (t && t.dirty) {
+  if (isLast) {
+    if (savingCount > 0) {
+      flashCount("保存中です — 完了までお待ちください");
+      return;
+    }
+    if (!(await confirmCloseLastTab(t))) return;
+    if (requestEditorClose()) return;
+  } else if (t && t.dirty) {
     const ok = await askConfirm(
       "タブを閉じる",
       `${t.name} の未保存の編集を破棄して閉じますか?`,
       { okLabel: "破棄して閉じる", danger: true }
     );
-    if (!ok) return;
-  } else if (isLast) {
-    // Closing the last tab resets to a blank page — confirm first so it is
-    // never a surprise.
-    const ok = await askConfirm("タブを閉じる", "最後のタブを閉じますか?", {
-      okLabel: "閉じる",
-    });
     if (!ok) return;
   }
   try {
@@ -5390,6 +5418,10 @@ function initSettings() {
   });
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
+  $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
+  $("set-confirm-last-tab-close").addEventListener("change", () => (
+    updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked)
+  ));
   updateSidebarSideButtons();
   document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
     btn.addEventListener("click", () => updateSetting("sidebarSide", btn.dataset.sidebarSide));
