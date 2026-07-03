@@ -1,0 +1,3 @@
+[alias]
+# Repo automation lives in the xtask crate: `cargo xtask release --bump patch`.
+xtask = "run --quiet -p xtask --"

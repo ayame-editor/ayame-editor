@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ayame-core", "crates/ayame-cli"]
+members = ["crates/ayame-core", "crates/ayame-cli", "xtask"]
 
 [workspace.package]
 version = "0.3.0"

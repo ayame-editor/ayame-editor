@@ -3,16 +3,19 @@
 ## One command
 
 Everything below (gate → artifact → smoke → tag → push → watch the workflow)
-is scripted:
+is automated by the `xtask` crate — plain Rust, so it runs identically on
+Linux, macOS, and Windows with no bash/node dependency:
 
 ```sh
-scripts/release.sh                  # release the version already in Cargo.toml
-scripts/release.sh --bump patch     # bump + commit "release: vX.Y.Z" + release
-scripts/release.sh --dry-run        # run every check, stop before tag/push
+cargo xtask release                  # release the version already in Cargo.toml
+cargo xtask release --bump patch     # bump + commit "release: vX.Y.Z" + release
+cargo xtask release --dry-run        # run every check, stop before tag/push
 ```
 
-The sections below document what the script does, and the manual platform
-checks it cannot automate.
+(`scripts/release.sh` is a thin wrapper around the same command.)
+
+The sections below document what the automation does, and the manual platform
+checks it cannot cover.
 
 ## Local Gate
 
