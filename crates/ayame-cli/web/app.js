@@ -14,6 +14,8 @@ const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 const SETTINGS_KEY = "ayame.settings.v1";
 const TREE_KEY = "ayame.treeRoot.v1";
+const RECENT_KEY = "ayame.recentFiles.v1";
+const RECENT_MAX = 12; // cap on 最近使ったファイル entries
 const MAX_COPY_LINES = 20000; // clipboard cap: copy warns, cut refuses beyond this
 
 const FONT_STACKS = {
@@ -4058,6 +4060,7 @@ function configureOpener(mode, title) {
     ? "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。"
     : "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。";
   openerMsg("");
+  renderRecentFiles();
 }
 
 function hideOpener() {
@@ -4164,6 +4167,89 @@ function browseRow(ent, isUp) {
   return row;
 }
 
+// ---- recent files (最近使ったファイル) --------------------------------------
+//
+// A best-effort, browser-only history of recently opened paths. Kept in
+// localStorage (most-recent-first, deduped, capped) so it survives reloads
+// without any server/state changes. Surfaced as a shortcut list in the opener.
+
+function loadRecentFiles() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentFiles(list) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
+  } catch {
+    // ignore private-mode quota errors; recents are best-effort
+  }
+}
+
+// Record a freshly opened file at the head of the list. Untitled scratch
+// buffers never qualify.
+function pushRecentFile(path) {
+  const p = (path || "").trim();
+  if (!p || isUntitled(p)) return;
+  const list = [p, ...loadRecentFiles().filter((x) => x !== p)].slice(0, RECENT_MAX);
+  saveRecentFiles(list);
+}
+
+// Forget a path (e.g. it no longer opens) so the list stays trustworthy.
+function dropRecentFile(path) {
+  saveRecentFiles(loadRecentFiles().filter((x) => x !== path));
+}
+
+// Open a recent entry through the normal open path; drop it if it's gone.
+async function openRecent(path) {
+  const ok = await openPath(path);
+  if (!ok) {
+    dropRecentFile(path);
+    renderRecentFiles();
+  }
+}
+
+function renderRecentFiles() {
+  const box = $("opener-recent");
+  if (!box) return;
+  // The recent shortcut only makes sense when opening, not when saving.
+  const list = state.openerMode === "save" ? [] : loadRecentFiles();
+  box.textContent = "";
+  if (!list.length) {
+    box.classList.add("hidden");
+    return;
+  }
+  const head = document.createElement("div");
+  head.className = "opener-recent-head";
+  head.textContent = "最近使ったファイル";
+  box.append(head);
+  for (const path of list) box.append(recentRow(path));
+  box.classList.remove("hidden");
+}
+
+function recentRow(path) {
+  const row = document.createElement("button");
+  row.className = "opener-row recent";
+  row.type = "button";
+  row.title = path;
+  const ic = document.createElement("span");
+  ic.className = "ic";
+  ic.textContent = "最近";
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = pathBaseName(path) || path;
+  const dir = document.createElement("span");
+  dir.className = "sz";
+  dir.textContent = pathDirName(path) || "";
+  row.append(ic, nm, dir);
+  row.addEventListener("click", () => openRecent(path));
+  return row;
+}
+
 function markPickedFile(name) {
   for (const row of $("opener-list").querySelectorAll(".opener-row")) {
     row.classList.toggle("picked", row.querySelector(".nm")?.textContent === name);
@@ -4227,7 +4313,7 @@ async function closeTabSilently(id) {
 
 async function openPath(path) {
   const p = (path || "").trim();
-  if (!p) return;
+  if (!p) return false;
   await settleEditQueue();
   const pristine = pristineUntitledTabId();
   openerMsg("開いています…", true);
@@ -4235,8 +4321,10 @@ async function openPath(path) {
     const stat = await apiPost("/api/open", { path: p });
     onDocumentOpened(stat);
     await closeTabSilently(pristine);
+    return true;
   } catch (e) {
     reportOpenError("開けません: " + e.message);
+    return false;
   }
 }
 
@@ -4278,6 +4366,7 @@ function onDocumentOpened(stat) {
   state.docGen++;
   state.editGen++; // stale in-flight edit responses must not reposition this tab
   state.stat = stat;
+  pushRecentFile(stat.path);
   state.total = stat.view_lines ?? stat.lines ?? 0;
   // Fresh document: reset navigation, search, and caret state.
   state.first = 0;
