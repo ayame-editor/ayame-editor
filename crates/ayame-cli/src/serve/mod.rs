@@ -35,7 +35,7 @@ mod edit;
 mod ops;
 mod security;
 mod state;
-mod workspace;
+pub(crate) mod workspace;
 
 use security::NetPolicy;
 use state::{AppState, SharedState, TabsResponse};
@@ -857,6 +857,100 @@ mod tests {
         assert!(body.contains("\"text\":\"bbb\""), "body: {body}");
 
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// 名前を付けて保存 (`switch_to_saved`): the ACTIVE TAB becomes the saved
+    /// file — no second tab appears and the session is clean afterwards.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn save_as_switches_the_active_tab_to_the_saved_file() {
+        let f = scratch_file("saveas-src.txt", b"alpha\nbeta\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":5,"text":"ALPHA"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+
+        let out = f.with_extension("saved.txt");
+        let body = format!(
+            r#"{{"path":"{}","switch_to_saved":true}}"#,
+            out.display().to_string().replace('\\', "\\\\")
+        );
+        let (status, resp) = send(
+            addr,
+            post_json("/api/edit/save", &host, Some(&origin), &body),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {resp}");
+        assert!(resp.contains("\"switched\":true"), "body: {resp}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"ALPHA\nbeta\n");
+
+        // One tab, showing the saved file, clean.
+        let (_, tabs) = send(addr, get("/api/tabs", &host)).await;
+        assert_eq!(tabs.matches("\"id\":").count(), 1, "tabs: {tabs}");
+        assert!(tabs.contains("saved.txt"), "tabs: {tabs}");
+        let (_, stat) = send(addr, get("/api/stat", &host)).await;
+        assert!(stat.contains("saved.txt"), "stat: {stat}");
+        assert!(stat.contains("\"dirty\":false"), "stat: {stat}");
+        // The original file was never touched by the save-as.
+        assert_eq!(std::fs::read(&f).unwrap(), b"alpha\nbeta\n");
+
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Opening a path that is already open in a tab focuses that tab instead
+    /// of opening a duplicate.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn opening_an_already_open_file_focuses_its_tab() {
+        let fa = scratch_file("dedupe-a.txt", b"a\n");
+        let fb = scratch_file("dedupe-b.txt", b"b\n");
+        let addr = start_server(&fa).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let body = format!(
+            r#"{{"path":"{}"}}"#,
+            fb.display().to_string().replace('\\', "\\\\")
+        );
+        let (status, _) = send(addr, post_json("/api/open", &host, Some(&origin), &body)).await;
+        assert_eq!(status, 200);
+
+        // Re-open the first file: no third tab, and it becomes active again.
+        let body = format!(
+            r#"{{"path":"{}"}}"#,
+            fa.display().to_string().replace('\\', "\\\\")
+        );
+        let (status, _) = send(addr, post_json("/api/open", &host, Some(&origin), &body)).await;
+        assert_eq!(status, 200);
+
+        let (_, tabs) = send(addr, get("/api/tabs", &host)).await;
+        assert_eq!(tabs.matches("\"id\":").count(), 2, "tabs: {tabs}");
+        assert!(
+            tabs.contains("dedupe-a.txt\",\"dirty\":false,\"active\":true")
+                || tabs.contains("\"active\":true,\"name\":\"dedupe-a.txt\""),
+            "tabs: {tabs}"
+        );
+
+        let _ = std::fs::remove_file(&fa);
+        let _ = std::fs::remove_file(&fb);
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_for_display() {
+        use super::workspace::strip_verbatim;
+        assert_eq!(strip_verbatim(r"\\?\C:\Users\x\f.txt"), r"C:\Users\x\f.txt");
+        assert_eq!(strip_verbatim(r"\\?\UNC\srv\share\f"), r"\\srv\share\f");
+        assert_eq!(strip_verbatim("/tmp/f.txt"), "/tmp/f.txt");
     }
 
     /// A zero-width rectangle (c1 == c0) is a valid caret column: the export

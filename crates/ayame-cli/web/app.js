@@ -35,14 +35,15 @@ const DEFAULT_SETTINGS = {
 };
 
 const KEYMAP_ACTIONS = [
-  ["newFile", "新規テキスト", "Ctrl+N"],
+  ["newFile", "新規ファイル", "Ctrl+N"],
   ["openFile", "開く", "Ctrl+O"],
   ["saveFile", "保存", "Ctrl+S"],
-  ["saveAs", "別名で保存", "Ctrl+Shift+S"],
+  ["saveAs", "名前を付けて保存", "Ctrl+Shift+S"],
   ["closeTab", "タブを閉じる", "Ctrl+W"],
   ["commandPalette", "コマンドパレット", "Ctrl+Shift+P"],
   ["toggleSidebar", "エクスプローラー表示", "Ctrl+B"],
   ["find", "検索", "Ctrl+F"],
+  ["replace", "置換", "Ctrl+H"],
   ["findNext", "次の一致", "F3"],
   ["findPrev", "前の一致", "Shift+F3"],
   ["gotoLine", "行へ移動", "Ctrl+G"],
@@ -58,14 +59,12 @@ const KEYMAP_ACTIONS = [
   ["searchWord", "検索: 単語単位", "Alt+W"],
   ["searchRegex", "検索: 正規表現", "Alt+R"],
   ["sortSave", "ソート", ""],
-  ["replaceSave", "置換して保存", ""],
   ["diffFile", "2ファイル差分", ""],
   ["splitFile", "ファイルを分割", ""],
-  ["caseUpper", "大文字化して保存", ""],
-  ["caseLower", "小文字化して保存", ""],
+  ["caseUpper", "大文字に変換", ""],
+  ["caseLower", "小文字に変換", ""],
   ["settings", "設定", ""],
   ["keymap", "キー設定", ""],
-  ["revert", "保存時の状態に戻す", ""],
 ];
 const DEFAULT_KEYMAP = Object.fromEntries(KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]));
 
@@ -88,6 +87,7 @@ const state = {
   searchHits: null,
   searchTruncated: false,
   findOpen: false,
+  replaceOpen: false,
   history: [],
   historyIndex: -1,
   settings: { ...DEFAULT_SETTINGS },
@@ -152,6 +152,25 @@ function humanBytes(n) {
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Windows extended-length paths come back from canonicalize with a "\\?\"
+// prefix; never show that to the user ("保存しました: \\?\C:\…" reads broken).
+function displayPath(path) {
+  const s = String(path || "");
+  if (s.startsWith("\\\\?\\UNC\\")) return "\\\\" + s.slice(8);
+  if (s.startsWith("\\\\?\\")) return s.slice(4);
+  return s;
+}
+
+// Shortcuts are stored with KeyboardEvent key names ("Ctrl+Alt+ArrowUp");
+// menus and hints render the arrows as glyphs so labels stay compact.
+function displayShortcut(shortcut) {
+  return String(shortcut || "")
+    .replace(/ArrowUp/g, "↑")
+    .replace(/ArrowDown/g, "↓")
+    .replace(/ArrowLeft/g, "←")
+    .replace(/ArrowRight/g, "→");
 }
 
 // Show/hide one modal element, keeping the .hidden class and aria-hidden in
@@ -297,13 +316,12 @@ function hasDirtyDocuments() {
   return !!state.stat?.dirty || dirtyTabNames().length > 0;
 }
 
-function confirmCloseWorkspace() {
+function dirtyCloseMessage() {
   const dirty = dirtyTabNames();
-  if (!hasDirtyDocuments()) return true;
   const shown = dirty.slice(0, 5).join(", ");
   const more = dirty.length > 5 ? ` ほか ${dirty.length - 5} 件` : "";
   const suffix = shown ? `\n\n${shown}${more}` : "";
-  return confirm(`未保存の編集があります。保存せず終了しますか?${suffix}`);
+  return `未保存の編集があります。保存せずに終了しますか?${suffix}`;
 }
 
 // Never let the native window kill the process while a save is in flight; the
@@ -334,7 +352,20 @@ window.__ayameNativeCloseRequested = () => {
     postNativeMessage("ayame:close-cancel");
     return;
   }
-  postNativeMessage(confirmCloseWorkspace() ? "ayame:close-ok" : "ayame:close-cancel");
+  if (!hasDirtyDocuments()) {
+    postNativeMessage("ayame:close-ok");
+    return;
+  }
+  // Release the native close request first (it times out after a few
+  // seconds), then ask with the in-app dialog; a confirmed close posts the
+  // ok separately — the Rust side exits on it regardless of timing.
+  postNativeMessage("ayame:close-cancel");
+  askConfirm("終了の確認", dirtyCloseMessage(), {
+    okLabel: "保存せずに終了",
+    danger: true,
+  }).then((ok) => {
+    if (ok) postNativeMessage("ayame:close-ok");
+  });
 };
 
 function retryPendingNativeClose() {
@@ -374,16 +405,17 @@ function resetKeymap() {
 
 function updateKeyHints() {
   document.querySelectorAll("[data-key-action]").forEach((el) => {
-    el.textContent = shortcutFor(el.dataset.keyAction);
+    el.textContent = displayShortcut(shortcutFor(el.dataset.keyAction));
   });
   const hint = (label, action) => {
-    const key = shortcutFor(action);
+    const key = displayShortcut(shortcutFor(action));
     return key ? `${label} (${key})` : label;
   };
   $("toggle-sidebar").title = hint("エクスプローラー", "toggleSidebar");
   $("undo-edit").title = hint("元に戻す", "undo");
   $("redo-edit").title = hint("やり直す", "redo");
   $("find").placeholder = hint("検索", "find");
+  $("find-expand").title = hint("置換を表示", "replace");
   $("find-prev").title = hint("前の一致", "findPrev");
   $("find-next").title = hint("次の一致", "findNext");
   $("opt-case").title = hint("大文字小文字を区別", "searchCase");
@@ -428,7 +460,7 @@ function renderKeymapRows() {
     const input = document.createElement("input");
     input.className = "keymap-input";
     input.readOnly = true;
-    input.value = shortcut;
+    input.value = displayShortcut(shortcut);
     input.placeholder = "未設定";
     input.dataset.action = action;
     input.addEventListener("keydown", (e) => {
@@ -504,7 +536,7 @@ function renderCommandPalette() {
     label.textContent = item.label;
     const key = document.createElement("span");
     key.className = "palette-key";
-    key.textContent = item.shortcut;
+    key.textContent = displayShortcut(item.shortcut);
     row.append(label, key);
     row.addEventListener("mouseenter", () => {
       if (paletteIndex === index) return;
@@ -1021,21 +1053,28 @@ async function saveSelectionToFile() {
   showLoading("選択を書き出し中…");
   try {
     const res = await apiPost("/api/selection/save", body);
-    flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${res.path}`);
+    flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${displayPath(res.path)}`);
   } catch (e) {
+    hideLoading();
     if (String(e.message || "").includes("既に存在")) {
-      if (confirm(`${f.path.trim()} は既に存在します。上書きしますか?`)) {
+      const overwrite = await askConfirm(
+        "上書きの確認",
+        `${displayPath(f.path.trim())} は既に存在します。上書きしますか?`,
+        { okLabel: "上書き", danger: true }
+      );
+      if (overwrite) {
+        showLoading("選択を書き出し中…");
         try {
           const res = await apiPost("/api/selection/save", { ...body, overwrite: true });
-          flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${res.path}`);
+          flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${displayPath(res.path)}`);
         } catch (e2) {
           flashCount("選択の保存エラー", "error");
-          alert(e2.message);
+          showMessage("選択の保存エラー", e2.message);
         }
       }
     } else {
       flashCount("選択の保存エラー", "error");
-      alert(e.message);
+      showMessage("選択の保存エラー", e.message);
     }
   } finally {
     hideLoading();
@@ -1045,7 +1084,7 @@ async function saveSelectionToFile() {
 function runCtxAction(action) {
   hideCtxMenu();
   // Only the two context-menu-specific actions live here; everything else
-  // (cut / copy / selectAll / find / sortSave / replaceSave / diffFile /
+  // (cut / copy / selectAll / find / replace / sortSave / diffFile /
   // splitFile) shares the menu dispatcher.
   let out;
   if (action === "paste") out = pasteFromClipboard();
@@ -1515,10 +1554,11 @@ function updateStatusPos() {
 
 // ---- search ----------------------------------------------------------------
 
-function showFind() {
+function showFind(withReplace = false) {
   state.findOpen = true;
   document.documentElement.classList.add("find-open");
-  const f = $("find");
+  if (withReplace) setReplaceRow(true);
+  const f = withReplace && state.query ? $("replace-input") : $("find");
   queueMicrotask(() => {
     f.focus();
     f.select();
@@ -1528,6 +1568,13 @@ function showFind() {
 function hideFind() {
   state.findOpen = false;
   document.documentElement.classList.remove("find-open");
+  setReplaceRow(false);
+}
+
+function setReplaceRow(open) {
+  state.replaceOpen = open;
+  document.documentElement.classList.toggle("replace-open", open);
+  $("find-expand").setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function buildMatcher() {
@@ -2083,7 +2130,7 @@ function positionExtraCarets(vis, focusVisible) {
 }
 
 function anyModalOpen() {
-  return promptVisible() || formVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible();
+  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || openerVisible();
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -2448,24 +2495,41 @@ function pasteText(raw) {
   });
 }
 
+// 名前を付けて保存: the CURRENT tab becomes the saved file (the server swaps
+// the active tab's document to the new path), exactly like every desktop
+// editor — no leftover untitled tab, no extra tab for the saved file.
 async function saveCopy() {
   if (savingCount > 0) {
     flashCount("保存中です — 完了までお待ちください");
     return;
   }
   await settleEditQueue();
-  const target = await showSaveDialog("別名で保存", suggestedSaveAsPath());
+  const target = await showSaveDialog("名前を付けて保存", suggestedSaveAsPath());
   if (!target) return;
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", target);
-    const stat = await apiPost("/api/open", { path: res.path });
-    onDocumentOpened(stat);
-    flashCount(`保存しました: ${res.path}`);
+    const res = await apiPost("/api/edit/save", { ...target, switch_to_saved: true });
+    if (res.switched) {
+      // Same tab, new document identity: refresh in place, keep the caret.
+      state.docGen++;
+      state.editGen++;
+      clearLineCache();
+      await refreshStat();
+      await reloadViewport();
+      setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+      render();
+      refreshTabs();
+      updateTreeActive();
+    } else {
+      // The workspace changed while saving (rare): fall back to focusing the
+      // saved file — the server dedupes, so this never duplicates a tab.
+      onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+    }
+    flashCount(`保存しました: ${displayPath(res.path)}`);
   } catch (e) {
     flashCount("保存エラー", "error");
-    alert(e.message);
+    showMessage("保存エラー", e.message);
   } finally {
     savingCount--;
     setSavingUI();
@@ -2473,11 +2537,12 @@ async function saveCopy() {
   }
 }
 
+// 名前を付けて保存 opens on the current file's own folder and name (Windows
+// standard); untitled buffers suggest a plain "untitled.txt".
 function suggestedSaveAsPath() {
   const p = state.stat?.path || "";
-  if (!p) return "untitled.txt";
-  if (isUntitled(p)) return pathBaseName(p) || "untitled.txt";
-  return `${p}.edited`;
+  if (!p || isUntitled(p)) return "untitled.txt";
+  return p;
 }
 
 async function saveFile() {
@@ -2499,39 +2564,14 @@ async function saveFile() {
     await refreshStat();
     await reloadViewport();
     render();
-    flashCount(`保存しました: ${res.path}`);
+    flashCount(`保存しました: ${displayPath(res.path)}`);
   } catch (e) {
     flashCount("保存エラー", "error");
-    alert(e.message);
+    showMessage("保存エラー", e.message);
   } finally {
     savingCount--;
     setSavingUI();
     retryPendingNativeClose();
-  }
-}
-
-// ファイルメニュー「保存時の状態に戻す」: discard every unsaved edit and go
-// back to the document as it exists on disk (/api/edit/revert reloads it).
-async function revertEdits() {
-  if (!state.stat?.dirty) {
-    flashCount("未保存の編集はありません");
-    return;
-  }
-  if (!confirm("未保存の編集をすべて破棄して、保存時の状態に戻しますか?")) return;
-  try {
-    await apiPost("/api/edit/revert", {});
-    clearLineCache();
-    state.sel = null;
-    state.extraCursors = [];
-    await refreshStat();
-    await reloadViewport();
-    // Re-clamp the caret against the reverted document's real line count.
-    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), 0);
-    render();
-    flashCount("保存時の状態に戻しました");
-  } catch (e) {
-    flashCount("元に戻せません", "error");
-    alert(e.message);
   }
 }
 
@@ -2604,7 +2644,7 @@ async function sortSave() {
     flashCount("ソートして上書きしました");
   } catch (e) {
     flashCount("ソートエラー", "error");
-    alert(e.message);
+    showMessage("ソートエラー", e.message);
   } finally {
     hideLoading();
   }
@@ -2630,43 +2670,174 @@ async function splitFile() {
   try {
     const dir = String(f.dir || "").trim();
     const res = await apiPost("/api/split/save", { lines, dir: dir || null });
-    flashCount(`${res.count} 個に分割しました: 最初のファイル ${res.files[0]}`);
+    flashCount(`${res.count} 個に分割しました: 最初のファイル ${displayPath(res.files[0])}`);
   } catch (e) {
     flashCount("分割エラー", "error");
-    alert(e.message);
+    showMessage("分割エラー", e.message);
   } finally {
     hideLoading();
   }
 }
 
-async function replaceSave() {
-  if (!state.stat?.open) return;
-  const base = state.stat?.path || "ayame";
-  const f = await askForm("置換して保存", [
-    { id: "find", type: "text", label: "置換前", value: $("find").value || state.query || "" },
-    { id: "replacement", type: "text", label: "置換後", value: "" },
-    { id: "regex", type: "check", label: "正規表現として解釈する", value: state.regex },
-    { id: "ci", type: "check", label: "大文字小文字を区別しない", value: state.ci },
-    { id: "path", type: "text", label: "保存先パス", value: `${base}.replaced` },
-  ]);
-  if (!f) return;
-  if (!f.find) {
-    flashCount("置換前の文字列を入力してください", "error");
+// ---- in-editor replace (the find bar's replace row) -------------------------
+//
+// Replacements are ordinary edit-session batches (/api/edit/replace_batch), so
+// they show up in the view immediately and undo like any other edit — no
+// separate output file. Matching lines come from the server (the same engine
+// the counter uses); the replacement text per line is computed with the same
+// JS matcher that drives the highlights, so regex group references ($1, $&)
+// work in regex mode. In literal mode the replacement is inserted verbatim.
+
+const REPLACE_ALL_MAX = 20000; // hits per pass; the message says when to rerun
+
+function charLenOf(str) {
+  return Array.from(str).length;
+}
+
+function utf8ByteLength(str) {
+  return new TextEncoder().encode(str).length;
+}
+
+// UTF-16 index of Unicode-scalar column `col` in `text` (surrogate-safe).
+function utf16IndexOfCol(text, col) {
+  let idx = 0;
+  let c = 0;
+  for (const ch of text) {
+    if (c >= col) break;
+    idx += ch.length;
+    c++;
+  }
+  return idx;
+}
+
+// The replacement string sent to the document for one concrete match.
+function replacementFor(matchText, replacement) {
+  if (!state.regex) return replacement;
+  const single = new RegExp(state.matcher.source, state.matcher.flags.replace("g", ""));
+  return matchText.replace(single, replacement);
+}
+
+// In literal mode "$" has no special meaning; escape it for String.replace.
+function literalReplacement(replacement) {
+  return replacement.replace(/\$/g, "$$$$");
+}
+
+function replaceReady() {
+  if (!state.stat?.open) return false;
+  if (!state.query) {
+    flashCount("検索文字列を入力してください", "error");
+    return false;
+  }
+  buildMatcher();
+  if (state.regexError || !state.matcher) {
+    flashCount("正規表現エラー", "error");
+    return false;
+  }
+  return true;
+}
+
+// 置換: replace the current match, then move to the next one. Without a
+// current match this just selects the first one (Notepad-style two-step).
+async function replaceCurrent() {
+  if (!replaceReady()) return;
+  const replacement = $("replace-input").value;
+  if (!state.lastMatch) {
+    await findStep("next");
     return;
   }
-  showLoading("置換実行中…");
   try {
-    const res = await apiPost("/api/replace/save", {
-      path: f.path,
-      find: f.find,
-      replacement: f.replacement,
-      regex: !!f.regex,
-      ci: !!f.ci,
-    });
-    flashCount(`置換して保存しました: ${res.path}`);
+    const res = await api(`/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`);
+    const h = res.hit;
+    if (!h || h.byte !== state.lastMatch.byte) {
+      await findStep("next");
+      return;
+    }
+    const lr = await api(`/api/lines?start=${h.line}&count=1`);
+    const text = lr.lines?.[0]?.text ?? "";
+    const u16 = utf16IndexOfCol(text, h.column);
+    const re = new RegExp(state.matcher.source, state.matcher.flags);
+    re.lastIndex = u16;
+    const m = re.exec(text);
+    if (!m || m.index !== u16) {
+      flashCount("一致を特定できません", "error");
+      return;
+    }
+    const rep = replacementFor(m[0], replacement);
+    const c0 = h.column;
+    const c1 = h.column + charLenOf(m[0]);
+    await enqueueEdit(() => applyRange(h.line, c0, h.line, c1, rep));
+    // Resume the scan just past the inserted text so a replacement that
+    // contains the query can never loop.
+    state.lastMatch = { byte: h.byte, len: Math.max(1, utf8ByteLength(rep)) };
+    await updateCount();
+    await findStep("next");
   } catch (e) {
     flashCount("置換エラー", "error");
-    alert(e.message);
+    console.error(e);
+  }
+}
+
+// すべて置換: one whole-line edit per matching line, flushed in batches. Line
+// numbers never change (line-based matches cannot introduce newlines), so
+// every batch keeps referring to valid coordinates.
+async function replaceAll() {
+  if (!replaceReady()) return;
+  const replacement = $("replace-input").value;
+  const literal = literalReplacement(replacement);
+  showLoading("置換中…");
+  try {
+    const res = await api(`/api/search?${qs()}&start=0&max=${REPLACE_ALL_MAX}`);
+    const hits = res.hits || [];
+    if (!hits.length) {
+      flashCount("一致なし");
+      return;
+    }
+    const lines = [...new Set(hits.map((h) => h.line))].sort((a, b) => a - b);
+    // Fetch the affected lines in contiguous chunks (≤2000 lines per request).
+    const texts = new Map();
+    for (let i = 0; i < lines.length; ) {
+      let j = i;
+      while (j + 1 < lines.length && lines[j + 1] - lines[i] < 2000) j++;
+      const start = lines[i];
+      const count = lines[j] - lines[i] + 1;
+      const r = await api(`/api/lines?start=${start}&count=${count}`);
+      r.lines.forEach((rec, k) => texts.set(start + k, rec.text ?? ""));
+      i = j + 1;
+    }
+    let replaced = 0;
+    let edits = [];
+    let pendingBytes = 0;
+    const flush = async () => {
+      if (!edits.length) return;
+      const batch = edits;
+      edits = [];
+      pendingBytes = 0;
+      await enqueueEdit(() => applyBatchPlain(batch));
+    };
+    for (const line of lines) {
+      const text = texts.get(line);
+      if (text == null) continue;
+      const re = new RegExp(state.matcher.source, state.matcher.flags);
+      const count = [...text.matchAll(re)].length;
+      if (!count) continue;
+      const next = text.replace(re, state.regex ? replacement : literal);
+      if (next === text) continue;
+      replaced += count;
+      edits.push({ l0: line, c0: 0, l1: line, c1: charLenOf(text), text: next });
+      pendingBytes += next.length;
+      if (edits.length >= 2000 || pendingBytes > 512 * 1024) await flush();
+    }
+    await flush();
+    state.lastMatch = null;
+    await updateCount();
+    flashCount(
+      replaced
+        ? `${commas(replaced)} 件置換しました${res.truncated ? " — 一致が多いため一部です。もう一度実行してください" : ""}`
+        : "一致なし"
+    );
+  } catch (e) {
+    flashCount("置換エラー", "error");
+    console.error(e);
   } finally {
     hideLoading();
   }
@@ -2686,8 +2857,8 @@ function showDiff(res) {
     `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}`
     + (res.current_dirty ? " / 未保存編集込み" : "")
     + (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
-  $("diff-old-path").textContent = (res.old_path || "現在のファイル") + (res.current_dirty ? " *" : "");
-  $("diff-new-path").textContent = res.new_path || "比較先";
+  $("diff-old-path").textContent = displayPath(res.old_path || "現在のファイル") + (res.current_dirty ? " *" : "");
+  $("diff-new-path").textContent = displayPath(res.new_path || "比較先");
   renderDiffView(res);
   setModalOpen($("diff-modal"), true);
 }
@@ -2843,31 +3014,80 @@ async function diffFile() {
     showDiff(res);
   } catch (e) {
     flashCount("差分エラー", "error");
-    alert(e.message);
+    showMessage("差分エラー", e.message);
   } finally {
     hideLoading();
   }
 }
 
-async function caseSave(mode) {
+// 選択メニュー「大文字に変換 / 小文字に変換」: transform the selection in the
+// editor as one undoable edit — nothing is written to disk until 保存.
+async function transformSelection(mode) {
   if (!state.stat?.open) return;
-  const base = state.stat?.path || "ayame";
-  const suffix = mode === "upper" ? "upper" : "lower";
-  const f = await askForm(`${mode === "upper" ? "大文字化" : "小文字化"}して保存`, [
-    { id: "path", type: "text", label: "保存先パス", value: `${base}.${suffix}` },
-    { id: "_hint", type: "hint", label: "ASCII 英字を変換した内容を別ファイルへ書き出します。元のファイルは変更されません。" },
-  ]);
-  if (!f || !f.path) return;
-  showLoading("変換実行中…");
-  try {
-    const res = await apiPost("/api/case/save", { path: f.path, mode });
-    flashCount(`保存しました: ${res.path}`);
-  } catch (e) {
-    flashCount("変換エラー", "error");
-    alert(e.message);
-  } finally {
-    hideLoading();
+  const fn = mode === "upper" ? (s) => s.toUpperCase() : (s) => s.toLowerCase();
+  if (!hasTextSelection()) {
+    flashCount("変換する範囲を選択してください", "error");
+    return;
   }
+  if (selectionLineCount() > MAX_COPY_LINES) {
+    flashCount(`変換は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    return;
+  }
+  const rr = rectRange();
+  enqueueEdit(async () => {
+    if (rr) {
+      const total = rr.l1 - rr.l0 + 1;
+      const res = await api(`/api/lines?start=${rr.l0}&count=${total}`);
+      const edits = [];
+      res.lines.forEach((rec, i) => {
+        const chars = Array.from(rec.text ?? "");
+        const c0 = Math.min(rr.c0, chars.length);
+        const c1 = Math.min(rr.c1, chars.length);
+        const piece = chars.slice(c0, c1).join("");
+        const next = fn(piece);
+        if (c1 > c0 && next !== piece) {
+          edits.push({ l0: rr.l0 + i, c0, l1: rr.l0 + i, c1, text: next });
+        }
+      });
+      return edits.length ? applyBatchPlain(edits) : null;
+    }
+    // Normal / multi-cursor selections: one edit per cursor, one undo step.
+    const cursors = allCursors();
+    const texts = [];
+    for (const c of cursors) {
+      const r = cursorSelectionRange(c);
+      texts.push(r ? fn(await selectedTextForRange(r)) : null);
+    }
+    const edits = [];
+    const editOf = cursors.map((c, i) => {
+      if (texts[i] == null) return -1;
+      edits.push({ ...cursorReplaceRange(c), text: texts[i] });
+      return edits.length - 1;
+    });
+    if (!edits.length) return null;
+    return applyBatch(edits, cursors, editOf);
+  });
+}
+
+// Apply a prepared edit batch that is not tied to the cursors (rect case
+// transform, replace-all) and refresh the view around the existing caret.
+async function applyBatchPlain(edits) {
+  const ctx = editContext();
+  await apiPost("/api/edit/replace_batch", { edits });
+  if (!sameEditContext(ctx)) return;
+  state.sel = null;
+  state.extraCursors = [];
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-batch refresh failed", e);
+    flashCount("再読込エラー");
+  }
+  if (!sameEditContext(ctx)) return;
+  setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+  revealCaret();
+  render();
 }
 
 // ---- input wiring ----------------------------------------------------------
@@ -2921,6 +3141,18 @@ function initEvents() {
     hideFind();
     focusEditor();
   });
+  $("find-expand").addEventListener("click", () => setReplaceRow(!state.replaceOpen));
+  $("replace-one").addEventListener("click", () => replaceCurrent());
+  $("replace-all").addEventListener("click", () => replaceAll());
+  $("replace-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      replaceCurrent();
+    } else if (e.key === "Escape") {
+      hideFind();
+      focusEditor();
+    }
+  });
   $("find-next").addEventListener("click", () => findStep("next"));
   $("find-prev").addEventListener("click", () => findStep("prev"));
   $("opt-case").addEventListener("click", () => toggleOpt("ci", "opt-case"));
@@ -2963,6 +3195,56 @@ function toggleOpt(key, id) {
   buildMatcher();
   scheduleRender();
   if (state.query) updateCount();
+}
+
+// ---- generic confirm / message dialog (replaces window.confirm/alert) -----
+// The browser dialogs leak the server origin into their chrome
+// ("127.0.0.1:PORT の内容"); everything user-facing goes through this modal.
+function confirmVisible() { return !$("confirm").classList.contains("hidden"); }
+
+function askConfirm(title, message, opts = {}) {
+  return new Promise((resolve) => {
+    const modal = $("confirm");
+    const okBtn = $("confirm-ok");
+    const cancelBtn = $("confirm-cancel");
+    $("confirm-title").textContent = title || "確認";
+    $("confirm-message").textContent = message || "";
+    okBtn.textContent = opts.okLabel || "OK";
+    okBtn.classList.toggle("danger", !!opts.danger);
+    okBtn.classList.toggle("primary", !opts.danger);
+    cancelBtn.textContent = opts.cancelLabel || "キャンセル";
+    cancelBtn.classList.toggle("hidden", !!opts.alert);
+    setModalOpen(modal, true);
+    queueMicrotask(() => okBtn.focus());
+    const finish = (val) => {
+      setModalOpen(modal, false);
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      $("confirm-close").removeEventListener("click", onCancel);
+      modal.removeEventListener("mousedown", onBackdrop);
+      modal.removeEventListener("keydown", onKey);
+      focusEditor();
+      resolve(val);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+      else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+    };
+    const onBackdrop = (ev) => { if (ev.target === modal) finish(false); };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    $("confirm-close").addEventListener("click", onCancel);
+    modal.addEventListener("mousedown", onBackdrop);
+    modal.addEventListener("keydown", onKey);
+  });
+}
+
+// OK-only variant for error details and notices (replaces window.alert).
+function showMessage(title, message) {
+  return askConfirm(title, message, { alert: true });
 }
 
 // ---- generic input prompt (replaces the browser's window.prompt) ---------
@@ -3117,7 +3399,7 @@ function gotoLine(n) {
 // opener / prompt / settings), never the editor's hidden textarea.
 function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
-  if (promptVisible() || formVisible()) return;
+  if (promptVisible() || formVisible() || confirmVisible()) return;
   if (e.key === "Escape" && ctxMenuVisible()) { e.preventDefault(); hideCtxMenu(); return; }
   if (e.key === "Escape" && fileMenuVisible()) { e.preventDefault(); hideFileMenu(true); return; }
   if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
@@ -3148,6 +3430,7 @@ function onGlobalKey(e) {
     return;
   }
   if (matchesShortcut(e, "find")) { e.preventDefault(); showFind(); return; }
+  if (matchesShortcut(e, "replace")) { e.preventDefault(); showFind(true); return; }
   if (matchesShortcut(e, "saveAs")) { e.preventDefault(); hideFileMenu(); saveCopy(); return; }
   if (matchesShortcut(e, "saveFile")) { e.preventDefault(); hideFileMenu(); saveFile(); return; }
   if (matchesShortcut(e, "findPrev")) { e.preventDefault(); findStep("prev"); return; }
@@ -3156,19 +3439,17 @@ function onGlobalKey(e) {
   if (matchesShortcut(e, "searchRegex")) { e.preventDefault(); toggleOpt("regex", "opt-regex"); return; }
   if (matchesShortcut(e, "searchWord")) { e.preventDefault(); toggleOpt("word", "opt-word"); return; }
   if (matchesShortcut(e, "sortSave")) { e.preventDefault(); sortSave(); return; }
-  if (matchesShortcut(e, "replaceSave")) { e.preventDefault(); replaceSave(); return; }
   if (matchesShortcut(e, "diffFile")) { e.preventDefault(); diffFile(); return; }
   if (matchesShortcut(e, "splitFile")) { e.preventDefault(); splitFile(); return; }
-  if (matchesShortcut(e, "caseUpper")) { e.preventDefault(); caseSave("upper"); return; }
-  if (matchesShortcut(e, "caseLower")) { e.preventDefault(); caseSave("lower"); return; }
   if (matchesShortcut(e, "settings")) { e.preventDefault(); showSettings(); return; }
   if (matchesShortcut(e, "keymap")) { e.preventDefault(); showKeymap(); return; }
-  if (matchesShortcut(e, "revert")) { e.preventDefault(); revertEdits(); return; }
   // Editor clipboard / history — not while typing in a search or dialog field.
   if (inField) return;
   if (matchesShortcut(e, "selectAll")) { e.preventDefault(); selectAll(); return; }
   if (matchesShortcut(e, "copy")) { e.preventDefault(); copySelection(); return; }
   if (matchesShortcut(e, "cut")) { e.preventDefault(); cutSelection(); return; }
+  if (matchesShortcut(e, "caseUpper")) { e.preventDefault(); transformSelection("upper"); return; }
+  if (matchesShortcut(e, "caseLower")) { e.preventDefault(); transformSelection("lower"); return; }
   if (matchesShortcut(e, "redo")) { e.preventDefault(); redoEdit(); return; }
   if (matchesShortcut(e, "undo")) { e.preventDefault(); undoEdit(); return; }
 }
@@ -3425,7 +3706,7 @@ function configureOpener(mode, title) {
   const save = mode === "save";
   const m = $("opener");
   m.classList.toggle("save-mode", save);
-  $("opener-title").textContent = title || (save ? "別名で保存" : "ファイルを開く");
+  $("opener-title").textContent = title || (save ? "名前を付けて保存" : "ファイルを開く");
   $("opener-input-label").textContent = save ? "ファイル名" : "パス";
   $("opener-input").placeholder = save
     ? "保存するファイル名、またはフルパス"
@@ -3549,7 +3830,7 @@ function markPickedFile(name) {
   }
 }
 
-function saveDialogTarget() {
+async function saveDialogTarget() {
   const raw = $("opener-input").value.trim();
   if (!raw) {
     openerMsg("保存するファイル名を入力してください");
@@ -3559,33 +3840,61 @@ function saveDialogTarget() {
   const base = pathBaseName(path);
   const existing = state.openerEntries.find((e) => !e.is_dir && e.name === base);
   const overwrite = !!existing;
-  if (overwrite && !confirm(`${base} は既に存在します。上書きしますか?`)) return null;
+  if (overwrite) {
+    const ok = await askConfirm(
+      "上書きの確認",
+      `${base} は既に存在します。上書きしますか?`,
+      { okLabel: "上書き", danger: true }
+    );
+    if (!ok) return null;
+  }
   return { path, overwrite };
 }
 
-function commitOpener() {
+async function commitOpener() {
   if (state.openerMode === "save") {
-    const target = saveDialogTarget();
+    const target = await saveDialogTarget();
     if (target) finishSaveDialog(target);
     return;
   }
   openPath($("opener-input").value);
 }
 
-function confirmDiscardIfDirty() {
-  if (!state.stat?.dirty) return true;
-  return confirm("未保存の編集があります。別のファイルを開くと破棄されます。開きますか?");
+// A pristine untitled buffer (never typed in, never saved) is replaced when a
+// real file is opened, Notepad++/VS Code-style — otherwise every launch would
+// leave an empty "untitled" tab dangling next to the opened file.
+function pristineUntitledTabId() {
+  const active = (state.tabs || []).find((t) => t.active);
+  if (!active || active.dirty || !isUntitled(active.path)) return null;
+  if (state.stat?.dirty || state.stat?.can_undo) return null;
+  return active.id;
+}
+
+async function closeTabSilently(id) {
+  if (id == null) return;
+  try {
+    // Re-check against the server's current truth: only a still-open,
+    // background, still-clean tab is closed.
+    const r = await api("/api/tabs");
+    const tab = (r.tabs || []).find((t) => t.id === id);
+    if (!tab || tab.active || tab.dirty) return;
+    await apiPost("/api/tabs/close", { id });
+    refreshTabs();
+  } catch {
+    // non-fatal: the extra tab just stays
+  }
 }
 
 async function openPath(path) {
   const p = (path || "").trim();
   if (!p) return;
   await settleEditQueue();
-  if (!confirmDiscardIfDirty()) return;
+  const pristine = pristineUntitledTabId();
   openerMsg("開いています…", true);
   try {
     const stat = await apiPost("/api/open", { path: p });
     onDocumentOpened(stat);
+    await closeTabSilently(pristine);
   } catch (e) {
     reportOpenError("開けません: " + e.message);
   }
@@ -3593,7 +3902,7 @@ async function openPath(path) {
 
 async function uploadFile(file) {
   await settleEditQueue();
-  if (!confirmDiscardIfDirty()) return;
+  const pristine = pristineUntitledTabId();
   openerMsg(`読み込み中… (${file.name})`, true);
   showLoading(`読み込み中… ${file.name}`);
   try {
@@ -3603,6 +3912,7 @@ async function uploadFile(file) {
     });
     if (!r.ok) throw new Error((await r.text()) || r.statusText);
     onDocumentOpened(await r.json());
+    await closeTabSilently(pristine);
   } catch (e) {
     reportOpenError("読み込みエラー: " + e.message);
   } finally {
@@ -3616,8 +3926,8 @@ function reportOpenError(msg) {
   if (openerVisible()) {
     openerMsg(msg);
   } else if (state.stat?.open) {
-    flashCount("読み込みエラー");
-    alert(msg);
+    flashCount("読み込みエラー", "error");
+    showMessage("読み込みエラー", msg);
   } else {
     showOpener();
     openerMsg(msg);
@@ -3703,7 +4013,7 @@ function renderTabs(list) {
     const el = document.createElement("div");
     el.className = "tab" + (t.active ? " active" : "") + (t.dirty ? " dirty" : "");
     el.dataset.id = String(t.id);
-    el.title = t.path;
+    el.title = displayPath(t.path);
     el.setAttribute("role", "tab");
     el.setAttribute("aria-selected", t.active ? "true" : "false");
     el.tabIndex = 0;
@@ -3758,7 +4068,14 @@ async function selectTab(id) {
 async function closeTab(id) {
   await settleEditQueue();
   const t = state.tabs.find((x) => x.id === id);
-  if (t && t.dirty && !confirm(`${t.name} の未保存の編集を破棄して閉じますか?`)) return;
+  if (t && t.dirty) {
+    const ok = await askConfirm(
+      "タブを閉じる",
+      `${t.name} の未保存の編集を破棄して閉じますか?`,
+      { okLabel: "破棄して閉じる", danger: true }
+    );
+    if (!ok) return;
+  }
   try {
     const stat = await apiPost("/api/tabs/close", { id });
     if (!stat.open) {
@@ -3796,8 +4113,8 @@ async function treeSetRoot(dir) {
     const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
     const res = await api(`/api/browse${q}`);
     state.treeParent = res.parent;
-    $("sb-root").textContent = res.dir;
-    $("sb-root").title = res.dir;
+    $("sb-root").textContent = displayPath(res.dir);
+    $("sb-root").title = displayPath(res.dir);
     try {
       localStorage.setItem(TREE_KEY, res.dir);
     } catch {
@@ -3853,10 +4170,12 @@ function renderTreeNode(ent, depth) {
       meta.textContent = humanBytes(ent.size);
       row.append(meta);
     }
-    row.title = ent.path;
+    row.title = displayPath(ent.path);
     row.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPath(ent.path); // opens in a new tab
+      // Opens in a new tab; a file that is already open just gets focused
+      // (the server dedupes by path).
+      openPath(ent.path);
     });
     return row;
   }
@@ -3949,6 +4268,7 @@ function runMenuAction(action) {
   if (action === "undo") return undoEdit();
   if (action === "redo") return redoEdit();
   if (action === "find") return showFind();
+  if (action === "replace") return showFind(true);
   if (action === "gotoLine") {
     askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
     return;
@@ -3962,13 +4282,11 @@ function runMenuAction(action) {
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
   if (action === "settings") return showSettings();
   if (action === "sortSave") return sortSave();
-  if (action === "replaceSave") return replaceSave();
   if (action === "diffFile") return diffFile();
   if (action === "splitFile") return splitFile();
-  if (action === "caseUpper") return caseSave("upper");
-  if (action === "caseLower") return caseSave("lower");
+  if (action === "caseUpper") return transformSelection("upper");
+  if (action === "caseLower") return transformSelection("lower");
   if (action === "keymap") return showKeymap();
-  if (action === "revert") return revertEdits();
   if (action === "newFile") return newUntitled();
   if (action === "openFile") return showOpener();
   if (action === "saveFile") return saveFile();

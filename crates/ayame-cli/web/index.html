@@ -46,31 +46,23 @@
     </svg>
     <div id="app">
       <nav id="menubar" role="menubar" aria-label="メニュー">
-        <a class="app-brand" href="/" aria-label="Ayame Editor">
-          <img src="/ayame-logo.svg" width="150" height="32" alt="Ayame Editor" />
-        </a>
         <div class="menu-shell">
           <button id="file-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false">
             ファイル
           </button>
           <div id="file-menu" class="file-menu hidden" role="menu" aria-label="ファイル">
             <button id="new-file" class="menu-item" role="menuitem">
-              <span class="menu-label">新規テキスト</span><span class="menu-key" data-key-action="newFile">Ctrl+N</span>
+              <span class="menu-label">新規ファイル</span><span class="menu-key" data-key-action="newFile">Ctrl+N</span>
             </button>
             <button id="open-file" class="menu-item" role="menuitem">
-              <span class="menu-label">開く...</span><span class="menu-key" data-key-action="openFile">Ctrl+O</span>
+              <span class="menu-label">開く</span><span class="menu-key" data-key-action="openFile">Ctrl+O</span>
             </button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button id="save-file" class="menu-item" role="menuitem">
               <span class="menu-label">保存</span><span class="menu-key" data-key-action="saveFile">Ctrl+S</span>
             </button>
             <button id="save-copy" class="menu-item" role="menuitem">
-              <span class="menu-label">別名で保存...</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
-            </button>
-            <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="revert" role="menuitem"
-                    title="未保存の編集をすべて破棄して、ディスク上の内容に戻します">
-              <span class="menu-label">保存時の状態に戻す</span><span class="menu-key" data-key-action="revert"></span>
+              <span class="menu-label">名前を付けて保存</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
             </button>
           </div>
         </div>
@@ -81,6 +73,7 @@
             <button class="menu-item" data-menu-action="redo" role="menuitem"><span class="menu-label">やり直す</span><span class="menu-key" data-key-action="redo">Ctrl+Y</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+            <button class="menu-item" data-menu-action="replace" role="menuitem"><span class="menu-label">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
             <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
           </div>
         </div>
@@ -92,8 +85,11 @@
             <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
             <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="addCursorAbove" role="menuitem"><span class="menu-label">カーソルを上に追加</span><span class="menu-key" data-key-action="addCursorAbove">Ctrl+Alt+ArrowUp</span></button>
-            <button class="menu-item" data-menu-action="addCursorBelow" role="menuitem"><span class="menu-label">カーソルを下に追加</span><span class="menu-key" data-key-action="addCursorBelow">Ctrl+Alt+ArrowDown</span></button>
+            <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字に変換</span><span class="menu-key" data-key-action="caseUpper"></span></button>
+            <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字に変換</span><span class="menu-key" data-key-action="caseLower"></span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="addCursorAbove" role="menuitem"><span class="menu-label">カーソルを上に追加</span><span class="menu-key" data-key-action="addCursorAbove">Ctrl+Alt+↑</span></button>
+            <button class="menu-item" data-menu-action="addCursorBelow" role="menuitem"><span class="menu-label">カーソルを下に追加</span><span class="menu-key" data-key-action="addCursorBelow">Ctrl+Alt+↓</span></button>
           </div>
         </div>
         <div class="menu-shell">
@@ -133,7 +129,7 @@
         <div class="tb-sep"></div>
 
         <div class="menu-shell">
-          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・置換・差分・分割・ケース変換">
+          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・差分・分割">
             <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール">
@@ -141,17 +137,11 @@
                     title="行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)">
               <span class="menu-label">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
             </button>
-            <button class="menu-item" data-menu-action="replaceSave" role="menuitem"><span class="menu-label">置換して保存</span><span class="menu-key" data-key-action="replaceSave"></span></button>
             <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
             <button class="menu-item" data-menu-action="splitFile" role="menuitem"
                     title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)">
               <span class="menu-label">ファイルを分割</span><span class="menu-key" data-key-action="splitFile"></span>
             </button>
-            <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="caseUpper" role="menuitem"><span class="menu-label">大文字化して保存</span><span class="menu-key" data-key-action="caseUpper"></span></button>
-            <button class="menu-item" data-menu-action="caseLower" role="menuitem"><span class="menu-label">小文字化して保存</span><span class="menu-key" data-key-action="caseLower"></span></button>
-            <div class="menu-sep" aria-hidden="true"></div>
-            <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label">キー設定</span><span class="menu-key" data-key-action="keymap"></span></button>
           </div>
         </div>
       </header>
@@ -191,12 +181,15 @@
                       aria-label="エディタ"></textarea>
           </div>
           <div id="vscrollbar"><div id="vticks"></div><div id="vthumb"></div></div>
-          <!-- Floating in-editor search (VS Code style): overlays the top-right
-               of the viewport so the toolbar stays minimal. -->
-          <div class="find-group" role="search" aria-label="検索">
+          <!-- Floating in-editor search & replace (VS Code style): overlays the
+               top-right of the viewport so the toolbar stays minimal. -->
+          <div class="find-group" role="search" aria-label="検索と置換">
             <div class="field find">
+              <button id="find-expand" class="ico find-expand" title="置換を表示 (Ctrl+H)"
+                      aria-label="置換を表示" aria-expanded="false"></button>
               <svg class="ay-icon find-mag"><use href="#i-search"></use></svg>
               <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
+              <span id="find-count" class="find-count"></span>
               <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
               <button id="opt-word" class="toggle" title="単語単位 (Alt+W)">ab</button>
               <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
@@ -206,25 +199,29 @@
               <button id="find-next" class="ico" title="次の一致 (F3)" aria-label="次の一致">
                 <svg class="ay-icon"><use href="#i-down"></use></svg>
               </button>
-              <span id="find-count" class="find-count"></span>
               <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる">×</button>
+            </div>
+            <div class="field replace-row" role="group" aria-label="置換">
+              <input id="replace-input" type="text" autocomplete="off" placeholder="置換後" />
+              <button id="replace-one" class="cmd replace-btn" title="現在の一致を置換して次へ">置換</button>
+              <button id="replace-all" class="cmd replace-btn" title="すべての一致を置換 (元に戻せます)">すべて置換</button>
             </div>
           </div>
           <div id="overlay" class="overlay hidden"></div>
         </main>
       </div>
 
-      <!-- Status bar keeps only the always-useful vitals; totals and sizes
-           live in the explorer / tab tooltips. #st-msg is the single visible
-           home for operation feedback (save results, errors, hints). -->
+      <!-- Status bar keeps only the always-useful vitals, right-aligned like a
+           normal editor; feedback (save results, errors, hints) lives on the
+           left in #st-msg, the single visible home for operation messages. -->
       <footer id="statusbar">
-        <span id="st-pos" class="seg">—</span>
-        <span id="st-enc" class="seg">—</span>
-        <span id="st-eol" class="seg">—</span>
-        <span id="st-edit" class="seg">—</span>
         <span id="st-saving" class="seg saving-seg hidden" role="status">保存中…</span>
         <span id="st-msg" class="seg msg" role="status" aria-live="polite"></span>
         <div class="spacer"></div>
+        <span id="st-pos" class="seg">—</span>
+        <span id="st-edit" class="seg">—</span>
+        <span id="st-enc" class="seg">—</span>
+        <span id="st-eol" class="seg">—</span>
         <span id="st-index" class="seg dim">—</span>
       </footer>
     </div>
@@ -396,6 +393,24 @@
       </div>
     </div>
 
+    <!-- Generic confirm / message dialog (replaces the browser's
+         window.confirm and window.alert — no more "127.0.0.1 の内容"). -->
+    <div id="confirm" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel confirm-panel" role="dialog" aria-label="確認">
+        <div class="modal-head">
+          <div class="modal-title" id="confirm-title">確認</div>
+          <button id="confirm-close" class="modal-x" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="confirm-body">
+          <div id="confirm-message" class="confirm-message"></div>
+          <div class="confirm-actions">
+            <button id="confirm-cancel" class="cmd">キャンセル</button>
+            <button id="confirm-ok" class="cmd primary">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Generic input prompt (replaces the browser's window.prompt). -->
     <div id="prompt" class="modal hidden" aria-hidden="true">
       <div class="modal-panel prompt-panel" role="dialog" aria-label="入力">
@@ -429,9 +444,9 @@
       </button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="find" role="menuitem"><span class="menu-label">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
+      <button class="menu-item" data-ctx="replace" role="menuitem"><span class="menu-label">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="sortSave" role="menuitem"><span class="menu-label">ソート</span><span class="menu-key"></span></button>
-      <button class="menu-item" data-ctx="replaceSave" role="menuitem"><span class="menu-label">置換して保存</span><span class="menu-key"></span></button>
       <button class="menu-item" data-ctx="diffFile" role="menuitem"><span class="menu-label">2ファイル差分</span><span class="menu-key"></span></button>
       <button class="menu-item" data-ctx="splitFile" role="menuitem"><span class="menu-label">ファイルを分割</span><span class="menu-key"></span></button>
     </div>

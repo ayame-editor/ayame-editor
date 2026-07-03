@@ -598,7 +598,14 @@ impl AppState {
     /// the install itself is one atomic workspace mutation, serialized against
     /// other transitions. Stale aside files of `path` (crash leftovers from
     /// any previous session) are swept before opening.
+    ///
+    /// A path that is ALREADY open in some tab focuses that tab instead of
+    /// opening a duplicate — clicking a file in the explorer means "go to that
+    /// file", the same as every tabbed editor.
     pub(super) async fn open_path(&self, path: String) -> Result<(), (StatusCode, String)> {
+        if let Some(id) = self.tab_with_path(Path::new(&path)).await {
+            return self.switch_tab(id).await;
+        }
         let opts = self.open_opts.clone();
         let p = path.clone();
         let doc = tokio::task::spawn_blocking(move || {
@@ -613,6 +620,45 @@ impl AppState {
         remove_aside_files(orphaned);
         self.invalidate_dirty_snapshot(); // a different tab is active now
         Ok(())
+    }
+
+    /// The tab (if any) whose document is `path`, compared literally first and
+    /// then by canonical path so `C:\x\f.txt` and `\\?\C:\x\f.txt`, or a path
+    /// reached through a symlink, still match. Filesystem calls run off the
+    /// async runtime and never under the workspace lock.
+    async fn tab_with_path(&self, path: &Path) -> Option<u64> {
+        let target = path.to_path_buf();
+        let tabs: Vec<(u64, PathBuf)> = self.read(|ws| {
+            ws.tabs
+                .order
+                .iter()
+                .filter_map(|&id| {
+                    let doc = if ws.tabs.active == Some(id) {
+                        ws.doc.as_ref()
+                    } else {
+                        ws.tabs.inactive.get(&id).map(|t| &t.doc)
+                    }?;
+                    Some((id, doc.path().to_path_buf()))
+                })
+                .collect()
+        });
+        if tabs.is_empty() {
+            return None;
+        }
+        tokio::task::spawn_blocking(move || {
+            let canon = std::fs::canonicalize(&target).ok();
+            tabs.into_iter()
+                .find(|(_, p)| {
+                    *p == target
+                        || canon
+                            .as_deref()
+                            .is_some_and(|c| std::fs::canonicalize(p).is_ok_and(|pc| pc == c))
+                })
+                .map(|(id, _)| id)
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     /// Best-effort deletion of every tracked aside file (all tabs), for the

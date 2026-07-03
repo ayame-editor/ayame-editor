@@ -134,7 +134,7 @@ pub(super) async fn api_browse(
         let is_dir = meta.is_dir();
         entries.push(BrowseEntry {
             name,
-            path: ent.path().to_string_lossy().to_string(),
+            path: strip_verbatim(&ent.path().to_string_lossy()),
             is_dir,
             size: if is_dir { 0 } else { meta.len() },
         });
@@ -149,12 +149,27 @@ pub(super) async fn api_browse(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    let parent = dir.parent().map(|p| p.to_string_lossy().to_string());
+    let parent = dir.parent().map(|p| strip_verbatim(&p.to_string_lossy()));
     Ok(Json(BrowseResponse {
-        dir: dir.to_string_lossy().to_string(),
+        dir: strip_verbatim(&dir.to_string_lossy()),
         parent,
         entries,
     }))
+}
+
+/// Drop the Windows extended-length prefix that `canonicalize` adds
+/// (`\\?\C:\…` → `C:\…`, `\\?\UNC\server\share` → `\\server\share`). Every
+/// path that reaches the browser goes through this: the prefix is an
+/// implementation detail that reads as garbage in the UI, and paths without
+/// it stay valid inputs for reopening/saving.
+pub(crate) fn strip_verbatim(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
 }
 
 fn default_browse_dir(state: &AppState) -> PathBuf {

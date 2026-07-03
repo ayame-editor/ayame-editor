@@ -81,8 +81,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     let init_script = match &pending_open {
         Some(p) => {
             // Absolute-ize so the server resolves the path regardless of cwd.
+            // The Windows verbatim prefix canonicalize adds is stripped so it
+            // never surfaces in tab tooltips or save dialogs.
             let abs = std::fs::canonicalize(p)
-                .map(|x| x.to_string_lossy().into_owned())
+                .map(|x| crate::serve::workspace::strip_verbatim(&x.to_string_lossy()))
                 .unwrap_or_else(|_| p.clone());
             format!(
                 "window.__ayamePendingOpen = {};",
@@ -348,11 +350,11 @@ fn build_macos_menu() -> Option<muda::Menu> {
         "ファイル",
         true,
         &[
-            &item("newFile", "新規テキスト", key(cmd, Code::KeyN)),
-            &item("openFile", "開く…", key(cmd, Code::KeyO)),
+            &item("newFile", "新規ファイル", key(cmd, Code::KeyN)),
+            &item("openFile", "開く", key(cmd, Code::KeyO)),
             &PredefinedMenuItem::separator(),
             &item("saveFile", "保存", key(cmd, Code::KeyS)),
-            &item("saveAs", "別名で保存…", key(shift_cmd, Code::KeyS)),
+            &item("saveAs", "名前を付けて保存", key(shift_cmd, Code::KeyS)),
             &PredefinedMenuItem::separator(),
             &item("closeTab", "タブを閉じる", key(cmd, Code::KeyW)),
         ],
@@ -374,6 +376,7 @@ fn build_macos_menu() -> Option<muda::Menu> {
             &item("selectAll", "すべて選択", key(cmd, Code::KeyA)),
             &PredefinedMenuItem::separator(),
             &item("find", "検索", key(cmd, Code::KeyF)),
+            &item("replace", "置換", None),
         ],
     )
     .ok()?;

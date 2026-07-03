@@ -154,12 +154,37 @@ pub(super) struct EditSaveRequest {
     path: Option<String>,
     #[serde(default)]
     overwrite: bool,
+    /// 名前を付けて保存 semantics: after a successful save the ACTIVE TAB shows
+    /// the saved file (instead of leaving the tab on the old document and
+    /// opening the saved copy as a second tab).
+    #[serde(default)]
+    switch_to_saved: bool,
+}
+
+/// [`SaveResult`] plus whether the active tab now shows the saved file.
+#[derive(Serialize)]
+pub(super) struct EditSaveResponse {
+    path: PathBuf,
+    bytes: u64,
+    lines: u64,
+    switched: bool,
+}
+
+impl EditSaveResponse {
+    fn from_result(res: SaveResult, switched: bool) -> Self {
+        EditSaveResponse {
+            path: res.path,
+            bytes: res.bytes,
+            lines: res.lines,
+            switched,
+        }
+    }
 }
 
 pub(super) async fn api_edit_save(
     State(state): State<SharedState>,
     Json(req): Json<EditSaveRequest>,
-) -> Result<Json<SaveResult>, (StatusCode, String)> {
+) -> Result<Json<EditSaveResponse>, (StatusCode, String)> {
     // Consistent snapshot (doc + edits + revision) under one lock acquisition.
     let mut snap = state.edit_snapshot()?;
     let active_path = snap.doc.path().to_path_buf();
@@ -182,18 +207,30 @@ pub(super) async fn api_edit_save(
         // snapshot alone is enough — edits made during the save simply stay
         // pending against the still-open document.
         let target_for_save = target.clone();
+        let doc_for_save = snap.doc.clone();
+        let edits_for_save = snap.take_edits();
         let res = tokio::task::spawn_blocking(move || {
             if req.overwrite {
-                snap.edits
-                    .save_to_path_overwrite(&snap.doc, target_for_save)
+                edits_for_save.save_to_path_overwrite(&doc_for_save, target_for_save)
             } else {
-                snap.edits.save_to_path(&snap.doc, target_for_save)
+                edits_for_save.save_to_path(&doc_for_save, target_for_save)
             }
         })
         .await
         .map_err(internal)?
         .map_err(bad_request)?;
-        return Ok(Json(res));
+        let mut switched = false;
+        if req.switch_to_saved {
+            // Make the saved file the active tab's document (fresh, clean
+            // session — the saved bytes ARE the view). Skipped when the
+            // workspace moved on while the save was streaming; the client
+            // then falls back to opening the file normally.
+            let _transitions = state.lock_transitions().await;
+            if state.confirm_overwrite(&snap).is_ok() {
+                switched = state.reload_reverted(res.path.clone()).await.is_ok();
+            }
+        }
+        return Ok(Json(EditSaveResponse::from_result(res, switched)));
     }
 
     // In-place overwrite. Phase 1 — stream the snapshot to a stage file
@@ -235,10 +272,14 @@ pub(super) async fn api_edit_save(
     match swapped {
         Ok(aside_used) => {
             state.commit_in_place_save(&snap, aside_used);
-            Ok(Json(SaveResult {
+            // The active tab already shows the saved path: report it as
+            // switched so 名前を付けて保存 onto the same file refreshes in
+            // place instead of opening anything.
+            Ok(Json(EditSaveResponse {
                 path: target,
                 bytes: saved.bytes,
                 lines: saved.lines,
+                switched: true,
             }))
         }
         // The swap either rolled back (target intact) or kept the stage (its

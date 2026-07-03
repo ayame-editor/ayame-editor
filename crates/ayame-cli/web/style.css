@@ -180,26 +180,6 @@ html, body {
   position: relative;
   z-index: 48;
 }
-.app-brand {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  margin-right: auto; /* menus sit right-aligned in the title bar */
-  padding: 0 2px;
-  text-decoration: none;
-  flex: 0 0 auto;
-}
-/* Right-aligned menubar shells anchor their dropdown to the right edge so the
-   last menu never overflows the window. */
-#menubar .file-menu {
-  left: auto;
-  right: 0;
-}
-.app-brand img {
-  display: block;
-  width: 150px;
-  height: 32px;
-}
 .menubar-button {
   height: 24px;
   min-width: 0;
@@ -342,7 +322,11 @@ button.cmd { min-width: 46px; padding: 0 11px; }
   top: calc(100% + 3px);
   left: 0;
   z-index: 45;
-  width: 252px;
+  /* Wide enough for the longest label+shortcut pair: labels must never be
+     ellipsized into "カーソルを上に...". */
+  width: max-content;
+  min-width: 252px;
+  max-width: min(360px, calc(100vw - 16px));
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -403,18 +387,22 @@ button.toggle.on {
   color: #fff;
 }
 
-/* Floating in-editor search: overlays the viewport's top-right (VS Code
-   style) so opening it never reflows the toolbar or the text. */
+/* Floating in-editor search & replace: overlays the viewport's top-right
+   (VS Code style) so opening it never reflows the toolbar or the text. */
 .find-group {
   display: none;
   position: absolute;
-  top: 12px;
+  top: 10px;
   right: 24px;
   z-index: 24;
-  width: min(480px, calc(100% - 48px));
+  width: min(520px, calc(100% - 48px));
   min-width: 0;
+  flex-direction: column;
+  gap: 6px;
 }
 html.find-open .find-group { display: flex; }
+/* Sit below the column ruler instead of overlapping it. */
+#viewport.has-ruler .find-group { top: 26px; }
 
 .field {
   display: flex;
@@ -470,12 +458,61 @@ html.find-open .find-group { display: flex; }
   font-size: 16px;
 }
 
+/* Match counter sits right after the input; an empty counter collapses so no
+   stray gap opens up between the buttons. */
 .find-count {
   color: var(--fg-dim);
   font-size: 12px;
-  min-width: 52px;
+  padding: 0 4px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+  flex: 0 1 auto;
+}
+.find-count:empty { display: none; }
+
+/* Chevron that expands the replace row (rotates when open). */
+.find-expand {
+  width: 20px;
+  height: 24px;
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+.find-expand::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform .12s ease;
+}
+html.replace-open .find-expand::before { transform: rotate(90deg); }
+
+/* Replace row: hidden until expanded (Ctrl+H or the chevron). */
+.find-group .replace-row {
+  display: none;
+  height: 30px;
+  padding: 2px 7px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+}
+html.replace-open .find-group .replace-row { display: flex; }
+.replace-row input {
+  flex: 1 1 120px;
+  width: auto;
+}
+.replace-btn {
+  height: 24px;
+  min-width: 0;
+  padding: 0 9px;
+  font-size: 12px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
 }
 
 /* ---- main area (sidebar + viewport) ---------------------------------- */
@@ -504,25 +541,8 @@ html[data-sidebar-side="right"] #sidebar {
   border-left: 1px solid var(--border);
 }
 #sidebar.hidden { display: none; }
-#sidebar::after {
-  content: "";
-  position: absolute;
-  left: -26px;
-  bottom: -18px;
-  width: 250px;
-  height: 292px;
-  background: url("/iris-watercolor.png") left bottom / contain no-repeat;
-  opacity: var(--illus, 0);
-  pointer-events: none;
-  z-index: 0;
-  -webkit-mask-image: linear-gradient(to top, #000 58%, transparent 100%);
-  mask-image: linear-gradient(to top, #000 58%, transparent 100%);
-}
-html[data-sidebar-side="right"] #sidebar::after {
-  left: auto;
-  right: -26px;
-  transform: scaleX(-1);
-}
+/* No illustration in the explorer: the watercolor iris (#ambient) lives in
+   the editor viewport only, so the file tree stays plain and readable. */
 
 .sb-head {
   display: flex;
@@ -1292,14 +1312,16 @@ html.saving .caret.extra { visibility: hidden; }
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
 }
-.seg {
+/* Scoped to the segmented control: #statusbar spans share the .seg class and
+   must never flex-grow (that spread the vitals across the whole bar). */
+.seg-control .seg {
   flex: 1 1 0;
   height: 24px;
   min-width: 0;
   border-radius: calc(var(--radius) - 3px);
   color: var(--fg-dim);
 }
-.seg.on {
+.seg-control .seg.on {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
@@ -1612,6 +1634,24 @@ button { border-radius: var(--radius); }
   border-top: 1px dashed var(--border);
 }
 
+/* generic confirm / message modal (replaces window.confirm / window.alert) */
+.confirm-panel { width: min(460px, 92vw); }
+.confirm-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.confirm-message {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.confirm-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }
+.confirm-actions .cmd.hidden { display: none; }
+.cmd.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.cmd.danger:hover { background: color-mix(in srgb, var(--danger) 86%, #000); color: #fff; }
+
 /* generic prompt modal (replaces window.prompt) */
 .prompt-panel { width: min(460px, 92vw); }
 .prompt-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -1635,7 +1675,8 @@ button { border-radius: var(--radius); }
   position: fixed;
   top: 0;
   left: 0;
-  width: 252px;
+  width: max-content;
+  min-width: 252px;
   z-index: 70;
 }
 .ctx-menu .menu-item:disabled {
