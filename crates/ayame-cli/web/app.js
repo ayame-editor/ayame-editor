@@ -102,6 +102,8 @@ const state = {
   historyIndex: -1,
   settings: { ...DEFAULT_SETTINGS },
   tabs: [], // open tabs from /api/tabs
+  followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
+  tailTimer: null, // setInterval handle while following; cleared when off
   treeParent: null, // parent of the current tree root (for the "up" button)
   treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
@@ -222,6 +224,11 @@ function showAppMenu(id) {
       const on = !!state.settings.wordWrap;
       wrap.classList.toggle("checked", on);
       wrap.setAttribute("aria-checked", String(on));
+    }
+    const tail = $("menu-toggle-tail");
+    if (tail) {
+      tail.classList.toggle("checked", state.followTail);
+      tail.setAttribute("aria-checked", String(state.followTail));
     }
   }
   $(`${id}-menu`).classList.remove("hidden");
@@ -2262,6 +2269,92 @@ async function reloadViewport() {
   state.loadToken++; // cancel any in-flight ensureData for the old contents
 }
 
+// ---- 末尾に追従 (tail -f) ----------------------------------------------------
+//
+// While following, poll /api/tail/poll on an interval. On growth the server has
+// already extended the line index in place over just the appended bytes, so the
+// client only re-fetches the visible window. If the viewport was sitting at the
+// bottom we auto-scroll to the new bottom (follow); if the user had scrolled up
+// we keep their position and just let the scrollbar grow. Following pauses while
+// the session has unsaved edits (the overlay would not line up) and stops on an
+// external truncation/rotation, prompting the user to reopen.
+
+const TAIL_POLL_MS = 1000;
+
+// "At the bottom" = the last line sits within the current view; decides whether
+// a growth should follow (auto-scroll) or merely extend the scrollbar in place.
+function tailAtBottom() {
+  return state.first >= maxFirst() - 2;
+}
+
+function updateTailUI() {
+  const btn = $("st-tail");
+  if (btn) btn.classList.toggle("on", state.followTail);
+  const item = $("menu-toggle-tail");
+  if (item) {
+    item.classList.toggle("checked", state.followTail);
+    item.setAttribute("aria-checked", String(state.followTail));
+  }
+}
+
+function setFollowTail(on) {
+  on = !!on && !!state.stat?.open;
+  const was = state.followTail;
+  state.followTail = on;
+  if (state.tailTimer) {
+    clearInterval(state.tailTimer);
+    state.tailTimer = null;
+  }
+  if (on) {
+    state.tailTimer = setInterval(pollTail, TAIL_POLL_MS);
+    setFirst(maxFirst()); // jump to the tail so following starts from the end
+    flashCount("末尾に追従中 (tail -f)");
+    pollTail(); // don't wait a whole interval for the first check
+  } else if (was) {
+    flashCount("追従を停止しました");
+  }
+  updateTailUI();
+}
+
+async function pollTail() {
+  if (!state.followTail || !state.stat?.open) return;
+  if (savingCount > 0) return; // never poll mid-save
+  let resp;
+  try {
+    resp = await apiPost("/api/tail/poll");
+  } catch {
+    return; // transient (e.g. a racing reload); try again next tick
+  }
+  if (!state.followTail) return; // toggled off during the round-trip
+  if (!resp.open) {
+    setFollowTail(false);
+    return;
+  }
+  if (resp.changed) {
+    // Truncated / rotated / replaced under us: stop and let the user reopen.
+    setFollowTail(false);
+    flashCount("ファイルが外部で変更されました — 追従を停止しました", "error");
+    return;
+  }
+  // resp.pending_edits: growth seen but not followed (unsaved edits) — pause
+  // silently and resume once the overlay is clear. resp.grew false: nothing new.
+  if (resp.pending_edits || !resp.grew) return;
+  // Auto-scroll only if we were already at the bottom; otherwise adopt the new
+  // total so the scrollbar grows but the user's position is left untouched.
+  const stick = tailAtBottom();
+  state.total = resp.lines;
+  if (stick) state.first = maxFirst();
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch {
+    return;
+  }
+  if (!state.followTail) return;
+  if (stick) state.first = maxFirst();
+  render();
+}
+
 // The range the next text insertion replaces: the selection, or the caret.
 function replaceTarget() {
   const r = selRange();
@@ -3689,6 +3782,7 @@ function initEvents() {
   });
   $("st-enc").addEventListener("click", showConvert);
   $("st-eol").addEventListener("click", showConvert);
+  $("st-tail").addEventListener("click", () => setFollowTail(!state.followTail));
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
@@ -4559,6 +4653,7 @@ function reportOpenError(msg) {
 function onDocumentOpened(stat) {
   state.docGen++;
   state.editGen++; // stale in-flight edit responses must not reposition this tab
+  setFollowTail(false); // following is per-document; a new doc/tab starts un-followed
   state.stat = stat;
   pushRecentFile(stat.path);
   state.total = stat.view_lines ?? stat.lines ?? 0;
@@ -4918,6 +5013,7 @@ function runMenuAction(action) {
   if (action === "toggleWhitespace") return updateSetting("showWhitespace", !state.settings.showWhitespace);
   if (action === "toggleZenkakuUnderline") return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
   if (action === "toggleWordWrap") return updateSetting("wordWrap", !state.settings.wordWrap);
+  if (action === "toggleFollowTail") return setFollowTail(!state.followTail);
   if (action === "settings") return showSettings();
   if (action === "sortSave") return sortSave();
   if (action === "diffFile") return diffFile();

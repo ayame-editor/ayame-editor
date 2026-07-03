@@ -1146,6 +1146,12 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
   background: var(--hover);
   color: var(--accent-bright);
 }
+/* 末尾に追従 (tail -f) while active: a tinted pill so "following" is visible. */
+#statusbar button.seg-btn.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-bright);
+  font-weight: 600;
+}
 #statusbar .spacer { flex: 1; }
 /* Single visible home for operation feedback (save results, errors, hints):
    always on screen, announced politely to screen readers. */

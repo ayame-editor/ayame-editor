@@ -42,7 +42,7 @@ pub mod search;
 pub mod split;
 pub mod transform;
 
-pub use document::{Document, FileStat, Line, OpenOptions};
+pub use document::{Document, FileStat, Line, OpenOptions, TailRefresh};
 pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};

@@ -57,6 +57,20 @@ pub struct FileStat {
     pub from_cache: bool,
 }
 
+/// Outcome of polling an opened document for appended data (`tail -f`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TailRefresh {
+    /// The on-disk length is unchanged since the last refresh.
+    Unchanged,
+    /// New bytes were appended; the line index was extended in place.
+    Grew,
+    /// The file shrank or was otherwise rewritten under us (truncated, rotated,
+    /// or grown from empty so its encoding/BOM was never detected). The
+    /// immutable-prefix assumption no longer holds and the caller must reopen
+    /// and reindex from scratch.
+    Reindex,
+}
+
 pub struct Document {
     path: PathBuf,
     // The mapping must outlive every borrow of `buf()`; `_file` keeps the fd open.
@@ -156,6 +170,49 @@ impl Document {
     #[inline]
     pub fn byte_len(&self) -> u64 {
         self.len
+    }
+
+    /// Current on-disk length of the mapped file (a stat of the open fd). Used
+    /// by tail-follow to cheaply detect appended data before taking any write
+    /// path. Reads the same inode the mmap is bound to, so it stays consistent
+    /// with [`Document::refresh_tail`], which re-maps that fd.
+    pub fn disk_len(&self) -> Result<u64> {
+        Ok(self._file.metadata()?.len())
+    }
+
+    /// Poll the file for appended data and, when it grew, extend the line index
+    /// incrementally over just the new bytes (the prefix is immutable, so it is
+    /// never re-scanned). This is the core of the editor's `tail -f` follow.
+    ///
+    /// Returns [`TailRefresh::Grew`] after a successful extend, [`Unchanged`]
+    /// when the length is the same, or [`Reindex`] when the file shrank / was
+    /// replaced (or was opened empty, so its encoding was detected on no bytes)
+    /// — in which case the caller should reopen the path from scratch.
+    ///
+    /// [`Unchanged`]: TailRefresh::Unchanged
+    /// [`Reindex`]: TailRefresh::Reindex
+    pub fn refresh_tail(&mut self) -> Result<TailRefresh> {
+        let new_len = self._file.metadata()?.len();
+        if new_len == self.len {
+            return Ok(TailRefresh::Unchanged);
+        }
+        if new_len < self.len || self.len == 0 {
+            // Shrunk/rotated, or grown from empty (encoding/BOM never detected):
+            // the incremental prefix assumption does not hold — reopen.
+            return Ok(TailRefresh::Reindex);
+        }
+        // Grew: an existing mapping has a fixed length, so re-map the fd to make
+        // the appended bytes visible, then extend the index over the new range.
+        let new_mmap = unsafe { Mmap::map(&self._file)? };
+        if (new_mmap.len() as u64) < new_len {
+            // A racing shrink between the stat and the map: treat as a reindex
+            // rather than index bytes that may already be gone.
+            return Ok(TailRefresh::Reindex);
+        }
+        self.index.extend_tail(&new_mmap);
+        self.mmap = Some(new_mmap);
+        self.len = new_len;
+        Ok(TailRefresh::Grew)
     }
 
     #[inline]
@@ -586,6 +643,33 @@ mod tests {
             "changed file must not be served from cache"
         );
         assert_eq!(d3.line_count(), n + 1);
+    }
+
+    #[test]
+    fn refresh_tail_follows_appended_data() {
+        use std::fs::OpenOptions as FsOpenOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("follow.log");
+        std::fs::write(&path, b"line 0\nline 1\n").unwrap();
+
+        let mut doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        assert_eq!(doc.line_count(), 2);
+        // No change yet.
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Unchanged);
+        assert_eq!(doc.line_count(), 2);
+
+        // Append two more lines out-of-band and follow them.
+        let mut f = FsOpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"line 2\nline 3\n").unwrap();
+        f.flush().unwrap();
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Grew);
+        assert_eq!(doc.line_count(), 4);
+        assert_eq!(doc.line(3).unwrap(), "line 3");
+        assert_eq!(doc.byte_len(), std::fs::metadata(&path).unwrap().len());
+
+        // Truncating (a shrink) signals that a full reindex is needed.
+        std::fs::write(&path, b"fresh\n").unwrap();
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Reindex);
     }
 
     #[test]

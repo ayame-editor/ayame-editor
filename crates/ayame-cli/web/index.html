@@ -110,6 +110,7 @@
             <button class="menu-item" id="menu-toggle-ws" data-menu-action="toggleWhitespace" role="menuitemcheckbox" aria-checked="false"><span class="menu-label">空白・改行を表示</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-zsp-underline" data-menu-action="toggleZenkakuUnderline" role="menuitemcheckbox" aria-checked="false"><span class="menu-label">全角空白を下線で表示</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-wrap" data-menu-action="toggleWordWrap" role="menuitemcheckbox" aria-checked="false"><span class="menu-label">折り返し</span><span class="menu-key"></span></button>
+            <button class="menu-item" id="menu-toggle-tail" data-menu-action="toggleFollowTail" role="menuitemcheckbox" aria-checked="false"><span class="menu-label">末尾に追従 (tail -f)</span><span class="menu-key"></span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="settings" role="menuitem"><span class="menu-label">設定</span><span class="menu-key" data-key-action="settings"></span></button>
           </div>
@@ -235,6 +236,7 @@
         <span id="st-msg" class="seg msg" role="status" aria-live="polite"></span>
         <div class="spacer"></div>
         <span id="st-pos" class="seg">—</span>
+        <button id="st-tail" class="seg seg-btn" title="末尾に追従 (tail -f)">追従</button>
         <span id="st-edit" class="seg">—</span>
         <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存">—</button>
         <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存">—</button>

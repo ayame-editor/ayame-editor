@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
-use ayame_core::{Document, EditSession, Encoding, OpenOptions};
+use ayame_core::{Document, EditSession, Encoding, OpenOptions, TailRefresh};
 use serde::Serialize;
 
 use super::ops::WorkerInput;
@@ -452,6 +452,79 @@ impl AppState {
         self.open_opts.clone()
     }
 
+    /// Poll the active document for appended data (`tail -f`). When it grew and
+    /// the session has no pending edits, the line index is extended in place
+    /// over just the new bytes; a shrink or external replacement reports
+    /// `changed` so the client can reopen. Blocking (stat + mmap + scan), so
+    /// callers should run it off the async runtime.
+    pub(super) fn poll_tail(&self) -> TailStatus {
+        // Cheap peek under a short read lock: an Arc handle plus whether the
+        // overlay holds edits (we only follow a clean, unedited view — the
+        // overlay's line anchors reference the original document).
+        let (doc, has_edits) = self.read(|ws| match ws.doc() {
+            Some(d) => (Some(d.clone()), ws.edits.has_edits()),
+            None => (None, false),
+        });
+        let Some(doc) = doc else {
+            return TailStatus::closed();
+        };
+        let known = doc.byte_len();
+        let disk = match doc.disk_len() {
+            Ok(n) => n,
+            // A stat failure (the file vanished) reads as "changed externally".
+            Err(_) => {
+                let mut s = TailStatus::at(doc.line_count(), known);
+                s.changed = true;
+                return s;
+            }
+        };
+        if disk == known {
+            return TailStatus::at(doc.line_count(), known);
+        }
+        if disk < known || known == 0 {
+            // Shrunk/rotated, or grown from empty (encoding never detected).
+            let mut s = TailStatus::at(doc.line_count(), known);
+            s.changed = true;
+            return s;
+        }
+        // Growth detected. If edits are pending we do not follow — report it so
+        // the client stops auto-scrolling into a view its overlay predates.
+        if has_edits {
+            let mut s = TailStatus::at(doc.line_count(), known);
+            s.pending_edits = true;
+            return s;
+        }
+        // Release our extra handle and the find snapshot's handle so the live
+        // document becomes uniquely owned and can be extended in place. (The
+        // find snapshot is a leaf lock, taken here with no ws guard held.)
+        drop(doc);
+        self.invalidate_dirty_snapshot();
+        self.write(|ws| {
+            let Some(arc) = ws.doc.as_mut() else {
+                return TailStatus::closed();
+            };
+            match Arc::get_mut(arc) {
+                Some(doc) => match doc.refresh_tail() {
+                    Ok(TailRefresh::Grew) => {
+                        let mut s = TailStatus::at(doc.line_count(), doc.byte_len());
+                        s.grew = true;
+                        s
+                    }
+                    Ok(TailRefresh::Reindex) => {
+                        let mut s = TailStatus::at(doc.line_count(), doc.byte_len());
+                        s.changed = true;
+                        s
+                    }
+                    Ok(TailRefresh::Unchanged) | Err(_) => {
+                        TailStatus::at(doc.line_count(), doc.byte_len())
+                    }
+                },
+                // An in-flight op still holds a handle: leave it for next tick.
+                None => TailStatus::at(arc.line_count(), arc.byte_len()),
+            }
+        })
+    }
+
     /// Serialize a multi-step doc-slot transition against all others. See the
     /// locking notes on [`AppState::ws`].
     pub(super) async fn lock_transitions(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -726,6 +799,46 @@ fn tab_name(path: &str) -> String {
         };
     }
     basename
+}
+
+/// Result of a `tail -f` poll on the active document. `lines`/`bytes` are the
+/// current totals so the client can grow its scrollbar even when it decides not
+/// to auto-scroll.
+#[derive(Serialize)]
+pub(super) struct TailStatus {
+    /// Whether a file is open at all.
+    open: bool,
+    /// New bytes were appended and the line index was extended in place.
+    grew: bool,
+    /// The file shrank or was replaced externally — the client should reopen.
+    changed: bool,
+    /// Growth was seen but NOT followed because the session has pending edits.
+    pending_edits: bool,
+    lines: u64,
+    bytes: u64,
+}
+
+impl TailStatus {
+    pub(super) fn closed() -> TailStatus {
+        TailStatus {
+            open: false,
+            grew: false,
+            changed: false,
+            pending_edits: false,
+            lines: 0,
+            bytes: 0,
+        }
+    }
+    fn at(lines: u64, bytes: u64) -> TailStatus {
+        TailStatus {
+            open: true,
+            grew: false,
+            changed: false,
+            pending_edits: false,
+            lines,
+            bytes,
+        }
+    }
 }
 
 #[derive(Serialize)]

@@ -38,7 +38,7 @@ mod state;
 pub(crate) mod workspace;
 
 use security::NetPolicy;
-use state::{AppState, SharedState, TabsResponse};
+use state::{AppState, SharedState, TabsResponse, TailStatus};
 
 /// Hard cap on lines returned in one viewport request, so a hostile/buggy
 /// client can never ask us to materialize the whole file.
@@ -134,6 +134,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/ayame-logo.svg", get(assets::ayame_logo_svg))
         .route("/iris-watercolor.png", get(assets::iris_watercolor_png))
         .route("/api/stat", get(api_stat))
+        .route("/api/tail/poll", post(api_tail_poll))
         .route("/api/open", post(workspace::api_open))
         .route("/api/new", post(workspace::api_new))
         .route("/api/tabs", get(workspace::api_tabs))
@@ -338,6 +339,17 @@ async fn api_stat(State(state): State<SharedState>) -> Json<StatResponse> {
     Json(stat_response(&state))
 }
 
+/// `tail -f`: poll the active document for appended data. Growth extends the
+/// line index incrementally over just the new bytes (see
+/// [`Document::refresh_tail`]); a shrink/replacement is reported as `changed`.
+/// The stat + mmap + tail scan are blocking, so they run off the async runtime.
+async fn api_tail_poll(State(state): State<SharedState>) -> Json<TailStatus> {
+    let status = tokio::task::spawn_blocking(move || state.poll_tail())
+        .await
+        .unwrap_or_else(|_| TailStatus::closed());
+    Json(status)
+}
+
 fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, e.to_string())
 }
@@ -464,6 +476,47 @@ mod tests {
         // localhost with any port is us.
         let (status, _) = send(addr, get("/api/stat", "localhost:1")).await;
         assert_eq!(status, 200);
+
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tail_poll_follows_appended_data() {
+        use std::io::Write as _;
+        let f = scratch_file("tail.log", b"line 0\nline 1\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        // No growth yet: grew=false, current totals reported.
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"grew\":false"), "body: {body}");
+        assert!(body.contains("\"lines\":2"), "body: {body}");
+
+        // Append two lines out-of-band, then poll: the index extends in place.
+        {
+            let mut w = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+            w.write_all(b"line 2\nline 3\n").unwrap();
+            w.flush().unwrap();
+        }
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"grew\":true"), "body: {body}");
+        assert!(body.contains("\"lines\":4"), "body: {body}");
+
+        // The new lines are now served through the normal viewport endpoint.
+        let (_, lines) = send(addr, get("/api/lines?start=0&count=10", &host)).await;
+        assert!(lines.contains("line 3"), "body: {lines}");
+
+        // Truncating the file signals an external change (client should reopen).
+        std::fs::write(&f, b"reset\n").unwrap();
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"changed\":true"), "body: {body}");
 
         let _ = std::fs::remove_file(&f);
     }

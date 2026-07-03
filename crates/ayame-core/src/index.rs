@@ -121,6 +121,78 @@ impl LineIndex {
         }
     }
 
+    /// Extend the index in place to cover bytes appended to `buf` since it was
+    /// built — the incremental step behind `tail -f`.
+    ///
+    /// The caller guarantees the growth is append-only: bytes `[0, self.len())`
+    /// are byte-identical to when the index was built, and `buf.len()` is at
+    /// least the old length. Only the final — possibly unterminated — line and
+    /// the appended range are re-scanned; every earlier checkpoint is kept, so
+    /// the cost is bounded by the new bytes, never by the file size. Returns the
+    /// new line count.
+    pub fn extend_tail(&mut self, buf: &[u8]) -> u64 {
+        let new_len = buf.len() as u64;
+        if new_len <= self.len {
+            // Nothing appended: the index already describes this buffer.
+            return self.line_count;
+        }
+
+        // Restart at the start of the current final line: an append can extend a
+        // last line that had no terminator, so that line must be re-scanned.
+        let (restart_line, restart_off) = if self.line_count == 0 {
+            // The old content was empty (zero-length, or only a BOM): index the
+            // whole content region from scratch.
+            self.checkpoints.clear();
+            (0u64, self.base)
+        } else {
+            let last = self.line_count - 1;
+            // `last`'s start lies in the immutable prefix, so resolving it against
+            // the new (longer) buffer yields the same offset the old index had.
+            let off = self.line_range(buf, last).map(|(s, _)| s).unwrap_or(self.base);
+            // Drop the lone checkpoint that might sit on the final line; we
+            // re-derive it (and everything after) below.
+            let keep = self.checkpoints.partition_point(|c| c.line < last);
+            self.checkpoints.truncate(keep);
+            (last, off)
+        };
+
+        // The content region is non-empty from `restart_off` (new_len > base), so
+        // the restart line itself always exists. Anchor a checkpoint on it when
+        // it is a stride multiple (mirrors `build`'s guaranteed line-0 sample).
+        if restart_line.is_multiple_of(self.stride) {
+            self.checkpoints.push(Checkpoint {
+                line: restart_line,
+                off: restart_off,
+            });
+        }
+
+        // Walk the appended range with the same line-counting semantics as a
+        // fresh build: a '\n' opens a new line only if content follows it.
+        let mut off = restart_off;
+        let mut line = restart_line;
+        while off < new_len {
+            match memchr(b'\n', &buf[off as usize..new_len as usize]) {
+                Some(rel) => {
+                    let nxt = off + rel as u64 + 1;
+                    if nxt < new_len {
+                        line += 1;
+                        if line.is_multiple_of(self.stride) {
+                            self.checkpoints.push(Checkpoint { line, off: nxt });
+                        }
+                        off = nxt;
+                    } else {
+                        break; // a trailing newline opens no line
+                    }
+                }
+                None => break, // the last line runs to EOF without a terminator
+            }
+        }
+
+        self.line_count = line + 1;
+        self.len = new_len;
+        self.line_count
+    }
+
     /// Total number of lines. A file ending in a newline does *not* count a
     /// trailing empty line (matches what data engineers mean by "rows").
     #[inline]
@@ -584,6 +656,62 @@ mod tests {
         assert!(LineIndex::from_bytes(&corrupt).is_none());
         // Truncation must be rejected.
         assert!(LineIndex::from_bytes(&bytes[..bytes.len() - 4]).is_none());
+    }
+
+    #[test]
+    fn extend_tail_matches_a_full_rebuild() {
+        // Grow a buffer in several appends and assert the incrementally-extended
+        // index is indistinguishable from one built over the whole buffer each
+        // time — including line count and random access under a tiny stride that
+        // forces many checkpoints on the appended range.
+        let mut full: Vec<u8> = Vec::new();
+        for i in 0..40u64 {
+            full.extend_from_slice(format!("row-{i}\n").as_bytes());
+        }
+        // A stride small enough that the tail scan must add fresh checkpoints.
+        let mut idx = LineIndex::build(&full[..0], 0, 4);
+        assert_eq!(idx.line_count(), 0);
+
+        let appends: &[&[u8]] = &[
+            b"row-0\nrow-1\nrow-2\n", // empty -> content
+            b"row-3\n",              // whole-line append
+            b"row-4",                // append without a terminator
+            b"\nrow-5\nrow-6\n",     // finish the dangling line, add more
+        ];
+        let mut cut = 0usize;
+        for chunk in appends {
+            cut += chunk.len();
+            let view = &full[..cut];
+            idx.extend_tail(view);
+            let fresh = LineIndex::build(view, 0, 4);
+            assert_eq!(
+                idx.line_count(),
+                fresh.line_count(),
+                "line count diverged at {cut} bytes"
+            );
+            for i in 0..fresh.line_count() {
+                assert_eq!(
+                    idx.line_range(view, i),
+                    fresh.line_range(view, i),
+                    "line {i} range diverged at {cut} bytes"
+                );
+            }
+            assert!(idx.line_range(view, fresh.line_count()).is_none());
+        }
+        // The dangling "row-4" must have merged with "\n" into a single "row-4".
+        let (s, e) = idx.line_range(&full, 4).unwrap();
+        assert_eq!(&full[s as usize..e as usize], b"row-4");
+        assert_eq!(idx.line_count(), 7);
+    }
+
+    #[test]
+    fn extend_tail_is_noop_without_growth() {
+        let buf = b"alpha\nbeta\ngamma\n";
+        let mut idx = LineIndex::build(buf, 0, 4096);
+        assert_eq!(idx.line_count(), 3);
+        // No growth (same length) leaves the index untouched.
+        assert_eq!(idx.extend_tail(buf), 3);
+        assert_eq!(idx.line_count(), 3);
     }
 
     #[test]
