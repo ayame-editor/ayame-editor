@@ -365,18 +365,13 @@
             <span class="set-val"></span>
           </label>
           <label class="set-row">
-            <span class="set-label" data-i18n="settings.memoDir">メモの保存先</span>
-            <input id="set-memo-dir" type="text" autocomplete="off" spellcheck="false"
-                   placeholder="例: /home/you/memo — 空なら保存ダイアログ" data-i18n-placeholder="settings.memoDirPlaceholder" />
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.memoName">メモの名前</span>
+            <span class="set-label" data-i18n="settings.memoName">新規ファイルの名前</span>
             <input id="set-memo-name" type="text" autocomplete="off" spellcheck="false"
-                   placeholder="memo-{yyyy}{mm}{dd}.txt" />
+                   placeholder="untitled-{seq}.txt" />
           </label>
           <div class="set-row set-hint-row">
             <span class="set-label" aria-hidden="true"></span>
-            <span class="set-hint" data-i18n="settings.memoNameHint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}</span>
+            <span class="set-hint" data-i18n="settings.memoNameHint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}</span>
           </div>
           <div class="set-row">
             <span class="set-label" data-i18n="settings.sidebar">サイドバー</span>

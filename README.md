@@ -6,7 +6,7 @@ A fast desktop text editor for huge files.
 
 Runs on macOS, Windows, and Linux.
 
-## Download
+## Install
 
 Download the build for your OS from the
 [latest release](https://github.com/hjosugi/ayame-editor/releases/latest).
@@ -29,43 +29,16 @@ Windows (PowerShell):
 pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
 ```
 
-This installs `ayame.exe`, adds it to the user `PATH`, and updates the Desktop /
-Start Menu shortcuts. You can also download `ayame-*.exe` from Releases.
-
 Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
-## Features
+## More
 
-- Huge files open quickly by reading only the parts you view.
-- UTF-8, Shift_JIS, and EUC-JP are detected automatically.
-- Tabs, explorer, search, edit, selection, multiple cursors, and themes.
-- Sort, two-file diff, bulk transform, and file split tools.
-- Crash recovery for unsaved edits.
-
-## How to build
-
-```sh
-cargo build --release --features gui
-./target/release/ayame
-```
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for platform-specific setup.
-
-## Documentation
-
-- [Development](docs/DEVELOPMENT.md)
-- [Design](docs/DESIGN.md)
-- [Benchmarks](docs/BENCHMARKS.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Release process](docs/RELEASE.md)
-
-## Changelog
-
-See [GitHub Releases](https://github.com/hjosugi/ayame-editor/releases).
+Build steps, Linux runtime packages, design notes, and release notes are in
+[docs](docs/).
 
 ## License
 

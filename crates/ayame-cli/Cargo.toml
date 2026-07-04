@@ -44,5 +44,18 @@ tao = { version = "0.34", optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", optional = true }
 
+# Build-time only: the TypeScript sources under web/src are type-stripped to
+# plain ES modules by build.rs using the oxc toolchain (Rust-native, no Node in
+# the shipped build). The transformed JS is embedded via include_str! — see
+# build.rs and src/serve/assets.rs. tsc is only a CI type gate, never a runtime
+# or release-build dependency.
+[build-dependencies]
+oxc_allocator = "0.138"
+oxc_parser = "0.138"
+oxc_span = "0.138"
+oxc_semantic = "0.138"
+oxc_transformer = "0.138"
+oxc_codegen = "0.138"
+
 [lints]
 workspace = true

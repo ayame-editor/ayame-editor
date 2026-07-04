@@ -9,6 +9,11 @@
 
 const $ = (id) => document.getElementById(id);
 let LINE_HEIGHT = 18; // tracks --line-height; updated by Settings (font size)
+// LINE_HEIGHT is reassigned only through this setter so other modules can
+// import it as a read-only live binding (Settings owns the write).
+function setLineHeight(v) {
+  LINE_HEIGHT = v;
+}
 const OVERSCAN = 6;
 const PAD = 400; // extra lines fetched around the viewport and cached
 const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
@@ -218,11 +223,9 @@ const MESSAGES = {
     "settings.fontSize": "文字サイズ",
     "settings.ruler": "列ルーラー",
     "settings.confirmExit": "終了確認",
-    "settings.memoDir": "メモの保存先",
-    "settings.memoDirPlaceholder": "例: /home/you/memo — 空なら保存ダイアログ",
-    "settings.memoName": "メモの名前",
+    "settings.memoName": "新規ファイルの名前",
     "settings.memoNameHint":
-      "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}",
+      "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}",
     "settings.sidebar": "サイドバー",
     "settings.sidebarSide": "サイドバー位置",
     "settings.left": "左",
@@ -365,7 +368,6 @@ const MESSAGES = {
     "error.saveError": "保存エラー",
     "error.serverUnreachable": "サーバに接続できません",
     "error.newBuffer": "新規バッファを作成できません: {msg}",
-    "error.memoDir": "メモの保存先を開けません: {dir}",
     // -- theme JSON --
     "theme.cannotOpen": "テーマを開けません",
     "theme.missingColor": "color がありません",
@@ -557,11 +559,9 @@ const MESSAGES = {
     "settings.fontSize": "Font Size",
     "settings.ruler": "Column Ruler",
     "settings.confirmExit": "Confirm Exit",
-    "settings.memoDir": "Memo Folder",
-    "settings.memoDirPlaceholder": "Example: /home/you/memo - empty uses the save dialog",
-    "settings.memoName": "Memo Name",
+    "settings.memoName": "New file name",
     "settings.memoNameHint":
-      "Available variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}",
+      "Variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd} (weekday) {seq} (sequence) {date} {time} {datetime}",
     "settings.sidebar": "Sidebar",
     "settings.sidebarSide": "Sidebar Position",
     "settings.left": "Left",
@@ -692,7 +692,6 @@ const MESSAGES = {
     "error.saveError": "Save error",
     "error.serverUnreachable": "Cannot connect to the server",
     "error.newBuffer": "Cannot create a new buffer: {msg}",
-    "error.memoDir": "Cannot open memo folder: {dir}",
     "theme.cannotOpen": "Could not open the theme.",
     "theme.missingColor": "Missing color.",
     "theme.jsonError": "Theme JSON error",
@@ -758,6 +757,21 @@ function currentLocale() {
   return lang === "auto" ? browserLocale() : lang;
 }
 
+// Weekday names for the 新規ファイル名 template ({ddd} short / {dddd} long).
+// Indexed by Date.getDay() (0 = Sunday). Kept here so the expansion follows the
+// app language (currentLocale()) rather than the OS/navigator locale, which
+// keeps a given template + language reproducible.
+const WEEKDAYS = {
+  ja: {
+    short: ["日", "月", "火", "水", "木", "金", "土"],
+    long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
+  },
+  en: {
+    short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  },
+};
+
 // Look up `key` in the active locale (fallback chain: locale → ja → key),
 // then substitute {var} placeholders from `vars`.
 function t(key, vars = null) {
@@ -790,9 +804,8 @@ const DEFAULT_SETTINGS = {
   language: "auto",
   keymap: {},
   customThemes: {},
-  // クイックメモ: 保存先フォルダ (空 = 保存ダイアログ) と名前テンプレート。
-  memoDir: "",
-  memoName: "memo-{yyyy}{mm}{dd}.txt",
+  // 新規ファイルを保存する際、保存ダイアログに提案する既定のファイル名テンプレート。
+  memoName: "untitled-{seq}.txt",
   // 前回の保存先: last save-as folder, suggested for new untitled buffers.
   lastSaveDir: "",
 };
@@ -1064,7 +1077,7 @@ function applyLocale() {
   if (state.tabs?.length) renderTabs(state.tabs);
   if (keymapVisible()) renderKeymapRows();
   if (commandPaletteVisible()) {
-    paletteItems = commandPaletteItems();
+    setPaletteItems(commandPaletteItems());
     renderCommandPalette();
   }
   renderRecentFiles();
@@ -1390,6 +1403,11 @@ function renderKeymapRows() {
 
 let paletteItems = [];
 let paletteIndex = 0;
+// applyLocale (another module) rebuilds the palette on a language switch;
+// it does so via this setter since imports are read-only bindings.
+function setPaletteItems(v) {
+  paletteItems = v;
+}
 
 function commandPaletteVisible() {
   return !$("command-palette").classList.contains("hidden");
@@ -1670,6 +1688,14 @@ function charWidth() {
   if (_charW) return _charW;
   _charW = measureTextWidth("0".repeat(100)) / 100 || 8;
   return _charW;
+}
+
+// Called by Settings when the font metrics change: drop the cached char width
+// and force the ruler to rebuild. Grouped here so both cached metrics
+// (_charW / _rulerKey) stay owned by this module.
+function invalidateFontMetrics() {
+  _charW = 0;
+  _rulerKey = "";
 }
 
 // Measure the rendered pixel width of `str` in the content font. One reused,
@@ -3676,7 +3702,7 @@ async function finishSaveAs(res) {
 }
 
 // 前回の保存先: persisted so untitled buffers suggest the folder you last
-// saved into (and so the memo flow survives restarts).
+// saved into (survives restarts).
 function rememberSaveDir(path) {
   const dir = pathDirName(displayPath(path));
   if (!dir) return;
@@ -3690,7 +3716,7 @@ async function saveCopy() {
     return;
   }
   await settleEditQueue();
-  const target = await showSaveDialog(t("menu.saveAs"), suggestedSaveAsPath());
+  const target = await showSaveDialog(t("menu.saveAs"), await suggestedSaveAsPath());
   if (!target) return;
   savingCount++;
   setSavingUI();
@@ -3708,26 +3734,39 @@ async function saveCopy() {
 }
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
-// standard); untitled buffers suggest the expanded メモの名前 template inside
-// 前回の保存先 when one is known (else the dialog falls back as before).
-function suggestedSaveAsPath() {
+// standard); untitled buffers suggest the expanded 新規ファイル名 template
+// inside 前回の保存先. Async because {seq} numbering needs the folder listing.
+async function suggestedSaveAsPath() {
   const p = state.stat?.path || "";
   if (p && !isUntitled(p)) return p;
-  const name =
-    expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim() ||
-    "untitled.txt";
+  const tpl = state.settings.memoName || DEFAULT_SETTINGS.memoName;
   const dir = (state.settings.lastSaveDir || "").trim();
-  return dir ? joinPath(dir, name) : name;
+  let listing = null;
+  try {
+    listing = await api(`/api/browse?dir=${encodeURIComponent(dir)}`);
+  } catch {
+    listing = null; // folder gone / unreadable → suggest without collision info
+  }
+  const taken = new Set(
+    ((listing && listing.entries) || []).filter((e) => !e.is_dir).map((e) => e.name),
+  );
+  const name = expandNameTemplate(tpl, taken).trim() || "untitled.txt";
+  const baseDir = (listing && listing.dir) || dir;
+  return baseDir ? joinPath(baseDir, name) : name;
 }
 
-// Expand the メモの名前 template tokens from the current local time.
-// {date}=YYYYMMDD, {time}=HHMMSS, {datetime}=YYYYMMDD-HHMMSS; note {mm} is the
-// month and {MM} the minutes (all zero-padded). The parameter is deliberately
-// not named `t` — that is the i18n helper.
-function expandNameTemplate(tpl) {
+// Expand the 新規ファイル名 template. Date/time come from the current local
+// time; weekday names ({ddd} short / {dddd} long) follow the app language via
+// currentLocale(); {seq} (and zero-padded {seq2}/{seq3}/{seq4}) resolve to the
+// smallest number not already taken in the target folder (existingNames — a Set
+// or array of the folder's file names). {date}=YYYYMMDD, {time}=HHMMSS,
+// {datetime}=YYYYMMDD-HHMMSS; {mm}=month, {MM}=minutes (all zero-padded). The
+// first parameter is deliberately not named `t` — that is the i18n helper.
+function expandNameTemplate(tpl, existingNames = null) {
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, "0");
   const yyyy = String(d.getFullYear()).padStart(4, "0");
+  const wk = WEEKDAYS[currentLocale()] || WEEKDAYS.en;
   const map = {
     "{yyyy}": yyyy,
     "{yy}": yyyy.slice(-2),
@@ -3736,18 +3775,44 @@ function expandNameTemplate(tpl) {
     "{HH}": p2(d.getHours()),
     "{MM}": p2(d.getMinutes()),
     "{ss}": p2(d.getSeconds()),
+    "{ddd}": wk.short[d.getDay()],
+    "{dddd}": wk.long[d.getDay()],
   };
   map["{date}"] = `${yyyy}${map["{mm}"]}${map["{dd}"]}`;
   map["{time}"] = `${map["{HH}"]}${map["{MM}"]}${map["{ss}"]}`;
   map["{datetime}"] = `${map["{date}"]}-${map["{time}"]}`;
-  return String(tpl || "").replace(
-    /\{(?:yyyy|yy|mm|dd|HH|MM|ss|date|time|datetime)\}/g,
+  const base = String(tpl || "").replace(
+    /\{(?:yyyy|yy|mm|dd|HH|MM|ss|ddd|dddd|date|time|datetime)\}/g,
     (m) => map[m],
   );
+  const taken = existingNames instanceof Set ? existingNames : new Set(existingNames || []);
+  // Every {seq*} token in one name resolves to the same number.
+  const expandSeq = (n) =>
+    base
+      .replace(/\{seq4\}/g, String(n).padStart(4, "0"))
+      .replace(/\{seq3\}/g, String(n).padStart(3, "0"))
+      .replace(/\{seq2\}/g, String(n).padStart(2, "0"))
+      .replace(/\{seq\}/g, String(n));
+  let name;
+  if (/\{seq[234]?\}/.test(base)) {
+    name = expandSeq(1); // fallback if every number up to the cap is taken
+    for (let n = 1; n <= 9999; n++) {
+      const cand = expandSeq(n);
+      if (!taken.has(cand)) {
+        name = cand;
+        break;
+      }
+    }
+  } else {
+    name = base;
+  }
+  // Templates without {seq} keep the classic "-2 / -3 …" suffix on collision.
+  if (taken.has(name)) name = freeMemoName(name, taken) || name;
+  return name;
 }
 
-// "memo.txt" taken → "memo-2.txt", "memo-3.txt", … (before the extension).
-// null after 99 collisions — something is off, let the dialog decide.
+// "note.txt" taken → "note-2.txt", "note-3.txt", … (before the extension).
+// null after 99 collisions — let the save dialog's own numbering take over.
 function freeMemoName(name, taken) {
   if (!taken.has(name)) return name;
   const dot = name.lastIndexOf(".");
@@ -3760,43 +3825,6 @@ function freeMemoName(name, taken) {
   return null;
 }
 
-// クイックメモ保存: with 設定 → メモの保存先 set, an untitled buffer saves
-// straight into that folder under the expanded メモの名前 (auto-numbered on
-// collision) — Ctrl+S and done, no dialog. Returns true when the save was
-// handled (or failed with its own error UI); false falls back to the dialog.
-async function quickMemoSave(memoDir) {
-  const name =
-    expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim() || "memo.txt";
-  let listing;
-  try {
-    listing = await api(`/api/browse?dir=${encodeURIComponent(memoDir)}`);
-  } catch {
-    flashCount(t("error.memoDir", { dir: memoDir }), "error");
-    return false; // dir missing / typo → the dialog still gets the memo saved
-  }
-  const taken = new Set((listing.entries || []).filter((e) => !e.is_dir).map((e) => e.name));
-  const free = freeMemoName(name, taken);
-  if (!free) return false;
-  savingCount++;
-  setSavingUI();
-  try {
-    const res = await apiPost("/api/edit/save", {
-      path: joinPath(listing.dir, free),
-      switch_to_saved: true,
-    });
-    await finishSaveAs(res);
-    return true;
-  } catch (e) {
-    flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(e.message));
-    return true; // reported here — don't surprise with a dialog on top
-  } finally {
-    savingCount--;
-    setSavingUI();
-    retryPendingNativeClose();
-  }
-}
-
 async function saveFile() {
   if (!state.stat?.open) return;
   if (savingCount > 0) {
@@ -3805,8 +3833,8 @@ async function saveFile() {
   }
   await settleEditQueue();
   if (isUntitled(state.stat.path)) {
-    const memoDir = (state.settings.memoDir || "").trim();
-    if (memoDir && (await quickMemoSave(memoDir))) return;
+    // Untitled buffers always go through the save dialog; the dialog is
+    // pre-filled with the expanded name template (see suggestedSaveAsPath).
     await saveCopy();
     return;
   }
@@ -6811,9 +6839,8 @@ function applySettings(s) {
   root.style.setProperty("--font-size", `${fs}px`);
   const lh = fs + 6;
   root.style.setProperty("--line-height", `${lh}px`);
-  LINE_HEIGHT = lh; // keep virtualization math in sync with the CSS
-  _charW = 0; // font metrics changed → remeasure on next click
-  _rulerKey = ""; // force the ruler to rebuild against the new metrics
+  setLineHeight(lh); // keep virtualization math in sync with the CSS
+  invalidateFontMetrics(); // font metrics changed → remeasure + rebuild the ruler
   // ---- long-line wrapping (折り返し) ----
   // Purely a CSS switch on #content: rows go white-space:pre-wrap and grow past
   // one LINE_HEIGHT so long lines wrap instead of scrolling horizontally. The
@@ -7028,10 +7055,6 @@ function initSettings() {
   $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
   $("set-confirm-last-tab-close").addEventListener("change", () =>
     updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked),
-  );
-  $("set-memo-dir").value = state.settings.memoDir || "";
-  $("set-memo-dir").addEventListener("input", () =>
-    updateSetting("memoDir", $("set-memo-dir").value),
   );
   $("set-memo-name").value = state.settings.memoName || DEFAULT_SETTINGS.memoName;
   $("set-memo-name").addEventListener("input", () =>
