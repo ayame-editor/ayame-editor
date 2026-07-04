@@ -42,7 +42,9 @@ ayame ./huge.log
 - **マルチカーソル** — `Ctrl`＋クリックでカーソルを追加、`Ctrl+Alt+↑/↓` で上下に追加。全カーソルに同時入力・削除・貼り付けでき、1回の `Ctrl+Z` でまとめて戻せます。`Esc` で1つに戻ります。
 - **テーマ** — 明るく静かな **Iris Light**（既定）ほか、Iris Mist / Dawn、Sumi Light、単色の Mono Paper、ダーク／ブラック。背景は水彩か単色を選べ、テーマは JSON で書き出し・自作もできます（⚙ 設定）。
 
-新規テキストの既定名は `AYAME_UNTITLED_NAME` で変えられます。`{date}` / `{time}` / `{datetime}` / `{pid}` が使えます。
+- **クイックメモ** — ⚙ 設定の「メモの保存先」にフォルダを入れておくと、新規テキストは `Ctrl+S` で即そこへ保存されます（ダイアログなし）。名前は「メモの名前」テンプレート（既定 `memo-{yyyy}{mm}{dd}.txt`）で決まり、同名があれば `-2`, `-3`, … と自動連番。使える変数は `{yyyy}` `{yy}` `{mm}` `{dd}` `{HH}` `{MM}` `{ss}` `{date}` `{time}` `{datetime}`。保存先が未設定なら従来どおり保存ダイアログが開きますが、名前はテンプレートを展開したもの、フォルダは前回の保存先を提案します。
+
+新規タブの「表示名」の既定は `AYAME_UNTITLED_NAME` で変えられます。`{date}` / `{time}` / `{datetime}` / `{pid}` が使えます。
 
 ```sh
 AYAME_UNTITLED_NAME='memo-{date}-{time}.txt' ayame
@@ -54,6 +56,7 @@ AYAME_UNTITLED_NAME='memo-{date}-{time}.txt' ayame
 |---|---|
 | ファイルを開く | `Ctrl+O` |
 | 新しいタブ / 閉じる | `Ctrl+N` / `Ctrl+W` |
+| 新規ウィンドウ | `Ctrl+Shift+N` |
 | エクスプローラー | `Ctrl+B` |
 | 検索 / 次・前の一致 | `Ctrl+F` / `F3`・`Shift+F3` |
 | 行へ移動 | `Ctrl+G` |

@@ -120,7 +120,7 @@ pub(super) async fn api_browse(
 
     let mut rd = tokio::fs::read_dir(&dir)
         .await
-        .map_err(|e| bad_request(format!("{}: {e}", dir.display())))?;
+        .map_err(|e| bad_request(format!("{}: {e}", display_path(&dir))))?;
     let mut entries = Vec::new();
     while let Some(ent) = rd.next_entry().await.map_err(internal)? {
         let name = ent.file_name().to_string_lossy().to_string();
@@ -134,7 +134,7 @@ pub(super) async fn api_browse(
         let is_dir = meta.is_dir();
         entries.push(BrowseEntry {
             name,
-            path: strip_verbatim(&ent.path().to_string_lossy()),
+            path: display_path(&ent.path()),
             is_dir,
             size: if is_dir { 0 } else { meta.len() },
         });
@@ -149,19 +149,28 @@ pub(super) async fn api_browse(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    let parent = dir.parent().map(|p| strip_verbatim(&p.to_string_lossy()));
+    let parent = dir.parent().map(display_path);
     Ok(Json(BrowseResponse {
-        dir: strip_verbatim(&dir.to_string_lossy()),
+        dir: display_path(&dir),
         parent,
         entries,
     }))
 }
 
-/// Drop the Windows extended-length prefix that `canonicalize` adds
-/// (`\\?\C:\…` → `C:\…`, `\\?\UNC\server\share` → `\\server\share`). Every
-/// path that reaches the browser goes through this: the prefix is an
-/// implementation detail that reads as garbage in the UI, and paths without
-/// it stay valid inputs for reopening/saving.
+/// The UI-facing form of a filesystem path: EVERY path serialized to a client
+/// (response fields and error strings alike) goes through this single choke
+/// point. It drops the Windows extended-length prefix that `canonicalize`
+/// adds (`\\?\C:\…` → `C:\…`, `\\?\UNC\server\share` → `\\server\share`): the
+/// prefix is an implementation detail that reads as garbage in the UI, and
+/// paths without it stay valid inputs for reopening/saving. Internal file
+/// operations keep the raw path — only what leaves the server is rewritten.
+pub(crate) fn display_path(p: &Path) -> String {
+    strip_verbatim(&p.to_string_lossy())
+}
+
+/// String form of [`display_path`]. Verbatim prefixes cannot occur at the
+/// start of a Unix path (absolute paths start with `/`), so this is a safe
+/// pass-through on every OS — which also makes it testable on Linux.
 pub(crate) fn strip_verbatim(path: &str) -> String {
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")

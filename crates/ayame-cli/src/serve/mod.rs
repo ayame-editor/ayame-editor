@@ -307,9 +307,12 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
     state.read(|ws| match ws.doc_and_edits() {
         Ok((doc, edits)) => {
             let edit = edits.stats(doc);
+            let mut file = doc.stat();
+            // UI-facing path: never leak a Windows verbatim prefix.
+            file.path = workspace::strip_verbatim(&file.path);
             StatResponse {
                 open: true,
-                file: Some(doc.stat()),
+                file: Some(file),
                 view_lines: edit.total_lines,
                 dirty: edit.dirty,
                 revision: edit.revision,
@@ -1002,10 +1005,43 @@ mod tests {
 
     #[test]
     fn verbatim_prefix_is_stripped_for_display() {
-        use super::workspace::strip_verbatim;
-        assert_eq!(strip_verbatim(r"\\?\C:\Users\x\f.txt"), r"C:\Users\x\f.txt");
+        use super::workspace::{display_path, strip_verbatim};
+        // Drive prefix goes; UNC prefix folds back to a plain UNC path.
+        assert_eq!(strip_verbatim(r"\\?\C:\Users\x"), r"C:\Users\x");
         assert_eq!(strip_verbatim(r"\\?\UNC\srv\share\f"), r"\\srv\share\f");
+        // Everything else passes through unchanged, on every OS.
         assert_eq!(strip_verbatim("/tmp/f.txt"), "/tmp/f.txt");
+        assert_eq!(strip_verbatim(r"C:\Users\x\f.txt"), r"C:\Users\x\f.txt");
+        assert_eq!(strip_verbatim(r"\\srv\share\f"), r"\\srv\share\f");
+        // The Path-typed form is the same choke point.
+        assert_eq!(display_path(Path::new(r"\\?\C:\Users\x")), r"C:\Users\x");
+        assert_eq!(display_path(Path::new("/tmp/f.txt")), "/tmp/f.txt");
+    }
+
+    /// Response-level guard: an error string that carries a path reaches the
+    /// client with the verbatim prefix stripped. (On Linux `\\?\...` is just a
+    /// weird relative name that cannot exist, and on Windows canonicalizing it
+    /// fails the same way, so /api/browse answers 400 echoing the directory.)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn browse_error_shows_the_path_without_the_verbatim_prefix() {
+        let f = scratch_file("browse-verbatim.txt", b"a\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+
+        // dir = \\?\C:\ayame-no-such-dir, percent-encoded.
+        let (status, body) = send(
+            addr,
+            get(
+                "/api/browse?dir=%5C%5C%3F%5CC%3A%5Cayame-no-such-dir",
+                &host,
+            ),
+        )
+        .await;
+        assert_eq!(status, 400, "body: {body}");
+        assert!(body.contains(r"C:\ayame-no-such-dir"), "body: {body}");
+        assert!(!body.contains(r"\\?\"), "body: {body}");
+
+        let _ = std::fs::remove_file(&f);
     }
 
     /// A zero-width rectangle (c1 == c0) is a valid caret column: the export

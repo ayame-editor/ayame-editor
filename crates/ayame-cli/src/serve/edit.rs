@@ -8,7 +8,7 @@ use axum::Json;
 use ayame_core::{BatchEdit, EditLine, EditStats, Encoding, Eol, SaveResult};
 use serde::{Deserialize, Serialize};
 
-use super::{bad_request, default_save_copy_path, internal, SharedState, MAX_VIEW};
+use super::{bad_request, default_save_copy_path, internal, workspace, SharedState, MAX_VIEW};
 
 #[derive(Deserialize)]
 pub(super) struct LinesQuery {
@@ -177,7 +177,8 @@ pub(super) struct EditSaveRequest {
 /// [`SaveResult`] plus whether the active tab now shows the saved file.
 #[derive(Serialize)]
 pub(super) struct EditSaveResponse {
-    path: PathBuf,
+    /// UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
+    path: String,
     bytes: u64,
     lines: u64,
     switched: bool,
@@ -186,7 +187,7 @@ pub(super) struct EditSaveResponse {
 impl EditSaveResponse {
     fn from_result(res: SaveResult, switched: bool) -> Self {
         EditSaveResponse {
-            path: res.path,
+            path: workspace::display_path(&res.path),
             bytes: res.bytes,
             lines: res.lines,
             switched,
@@ -332,7 +333,7 @@ pub(super) async fn api_edit_save(
         return Err(e);
     }
 
-    let aside = super::workspace::aside_path(&target);
+    let aside = workspace::aside_path(&target);
     let stage_for_swap = stage.clone();
     let target_for_swap = target.clone();
     let swapped = tokio::task::spawn_blocking(move || {
@@ -347,7 +348,7 @@ pub(super) async fn api_edit_save(
             // switched so 名前を付けて保存 onto the same file refreshes in
             // place instead of opening anything.
             Ok(Json(EditSaveResponse {
-                path: target,
+                path: workspace::display_path(&target),
                 bytes: saved.bytes,
                 lines: saved.lines,
                 switched: true,
@@ -445,7 +446,10 @@ pub(super) fn replace_existing_file(stage: &Path, target: &Path) -> std::io::Res
 fn keep_stage_error(e: std::io::Error, stage: &Path) -> std::io::Error {
     std::io::Error::new(
         e.kind(),
-        format!("{e}; the saved data is preserved at '{}'", stage.display()),
+        format!(
+            "{e}; the saved data is preserved at '{}'",
+            workspace::display_path(stage)
+        ),
     )
 }
 
@@ -569,7 +573,7 @@ pub(super) async fn api_selection_save(
     if target.exists() && !req.overwrite {
         return Err((
             StatusCode::CONFLICT,
-            format!("{} は既に存在します", target.display()),
+            format!("{} は既に存在します", workspace::display_path(&target)),
         ));
     }
     tokio::task::spawn_blocking(move || write_selection_to_file(&state, &req, &target))
@@ -635,8 +639,10 @@ fn write_selection_to_file(
     let eff_c1 = if last == req.l1 { req.c1 } else { usize::MAX };
 
     let stage = overwrite_stage_path(target);
+    // Client-facing label of the stage file (verbatim prefix stripped).
+    let stage_label = workspace::display_path(&stage);
     let file =
-        std::fs::File::create(&stage).map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+        std::fs::File::create(&stage).map_err(|e| internal(format!("{stage_label}: {e}")))?;
     let mut out = std::io::BufWriter::new(file);
     let mut bytes: u64 = 0;
     let mut first = true;
@@ -671,23 +677,23 @@ fn write_selection_to_file(
             };
             if !first {
                 out.write_all(b"\n")
-                    .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+                    .map_err(|e| internal(format!("{stage_label}: {e}")))?;
                 bytes += 1;
             }
             first = false;
             out.write_all(piece.as_bytes())
-                .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+                .map_err(|e| internal(format!("{stage_label}: {e}")))?;
             bytes += piece.len() as u64;
         }
         start += count;
     }
     out.flush()
-        .map_err(|e| internal(format!("{}: {e}", stage.display())))?;
+        .map_err(|e| internal(format!("{stage_label}: {e}")))?;
     drop(out);
     replace_existing_file(&stage, target)
-        .map_err(|e| internal(format!("{}: {e}", target.display())))?;
+        .map_err(|e| internal(format!("{}: {e}", workspace::display_path(target))))?;
     Ok(SelectionSaveResponse {
-        path: target.display().to_string(),
+        path: workspace::display_path(target),
         lines: last - req.l0 + 1,
         bytes,
     })

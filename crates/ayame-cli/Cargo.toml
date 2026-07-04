@@ -37,3 +37,6 @@ tao = { version = "0.34", optional = true }
 # menubar instead, so the dependency exists solely on macOS.
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", optional = true }
+
+[lints]
+workspace = true

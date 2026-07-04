@@ -1,0 +1,3 @@
+# Defaults are intentional — this file exists so the choice is explicit and
+# so editors pick up LF endings on every OS.
+newline_style = "Unix"

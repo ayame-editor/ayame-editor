@@ -190,7 +190,8 @@ async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, Strin
 
 #[derive(Serialize)]
 pub(super) struct ArtifactResponse {
-    path: PathBuf,
+    /// UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
+    path: String,
     bytes: u64,
     lines: u64,
 }
@@ -301,7 +302,7 @@ async fn sort_save_in_place(
             state.mark_edits_saved();
             state.install_reloaded(target.clone()).await?;
             Ok(Json(ArtifactResponse {
-                path: target,
+                path: workspace::display_path(&target),
                 bytes,
                 lines: total_lines,
             }))
@@ -496,7 +497,11 @@ pub(super) async fn api_split_save(
 
     let out = wait_worker_output("split", &mut cmd, ARTIFACT_TIMEOUT).await;
     drop(wd); // remove the materialized input, if any
-    let res: ayame_core::SplitResult = parse_worker_json("split", &out?)?;
+    let mut res: ayame_core::SplitResult = parse_worker_json("split", &out?)?;
+    // UI-facing part list: never leak a Windows verbatim prefix.
+    for f in &mut res.files {
+        *f = PathBuf::from(workspace::display_path(f));
+    }
     Ok(Json(res))
 }
 
@@ -612,21 +617,28 @@ pub(super) async fn api_grep(
     let case_sensitive = !req.ci;
     let whole_word = req.word;
     let max = req.max.clamp(1, 20_000);
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<ayame_core::GrepResult> {
-        let opts = ayame_core::GrepOptions {
-            query,
-            regex,
-            case_sensitive,
-            whole_word,
-            glob,
-            max_hits: max,
-            ..Default::default()
-        };
-        ayame_core::grep_dir(&dir, &opts).with_context(|| format!("searching {}", dir.display()))
-    })
-    .await
-    .map_err(internal)?
-    .map_err(bad_request)?;
+    let mut result =
+        tokio::task::spawn_blocking(move || -> anyhow::Result<ayame_core::GrepResult> {
+            let opts = ayame_core::GrepOptions {
+                query,
+                regex,
+                case_sensitive,
+                whole_word,
+                glob,
+                max_hits: max,
+                ..Default::default()
+            };
+            ayame_core::grep_dir(&dir, &opts)
+                .with_context(|| format!("searching {}", workspace::display_path(&dir)))
+        })
+        .await
+        .map_err(internal)?
+        .map_err(bad_request)?;
+    // UI-facing hit paths: never leak a Windows verbatim prefix (the walk
+    // inherits the root's prefix when the open file's path is canonical).
+    for hit in &mut result.hits {
+        hit.path = workspace::strip_verbatim(&hit.path);
+    }
     Ok(Json(result))
 }
 
@@ -751,15 +763,16 @@ pub(super) async fn api_diff(
     }
     let (old, dirty) = state.doc_and_dirty_edits()?;
     let current_dirty = dirty.is_some();
-    let old_path = old.path().display().to_string();
-    let new_path = path.clone();
+    // Both response paths are UI-facing: verbatim prefixes are stripped.
+    let old_path = workspace::display_path(old.path());
+    let new_path = workspace::strip_verbatim(&path);
     let open_options = state.open_options();
     let max_hunks = q.max_hunks.min(100_000);
     let max_lines = q.max_lines.clamp(1, 500);
     let window = q.window.max(1);
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<WebDiffResponse> {
-        let new =
-            Document::open(&path, &open_options).with_context(|| format!("opening '{path}'"))?;
+        let new = Document::open(&path, &open_options)
+            .with_context(|| format!("opening '{}'", workspace::strip_verbatim(&path)))?;
         let input = materialize_worker_input(old.as_ref(), dirty.as_ref(), "diff-current")?;
         let response = match &input {
             WorkerInput::Materialized { path: current, .. } => {
@@ -937,7 +950,7 @@ async fn run_artifact_worker(
     }
     let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
     Ok(ArtifactResponse {
-        path: target.to_path_buf(),
+        path: workspace::display_path(target),
         bytes,
         lines,
     })

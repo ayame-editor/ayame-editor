@@ -18,6 +18,342 @@ const RECENT_KEY = "ayame.recentFiles.v1";
 const RECENT_MAX = 12; // cap on 最近使ったファイル entries
 const MAX_COPY_LINES = 20000; // clipboard cap: copy warns, cut refuses beyond this
 
+const I18N_EN = {
+  "メニュー": "Menu",
+  "ファイル": "File",
+  "新規ファイル": "New File",
+  "新規ウィンドウ": "New Window",
+  "開く": "Open",
+  "保存": "Save",
+  "名前を付けて保存": "Save As",
+  "文字コード / 改行コード…": "Encoding / Line Endings...",
+  "編集": "Edit",
+  "元に戻す": "Undo",
+  "やり直す": "Redo",
+  "検索": "Find",
+  "置換": "Replace",
+  "行へ移動": "Go to Line",
+  "行を複製": "Duplicate Line",
+  "行を上へ移動": "Move Line Up",
+  "行を下へ移動": "Move Line Down",
+  "行を削除": "Delete Line",
+  "選択": "Selection",
+  "すべて選択": "Select All",
+  "次の一致を選択": "Select Next Occurrence",
+  "コピー": "Copy",
+  "切り取り": "Cut",
+  "貼り付け": "Paste",
+  "大文字に変換": "Transform to Uppercase",
+  "小文字に変換": "Transform to Lowercase",
+  "カーソルを上に追加": "Add Cursor Above",
+  "カーソルを下に追加": "Add Cursor Below",
+  "表示": "View",
+  "エクスプローラー": "Explorer",
+  "エクスプローラー操作": "Explorer Actions",
+  "検索バー": "Find Bar",
+  "コマンドパレット": "Command Palette",
+  "空白・改行を表示": "Show Whitespace and Line Endings",
+  "全角空白を下線で表示": "Underline Full-width Spaces",
+  "折り返し": "Word Wrap",
+  "末尾に追従 (tail -f)": "Follow Tail (tail -f)",
+  "設定": "Settings",
+  "ツール": "Tools",
+  "ソート": "Sort",
+  "2ファイル差分": "Two-file Diff",
+  "ファイルを分割": "Split File",
+  "フォルダ内検索": "Search Folder",
+  "新規タブ": "New Tab",
+  "エクスプローラーを閉じる": "Close Explorer",
+  "上の階層へ": "Up One Level",
+  "エディタ": "Editor",
+  "検索と置換": "Find and Replace",
+  "置換を表示": "Show Replace",
+  "検索 (Ctrl+F)": "Find (Ctrl+F)",
+  "大文字小文字を区別": "Match Case",
+  "大文字小文字を区別 (Alt+C)": "Match Case (Alt+C)",
+  "単語単位": "Whole Word",
+  "単語単位 (Alt+W)": "Whole Word (Alt+W)",
+  "正規表現": "Regular Expression",
+  "正規表現 (Alt+R)": "Regular Expression (Alt+R)",
+  "前の一致": "Previous Match",
+  "前の一致 (Shift+F3)": "Previous Match (Shift+F3)",
+  "次の一致": "Next Match",
+  "次の一致 (F3)": "Next Match (F3)",
+  "検索を閉じる": "Close Find",
+  "検索を閉じる (Esc)": "Close Find (Esc)",
+  "置換後": "Replace With",
+  "現在の一致を置換して次へ": "Replace Current Match and Go Next",
+  "すべての一致を置換 (元に戻せます)": "Replace All Matches (undoable)",
+  "すべて置換": "Replace All",
+  "保存中…": "Saving...",
+  "追従": "Follow",
+  "文字コードを変換して保存": "Convert Encoding and Save",
+  "改行コードを変換して保存": "Convert Line Endings and Save",
+  "ファイルを開く": "Open File",
+  "閉じる": "Close",
+  "閉じる (Esc)": "Close (Esc)",
+  "パス": "Path",
+  "ファイル名": "File Name",
+  "ファイルのパスを入力… (例: /var/log/huge.log)": "Enter a file path... (e.g. /var/log/huge.log)",
+  "保存するファイル名、またはフルパス": "File name to save, or a full path",
+  "フォルダ": "Folder",
+  "場所": "Location",
+  "表示中のフォルダをツリーに開く": "Open the current folder in the tree",
+  "表示中のフォルダをエクスプローラーに表示": "Show the current folder in Explorer",
+  "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。": "Drag and drop a file here to open it. For large files, entering a path is faster.",
+  "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。": "Choose a folder and enter a file name. Selecting an existing file asks before overwriting.",
+  "テーマ": "Theme",
+  "Mono Paper (単色)": "Mono Paper (Solid)",
+  "ダーク": "Dark",
+  "ブラック": "Black",
+  "背景": "Background",
+  "水彩": "Watercolor",
+  "単色（全単色配慮）": "Solid",
+  "イラスト": "Illustration",
+  "フォント": "Font",
+  "等幅 (Consolas / Menlo)": "Monospace (Consolas / Menlo)",
+  "等幅 + 日本語 (Noto/MS Gothic)": "Monospace + Japanese (Noto/MS Gothic)",
+  "システムUI": "System UI",
+  "文字サイズ": "Font Size",
+  "列ルーラー": "Column Ruler",
+  "終了確認": "Confirm Exit",
+  "メモの保存先": "Memo Folder",
+  "例: /home/you/memo — 空なら保存ダイアログ": "Example: /home/you/memo - empty uses the save dialog",
+  "メモの名前": "Memo Name",
+  "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}": "Available variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}",
+  "サイドバー": "Sidebar",
+  "サイドバー位置": "Sidebar Position",
+  "左": "Left",
+  "右": "Right",
+  "言語": "Language",
+  "自動": "Auto",
+  "日本語": "Japanese",
+  "英語": "English",
+  "キー設定": "Key Bindings",
+  "テーマJSON": "Theme JSON",
+  "タブで編集": "Edit in Tab",
+  "文字コード / 改行コード": "Encoding / Line Endings",
+  "文字コード": "Encoding",
+  "改行コード": "Line Endings",
+  "CR (旧 Mac)": "CR (classic Mac)",
+  "BOMを付ける（UTF-8のみ）": "Add BOM (UTF-8 only)",
+  "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。\n「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。": "\"Reopen\" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.\n\"Convert and Save\" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.",
+  "キャンセル": "Cancel",
+  "開き直す": "Reopen",
+  "変換して保存": "Convert and Save",
+  "入力欄を選んでキーを押すと変更できます。Backspace / Delete で未設定。": "Focus a field and press keys to change it. Backspace / Delete clears it.",
+  "JSONをタブで編集": "Edit JSON in Tab",
+  "既定に戻す": "Reset to Defaults",
+  "差分": "Diff",
+  "現在": "Current",
+  "比較先": "Compare To",
+  "現在のファイル": "Current File",
+  "比較先ファイル": "Comparison File",
+  "オプション": "Options",
+  "実行": "Run",
+  "入力": "Input",
+  "確認": "Confirm",
+  "OK": "OK",
+  "コンテキストメニュー": "Context Menu",
+  "選択箇所をファイルに保存…": "Save Selection to File...",
+  "選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません": "Write only the selected lines to another file. The clipboard line limit does not apply.",
+  "ドロップしてファイルを開く": "Drop to Open File",
+  "このJSONをテーマとして適用": "Apply this JSON as a theme",
+  "テーマ適用": "Apply Theme",
+  "このJSONをキー設定として適用": "Apply this JSON as key bindings",
+  "キー設定適用": "Apply Key Bindings",
+  "ソート・差分・分割": "Sort, Diff, Split",
+  "行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)": "Sort lines and overwrite the current file. By default it compares whole lines; with a key column it compares that column.",
+  "行数を指定して複数ファイルに分割します (例: 100万行ずつ)": "Split into multiple files by line count.",
+  "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)": "Search files in a folder recursively, with file-name filters and regular expressions.",
+  "未設定": "Unassigned",
+  "保存済": "Saved",
+  "未保存": "Unsaved",
+  "索引OK": "Index OK",
+  "すべての編集は保存済みです": "All edits are saved.",
+  "行 0": "Line 0",
+  "正規表現エラー": "Regular expression error",
+  "一致なし": "No matches",
+  "エラー": "Error",
+  "検索エラー": "Search error",
+  "コピーしました": "Copied",
+  "コピーエラー": "Copy error",
+  "ここからは貼り付けできません — Ctrl+V を使ってください": "Cannot paste from here. Use Ctrl+V.",
+  "選択がありません": "No selection",
+  "複数選択はコピーまたは切り取りを使ってください": "Use Copy or Cut for multiple selections.",
+  "選択箇所をファイルに保存": "Save Selection to File",
+  "保存先パス": "Save Path",
+  "選択を書き出し中…": "Writing selection...",
+  "上書きの確認": "Overwrite Confirmation",
+  "上書き": "Overwrite",
+  "選択の保存エラー": "Selection Save Error",
+  "文字入力と衝突するキーは使えません": "That shortcut conflicts with text input.",
+  "終了の確認": "Confirm Exit",
+  "保存せずに終了": "Exit Without Saving",
+  "終了": "Exit",
+  "保存処理中です。完了後に閉じます…": "Saving is in progress. The window will close when it finishes...",
+  "未保存の編集があります。保存せずに終了しますか?": "There are unsaved edits. Exit without saving?",
+  "最後のタブを閉じると Ayame Editor を終了します。終了しますか?": "Closing the last tab exits Ayame Editor. Exit?",
+  "保存中です — 完了後に入力します": "Saving. Input will continue after it finishes.",
+  "保存中です — 完了までお待ちください": "Saving. Please wait until it finishes.",
+  "編集エラー": "Edit error",
+  "末尾に追従中 (tail -f)": "Following tail (tail -f)",
+  "追従を停止しました": "Stopped following tail",
+  "ファイルが外部で変更されました — 追従を停止しました": "The file changed externally. Tail following stopped.",
+  "再読込エラー": "Reload error",
+  "保存エラー": "Save error",
+  "先に保存してください": "Save the file first.",
+  "変換保存エラー": "Convert Save Error",
+  "保存されたファイルがありません": "There is no saved file.",
+  "未保存の編集を破棄して開き直しますか?": "Discard unsaved edits and reopen?",
+  "破棄して開き直す": "Discard and Reopen",
+  "開き直しエラー": "Reopen Error",
+  "キー列 (1始まり)": "Key Column (1-based)",
+  "空なら行全体で比較": "Leave empty to compare whole lines",
+  "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較": "Empty: compare whole lines as strings. Number: compare that delimited column as the key.",
+  "区切り文字": "Delimiter",
+  "キー列を使うときの列の区切り (例: , やタブ)": "Column delimiter when using a key column, such as comma or tab.",
+  "数値として比較する": "Compare as numbers",
+  "10 と 9 を文字列でなく数値の大小で並べます": "Sort 10 and 9 by numeric value instead of string order.",
+  "並び順": "Order",
+  "昇順 (A→Z, 小→大)": "Ascending (A to Z, small to large)",
+  "降順 (Z→A, 大→小)": "Descending (Z to A, large to small)",
+  "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。": "Sort the current file and overwrite it. Unsaved edits are included. This operation cannot be undone.",
+  "キー列は 1 以上の整数で指定してください": "Key column must be an integer greater than or equal to 1.",
+  "ソート実行中…": "Sorting...",
+  "ソートして上書きしました": "Sorted and overwritten.",
+  "ソートエラー": "Sort error",
+  "1ファイルあたりの行数": "Lines per File",
+  "出力先フォルダ": "Output Folder",
+  "空なら元ファイルと同じ場所": "Leave empty to use the original file's folder",
+  "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。": "Write the current file into parts by line count. Unsaved edits are included. The original file is not changed.",
+  "分割": "Split",
+  "行数は 1 以上の整数で指定してください": "Line count must be an integer greater than or equal to 1.",
+  "分割実行中…": "Splitting...",
+  "分割エラー": "Split error",
+  "検索文字列を入力してください": "Enter a search string.",
+  "一致を特定できません": "Could not identify the match.",
+  "置換エラー": "Replace error",
+  "置換中…": "Replacing...",
+  "追加": "Added",
+  "削除": "Deleted",
+  "変更": "Changed",
+  "差分はありません": "No differences",
+  "比較先ファイルパス": "Comparison File Path",
+  "差分を計算中…": "Computing diff...",
+  "差分エラー": "Diff error",
+  "検索語": "Search Term",
+  "検索する文字列 / 正規表現": "String or regular expression to search for",
+  "対象フォルダ": "Target Folder",
+  "空欄で開いているファイルのフォルダ": "Leave empty to use the open file's folder",
+  "ファイル名フィルタ": "File Name Filter",
+  "例: *.rs, *.txt (空欄で全て)": "Example: *.rs, *.txt (empty for all)",
+  "大文字小文字を区別しない": "Ignore case",
+  "フォルダ内を検索中…": "Searching folder...",
+  "フォルダ内検索エラー": "Folder Search Error",
+  "一致はありません": "No matches",
+  "変換する範囲を選択してください": "Select a range to transform.",
+  "行番号": "Line Number",
+  "読み込み中…": "Loading...",
+  "未保存編集込み": "includes unsaved edits",
+  "現在のファイル": "Current File",
+  "比較先": "Comparison",
+  "上へ": "Up",
+  "ファイル": "File",
+  "最近使ったファイル": "Recent Files",
+  "最近": "Recent",
+  "保存するファイル名を入力してください": "Enter a file name to save.",
+  "開いています…": "Opening...",
+  "読み込みエラー": "Load error",
+  "閉じる": "Close",
+  "タブ切替エラー": "Tab switch error",
+  "タブを閉じる": "Close Tab",
+  "破棄して閉じる": "Discard and Close",
+  "タブを閉じられません": "Could not close the tab.",
+  "現在のフォルダをエクスプローラーに表示しました": "Showing the current folder in Explorer.",
+  "テーマを開けません": "Could not open the theme.",
+  "color がありません": "Missing color.",
+  "テーマ JSON エラー": "Theme JSON error",
+  "キー設定を開けません": "Could not open key bindings.",
+  "キー設定 JSON エラー": "Key bindings JSON error",
+  "サーバに接続できません": "Cannot connect to the server",
+};
+
+const I18N_EN_PATTERNS = [
+  [/^保存しました: (.+)$/u, (m) => `Saved: ${m[1]}`],
+  [/^(.+) は既に存在します。上書きしますか\?$/u, (m) => `${m[1]} already exists. Overwrite it?`],
+  [/^(.+) の未保存の編集があります。保存せずに Ayame Editor を終了しますか\?$/u, (m) => `${m[1]} has unsaved edits. Exit Ayame Editor without saving?`],
+  [/^(.+) の未保存の編集を破棄して閉じますか\?$/u, (m) => `Discard unsaved edits in ${m[1]} and close it?`],
+  [/^ほか (\d+) 件$/u, (m) => `${m[1]} more`],
+  [/^行 ([\d,]+), 列 ([\d,]+)$/u, (m) => `Line ${m[1]}, Column ${m[2]}`],
+  [/^(.+) · ([\d,]+) カーソル$/u, (m) => `${m[1]} · ${m[2]} cursors`],
+  [/^([\d,]+)\+? 件$/u, (m) => (/\+/.test(m[0]) ? `${m[1]}+ matches` : `${m[1]} matches`)],
+  [/^保存しました: (.+)$/u, (m) => `Saved: ${m[1]}`],
+  [/^(.+) で保存しました$/u, (m) => `Saved as ${m[1]}`],
+  [/^(.+) で開き直しました$/u, (m) => `Reopened as ${m[1]}`],
+  [/^([\d,]+) 個に分割しました: 最初のファイル (.+)$/u, (m) => `Split into ${m[1]} files: first file ${m[2]}`],
+  [/^([\d,]+) 件置換しました$/u, (m) => `Replaced ${m[1]} matches.`],
+  [/^([\d,]+) 件置換しました — 一致が多いため一部です。もう一度実行してください$/u, (m) => `Replaced ${m[1]} matches. There are more matches; run it again.`],
+  [/^差分: ([\d,]+) hunk$/u, (m) => `Diff: ${m[1]} hunk${m[1] === "1" ? "" : "s"}`],
+  [/^フォルダ内検索: ([\d,]+) 件$/u, (m) => `Folder search: ${m[1]} matches`],
+  [/^選択 ([\d,]+) 行を保存しました: (.+)$/u, (m) => `Saved ${m[1]} selected lines: ${m[2]}`],
+  [/^選択中の ([\d,]+) 行を UTF-8 \/ LF で書き出します。コピーの行数上限 \(([\d,]+) 行\) はかかりません。$/u, (m) => `Writes the selected ${m[1]} lines as UTF-8 / LF. The clipboard limit of ${m[2]} lines does not apply.`],
+  [/^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません$/u, (m) => `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied.`],
+  [/^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます$/u, (m) => `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied. Use right-click > Save Selection to File to write everything.`],
+  [/^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。削除だけなら Delete キー$/u, (m) => `Cut is limited to ${m[1]} lines (${m[2]} selected). Use Delete to delete only.`],
+  [/^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー$/u, (m) => `Cut is limited to ${m[1]} lines (${m[2]} selected). Use right-click > Save Selection to File to keep everything, or Delete to delete only.`],
+  [/^変換は一度に ([\d,]+) 行までです$/u, (m) => `Transform is limited to ${m[1]} lines at once.`],
+  [/^複製は一度に ([\d,]+) 行までです$/u, (m) => `Duplicate is limited to ${m[1]} lines at once.`],
+  [/^行の移動は一度に ([\d,]+) 行までです$/u, (m) => `Moving lines is limited to ${m[1]} lines at once.`],
+  [/^このhunkは先頭 ([\d,]+) 行だけ表示しています$/u, (m) => `This hunk shows only the first ${m[1]} lines.`],
+  [/^([\d,]+) 件 \/ ([\d,]+) ファイル$/u, (m) => `${m[1]} matches / ${m[2]} files`],
+  [/^([\d,]+) 件 \/ ([\d,]+) ファイル（上限 ([\d,]+) 件で打ち切り）$/u, (m) => `${m[1]} matches / ${m[2]} files (stopped at the ${m[3]} match limit)`],
+  [/^([\d,]+) 件 \/ ([\d,]+) ファイル \/ 走査ファイル数の上限に達しました$/u, (m) => `${m[1]} matches / ${m[2]} files / reached the scanned-file limit`],
+  [/^開けません: (.+)$/u, (m) => `Cannot open: ${m[1]}`],
+  [/^読み込み中… \((.+)\)$/u, (m) => `Loading... (${m[1]})`],
+  [/^読み込み中… (.+)$/u, (m) => `Loading... ${m[1]}`],
+  [/^開いています: (.+) …$/u, (m) => `Opening: ${m[1]} ...`],
+  [/^ディレクトリを開けません: (.+)$/u, (m) => `Cannot open directory: ${m[1]}`],
+  [/^メモの保存先を開けません: (.+)$/u, (m) => `Cannot open memo folder: ${m[1]}`],
+  [/^新規バッファを作成できません: (.+)$/u, (m) => `Cannot create a new buffer: ${m[1]}`],
+  [/^テーマ適用: (.+)$/u, (m) => `Theme applied: ${m[1]}`],
+  [/^(.+) を閉じる$/u, (m) => `Close ${m[1]}`],
+  [/^未保存の編集: \+([\d,]+) 行追加 \/ ~([\d,]+) 行変更 \/ -([\d,]+) 行削除$/u, (m) => `Unsaved edits: +${m[1]} lines added / ~${m[2]} lines changed / -${m[3]} lines deleted`],
+];
+
+function normalizeLanguage(lang) {
+  return ["auto", "ja", "en"].includes(lang) ? lang : "auto";
+}
+
+function browserLocale() {
+  return String(navigator.language || "").toLowerCase().startsWith("ja") ? "ja" : "en";
+}
+
+function currentLocale() {
+  const lang = normalizeLanguage(state.settings?.language || "auto");
+  return lang === "auto" ? browserLocale() : lang;
+}
+
+function translateText(text) {
+  const raw = String(text ?? "");
+  if (currentLocale() !== "en") return raw;
+  const exact = I18N_EN[raw];
+  if (exact != null) return exact;
+  for (const [re, fn] of I18N_EN_PATTERNS) {
+    const m = raw.match(re);
+    if (m) return fn(m);
+  }
+  return raw;
+}
+
+function t(key, vars = null) {
+  let out = translateText(key);
+  if (vars) {
+    out = out.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
+  }
+  return out;
+}
+
 const FONT_STACKS = {
   mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
   "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
@@ -36,12 +372,19 @@ const DEFAULT_SETTINGS = {
   wordWrap: false,
   bgMode: "watercolor",
   illus: null,
+  language: "auto",
   keymap: {},
   customThemes: {},
+  // クイックメモ: 保存先フォルダ (空 = 保存ダイアログ) と名前テンプレート。
+  memoDir: "",
+  memoName: "memo-{yyyy}{mm}{dd}.txt",
+  // 前回の保存先: last save-as folder, suggested for new untitled buffers.
+  lastSaveDir: "",
 };
 
 const KEYMAP_ACTIONS = [
   ["newFile", "新規ファイル", "Ctrl+N"],
+  ["newWindow", "新規ウィンドウ", "Ctrl+Shift+N"],
   ["openFile", "開く", "Ctrl+O"],
   ["saveFile", "保存", "Ctrl+S"],
   ["saveAs", "名前を付けて保存", "Ctrl+Shift+S"],
@@ -193,6 +536,21 @@ function setModalOpen(modal, open) {
   modal.setAttribute("aria-hidden", open ? "false" : "true");
 }
 
+// Build an <svg><use href="#id"></use></svg> node for a sprite symbol from
+// index.html. Purely decorative: callers keep the accessible name on the
+// element (aria-label / visible text) — the icon itself is aria-hidden.
+function iconSvg(id, cls = "ay-icon") {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS(NS, "use");
+  use.setAttribute("href", `#${id}`);
+  svg.append(use);
+  return svg;
+}
+
 const APP_MENUS = ["file", "edit", "selection", "view", "tools"];
 const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -251,6 +609,81 @@ function hideFileMenu(focusButton = false) {
       focused = true;
     }
   }
+}
+
+const STATIC_I18N_SKIP = [
+  "#content",
+  "#tabs",
+  "#tree",
+  "#opener-list",
+  "#opener-recent",
+  "#opener-cwd",
+  "#st-msg",
+  "#overlay",
+  "#find-count",
+  "#form-body",
+  "#confirm-message",
+  "#prompt-label",
+  "#keymap-list",
+  "#palette-list",
+  "#diff-view",
+  "#grep-results",
+].join(",");
+const I18N_ATTRS = ["aria-label", "title", "placeholder"];
+
+function shouldSkipStaticI18nNode(node) {
+  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  return !!(el && el.closest(STATIC_I18N_SKIP));
+}
+
+function translatePreservingSpace(source) {
+  const leading = source.match(/^\s*/)?.[0] || "";
+  const trailing = source.match(/\s*$/)?.[0] || "";
+  const core = source.trim();
+  if (!core) return source;
+  return `${leading}${translateText(core)}${trailing}`;
+}
+
+function applyStaticI18n(root = document.body) {
+  document.documentElement.lang = currentLocale();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue.trim() || shouldSkipStaticI18nNode(node)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    if (node.__ayameI18nSource == null) node.__ayameI18nSource = node.nodeValue;
+    node.nodeValue = translatePreservingSpace(node.__ayameI18nSource);
+  }
+  root.querySelectorAll("*").forEach((el) => {
+    for (const attr of I18N_ATTRS) {
+      if (!el.hasAttribute(attr)) continue;
+      const store = `__ayameI18nAttr_${attr}`;
+      if (el[store] == null) el[store] = el.getAttribute(attr);
+      el.setAttribute(attr, translateText(el[store]));
+    }
+  });
+}
+
+function applyLocale() {
+  applyStaticI18n();
+  updateKeyHints();
+  updateStatusMeta();
+  updateStatusPos();
+  updateFindCountLabel();
+  updateTailUI();
+  if (state.tabs?.length) renderTabs(state.tabs);
+  if (keymapVisible()) renderKeymapRows();
+  if (commandPaletteVisible()) {
+    paletteItems = commandPaletteItems();
+    renderCommandPalette();
+  }
+  renderRecentFiles();
 }
 
 function normalizeShortcut(raw) {
@@ -375,6 +808,17 @@ function requestEditorClose() {
   return false;
 }
 
+// 新規ウィンドウ: native builds ask the Rust side to spawn a fresh window
+// process (contract: the "ayame:new-window" IPC message); the plain browser
+// build just opens the app URL in a new tab/window.
+function openNewWindow() {
+  if (isNativeApp()) {
+    postNativeMessage("ayame:new-window");
+    return;
+  }
+  window.open(location.href, "_blank");
+}
+
 async function confirmCloseLastTab(t) {
   if (t?.dirty) {
     return askConfirm(
@@ -474,19 +918,27 @@ function updateKeyHints() {
   });
   const hint = (label, action) => {
     const key = displayShortcut(shortcutFor(action));
-    return key ? `${label} (${key})` : label;
+    const text = t(label);
+    return key ? `${text} (${key})` : text;
   };
   $("toggle-sidebar").title = hint("エクスプローラー", "toggleSidebar");
+  $("toggle-sidebar").setAttribute("aria-label", t("エクスプローラー"));
   $("undo-edit").title = hint("元に戻す", "undo");
+  $("undo-edit").setAttribute("aria-label", t("元に戻す"));
   $("redo-edit").title = hint("やり直す", "redo");
+  $("redo-edit").setAttribute("aria-label", t("やり直す"));
   $("find").placeholder = hint("検索", "find");
   $("find-expand").title = hint("置換を表示", "replace");
+  $("find-expand").setAttribute("aria-label", t("置換を表示"));
   $("find-prev").title = hint("前の一致", "findPrev");
+  $("find-prev").setAttribute("aria-label", t("前の一致"));
   $("find-next").title = hint("次の一致", "findNext");
+  $("find-next").setAttribute("aria-label", t("次の一致"));
   $("opt-case").title = hint("大文字小文字を区別", "searchCase");
   $("opt-word").title = hint("単語単位", "searchWord");
   $("opt-regex").title = hint("正規表現", "searchRegex");
   $("new-tab").title = hint("新規タブ", "newFile");
+  $("new-tab").setAttribute("aria-label", t("新規タブ"));
 }
 
 function keymapVisible() {
@@ -521,12 +973,12 @@ function renderKeymapRows() {
     if (shortcut && used.get(shortcut) > 1) row.classList.add("conflict");
     const name = document.createElement("span");
     name.className = "keymap-label";
-    name.textContent = label;
+    name.textContent = t(label);
     const input = document.createElement("input");
     input.className = "keymap-input";
     input.readOnly = true;
     input.value = displayShortcut(shortcut);
-    input.placeholder = "未設定";
+    input.placeholder = t("未設定");
     input.dataset.action = action;
     input.addEventListener("keydown", (e) => {
       e.preventDefault();
@@ -554,13 +1006,13 @@ function commandLabelFromElement(el) {
 }
 
 function commandPaletteItems() {
-  const keymapLabels = new Map(KEYMAP_ACTIONS.map(([action, label]) => [action, label]));
+  const keymapLabels = new Map(KEYMAP_ACTIONS.map(([action, label]) => [action, t(label)]));
   const seen = new Set();
   const items = [];
   const add = (action, label = "") => {
     if (!action || seen.has(action)) return;
     seen.add(action);
-    const text = label || keymapLabels.get(action) || action;
+    const text = label ? translateText(label) : keymapLabels.get(action) || action;
     items.push({
       action,
       label: text.replace(/\.\.\.$/, ""),
@@ -1533,7 +1985,7 @@ function updateStatusMeta() {
     }
     $("st-edit").title = "";
     $("st-index").title = "";
-    $("st-pos").textContent = "行 0";
+    $("st-pos").textContent = t("行 0");
     $("undo-edit").disabled = true;
     $("redo-edit").disabled = true;
     $("apply-theme").classList.add("hidden");
@@ -1550,13 +2002,13 @@ function updateStatusMeta() {
   $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
   $("st-eol").textContent = eol(s.eol);
   // Deliberately terse: the bar shows state, the tooltip carries the numbers.
-  $("st-edit").textContent = s.dirty ? "未保存" : "保存済";
+  $("st-edit").textContent = s.dirty ? t("未保存") : t("保存済");
   $("st-edit").title = s.dirty
-    ? `未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`
-    : "すべての編集は保存済みです";
+    ? translateText(`未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`)
+    : t("すべての編集は保存済みです");
   $("undo-edit").disabled = !s.can_undo;
   $("redo-edit").disabled = !s.can_redo;
-  $("st-index").textContent = "索引OK";
+  $("st-index").textContent = t("索引OK");
   $("st-index").title =
     `${commas(lines)} 行 / ${humanBytes(s.bytes)} / 索引 ${commas(s.checkpoints)} 点 (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`;
   // Keep the active tab's unsaved-dot (and the tabs model behind
@@ -1668,12 +2120,12 @@ function eol(e) {
 
 function updateStatusPos() {
   if (state.total === 0) {
-    $("st-pos").textContent = "行 0";
+    $("st-pos").textContent = t("行 0");
     return;
   }
-  const pos = `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`;
+  const pos = translateText(`行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`);
   const n = state.extraCursors.length;
-  $("st-pos").textContent = n ? `${pos} · ${n + 1} カーソル` : pos;
+  $("st-pos").textContent = n ? translateText(`${pos} · ${n + 1} カーソル`) : pos;
 }
 
 // ---- search ----------------------------------------------------------------
@@ -1894,7 +2346,7 @@ async function updateCount() {
     updateFindCountLabel();
     scheduleRender();
   } catch (e) {
-    $("find-count").textContent = "正規表現エラー";
+    $("find-count").textContent = t("正規表現エラー");
     $("find").parentElement.classList.add("error");
     scheduleRender();
   }
@@ -1914,13 +2366,14 @@ function updateFindCountLabel() {
       return;
     }
   }
-  $("find-count").textContent = `${total} 件`;
+  $("find-count").textContent = translateText(`${total} 件`);
 }
 
 // Operation feedback goes to the always-visible status bar (aria-live), and is
 // mirrored into the find bar when that is open. Errors stay a little longer.
 let stMsgTimer = 0;
 function flashCount(msg, kind = "") {
+  msg = msg ? translateText(msg) : "";
   const isError = kind === "error";
   const el = $("st-msg");
   if (el) {
@@ -2705,9 +3158,41 @@ function pasteText(raw) {
   });
 }
 
-// 名前を付けて保存: the CURRENT tab becomes the saved file (the server swaps
-// the active tab's document to the new path), exactly like every desktop
-// editor — no leftover untitled tab, no extra tab for the saved file.
+// Shared tail of every save-as-style save (名前を付けて保存 / クイックメモ保存):
+// the current tab becomes the saved file (the server swaps the active tab's
+// document to the new path), exactly like every desktop editor — no leftover
+// untitled tab, no extra tab for the saved file. Also remembers the folder as
+// 前回の保存先 for the next untitled buffer.
+async function finishSaveAs(res) {
+  if (res.switched) {
+    // Same tab, new document identity: refresh in place, keep the caret.
+    state.docGen++;
+    state.editGen++;
+    clearLineCache();
+    await refreshStat();
+    await reloadViewport();
+    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+    render();
+    refreshTabs();
+    updateTreeActive();
+  } else {
+    // The workspace changed while saving (rare): fall back to focusing the
+    // saved file — the server dedupes, so this never duplicates a tab.
+    onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+  }
+  rememberSaveDir(res.path);
+  flashCount(`保存しました: ${displayPath(res.path)}`);
+}
+
+// 前回の保存先: persisted so untitled buffers suggest the folder you last
+// saved into (and so the memo flow survives restarts).
+function rememberSaveDir(path) {
+  const dir = pathDirName(displayPath(path));
+  if (!dir) return;
+  state.settings = { ...state.settings, lastSaveDir: dir };
+  saveSettings(state.settings);
+}
+
 async function saveCopy() {
   if (savingCount > 0) {
     flashCount("保存中です — 完了までお待ちください");
@@ -2720,23 +3205,7 @@ async function saveCopy() {
   setSavingUI();
   try {
     const res = await apiPost("/api/edit/save", { ...target, switch_to_saved: true });
-    if (res.switched) {
-      // Same tab, new document identity: refresh in place, keep the caret.
-      state.docGen++;
-      state.editGen++;
-      clearLineCache();
-      await refreshStat();
-      await reloadViewport();
-      setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
-      render();
-      refreshTabs();
-      updateTreeActive();
-    } else {
-      // The workspace changed while saving (rare): fall back to focusing the
-      // saved file — the server dedupes, so this never duplicates a tab.
-      onDocumentOpened(await apiPost("/api/open", { path: res.path }));
-    }
-    flashCount(`保存しました: ${displayPath(res.path)}`);
+    await finishSaveAs(res);
   } catch (e) {
     flashCount("保存エラー", "error");
     showMessage("保存エラー", e.message);
@@ -2748,11 +3217,91 @@ async function saveCopy() {
 }
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
-// standard); untitled buffers suggest a plain "untitled.txt".
+// standard); untitled buffers suggest the expanded メモの名前 template inside
+// 前回の保存先 when one is known (else the dialog falls back as before).
 function suggestedSaveAsPath() {
   const p = state.stat?.path || "";
-  if (!p || isUntitled(p)) return "untitled.txt";
-  return p;
+  if (p && !isUntitled(p)) return p;
+  const name = expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim()
+    || "untitled.txt";
+  const dir = (state.settings.lastSaveDir || "").trim();
+  return dir ? joinPath(dir, name) : name;
+}
+
+// Expand the メモの名前 template tokens from the current local time.
+// {date}=YYYYMMDD, {time}=HHMMSS, {datetime}=YYYYMMDD-HHMMSS; note {mm} is the
+// month and {MM} the minutes (all zero-padded).
+function expandNameTemplate(t) {
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, "0");
+  const yyyy = String(d.getFullYear()).padStart(4, "0");
+  const map = {
+    "{yyyy}": yyyy,
+    "{yy}": yyyy.slice(-2),
+    "{mm}": p2(d.getMonth() + 1),
+    "{dd}": p2(d.getDate()),
+    "{HH}": p2(d.getHours()),
+    "{MM}": p2(d.getMinutes()),
+    "{ss}": p2(d.getSeconds()),
+  };
+  map["{date}"] = `${yyyy}${map["{mm}"]}${map["{dd}"]}`;
+  map["{time}"] = `${map["{HH}"]}${map["{MM}"]}${map["{ss}"]}`;
+  map["{datetime}"] = `${map["{date}"]}-${map["{time}"]}`;
+  return String(t || "").replace(
+    /\{(?:yyyy|yy|mm|dd|HH|MM|ss|date|time|datetime)\}/g,
+    (m) => map[m]
+  );
+}
+
+// "memo.txt" taken → "memo-2.txt", "memo-3.txt", … (before the extension).
+// null after 99 collisions — something is off, let the dialog decide.
+function freeMemoName(name, taken) {
+  if (!taken.has(name)) return name;
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  for (let i = 2; i <= 99; i++) {
+    const cand = `${stem}-${i}${ext}`;
+    if (!taken.has(cand)) return cand;
+  }
+  return null;
+}
+
+// クイックメモ保存: with 設定 → メモの保存先 set, an untitled buffer saves
+// straight into that folder under the expanded メモの名前 (auto-numbered on
+// collision) — Ctrl+S and done, no dialog. Returns true when the save was
+// handled (or failed with its own error UI); false falls back to the dialog.
+async function quickMemoSave(memoDir) {
+  const name = expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim()
+    || "memo.txt";
+  let listing;
+  try {
+    listing = await api(`/api/browse?dir=${encodeURIComponent(memoDir)}`);
+  } catch {
+    flashCount(`メモの保存先を開けません: ${memoDir}`, "error");
+    return false; // dir missing / typo → the dialog still gets the memo saved
+  }
+  const taken = new Set((listing.entries || []).filter((e) => !e.is_dir).map((e) => e.name));
+  const free = freeMemoName(name, taken);
+  if (!free) return false;
+  savingCount++;
+  setSavingUI();
+  try {
+    const res = await apiPost("/api/edit/save", {
+      path: joinPath(listing.dir, free),
+      switch_to_saved: true,
+    });
+    await finishSaveAs(res);
+    return true;
+  } catch (e) {
+    flashCount("保存エラー", "error");
+    showMessage("保存エラー", e.message);
+    return true; // reported here — don't surprise with a dialog on top
+  } finally {
+    savingCount--;
+    setSavingUI();
+    retryPendingNativeClose();
+  }
 }
 
 async function saveFile() {
@@ -2763,6 +3312,8 @@ async function saveFile() {
   }
   await settleEditQueue();
   if (isUntitled(state.stat.path)) {
+    const memoDir = (state.settings.memoDir || "").trim();
+    if (memoDir && (await quickMemoSave(memoDir))) return;
     await saveCopy();
     return;
   }
@@ -3720,7 +4271,7 @@ function setQueryFromInput() {
   state.searchHits = null;
   state.searchTruncated = false;
   buildMatcher();
-  $("find-count").textContent = state.regexError ? "正規表現エラー" : "";
+  $("find-count").textContent = state.regexError ? t("正規表現エラー") : "";
   scheduleRender();
 }
 
@@ -3856,12 +4407,12 @@ function askConfirm(title, message, opts = {}) {
     const modal = $("confirm");
     const okBtn = $("confirm-ok");
     const cancelBtn = $("confirm-cancel");
-    $("confirm-title").textContent = title || "確認";
-    $("confirm-message").textContent = message || "";
-    okBtn.textContent = opts.okLabel || "OK";
+    $("confirm-title").textContent = translateText(title || "確認");
+    $("confirm-message").textContent = translateText(message || "");
+    okBtn.textContent = translateText(opts.okLabel || "OK");
     okBtn.classList.toggle("danger", !!opts.danger);
     okBtn.classList.toggle("primary", !opts.danger);
-    cancelBtn.textContent = opts.cancelLabel || "キャンセル";
+    cancelBtn.textContent = translateText(opts.cancelLabel || "キャンセル");
     cancelBtn.classList.toggle("hidden", !!opts.alert);
     setModalOpen(modal, true);
     queueMicrotask(() => okBtn.focus());
@@ -3901,8 +4452,8 @@ function promptVisible() { return !$("prompt").classList.contains("hidden"); }
 function askPrompt(title, label, value = "") {
   return new Promise((resolve) => {
     const modal = $("prompt");
-    $("prompt-title").textContent = title || "入力";
-    $("prompt-label").textContent = label || "";
+    $("prompt-title").textContent = translateText(title || "入力");
+    $("prompt-label").textContent = translateText(label || "");
     const input = $("prompt-input");
     input.value = value;
     setModalOpen(modal, true);
@@ -3942,26 +4493,26 @@ function askForm(title, fields, okLabel = "実行") {
   return new Promise((resolve) => {
     const modal = $("form-modal");
     const body = $("form-body");
-    $("form-title").textContent = title || "オプション";
-    $("form-ok").textContent = okLabel;
+    $("form-title").textContent = translateText(title || "オプション");
+    $("form-ok").textContent = translateText(okLabel);
     body.textContent = "";
     const readers = {};
     for (const f of fields) {
       if (f.type === "hint") {
         const hint = document.createElement("div");
         hint.className = "form-hint";
-        hint.textContent = f.label;
+        hint.textContent = translateText(f.label);
         body.append(hint);
         continue;
       }
       if (f.type === "check") {
         const lab = document.createElement("label");
         lab.className = "form-check";
-        if (f.title) lab.title = f.title;
+        if (f.title) lab.title = translateText(f.title);
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = !!f.value;
-        lab.append(cb, document.createTextNode(f.label));
+        lab.append(cb, document.createTextNode(translateText(f.label)));
         body.append(lab);
         readers[f.id] = () => cb.checked;
         continue;
@@ -3969,14 +4520,14 @@ function askForm(title, fields, okLabel = "実行") {
       const row = document.createElement("label");
       row.className = "form-row";
       const span = document.createElement("span");
-      span.textContent = f.label;
+      span.textContent = translateText(f.label);
       row.append(span);
       if (f.type === "select") {
         const sel = document.createElement("select");
         for (const [v, text] of f.options || []) {
           const o = document.createElement("option");
           o.value = v;
-          o.textContent = text;
+          o.textContent = translateText(text);
           sel.append(o);
         }
         if (f.value != null) sel.value = f.value;
@@ -3986,8 +4537,8 @@ function askForm(title, fields, okLabel = "実行") {
         const input = document.createElement("input");
         input.type = "text";
         input.value = f.value ?? "";
-        input.placeholder = f.placeholder ?? "";
-        if (f.title) input.title = f.title;
+        input.placeholder = translateText(f.placeholder ?? "");
+        if (f.title) input.title = translateText(f.title);
         row.append(input);
         readers[f.id] = () => input.value;
       }
@@ -4026,7 +4577,7 @@ function askForm(title, fields, okLabel = "実行") {
 // ---- loading overlay ------------------------------------------------------
 function showLoading(text) {
   const o = $("overlay");
-  o.textContent = text || "読み込み中…";
+  o.textContent = translateText(text || "読み込み中…");
   o.classList.remove("hidden");
 }
 function hideLoading() { $("overlay").classList.add("hidden"); }
@@ -4069,6 +4620,7 @@ function onGlobalKey(e) {
   if (matchesShortcut(e, "openFile")) { e.preventDefault(); hideFileMenu(); showOpener(); return; }
   if (matchesShortcut(e, "toggleSidebar")) { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
   if (matchesShortcut(e, "newFile")) { e.preventDefault(); hideFileMenu(); newUntitled(); return; }
+  if (matchesShortcut(e, "newWindow")) { e.preventDefault(); hideFileMenu(); openNewWindow(); return; }
   if (matchesShortcut(e, "gotoLine")) {
     e.preventDefault();
     askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
@@ -4441,7 +4993,8 @@ function renderCwdCrumbs(path) {
     if (i > 0) {
       const sep = document.createElement("span");
       sep.className = "cwd-sep";
-      sep.textContent = "›";
+      sep.setAttribute("aria-hidden", "true");
+      sep.append(iconSvg("i-chevron-right"));
       cwd.append(sep);
     }
     const btn = document.createElement("button");
@@ -4458,9 +5011,16 @@ function browseRow(ent, isUp) {
   const row = document.createElement("button");
   row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
   row.type = "button";
+  // The kind ("フォルダ" / "ファイル") moved from visible text into the icon;
+  // keep it for screen readers via the row's accessible name.
+  row.setAttribute(
+    "aria-label",
+    isUp ? "上の階層へ" : `${ent.is_dir ? "フォルダ" : "ファイル"}: ${ent.name}`
+  );
   const ic = document.createElement("span");
   ic.className = "ic";
-  ic.textContent = isUp ? "上へ" : ent.is_dir ? "フォルダ" : "ファイル";
+  ic.setAttribute("aria-hidden", "true");
+  ic.append(iconSvg(isUp ? "i-folder-up" : ent.is_dir ? "i-folder" : "i-file"));
   const nm = document.createElement("span");
   nm.className = "nm";
   nm.textContent = isUp ? "上の階層へ" : ent.name;
@@ -4552,9 +5112,11 @@ function recentRow(path) {
   row.className = "opener-row recent";
   row.type = "button";
   row.title = path;
+  row.setAttribute("aria-label", `最近使ったファイル: ${pathBaseName(path) || path}`);
   const ic = document.createElement("span");
   ic.className = "ic";
-  ic.textContent = "最近";
+  ic.setAttribute("aria-hidden", "true");
+  ic.append(iconSvg("i-clock"));
   const nm = document.createElement("span");
   nm.className = "nm";
   nm.textContent = pathBaseName(path) || path;
@@ -4771,7 +5333,7 @@ function renderTabs(list) {
     const x = document.createElement("button");
     x.type = "button";
     x.className = "tab-x";
-    x.textContent = "✕";
+    x.append(iconSvg("i-close"));
     x.title = "閉じる";
     x.setAttribute("aria-label", `${t.name} を閉じる`);
     el.append(dot, nm, x);
@@ -5051,6 +5613,7 @@ function runMenuAction(action) {
   if (action === "caseLower") return transformSelection("lower");
   if (action === "keymap") return showKeymap();
   if (action === "newFile") return newUntitled();
+  if (action === "newWindow") return openNewWindow();
   if (action === "openFile") return showOpener();
   if (action === "saveFile") return saveFile();
   if (action === "saveAs") return saveCopy();
@@ -5120,6 +5683,7 @@ function loadSettings() {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
     merged.sidebarSide = merged.sidebarSide === "right" ? "right" : "left";
+    merged.language = normalizeLanguage(merged.language);
     merged.keymap = sanitizeKeymap(merged.keymap);
     return merged;
   } catch {
@@ -5238,10 +5802,12 @@ function applySettings(s) {
 }
 
 function updateSetting(key, value) {
+  if (key === "language") value = normalizeLanguage(value);
   state.settings = { ...state.settings, [key]: value };
   applySettings(state.settings);
   saveSettings(state.settings);
   if (key === "sidebarSide") updateSidebarSideButtons();
+  if (key === "language") applyLocale();
 }
 
 function settingsVisible() {
@@ -5388,10 +5954,10 @@ function updateSidebarSideButtons() {
 function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
-  updateKeyHints();
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
+  $("set-language").value = normalizeLanguage(state.settings.language);
   const illusPct = state.settings.illus == null ? themeIllusPct(state.settings.theme) : Math.round(state.settings.illus * 100);
   $("set-illus").value = illusPct; $("set-illus-val").textContent = illusPct + "%";
   $("set-font").value = state.settings.font;
@@ -5405,6 +5971,7 @@ function initSettings() {
     const pct = themeIllusPct(id); $("set-illus").value = pct; $("set-illus-val").textContent = pct + "%";
   });
   $("set-bg").addEventListener("change", () => updateSetting("bgMode", $("set-bg").value));
+  $("set-language").addEventListener("change", () => updateSetting("language", $("set-language").value));
   $("set-illus").addEventListener("input", () => {
     const v = Number($("set-illus").value);
     $("set-illus-val").textContent = v + "%";
@@ -5422,6 +5989,10 @@ function initSettings() {
   $("set-confirm-last-tab-close").addEventListener("change", () => (
     updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked)
   ));
+  $("set-memo-dir").value = state.settings.memoDir || "";
+  $("set-memo-dir").addEventListener("input", () => updateSetting("memoDir", $("set-memo-dir").value));
+  $("set-memo-name").value = state.settings.memoName || DEFAULT_SETTINGS.memoName;
+  $("set-memo-name").addEventListener("input", () => updateSetting("memoName", $("set-memo-name").value));
   updateSidebarSideButtons();
   document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
     btn.addEventListener("click", () => updateSetting("sidebarSide", btn.dataset.sidebarSide));
@@ -5440,6 +6011,7 @@ function initSettings() {
   $("settings").addEventListener("click", (e) => {
     if (e.target === $("settings")) hideSettings();
   });
+  applyLocale();
 }
 
 // ---- boot ------------------------------------------------------------------

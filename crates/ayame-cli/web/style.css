@@ -253,6 +253,7 @@ html, body {
   font-size: 13px;
   flex: 0 0 auto;
 }
+.tab .tab-x .ay-icon { width: 12px; height: 12px; }
 .tab .tab-x:hover { background: var(--hover); color: var(--fg); }
 .tab-new {
   width: 36px;
@@ -1316,7 +1317,10 @@ html.saving .caret.extra { visibility: hidden; }
 .cwd-sep {
   color: var(--fg-faint);
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
 }
+.cwd-sep .ay-icon { width: 12px; height: 12px; }
 
 .opener-list {
   flex: 1;
@@ -1347,12 +1351,12 @@ html.saving .caret.extra { visibility: hidden; }
 }
 .opener-row:focus-visible { outline: none; border-color: var(--accent-bright); }
 .opener-row .ic {
-  flex: 0 0 64px;
+  /* fixed icon box (was a right-aligned text label like "フォルダ") */
+  flex: 0 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--fg-dim);
-  font-size: 11px;
-  font-family: var(--ui);
-  font-weight: 600;
-  text-align: right;
 }
 .opener-row.dir .ic {
   color: var(--accent);
@@ -1437,6 +1441,24 @@ html.saving .caret.extra { visibility: hidden; }
   outline: none;
 }
 .set-row select:focus { border-color: var(--accent-bright); }
+.set-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  outline: none;
+}
+.set-row input[type="text"]:focus { border-color: var(--accent-bright); }
+.set-row input[type="text"]::placeholder { color: var(--fg-faint); }
+/* the 使える変数 hint hugs the メモの名前 row above it */
+.set-row.set-hint-row { padding-top: 0; margin-top: -8px; }
+.set-row.set-hint-row .set-hint { font-size: 11px; color: var(--fg-faint); }
 .set-row input[type="range"] { flex: 1; accent-color: var(--accent); }
 .set-val { flex: 0 0 40px; text-align: right; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
 .seg-control {

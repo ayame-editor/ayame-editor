@@ -398,7 +398,9 @@ impl AppState {
                         None => continue,
                     }
                 };
-                let path = path.to_string_lossy().to_string();
+                // UI-facing path (and the name derived from it): never leak a
+                // Windows verbatim prefix.
+                let path = super::workspace::display_path(&path);
                 out.push(TabInfo {
                     id,
                     name: tab_name(&path),
@@ -635,7 +637,12 @@ impl AppState {
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
             .await
             .map_err(internal)?
-            .map_err(|e| bad_request(format!("reopening '{}': {e}", path.display())))?;
+            .map_err(|e| {
+                bad_request(format!(
+                    "reopening '{}': {e}",
+                    super::workspace::display_path(&path)
+                ))
+            })?;
         let asides = self.write(|ws| {
             ws.doc = Some(Arc::new(doc));
             std::mem::take(&mut ws.aside_files)
@@ -655,7 +662,12 @@ impl AppState {
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
             .await
             .map_err(internal)?
-            .map_err(|e| bad_request(format!("reopening '{}': {e}", path.display())))?;
+            .map_err(|e| {
+                bad_request(format!(
+                    "reopening '{}': {e}",
+                    super::workspace::display_path(&path)
+                ))
+            })?;
         let asides = self.write(|ws| {
             ws.doc = Some(Arc::new(doc));
             ws.edits = EditSession::default();
@@ -684,7 +696,7 @@ impl AppState {
             .map_err(|e| {
                 bad_request(format!(
                     "reopening '{}' as {}: {e}",
-                    path.display(),
+                    super::workspace::display_path(&path),
                     enc.label()
                 ))
             })?;
@@ -719,7 +731,12 @@ impl AppState {
         })
         .await
         .map_err(internal)?
-        .map_err(|e| bad_request(format!("opening '{path}': {e}")))?;
+        .map_err(|e| {
+            bad_request(format!(
+                "opening '{}': {e}",
+                super::workspace::strip_verbatim(&path)
+            ))
+        })?;
         let _transitions = self.transitions.lock().await;
         let orphaned = self.write(|ws| ws.install_new_tab(Arc::new(doc)));
         remove_aside_files(orphaned);

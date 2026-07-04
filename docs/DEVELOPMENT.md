@@ -16,6 +16,31 @@ cargo run -p ayame-cli -- --help
 通常の CLI / Web エディタ開発は Rust だけで足ります。ネイティブウィンドウ
 （`ayame gui`）を動かす時だけ `--features gui` と OS 別の WebView 依存が必要です。
 
+
+## 開発体験 (ツーリング)
+
+コードの全体像は [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)(実装の地図と主要リファクタの記録)から。
+
+リポジトリ直下の設定で、誰の環境でも同じ結果になるようにしてある:
+
+- **rust-toolchain.toml** — stable + rustfmt + clippy を自動で揃える(rustup が読む)。
+- **rustfmt.toml / .editorconfig** — 改行は LF、インデントは Rust 4 / それ以外 2。
+- **Cargo.toml `[workspace.lints]`** — `dbg!` / `todo!` / `unimplemented!` はビルドエラー。
+  CI はさらに `cargo clippy -D warnings`(gui feature 込み)を強制。
+- **フロントエンド** — ビルド工程なしの素の JS。CI で `node --check web/app.js` を実行。
+  formatter/linter は **oxfmt / oxlint**(oxc、Rust製の単一バイナリで Node 不要)を採用予定 —
+  進行中の大きな変更が合流した時点で一括フォーマットして CI に組み込む。
+- **リリース** — `cargo xtask release --bump patch` の1コマンド(docs/RELEASE.md)。
+
+日常のゲートはこれだけ:
+
+```sh
+cargo fmt --all --check
+cargo clippy --all-targets --locked --features ayame-cli/gui -- -D warnings
+cargo test --locked
+node --check crates/ayame-cli/web/app.js
+```
+
 ## Windows
 
 PowerShell を使います。

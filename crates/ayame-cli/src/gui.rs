@@ -84,7 +84,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             // The Windows verbatim prefix canonicalize adds is stripped so it
             // never surfaces in tab tooltips or save dialogs.
             let abs = std::fs::canonicalize(p)
-                .map(|x| crate::serve::workspace::strip_verbatim(&x.to_string_lossy()))
+                .map(|x| crate::serve::workspace::display_path(&x))
                 .unwrap_or_else(|_| p.clone());
             format!(
                 "window.__ayamePendingOpen = {};",
@@ -135,6 +135,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             }
             "ayame:ready" => {
                 let _ = ipc_proxy.send_event(GuiEvent::Ready);
+            }
+            "ayame:new-window" => {
+                let _ = ipc_proxy.send_event(GuiEvent::NewWindow);
             }
             msg => {
                 if let Some(title) = msg.strip_prefix("ayame:title:") {
@@ -270,6 +273,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                         save_window_state(&window, last_normal.as_ref());
                         *control_flow = ControlFlow::Exit;
                     }
+                } else if id == "newWindow" {
+                    // Same native path as the IPC request — a new window is a
+                    // new process, never a round-trip through __ayameMenu.
+                    spawn_new_window();
                 } else if let Ok(id_json) = serde_json::to_string(&id) {
                     let js = format!("window.__ayameMenu && window.__ayameMenu({id_json});");
                     let _ = webview.evaluate_script(&js);
@@ -283,6 +290,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     let _ = webview.evaluate_script(&js);
                 }
             }
+            Event::UserEvent(GuiEvent::NewWindow) => {
+                spawn_new_window();
+            }
             _ => {}
         }
     })
@@ -295,10 +305,27 @@ enum GuiEvent {
     SetTitle(String),
     Ready,
     OpenPaths(Vec<String>),
+    /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
+    NewWindow,
     /// A native menu item was activated; carries the muda item id, which is
     /// the frozen action name understood by `window.__ayameMenu` in the page.
     #[cfg(target_os = "macos")]
     Menu(String),
+}
+
+/// Open a new editor window: spawn a fresh, detached `<current-exe> gui`
+/// process. Each window is its own process + server by design — no state is
+/// shared, so a crash in one window can never take another down. Failures are
+/// logged and swallowed: the running window must never break over this.
+fn spawn_new_window() {
+    match std::env::current_exe() {
+        Ok(exe) => {
+            if let Err(e) = std::process::Command::new(exe).arg("gui").spawn() {
+                eprintln!("ayame: opening a new window failed: {e}");
+            }
+        }
+        Err(e) => eprintln!("ayame: opening a new window failed (current_exe): {e}"),
+    }
 }
 
 /// Registers the muda event forwarder and attaches the menu bar to NSApp.
@@ -364,6 +391,9 @@ fn build_macos_menu() -> Option<muda::Menu> {
         true,
         &[
             &item("newFile", "新規ファイル", key(cmd, Code::KeyN)),
+            // Handled natively in the event loop (like "quit"): a new window
+            // is a new process, not a page action.
+            &item("newWindow", "新規ウィンドウ", key(shift_cmd, Code::KeyN)),
             &item("openFile", "開く", key(cmd, Code::KeyO)),
             &PredefinedMenuItem::separator(),
             &item("saveFile", "保存", key(cmd, Code::KeyS)),

@@ -43,6 +43,23 @@
       <symbol id="i-tools" viewBox="0 0 24 24">
         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
       </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6 6 18" />
+      </symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24">
+        <path d="m9 5.5 6.5 6.5L9 18.5" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path d="M6.2 3.5h7.3l4.3 4.3v12.7H6.2V3.5Z" />
+        <path d="M13.5 3.5V8h4.3" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.2" />
+        <path d="M12 7.6V12l3 2.1" />
+      </symbol>
     </svg>
     <div id="app">
       <nav id="menubar" role="menubar" aria-label="メニュー">
@@ -53,6 +70,9 @@
           <div id="file-menu" class="file-menu hidden" role="menu" aria-label="ファイル">
             <button id="new-file" class="menu-item" role="menuitem">
               <span class="menu-label">新規ファイル</span><span class="menu-key" data-key-action="newFile">Ctrl+N</span>
+            </button>
+            <button id="new-window" class="menu-item" data-menu-action="newWindow" role="menuitem">
+              <span class="menu-label">新規ウィンドウ</span><span class="menu-key" data-key-action="newWindow">Ctrl+Shift+N</span>
             </button>
             <button id="open-file" class="menu-item" role="menuitem">
               <span class="menu-label">開く</span><span class="menu-key" data-key-action="openFile">Ctrl+O</span>
@@ -175,7 +195,7 @@
           <div class="sb-head">
             <svg class="ay-icon"><use href="#i-sidebar"></use></svg>
             <span class="sb-title">エクスプローラー</span>
-            <button id="sb-close" class="ico sb-close" title="エクスプローラーを閉じる" aria-label="エクスプローラーを閉じる">×</button>
+            <button id="sb-close" class="ico sb-close" title="エクスプローラーを閉じる" aria-label="エクスプローラーを閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
           </div>
           <div id="sb-root" class="sb-root" title=""></div>
           <div class="sb-actions" aria-label="エクスプローラー操作">
@@ -216,7 +236,7 @@
               <button id="find-next" class="ico" title="次の一致 (F3)" aria-label="次の一致">
                 <svg class="ay-icon"><use href="#i-down"></use></svg>
               </button>
-              <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる">×</button>
+              <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
             </div>
             <div class="field replace-row" role="group" aria-label="置換">
               <input id="replace-input" type="text" autocomplete="off" placeholder="置換後" />
@@ -253,7 +273,7 @@
             <img src="/favicon.svg" width="18" height="18" alt="" />
             <span id="opener-title">ファイルを開く</span>
           </div>
-          <button id="opener-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="opener-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
 
         <div class="opener-path">
@@ -280,7 +300,7 @@
       <div class="modal-panel settings-panel" role="dialog" aria-label="設定">
         <div class="modal-head">
           <div class="modal-title">設定</div>
-          <button id="settings-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="settings-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="settings-body">
           <label class="set-row">
@@ -300,6 +320,14 @@
             <select id="set-bg">
               <option value="watercolor">水彩</option>
               <option value="solid">単色（全単色配慮）</option>
+            </select>
+          </label>
+          <label class="set-row">
+            <span class="set-label">言語</span>
+            <select id="set-language">
+              <option value="auto">自動</option>
+              <option value="ja">日本語</option>
+              <option value="en">English</option>
             </select>
           </label>
           <label class="set-row">
@@ -330,6 +358,20 @@
             <input id="set-confirm-last-tab-close" type="checkbox" />
             <span class="set-val"></span>
           </label>
+          <label class="set-row">
+            <span class="set-label">メモの保存先</span>
+            <input id="set-memo-dir" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="例: /home/you/memo — 空なら保存ダイアログ" />
+          </label>
+          <label class="set-row">
+            <span class="set-label">メモの名前</span>
+            <input id="set-memo-name" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="memo-{yyyy}{mm}{dd}.txt" />
+          </label>
+          <div class="set-row set-hint-row">
+            <span class="set-label" aria-hidden="true"></span>
+            <span class="set-hint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}</span>
+          </div>
           <div class="set-row">
             <span class="set-label">サイドバー</span>
             <div class="seg-control" role="group" aria-label="サイドバー位置">
@@ -354,7 +396,7 @@
       <div class="modal-panel settings-panel" role="dialog" aria-label="文字コード / 改行コード">
         <div class="modal-head">
           <div class="modal-title">文字コード / 改行コード</div>
-          <button id="convert-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="convert-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="settings-body">
           <label class="set-row">
@@ -392,7 +434,7 @@
       <div class="modal-panel keymap-panel" role="dialog" aria-label="キー設定">
         <div class="modal-head">
           <div class="modal-title">キー設定</div>
-          <button id="keymap-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="keymap-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="keymap-body">
           <div class="keymap-hint">入力欄を選んでキーを押すと変更できます。Backspace / Delete で未設定。</div>
@@ -410,7 +452,7 @@
       <div class="modal-panel palette-panel" role="dialog" aria-label="コマンドパレット">
         <div class="modal-head">
           <div class="modal-title">コマンドパレット</div>
-          <button id="palette-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="palette-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="palette-body">
           <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false" />
@@ -423,7 +465,7 @@
       <div class="modal-panel diff-panel" role="dialog" aria-label="差分">
         <div class="modal-head">
           <div class="modal-title">差分</div>
-          <button id="diff-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="diff-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="diff-body">
           <div id="diff-summary" class="diff-summary"></div>
@@ -446,7 +488,7 @@
       <div class="modal-panel grep-panel" role="dialog" aria-label="フォルダ内検索">
         <div class="modal-head">
           <div class="modal-title">フォルダ内検索</div>
-          <button id="grep-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="grep-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="grep-body">
           <div id="grep-summary" class="grep-summary"></div>
@@ -461,7 +503,7 @@
       <div class="modal-panel form-panel" role="dialog" aria-label="オプション">
         <div class="modal-head">
           <div class="modal-title" id="form-title">オプション</div>
-          <button id="form-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="form-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div id="form-body" class="form-body"></div>
         <div class="form-actions">
@@ -477,7 +519,7 @@
       <div class="modal-panel confirm-panel" role="dialog" aria-label="確認">
         <div class="modal-head">
           <div class="modal-title" id="confirm-title">確認</div>
-          <button id="confirm-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="confirm-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="confirm-body">
           <div id="confirm-message" class="confirm-message"></div>
@@ -494,7 +536,7 @@
       <div class="modal-panel prompt-panel" role="dialog" aria-label="入力">
         <div class="modal-head">
           <div class="modal-title" id="prompt-title">入力</div>
-          <button id="prompt-close" class="modal-x" title="閉じる (Esc)">✕</button>
+          <button id="prompt-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="prompt-body">
           <span class="prompt-label" id="prompt-label"></span>
