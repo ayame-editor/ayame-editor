@@ -116,7 +116,7 @@ pub(crate) fn build_state(
             Some(doc)
         }
         None => {
-            eprintln!("ayame: no file open yet — open one (drag & drop or 開く)");
+            eprintln!("ayame: no file open yet — open one (drag & drop or Open)");
             None
         }
     };

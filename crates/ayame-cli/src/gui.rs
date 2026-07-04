@@ -357,19 +357,44 @@ fn build_macos_menu() -> Option<muda::Menu> {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
+    #[derive(Clone, Copy)]
+    enum UiLocale {
+        Ja,
+        En,
+    }
+
+    fn ui_locale() -> UiLocale {
+        let lang = ["AYAME_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .filter_map(|key| std::env::var(key).ok())
+            .find(|value| !value.trim().is_empty())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if lang.starts_with("ja") {
+            UiLocale::Ja
+        } else {
+            UiLocale::En
+        }
+    }
+
     let cmd = Modifiers::SUPER;
     let shift_cmd = Modifiers::SUPER | Modifiers::SHIFT;
     let key = |mods: Modifiers, code: Code| Some(Accelerator::new(Some(mods), code));
     // Ids are the frozen `window.__ayameMenu` action names, except "quit"
     // which is intercepted natively in the event loop.
     let item = |id: &str, text: &str, accel| MenuItem::with_id(id, text, true, accel);
+    let locale = ui_locale();
+    let label = |ja: &'static str, en: &'static str| match locale {
+        UiLocale::Ja => ja,
+        UiLocale::En => en,
+    };
 
     let app = Submenu::with_items(
         "Ayame Editor",
         true,
         &[
             &PredefinedMenuItem::about(
-                Some("Ayame Editor について"),
+                Some(label("Ayame Editor について", "About Ayame Editor")),
                 Some(AboutMetadata {
                     name: Some("Ayame Editor".into()),
                     version: Some(env!("CARGO_PKG_VERSION").into()),
@@ -377,59 +402,59 @@ fn build_macos_menu() -> Option<muda::Menu> {
                 }),
             ),
             &PredefinedMenuItem::separator(),
-            &item("settings", "設定…", key(cmd, Code::Comma)),
+            &item("settings", label("設定…", "Settings..."), key(cmd, Code::Comma)),
             &PredefinedMenuItem::separator(),
             // Not PredefinedMenuItem::quit: quitting must go through the same
             // unsaved-changes confirmation as closing the window.
-            &item("quit", "Ayame Editor を終了", key(cmd, Code::KeyQ)),
+            &item("quit", label("Ayame Editor を終了", "Quit Ayame Editor"), key(cmd, Code::KeyQ)),
         ],
     )
     .ok()?;
 
     let file = Submenu::with_items(
-        "ファイル",
+        label("ファイル", "File"),
         true,
         &[
-            &item("newFile", "新規ファイル", key(cmd, Code::KeyN)),
+            &item("newFile", label("新規ファイル", "New File"), key(cmd, Code::KeyN)),
             // Handled natively in the event loop (like "quit"): a new window
             // is a new process, not a page action.
-            &item("newWindow", "新規ウィンドウ", key(shift_cmd, Code::KeyN)),
-            &item("openFile", "開く", key(cmd, Code::KeyO)),
+            &item("newWindow", label("新規ウィンドウ", "New Window"), key(shift_cmd, Code::KeyN)),
+            &item("openFile", label("開く", "Open"), key(cmd, Code::KeyO)),
             &PredefinedMenuItem::separator(),
-            &item("saveFile", "保存", key(cmd, Code::KeyS)),
-            &item("saveAs", "名前を付けて保存", key(shift_cmd, Code::KeyS)),
+            &item("saveFile", label("保存", "Save"), key(cmd, Code::KeyS)),
+            &item("saveAs", label("名前を付けて保存", "Save As"), key(shift_cmd, Code::KeyS)),
             &PredefinedMenuItem::separator(),
-            &item("closeTab", "タブを閉じる", key(cmd, Code::KeyW)),
+            &item("closeTab", label("タブを閉じる", "Close Tab"), key(cmd, Code::KeyW)),
         ],
     )
     .ok()?;
 
     let edit = Submenu::with_items(
-        "編集",
+        label("編集", "Edit"),
         true,
         &[
-            &item("undo", "元に戻す", key(cmd, Code::KeyZ)),
-            &item("redo", "やり直す", key(shift_cmd, Code::KeyZ)),
+            &item("undo", label("元に戻す", "Undo"), key(cmd, Code::KeyZ)),
+            &item("redo", label("やり直す", "Redo"), key(shift_cmd, Code::KeyZ)),
             &PredefinedMenuItem::separator(),
-            &item("cut", "切り取り", key(cmd, Code::KeyX)),
-            &item("copy", "コピー", key(cmd, Code::KeyC)),
+            &item("cut", label("切り取り", "Cut"), key(cmd, Code::KeyX)),
+            &item("copy", label("コピー", "Copy"), key(cmd, Code::KeyC)),
             // Paste stays a native selector so the DOM paste event (the only
             // sanctioned clipboard-read path) reaches the hidden textarea.
-            &PredefinedMenuItem::paste(Some("貼り付け")),
-            &item("selectAll", "すべて選択", key(cmd, Code::KeyA)),
+            &PredefinedMenuItem::paste(Some(label("貼り付け", "Paste"))),
+            &item("selectAll", label("すべて選択", "Select All"), key(cmd, Code::KeyA)),
             &PredefinedMenuItem::separator(),
-            &item("find", "検索", key(cmd, Code::KeyF)),
-            &item("replace", "置換", None),
+            &item("find", label("検索", "Find"), key(cmd, Code::KeyF)),
+            &item("replace", label("置換", "Replace"), None),
         ],
     )
     .ok()?;
 
     let window = Submenu::with_items(
-        "ウインドウ",
+        label("ウインドウ", "Window"),
         true,
         &[
-            &PredefinedMenuItem::minimize(Some("しまう")),
-            &PredefinedMenuItem::maximize(Some("拡大/縮小")),
+            &PredefinedMenuItem::minimize(Some(label("しまう", "Minimize"))),
+            &PredefinedMenuItem::maximize(Some(label("拡大/縮小", "Zoom"))),
         ],
     )
     .ok()?;

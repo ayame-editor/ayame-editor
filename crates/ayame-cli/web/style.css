@@ -1419,7 +1419,8 @@ html.saving .caret.extra { visibility: hidden; }
 /* ---- settings --------------------------------------------------------- */
 
 .settings-panel { width: min(420px, 92vw); }
-.settings-body { padding: 8px 14px 14px; }
+/* the memo rows pushed the panel past 80vh on short windows: scroll, don't clip */
+.settings-body { padding: 8px 14px 14px; overflow-y: auto; scrollbar-width: thin; }
 .set-row {
   display: flex;
   align-items: center;
