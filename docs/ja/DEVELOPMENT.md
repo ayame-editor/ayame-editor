@@ -29,9 +29,9 @@ cargo run -p ayame-cli -- --help
 - **rustfmt.toml / .editorconfig** — 改行は LF、インデントは Rust 4 / それ以外 2。
 - **Cargo.toml `[workspace.lints]`** — `dbg!` / `todo!` / `unimplemented!` はビルドエラー。
   CI はさらに `cargo clippy -D warnings`(gui feature 込み)を強制。
-- **フロントエンド** — ビルド工程なしの素の JS。CI で `node --check web/app.js` を実行。
-  formatter/linter は **oxfmt / oxlint**(oxc、Rust製の単一バイナリで Node 不要)を採用予定 —
-  進行中の大きな変更が合流した時点で一括フォーマットして CI に組み込む。
+- **フロントエンド** — `crates/ayame-cli/web/src` の TypeScript ES modules。
+  Cargo build 時に `build.rs` が oxc で型を落とした JS を埋め込む。CI は `tsc`、
+  `oxfmt`、`oxlint` でソースを確認する。
 - **リリース** — `cargo xtask release --bump patch` の1コマンド(docs/RELEASE.md)。
 
 日常のゲートはこれだけ:
@@ -40,7 +40,9 @@ cargo run -p ayame-cli -- --help
 cargo fmt --all --check
 cargo clippy --all-targets --locked --features ayame-cli/gui -- -D warnings
 cargo test --locked
-node --check crates/ayame-cli/web/app.js
+npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 | xargs -0 oxfmt --check
+oxlint --max-warnings 0 crates/ayame-cli/web/src
 ```
 
 ## Windows

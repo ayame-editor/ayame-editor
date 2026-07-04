@@ -1,4 +1,4 @@
-# 実装ノート — 何がどう作られているか (v0.3.x)
+# 実装ノート — 何がどう作られているか (v0.5.x)
 
 *English: [../IMPLEMENTATION_NOTES.md](../IMPLEMENTATION_NOTES.md)*
 
@@ -14,7 +14,7 @@ ayame (単一バイナリ)
 │   ├─ cli/       CLIサブコマンド (stat/search/sort/replace/case/split/gen/diff/…)
 │   ├─ serve/     ローカルHTTPサーバ = UI層 (axum、ループバック既定)
 │   ├─ gui.rs     ネイティブ窓 (tao + wry = OSのWebView)。serve を裏で起動して指す
-│   └─ web/       フロントエンド (素のJS、ビルド工程なし、バイナリに埋め込み)
+│   └─ web/       フロントエンド (TypeScript ES modules、oxcで型を落としてバイナリに埋め込み)
 └─ xtask          リポジトリ自動化 (cargo xtask release)
 ```
 
@@ -84,6 +84,9 @@ OSのWebView(WKWebView / WebView2 / WebKitGTK)を向けるだけ — UIスタッ
 
 ## フロントエンド (web/)
 
+- ソースは `web/src/*.ts`。Cargo build 時に `build.rs` が oxc で TypeScript
+  の型を落とし、生成された ES modules を埋め込んで `/src/<module>.js` として配信する。
+  生成済み JS bundle はコミットしない。
 - **仮想化が前提**: DOM には可視域+パッド行しか存在せず、スクロールは行番号ベースの自作
   スクロールバー(ピクセル座標だとブラウザの高さ上限で 100億行を表現できない)。
 - 編集は直列キュー(`enqueueEdit`)で1本化。保存はキュー完了を待ってからスナップショット、

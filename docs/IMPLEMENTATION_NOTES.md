@@ -1,4 +1,4 @@
-# Implementation Notes — What Is Built, and How (v0.3.x)
+# Implementation Notes — What Is Built, and How (v0.5.x)
 
 *日本語版: [ja/IMPLEMENTATION_NOTES.md](ja/IMPLEMENTATION_NOTES.md)*
 
@@ -14,7 +14,7 @@ ayame (single binary)
 │   ├─ cli/       CLI subcommands (stat/search/sort/replace/case/split/gen/diff/…)
 │   ├─ serve/     local HTTP server = UI layer (axum, loopback by default)
 │   ├─ gui.rs     native window (tao + wry = the OS WebView). Launches serve in the background and points at it
-│   └─ web/       frontend (plain JS, no build step, embedded in the binary)
+│   └─ web/       frontend (TypeScript ES modules, type-stripped by oxc, embedded in the binary)
 └─ xtask          repository automation (cargo xtask release)
 ```
 
@@ -93,6 +93,9 @@ simply points the OS WebView (WKWebView / WebView2 / WebKitGTK) at it — there 
 
 ## Frontend (web/)
 
+- The source lives in `web/src/*.ts`. `build.rs` strips TypeScript with oxc at
+  Cargo build time, embeds the generated ES modules, and serves them under
+  `/src/<module>.js`. No generated JS bundle is committed.
 - **Virtualization is a given**: the DOM contains only the visible range plus pad lines, and
   scrolling uses a hand-rolled line-number-based scrollbar (pixel coordinates cannot represent
   10 billion lines within browser height limits).

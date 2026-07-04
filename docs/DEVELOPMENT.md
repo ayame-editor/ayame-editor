@@ -30,9 +30,9 @@ Configuration at the repository root makes results identical on anyone's machine
 - **rustfmt.toml / .editorconfig** — LF line endings; indentation is 4 for Rust, 2 for everything else.
 - **Cargo.toml `[workspace.lints]`** — `dbg!` / `todo!` / `unimplemented!` are build errors.
   CI additionally enforces `cargo clippy -D warnings` (including the gui feature).
-- **Frontend** — plain JS with no build step. CI runs `node --check web/app.js`.
-  The planned formatter/linter is **oxfmt / oxlint** (oxc: single Rust binaries, no Node required) —
-  once the large in-flight changes have merged, everything will be formatted in one pass and wired into CI.
+- **Frontend** — TypeScript ES modules in `crates/ayame-cli/web/src`.
+  Cargo embeds type-stripped JS with oxc in `build.rs`; CI checks the sources with `tsc`,
+  `oxfmt`, and `oxlint`.
 - **Releases** — a single command, `cargo xtask release --bump patch` (docs/RELEASE.md).
 
 The daily gate is just this:
@@ -41,7 +41,9 @@ The daily gate is just this:
 cargo fmt --all --check
 cargo clippy --all-targets --locked --features ayame-cli/gui -- -D warnings
 cargo test --locked
-node --check crates/ayame-cli/web/app.js
+npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 | xargs -0 oxfmt --check
+oxlint --max-warnings 0 crates/ayame-cli/web/src
 ```
 
 ## Windows
