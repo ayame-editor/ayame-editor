@@ -18,7 +18,17 @@ Download the build for your OS from the
 
 You can also install from the terminal:
 
+macOS / Windows / Linux:
+
 ```sh
+curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+```
+
+Linux needs WebKitGTK at runtime. On Debian / Ubuntu:
+
+```sh
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-0
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 

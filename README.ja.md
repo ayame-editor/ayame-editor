@@ -17,7 +17,17 @@ macOS、Windows、Linux で動作します。
 
 ターミナルからインストールすることもできます。
 
+macOS / Windows / Linux:
+
 ```sh
+curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+```
+
+Linux では実行時に WebKitGTK が必要です。Debian / Ubuntu の場合:
+
+```sh
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-0
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
