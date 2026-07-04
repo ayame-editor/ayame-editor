@@ -7,6 +7,7 @@ on:
       - ".github/workflows/pages.yml"
       - "docs/**"
       - "mkdocs.yml"
+      - "scripts/mkdocs_ayame_pages.py"
   workflow_dispatch:
 
 permissions:

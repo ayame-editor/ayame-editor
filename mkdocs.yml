@@ -32,7 +32,7 @@ extra_css:
   - assets/ayame-docs.css
 
 hooks:
-  - docs/hooks/ayame_pages.py
+  - scripts/mkdocs_ayame_pages.py
 
 nav:
   - Home: index.md
