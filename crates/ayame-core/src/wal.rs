@@ -1128,6 +1128,143 @@ mod tests {
         assert!(recovered.is_dirty());
     }
 
+    /// A malformed COMPLETE (newline-terminated) line is corruption, not a
+    /// torn tail: the log must read Invalid and refuse to replay — silently
+    /// truncating would drop committed records.
+    #[test]
+    fn corrupt_complete_line_marks_the_log_invalid() {
+        let (f, doc) = doc_from(b"one\ntwo\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+        live.replace_line(&doc, 0, "ONE".into()).unwrap();
+        live.replace_line(&doc, 1, "TWO".into()).unwrap();
+        drop(live);
+
+        // Corrupt a record but keep it newline-terminated (e.g. a bad block
+        // was written through, or the file was edited): COMPLETE garbage.
+        let mut file = std::fs::OpenOptions::new().append(true).open(&wal).unwrap();
+        file.write_all(b"{\"txn\":{\"op\":{\"kind\":\"garbage\"}}}\n")
+            .unwrap();
+        drop(file);
+
+        let doc2 = reopen(f.path());
+        let expected = Header::for_document(&doc2).unwrap();
+        assert_eq!(inspect(&wal, &expected), RecoveryInfo::Invalid);
+        let mut recovered = EditSession::default();
+        assert!(replay(&wal, &doc2, &mut recovered).is_err());
+    }
+
+    /// A second header record mid-log is corruption too — same refusal.
+    #[test]
+    fn misplaced_header_record_marks_the_log_invalid() {
+        let (f, doc) = doc_from(b"one\ntwo\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+        live.replace_line(&doc, 0, "ONE".into()).unwrap();
+        drop(live);
+
+        let header_line = std::fs::read_to_string(&wal)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        let mut file = std::fs::OpenOptions::new().append(true).open(&wal).unwrap();
+        file.write_all(format!("{header_line}\n").as_bytes())
+            .unwrap();
+        drop(file);
+
+        let doc2 = reopen(f.path());
+        let expected = Header::for_document(&doc2).unwrap();
+        assert_eq!(inspect(&wal, &expected), RecoveryInfo::Invalid);
+        let mut recovered = EditSession::default();
+        assert!(replay(&wal, &doc2, &mut recovered).is_err());
+    }
+
+    /// The crash window of the rename-aside fallback (target renamed to
+    /// `.old`, replacement not yet in place): readers fall back to the aside
+    /// copy, so the log is never lost.
+    #[test]
+    fn aside_log_is_used_when_the_target_is_missing() {
+        let (f, doc) = doc_from(b"one\ntwo\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+        live.replace_line(&doc, 0, "ONE".into()).unwrap();
+        live.replace_line(&doc, 1, "TWO".into()).unwrap();
+        let expected = texts(&live, &doc);
+        drop(live);
+
+        std::fs::rename(&wal, aside_path(&wal)).unwrap();
+        let doc2 = reopen(f.path());
+        let header = Header::for_document(&doc2).unwrap();
+        assert_eq!(
+            inspect(&wal, &header),
+            RecoveryInfo::Recoverable { transactions: 2 }
+        );
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 2);
+        assert_eq!(texts(&recovered, &doc2), expected);
+
+        // Once a target exists again it is authoritative; the stale aside is
+        // ignored (and a fresh write cleans it up).
+        let fresh = Header::for_document(&doc2).unwrap();
+        let w = WalWriter::create(&wal, fresh).unwrap();
+        drop(w);
+        assert!(!aside_path(&wal).exists(), "write_fresh drops stale asides");
+        assert_eq!(inspect(&wal, &header), RecoveryInfo::Clean);
+    }
+
+    /// Drive the fallback replace route directly (the plain rename cannot be
+    /// made to fail portably): with the target present — and even with a
+    /// stale aside in the way — the swap succeeds and an inspectable log
+    /// exists before, between (see the aside test above), and after.
+    #[test]
+    fn rename_via_aside_replaces_the_target_and_cleans_up() {
+        let (f, doc) = doc_from(b"one\ntwo\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let header = Header::for_document(&doc).unwrap();
+
+        // Old log with one txn at the target.
+        let mut live = EditSession::default();
+        live.set_wal(Some(WalWriter::create(&wal, header.clone()).unwrap()));
+        live.replace_line(&doc, 0, "OLD".into()).unwrap();
+        drop(live);
+        assert_eq!(
+            inspect(&wal, &header),
+            RecoveryInfo::Recoverable { transactions: 1 }
+        );
+        // A stale aside must not block the swap.
+        std::fs::write(aside_path(&wal), b"stale garbage\n").unwrap();
+
+        // New log content staged in a temp file (two txns).
+        let tmp = wal.with_file_name("staged.tmp");
+        let mut live = EditSession::default();
+        live.set_wal(Some(WalWriter::create(&tmp, header.clone()).unwrap()));
+        live.replace_line(&doc, 0, "NEW".into()).unwrap();
+        live.replace_line(&doc, 1, "NEW2".into()).unwrap();
+        drop(live);
+
+        rename_via_aside(&tmp, &wal).unwrap();
+        assert_eq!(
+            inspect(&wal, &header),
+            RecoveryInfo::Recoverable { transactions: 2 },
+            "the target now holds the staged log"
+        );
+        assert!(!aside_path(&wal).exists(), "the aside copy is dropped");
+        assert!(!tmp.exists());
+
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc, &mut recovered).unwrap(), 2);
+        assert_eq!(texts(&recovered, &doc), vec!["NEW", "NEW2"]);
+    }
+
     #[test]
     fn undo_across_a_compaction_snapshot_stays_replayable() {
         let (f, doc) = doc_from(b"base\n");
@@ -1227,5 +1364,129 @@ mod tests {
         // Garbage where the header should be.
         std::fs::write(&wal, b"not json\n").unwrap();
         assert_eq!(inspect(&wal, &expected), RecoveryInfo::Invalid);
+    }
+
+    /// Tiny deterministic PRNG (splitmix64) so the property test below needs
+    /// no dependencies and every failure is reproducible from its seed.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E3779B97F4A7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            z ^ (z >> 31)
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// Randomized crash-consistency property: random edits interleaved with
+    /// in-place saves (`reset_for_save`), undos/redos and compactions; at
+    /// random points a crash is simulated by replaying the log onto a
+    /// Document opened over the materialized saved bytes. The recovered view
+    /// and dirtiness must always equal the live session's.
+    #[test]
+    fn randomized_ops_saves_and_crashes_replay_the_live_view() {
+        for seed in 0..24u64 {
+            run_random_session(seed);
+        }
+    }
+
+    fn run_random_session(seed: u64) {
+        let mut rng = Rng(seed.wrapping_mul(0x2545F4914F6CDD1D).wrapping_add(seed + 1));
+        let lines = 3 + rng.below(6);
+        let mut contents = String::new();
+        for i in 0..lines {
+            contents.push_str(&format!("line{i}\n"));
+        }
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(contents.as_bytes()).unwrap();
+        f.flush().unwrap();
+        let doc = Document::open(f.path(), &AyameOpenOptions::default()).unwrap();
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        for step in 0..40u32 {
+            match rng.below(12) {
+                0..=4 => {
+                    let total = live.total_lines(&doc);
+                    if total == 0 {
+                        live.replace_range(&doc, 0, 0, 0, 0, "seed").unwrap();
+                    } else {
+                        let l0 = rng.below(total);
+                        let l1 = (l0 + rng.below(2)).min(total - 1);
+                        let c0 = rng.below(4) as usize;
+                        let c1 = if l1 == l0 {
+                            c0 + rng.below(3) as usize
+                        } else {
+                            rng.below(4) as usize
+                        };
+                        let text = match rng.below(4) {
+                            0 => String::new(),
+                            1 => format!("t{}", rng.below(5)),
+                            2 => format!("a{}\nb{}", rng.below(3), rng.below(3)),
+                            _ => "x".to_string(),
+                        };
+                        live.replace_range(&doc, l0, c0, l1, c1, &text).unwrap();
+                    }
+                }
+                5 => {
+                    let total = live.total_lines(&doc);
+                    if total > 1 {
+                        live.delete_line(&doc, rng.below(total)).unwrap();
+                    }
+                }
+                6 => {
+                    let total = live.total_lines(&doc);
+                    live.insert_line_before(&doc, rng.below(total + 1), format!("i{step}"))
+                        .unwrap();
+                }
+                7 | 8 => {
+                    let _ = live.undo();
+                }
+                9 => {
+                    let _ = live.redo();
+                }
+                10 => {
+                    // In-place save: the session keeps the OLD mmap document
+                    // and its history; the log restarts on the new base with
+                    // the save-time overlay captured for rebasing.
+                    live.save_to_path_overwrite(&doc, f.path()).unwrap();
+                    live.mark_saved();
+                    let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+                    live.wal_reset_for_save(&doc, header);
+                }
+                _ => live.wal_compact(),
+            }
+            let err = live.take_wal_error();
+            assert_eq!(err, None, "seed {seed} step {step}: unexpected {err:?}");
+            assert!(
+                live.wal().is_some(),
+                "seed {seed} step {step}: the log must stay attached"
+            );
+            if step % 7 == 6 || step == 39 {
+                // Simulated crash: fresh Document over the saved bytes.
+                let doc2 = reopen(f.path());
+                let mut recovered = EditSession::default();
+                replay(&wal, &doc2, &mut recovered)
+                    .unwrap_or_else(|e| panic!("seed {seed} step {step}: replay failed: {e}"));
+                assert_eq!(
+                    texts(&recovered, &doc2),
+                    texts(&live, &doc),
+                    "seed {seed} step {step}: recovered view diverged"
+                );
+                assert_eq!(
+                    recovered.is_dirty(),
+                    live.is_dirty(),
+                    "seed {seed} step {step}: recovered dirtiness diverged"
+                );
+            }
+        }
     }
 }

@@ -270,8 +270,7 @@ impl RebaseSource {
                             (None, None) => None,
                         };
                         if let Some(text) = new_text {
-                            out.entry(after_inserts).or_default().replacement =
-                                Some(text.clone());
+                            out.entry(after_inserts).or_default().replacement = Some(text.clone());
                         }
                     }
                 } else if !t.deleted {

@@ -20,8 +20,7 @@ use typeship::Bridge;
 use typeship_ts_rs::decl;
 
 use super::edit::{
-    CaretPosition, RecoverRequest, ReplaceRangeRequest, SelectionSaveRequest,
-    SelectionSaveResponse,
+    CaretPosition, RecoverRequest, ReplaceRangeRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
 use super::ops::{ArtifactResponse, CaseSaveRequest, ReplaceSaveRequest, SortSaveRequest};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest};
