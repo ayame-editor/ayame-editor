@@ -2,8 +2,6 @@
 
 Documentation for Ayame Editor, a desktop text editor for huge files.
 
-[日本語](ja/index.md)
-
 ## Start Here
 
 | Page | What it covers |
