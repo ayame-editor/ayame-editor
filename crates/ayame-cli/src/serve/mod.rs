@@ -166,6 +166,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/undo", post(edit::api_edit_undo))
         .route("/api/edit/redo", post(edit::api_edit_redo))
         .route("/api/edit/revert", post(edit::api_edit_revert))
+        .route("/api/edit/recover", post(edit::api_edit_recover))
         .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
         .route("/api/sort/save", post(ops::api_sort_save))
         .route("/api/replace/save", post(ops::api_replace_save))
@@ -184,6 +185,23 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .with_state(state)
 }
 
+/// Crash-log policy loop: every ~3 s fsync the live log (power-loss safety on
+/// top of the per-commit OS flush), compact it past its size threshold, and
+/// surface deferred write errors through the next stat response. A plain
+/// named thread holding only a `Weak` on the state — it needs no async
+/// runtime (shared by `serve` and the GUI's background server) and exits on
+/// its own once the state is dropped.
+fn spawn_wal_policy(state: &SharedState) {
+    let weak = Arc::downgrade(state);
+    let _ = std::thread::Builder::new()
+        .name("ayame-wal-policy".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let Some(state) = weak.upgrade() else { break };
+            state.wal_policy_tick();
+        });
+}
+
 async fn serve(
     state: SharedState,
     host: String,
@@ -191,6 +209,7 @@ async fn serve(
     policy: Arc<NetPolicy>,
     remote_active: bool,
 ) -> Result<()> {
+    spawn_wal_policy(&state);
     let app = router(state.clone(), policy);
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -217,6 +236,9 @@ async fn serve(
         .context("server error");
     // Graceful shutdown: drop the scratch this process accumulated (uploads,
     // untitled buffers, unsaved sort results, in-place save aside files).
+    // Crash logs of CLEAN sessions go too; dirty ones stay on disk — they are
+    // the recovery artifact the next process offers to replay.
+    state.cleanup_wal_files();
     state.cleanup_aside_files();
     workspace::cleanup_temp_dirs();
     result
@@ -299,9 +321,20 @@ pub(super) struct StatResponse {
     deleted_lines: u64,
     can_undo: bool,
     can_redo: bool,
+    /// Present when the active document's crash log holds `n` unsaved edit
+    /// transactions from a previous process, waiting for a restore/discard
+    /// decision via `POST /api/edit/recover`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recoverable: Option<usize>,
+    /// One-shot: crash logging failed and was disabled for this session (the
+    /// front-end shows it once; editing itself is unaffected).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wal_error: Option<String>,
 }
 
 pub(super) fn stat_response(state: &AppState) -> StatResponse {
+    // Drained once: whichever stat answers next carries the warning.
+    let wal_error = state.take_wal_error();
     // One read acquisition: doc and edits are mutually consistent and nothing
     // (in particular not the undo history) is cloned.
     state.read(|ws| match ws.doc_and_edits() {
@@ -321,6 +354,8 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
                 deleted_lines: edit.deleted_lines,
                 can_undo: edit.can_undo,
                 can_redo: edit.can_redo,
+                recoverable: ws.recoverable(),
+                wal_error,
             }
         }
         Err(_) => StatResponse {
@@ -334,6 +369,8 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
             deleted_lines: 0,
             can_undo: false,
             can_redo: false,
+            recoverable: None,
+            wal_error,
         },
     })
 }
