@@ -788,20 +788,16 @@ impl AppState {
             ws.edits.mark_saved_at(snap.content_gen);
             // The saved bytes ARE the file now: the base identity (len/mtime)
             // changed, so the crash log must restart from the new header —
-            // its old records must never replay onto the new base. (Edits
-            // that raced the rename recommit through the fresh log's
-            // undo-degradation snapshots; the header comparison keeps any
-            // torn state from ever replaying onto the wrong bytes.)
+            // its old records must never replay onto the new base.
+            // reset_for_save also captures the overlay that produced the new
+            // base, so later snapshots (compaction, undo past the save point)
+            // are REBASED onto the saved file instead of carrying stale
+            // old-base anchors; commit-time revision validation guarantees the
+            // live session content is exactly what reached the disk. Failures
+            // degrade the writer and surface once via take_wal_error().
             if ws.edits.wal().is_some() {
                 match wal::Header::for_document(&snap.doc) {
-                    Ok(header) => {
-                        if let Some(w) = ws.edits.wal() {
-                            if let Err(e) = w.reset(header) {
-                                ws.edits.set_wal(None);
-                                reset_err = Some(format!("crash log disabled: {e}"));
-                            }
-                        }
-                    }
+                    Ok(header) => ws.edits.wal_reset_for_save(&snap.doc, header),
                     Err(e) => {
                         ws.edits.set_wal(None);
                         reset_err = Some(format!("crash log disabled: {e}"));

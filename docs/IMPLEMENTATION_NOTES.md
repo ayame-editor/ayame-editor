@@ -166,10 +166,13 @@ with committed transactions mirrored to an append-only JSON Lines log.
   Save-as (switch) starts a fresh log at the new path and deletes the old path's log. Closing a tab
   deletes its log (logs pending a restore decision are kept). On clean shutdown only the logs of
   clean sessions are deleted; dirty ones are kept (candidates for restore next time).
-- **Known limits (inherited design trade-offs)**: undo/redo into history older than a reset/compaction
-  point degrades to the full snapshot. A snapshot taken right after an in-place save may contain
-  anchors based on the old mmap, so in that rare race window the restored content can roll back to
-  "the last saved state" (no saved data is ever lost).
+- **Known limits**: undo/redo into history older than a reset/compaction point degrades to a full
+  snapshot (recovered sessions only have undo history for the suffix since the log started).
+  Post-save snapshots are **rebased onto the new base**: `reset_for_save` captures the overlay that
+  produced the saved file, so undoing across a save point never yields a mismatched restore. If the
+  legacy plain-reset path is ever taken, the log is rewritten clean and recovery for that window is
+  disabled — a wrong restore is structurally impossible. A corrupted newline-terminated record marks
+  the whole log Invalid (recovery refused); only an unterminated EOF fragment is ignored as torn.
 
 ## Deliberately not done
 
