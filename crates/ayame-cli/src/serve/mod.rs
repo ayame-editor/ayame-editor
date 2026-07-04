@@ -130,7 +130,7 @@ pub(crate) fn build_state(
 fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
     Router::new()
         .route("/", get(assets::index))
-        .route("/app.js", get(assets::app_js))
+        .route("/src/{*path}", get(assets::src_module))
         .route("/style.css", get(assets::style_css))
         .route("/favicon.svg", get(assets::favicon_svg))
         .route("/ayame-logo.svg", get(assets::ayame_logo_svg))

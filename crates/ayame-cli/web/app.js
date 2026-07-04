@@ -24,11 +24,21 @@ const RECENT_MAX = 12; // cap on 最近使ったファイル entries
 const MAX_COPY_LINES = 20000; // clipboard cap: copy warns, cut refuses beyond this
 
 // ---- i18n -------------------------------------------------------------------
-// Dot-namespaced English keys; both locales are translations. Japanese is the
-// complete reference catalog — `en` falls back to `ja`, and `ja` falls back to
-// the key itself. Interpolated strings carry {var} placeholders, substituted
+// Dot-namespaced keys; every locale is a full translation table. English (`en`)
+// is the reference/fallback language and MUST stay complete — t() falls back
+// locale → en → key. Interpolated strings carry {var} placeholders substituted
 // by t(key, vars). Static HTML is tagged with data-i18n attributes and
 // re-applied per locale by applyStaticI18n().
+//
+// Adding a language `xx` is DATA-ONLY: add one `xx: { … }` block below — copy
+// `en` and translate every key, and include this block's own "language.name"
+// (its self-name for the picker), "language.auto", and a `weekday` table
+// (short/long arrays, indexed by Date.getDay()). normalizeLanguage(), the
+// Settings language picker (populateLanguageSelect), and browserLocale() all
+// derive from Object.keys(MESSAGES), so a new language is picked up with no code
+// change. (Server-origin errors are a separate concern: they are translated only
+// at the en boundary in serverMessage()/SERVER_MSG_EN; N-language coverage waits
+// on server-side error codes.)
 const MESSAGES = {
   ja: {
     // -- menu bar and menu items --
@@ -212,9 +222,16 @@ const MESSAGES = {
     "settings.bgWatercolor": "水彩",
     "settings.bgSolid": "単色（全単色配慮）",
     "settings.language": "言語",
-    "settings.langAuto": "自動",
-    "settings.langJa": "日本語",
-    "settings.langEn": "英語",
+    // Self-name of this language (shown in the language picker) + the "auto"
+    // option label. Every MESSAGES block must define "language.name".
+    "language.name": "日本語",
+    "language.auto": "自動",
+    // Weekday names for the 新規ファイル名 template, indexed by Date.getDay()
+    // (0 = Sunday). Part of this language block; en is the fallback.
+    weekday: {
+      short: ["日", "月", "火", "水", "木", "金", "土"],
+      long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
+    },
     "settings.illustration": "イラスト",
     "settings.font": "フォント",
     "settings.fontMono": "等幅 (Consolas / Menlo)",
@@ -548,9 +565,12 @@ const MESSAGES = {
     "settings.bgWatercolor": "Watercolor",
     "settings.bgSolid": "Solid",
     "settings.language": "Language",
-    "settings.langAuto": "Auto",
-    "settings.langJa": "Japanese",
-    "settings.langEn": "English",
+    "language.name": "English",
+    "language.auto": "Auto",
+    weekday: {
+      short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+      long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    },
     "settings.illustration": "Illustration",
     "settings.font": "Font",
     "settings.fontMono": "Monospace (Consolas / Menlo)",
@@ -740,16 +760,37 @@ function serverMessage(text) {
   return raw;
 }
 
-function normalizeLanguage(lang) {
-  return ["auto", "ja", "en"].includes(lang) ? lang : "auto";
+// Server-boundary predicate: the save endpoint reports an existing target with
+// a Japanese message (no error codes yet). Kept in the i18n/server-message
+// layer so UI modules never embed the raw string themselves.
+function isExistsError(msg) {
+  return String(msg ?? "").includes("既に存在");
 }
 
+// Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not
+// a locale — it defers to the browser). normalizeLanguage, the language picker,
+// and browserLocale all derive from this, so adding a language is data-only.
+function availableLocales() {
+  return Object.keys(MESSAGES);
+}
+
+function normalizeLanguage(lang) {
+  return lang === "auto" || availableLocales().includes(lang) ? lang : "auto";
+}
+
+// "auto": the first navigator.languages entry whose primary subtag has a
+// MESSAGES table (prefix match, so "zh-TW" resolves to "zh"); English if none.
 function browserLocale() {
-  return String(navigator.language || "")
-    .toLowerCase()
-    .startsWith("ja")
-    ? "ja"
-    : "en";
+  const locales = availableLocales();
+  const prefs =
+    navigator.languages && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language || ""];
+  for (const pref of prefs) {
+    const code = String(pref).toLowerCase().split("-")[0];
+    if (locales.includes(code)) return code;
+  }
+  return "en";
 }
 
 function currentLocale() {
@@ -757,26 +798,25 @@ function currentLocale() {
   return lang === "auto" ? browserLocale() : lang;
 }
 
-// Weekday names for the 新規ファイル名 template ({ddd} short / {dddd} long).
-// Indexed by Date.getDay() (0 = Sunday). Kept here so the expansion follows the
-// app language (currentLocale()) rather than the OS/navigator locale, which
-// keeps a given template + language reproducible.
-const WEEKDAYS = {
-  ja: {
-    short: ["日", "月", "火", "水", "木", "金", "土"],
-    long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
-  },
-  en: {
-    short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-    long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-  },
-};
+// Display name for a language option: each table names itself in "language.name"
+// ("日本語", "English"); "auto" uses the active locale's "language.auto".
+function localeLabel(code) {
+  if (code === "auto") return t("language.auto");
+  return (MESSAGES[code] && MESSAGES[code]["language.name"]) || code;
+}
 
-// Look up `key` in the active locale (fallback chain: locale → ja → key),
-// then substitute {var} placeholders from `vars`.
+// Weekday names for the 新規ファイル名 template ({ddd} short / {dddd} long),
+// indexed by Date.getDay() (0 = Sunday). Lives in each MESSAGES block so it is
+// part of "adding a language"; a block without a weekday table falls back to en.
+function weekdayNames(locale) {
+  return (MESSAGES[locale] && MESSAGES[locale].weekday) || MESSAGES.en.weekday;
+}
+
+// Look up `key` in the active locale. Fallback chain: locale → en (the key
+// language, kept complete) → the key itself. Then substitute {var} placeholders.
 function t(key, vars = null) {
-  const table = MESSAGES[currentLocale()] || MESSAGES.ja;
-  let out = table[key] ?? MESSAGES.ja[key] ?? key;
+  const table = MESSAGES[currentLocale()] || MESSAGES.en;
+  let out = table[key] ?? MESSAGES.en[key] ?? key;
   if (vars) {
     out = out.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
   }
@@ -1067,6 +1107,7 @@ function applyStaticI18n() {
 
 function applyLocale() {
   applyStaticI18n();
+  populateLanguageSelect(); // the "auto" label is localized; refresh it too
   updateKeyHints();
   updateStatusMeta();
   updateStatusPos();
@@ -2027,7 +2068,7 @@ async function saveSelectionToFile() {
     hideLoading();
     // Server-boundary string match: the save endpoint reports an existing
     // target as a Japanese message (no error codes yet).
-    if (String(e.message || "").includes("既に存在")) {
+    if (isExistsError(e.message)) {
       const overwrite = await askConfirm(
         t("dialog.overwrite.title"),
         t("dialog.overwrite.ask", { name: displayPath(f.path.trim()) }),
@@ -3766,7 +3807,7 @@ function expandNameTemplate(tpl, existingNames = null) {
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, "0");
   const yyyy = String(d.getFullYear()).padStart(4, "0");
-  const wk = WEEKDAYS[currentLocale()] || WEEKDAYS.en;
+  const wk = weekdayNames(currentLocale());
   const map = {
     "{yyyy}": yyyy,
     "{yy}": yyyy.slice(-2),
@@ -6714,7 +6755,7 @@ const THEME_PRESETS = {
     ],
   },
   "mono-paper": {
-    name: "Mono Paper (単色)",
+    name: "Mono Paper",
     type: "light",
     radius: 10,
     color: {
@@ -6882,6 +6923,21 @@ function themeIllusPct(id) {
   const t = themeJSONFor(id);
   return Math.round(((t && t.illustration) ?? 0) * 100);
 }
+// Build the language <select> from the available locales (Object.keys(MESSAGES)
+// plus "auto") so a newly added MESSAGES block appears with no markup change.
+function populateLanguageSelect() {
+  const sel = $("set-language");
+  if (!sel) return;
+  sel.replaceChildren();
+  for (const code of ["auto", ...availableLocales()]) {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = localeLabel(code);
+    sel.appendChild(opt);
+  }
+  sel.value = normalizeLanguage(state.settings.language);
+}
+
 function populateThemeSelect() {
   const sel = $("set-theme");
   [...sel.querySelectorAll("option[data-custom]")].forEach((o) => o.remove());
@@ -7015,7 +7071,7 @@ function initSettings() {
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
-  $("set-language").value = normalizeLanguage(state.settings.language);
+  populateLanguageSelect();
   const illusPct =
     state.settings.illus == null
       ? themeIllusPct(state.settings.theme)

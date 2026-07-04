@@ -22,8 +22,8 @@ jobs:
           rustup component add rustfmt clippy
       - name: Format
         run: cargo fmt --all --check
-      - name: Frontend syntax
-        run: node --check crates/ayame-cli/web/app.js
+      - name: Frontend type check
+        run: npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
       # oxc toolchain (Rust-native single binaries, no Node toolchain needed).
       # Version-pinned so formatting is reproducible; bump deliberately.
       - name: Frontend format + lint (oxfmt / oxlint)
@@ -36,8 +36,9 @@ jobs:
             tar -xzf "/tmp/$tool.tar.gz" -C /tmp
             chmod +x "/tmp/${tool}-x86_64-unknown-linux-gnu"
           done
-          /tmp/oxfmt-x86_64-unknown-linux-gnu --check crates/ayame-cli/web/app.js
-          /tmp/oxlint-x86_64-unknown-linux-gnu --max-warnings 0 crates/ayame-cli/web/app.js
+          find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 \
+            | xargs -0 /tmp/oxfmt-x86_64-unknown-linux-gnu --check
+          /tmp/oxlint-x86_64-unknown-linux-gnu --max-warnings 0 crates/ayame-cli/web/src
       # Rust <-> TypeScript type sharing (typeship): the committed api.d.ts
       # must match what the serve types generate.
       - name: Type bindings drift check

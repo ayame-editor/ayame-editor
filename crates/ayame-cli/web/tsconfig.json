@@ -1,0 +1,36 @@
+{
+  // Type gate for the TypeScript front-end (web/src). CI runs
+  //   npx -y typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+  // The shipped build does NOT use tsc — build.rs (oxc) does the type-strip.
+  //
+  // Strictness is deliberately pragmatic for this first port of a large JS
+  // monolith: strict/noImplicitAny/strictNullChecks are off (the code leans on
+  // structural JS patterns and a big mutable `state` object). The high-value
+  // flags that pass cleanly are on (noUnusedLocals, noFallthroughCasesInSwitch,
+  // isolatedModules). Tightening toward `strict: true` is tracked as follow-up.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  // `files` force-includes the ambient global augmentation (Window IPC/host
+  // hooks); a bare `**/*.ts` glob does not reliably pull in a lone .d.ts.
+  "files": ["src/env.d.ts"],
+  "include": ["src/**/*.ts"]
+}

@@ -37,7 +37,11 @@ fn main() {
     let mut ts_files = Vec::new();
     collect_ts(&src_dir, &mut ts_files);
     ts_files.sort();
-    assert!(!ts_files.is_empty(), "no .ts modules found under {}", src_dir.display());
+    assert!(
+        !ts_files.is_empty(),
+        "no .ts modules found under {}",
+        src_dir.display()
+    );
 
     let mut entries: Vec<String> = Vec::new();
     for path in &ts_files {
@@ -73,7 +77,10 @@ fn collect_ts(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.unwrap().path();
         if path.is_dir() {
             collect_ts(&path, out);
-        } else if path.extension().is_some_and(|e| e == "ts") {
+        } else if path.extension().is_some_and(|e| e == "ts")
+            // Declaration files are type-only: no runtime output to emit.
+            && !path.to_string_lossy().ends_with(".d.ts")
+        {
             out.push(path);
         }
     }

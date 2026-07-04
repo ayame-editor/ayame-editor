@@ -330,11 +330,9 @@
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.language">言語</span>
-            <select id="set-language">
-              <option value="auto" data-i18n="settings.langAuto">自動</option>
-              <option value="ja" data-i18n="settings.langJa">日本語</option>
-              <option value="en" data-i18n="settings.langEn">英語</option>
-            </select>
+            <!-- Options are built by populateLanguageSelect() from the locales
+                 in MESSAGES; keep this empty (single source of truth). -->
+            <select id="set-language"></select>
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.illustration">イラスト</span>
@@ -577,6 +575,6 @@
       <div class="dropzone-inner" data-i18n="app.dropToOpen">ドロップしてファイルを開く</div>
     </div>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/src/main.js" type="module"></script>
   </body>
 </html>
