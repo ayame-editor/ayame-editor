@@ -298,6 +298,11 @@ const I18N_EN = {
   タブ切替エラー: "Tab switch error",
   タブを閉じる: "Close Tab",
   破棄して閉じる: "Discard and Close",
+  クラッシュ復元: "Crash Recovery",
+  復元する: "Restore",
+  破棄: "Discard",
+  クラッシュ前の編集を破棄しました: "Discarded the pre-crash edits",
+  復元エラー: "Recovery error",
   タブを閉じられません: "Could not close the tab.",
   現在のフォルダをエクスプローラーに表示しました: "Showing the current folder in Explorer.",
   テーマを開けません: "Could not open the theme.",
@@ -408,6 +413,18 @@ const I18N_EN_PATTERNS = [
   [
     /^未保存の編集: \+([\d,]+) 行追加 \/ ~([\d,]+) 行変更 \/ -([\d,]+) 行削除$/u,
     (m) => `Unsaved edits: +${m[1]} lines added / ~${m[2]} lines changed / -${m[3]} lines deleted`,
+  ],
+  [
+    /^クラッシュ前の未保存の編集が見つかりました（([\d,]+)件）。復元しますか？$/u,
+    (m) => `Found ${m[1]} unsaved edit(s) from before a crash. Restore them?`,
+  ],
+  [
+    /^クラッシュ前の編集を復元しました（([\d,]+)件）$/u,
+    (m) => `Restored ${m[1]} pre-crash edit(s)`,
+  ],
+  [
+    /^自動保存ログが無効になりました: (.+)$/u,
+    (m) => `Crash-recovery logging was disabled: ${m[1]}`,
   ],
 ];
 
@@ -2603,7 +2620,17 @@ function revealLine(line) {
 async function refreshStat() {
   state.stat = await api("/api/stat");
   state.total = state.stat.view_lines ?? state.stat.lines;
+  noteWalError(state.stat);
   updateStatusMeta();
+}
+
+// One-shot warning when the server had to disable its crash log (an I/O
+// problem with the log never blocks editing; the stat response carries the
+// reason exactly once, so showing it whenever present shows it once).
+function noteWalError(stat) {
+  if (stat && stat.wal_error) {
+    flashCount(`自動保存ログが無効になりました: ${stat.wal_error}`, "error");
+  }
 }
 
 function clearLineCache() {
@@ -5760,6 +5787,43 @@ function reportOpenError(msg) {
   }
 }
 
+// ---- crash recovery (server-side WAL) ---------------------------------------
+
+// Guard: one recoverable document produces one dialog, even if open/select
+// events race while the modal is up.
+let walPromptBusy = false;
+
+// The server found a crash log with unsaved edits for the just-opened
+// document (stat.recoverable). Nothing is applied automatically: offer the
+// choice — 復元 replays the log into the live session, 破棄 deletes it.
+async function maybeOfferWalRecovery(stat) {
+  const n = stat?.recoverable;
+  if (!n || walPromptBusy) return;
+  walPromptBusy = true;
+  try {
+    const restore = await askConfirm(
+      "クラッシュ復元",
+      `クラッシュ前の未保存の編集が見つかりました（${commas(n)}件）。復元しますか？`,
+      { okLabel: "復元する", cancelLabel: "破棄" }
+    );
+    await apiPost("/api/edit/recover", restore ? {} : { discard: true });
+    clearLineCache();
+    await refreshStat();
+    await reloadViewport();
+    render();
+    if (restore) {
+      flashCount(`クラッシュ前の編集を復元しました（${commas(n)}件）`);
+    } else {
+      flashCount("クラッシュ前の編集を破棄しました");
+    }
+  } catch (e) {
+    flashCount("復元エラー", "error");
+    console.error(e);
+  } finally {
+    walPromptBusy = false;
+  }
+}
+
 function onDocumentOpened(stat) {
   state.docGen++;
   state.editGen++; // stale in-flight edit responses must not reposition this tab
@@ -5785,6 +5849,8 @@ function onDocumentOpened(stat) {
   refreshTabs();
   updateTreeActive();
   focusEditor();
+  noteWalError(stat);
+  maybeOfferWalRecovery(stat); // async on purpose: the open itself is done
 }
 
 function hasFiles(e) {
@@ -6781,6 +6847,9 @@ async function boot() {
     focusEditor();
     render();
     refreshTabs();
+    // A document passed on the command line goes through refreshStat, not
+    // onDocumentOpened — offer its crash recovery here.
+    maybeOfferWalRecovery(state.stat);
   }
   postNativeMessage("ayame:ready");
 }

@@ -394,7 +394,6 @@ impl AppState {
             .take()
     }
 
-
     /// The cached dirty snapshot, if it still matches (same document identity,
     /// same edit revision). A stale entry is dropped on the spot — checking on
     /// every use is the invalidation strategy — which also removes its temp
