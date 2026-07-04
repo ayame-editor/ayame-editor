@@ -21,7 +21,7 @@ cargo run -p ayame-cli -- --help
 
 ## 開発体験 (ツーリング)
 
-コードの全体像は [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)(実装の地図と主要リファクタの記録)から。
+主なコードは `crates/ayame-core` と `crates/ayame-cli` にあります。
 
 リポジトリ直下の設定で、誰の環境でも同じ結果になるようにしてある:
 
@@ -32,7 +32,6 @@ cargo run -p ayame-cli -- --help
 - **フロントエンド** — `crates/ayame-cli/web/src` の TypeScript ES modules。
   Cargo build 時に `build.rs` が oxc で型を落とした JS を埋め込む。CI は `tsc`、
   `oxfmt`、`oxlint` でソースを確認する。
-- **リリース** — `cargo xtask release --bump patch` の1コマンド(docs/RELEASE.md)。
 
 日常のゲートはこれだけ:
 
@@ -93,15 +92,6 @@ cargo run -p ayame-cli -- serve .\samples\dev.csv --port 8777
 cargo run -p ayame-cli --features gui -- gui .\samples\dev.csv
 ```
 
-### 6. ローカル release artifact
-
-`scripts/release-local.sh` は Bash スクリプトです。Windows では Git Bash から実行します。
-ネイティブアプリ版（`--features gui`）を作るため、WebView2 Runtime も入れておきます。
-
-```sh
-bash scripts/release-local.sh x86_64-pc-windows-msvc
-```
-
 ## macOS
 
 Terminal を使います。
@@ -146,12 +136,6 @@ cargo run -p ayame-cli -- serve samples/dev.csv --port 8777
 
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
-```
-
-### 6. ローカル release artifact
-
-```sh
-scripts/release-local.sh
 ```
 
 ## Linux
@@ -244,25 +228,3 @@ cargo run -p ayame-cli -- serve samples/dev.csv --port 8777
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
 ```
-
-### 6. ローカル release artifact
-
-```sh
-scripts/release-local.sh
-```
-
-## Release gate
-
-タグを切る前に実行します。
-
-```sh
-cargo fmt --all --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-cargo build --release --locked
-cargo build --release --locked --features gui
-scripts/crash-isolation-test.sh
-```
-
-GitHub Releases の OS 別 artifact は GitHub Actions が作ります。手元で確認する時は
-`scripts/release-local.sh` を使います。

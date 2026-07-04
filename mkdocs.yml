@@ -36,18 +36,9 @@ hooks:
 
 nav:
   - Home: index.md
-  - English:
-      - Development: DEVELOPMENT.md
-      - Implementation Notes: IMPLEMENTATION_NOTES.md
-      - Design: DESIGN.md
-      - Roadmap: ROADMAP.md
-      - Benchmarks: BENCHMARKS.md
-      - Release: RELEASE.md
+  - User Guide: USER_GUIDE.md
+  - Developer Guide: DEVELOPMENT.md
   - 日本語:
       - ホーム: ja/index.md
-      - 開発手順: ja/DEVELOPMENT.md
-      - 実装ノート: ja/IMPLEMENTATION_NOTES.md
-      - 設計: ja/DESIGN.md
-      - ロードマップ: ja/ROADMAP.md
-      - ベンチマーク: ja/BENCHMARKS.md
-      - リリース: ja/RELEASE.md
+      - ユーザー向け: ja/USER_GUIDE.md
+      - 開発者向け: ja/DEVELOPMENT.md

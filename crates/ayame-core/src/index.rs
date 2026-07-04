@@ -399,7 +399,7 @@ impl LineIndex {
         cp.line + extra
     }
 
-    // ---- persistence (for the on-disk index cache, DESIGN.md Step 2) --------
+    // ---- persistence for the on-disk index cache ---------------------------
 
     /// Serialize the index to a self-describing, self-checksummed byte blob.
     ///

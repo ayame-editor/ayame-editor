@@ -4,7 +4,7 @@
 //! Commands:
 //!   cargo xtask release [--bump patch|minor|major|X.Y.Z] [--yes] [--dry-run] [--skip-gate]
 //!
-//! `release` implements docs/RELEASE.md end to end: gate (fmt / clippy / test /
+//! `release` implements the release flow end to end: gate (fmt / clippy / test /
 //! release builds) → local artifact + CLI smoke → confirm → tag → push → watch
 //! the GitHub Release workflow. Bash-only extras (crash-isolation-test.sh) run
 //! when a shell is available and are skipped otherwise.
@@ -350,7 +350,7 @@ fn release(args: &[String]) -> Result<()> {
         say("gh not found — watch the Actions page manually");
     }
 
-    say("reminder: manual platform checks (docs/RELEASE.md)");
+    say("reminder: manual platform checks");
     println!("  - ayame            -> native window opens without a file");
     println!("  - ayame <FILE>     -> opens the file natively");
     println!("  - --encoding Shift_JIS search / worker smoke");

@@ -22,7 +22,7 @@ dependencies.
 
 ## Developer experience (tooling)
 
-For a map of the code, start with [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) (a map of the implementation and a record of major refactors).
+The main code lives under `crates/ayame-core` and `crates/ayame-cli`.
 
 Configuration at the repository root makes results identical on anyone's machine:
 
@@ -33,7 +33,6 @@ Configuration at the repository root makes results identical on anyone's machine
 - **Frontend** — TypeScript ES modules in `crates/ayame-cli/web/src`.
   Cargo embeds type-stripped JS with oxc in `build.rs`; CI checks the sources with `tsc`,
   `oxfmt`, and `oxlint`.
-- **Releases** — a single command, `cargo xtask release --bump patch` (docs/RELEASE.md).
 
 The daily gate is just this:
 
@@ -94,15 +93,6 @@ Open `http://127.0.0.1:8777/` in a browser.
 cargo run -p ayame-cli --features gui -- gui .\samples\dev.csv
 ```
 
-### 6. Local release artifact
-
-`scripts/release-local.sh` is a Bash script. On Windows, run it from Git Bash.
-Since it builds the native app (`--features gui`), install the WebView2 Runtime as well.
-
-```sh
-bash scripts/release-local.sh x86_64-pc-windows-msvc
-```
-
 ## macOS
 
 Use Terminal.
@@ -147,12 +137,6 @@ Open `http://127.0.0.1:8777/` in a browser.
 
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
-```
-
-### 6. Local release artifact
-
-```sh
-scripts/release-local.sh
 ```
 
 ## Linux
@@ -245,25 +229,3 @@ Open `http://127.0.0.1:8777/` in a browser.
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
 ```
-
-### 6. Local release artifact
-
-```sh
-scripts/release-local.sh
-```
-
-## Release gate
-
-Run before cutting a tag.
-
-```sh
-cargo fmt --all --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-cargo build --release --locked
-cargo build --release --locked --features gui
-scripts/crash-isolation-test.sh
-```
-
-The per-OS artifacts on GitHub Releases are built by GitHub Actions. To verify
-locally, use `scripts/release-local.sh`.
