@@ -12,6 +12,7 @@ Cargo.lock.bak
 # Node (frontend tooling, optional)
 node_modules
 dist
+/site
 
 # OS / editor
 .DS_Store

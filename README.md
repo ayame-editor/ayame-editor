@@ -37,8 +37,8 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ## More
 
-Build steps, Linux runtime packages, design notes, and release notes are in
-[docs](docs/).
+Build steps, Linux runtime packages, design notes, and release notes are in the
+[docs site](https://hjosugi.github.io/ayame-editor/).
 
 ## License
 

@@ -63,7 +63,7 @@ One-line positioning: **"an open-source, cross-platform EmEditor with a crash-pr
 | Shift_JIS/EUC-JP | encoding_rs + chardetng (native, zero FFI) | ICU-class codecs via cgo (C toolchain required) | Rust |
 | Implemented assets | `ayame-core` working and tested | Rewrite from scratch | **A rewrite is pure negative-value risk against requirement #1** → Rust |
 
-The clincher: the root [`Cargo.toml`](../Cargo.toml) explicitly documents in `[profile.release]` that we "**deliberately do not adopt `panic = "abort"`** (per-request panics are isolated via unwinding)". **Unwind-based panic isolation is already operating as a core piece of stability.** Zed is also Rust yet falls over on huge files — evidence that **the differentiator is the memory model, not the language**.
+The clincher: the root [`Cargo.toml`](https://github.com/hjosugi/ayame-editor/blob/main/Cargo.toml) explicitly documents in `[profile.release]` that we "**deliberately do not adopt `panic = "abort"`** (per-request panics are isolated via unwinding)". **Unwind-based panic isolation is already operating as a core piece of stability.** Zed is also Rust yet falls over on huge files — evidence that **the differentiator is the memory model, not the language**.
 
 > Other languages considered (Zig/Erlang/OCaml/Motoko, etc.): Zig is still pre-1.0 as of 2026 (ongoing breaking changes + no borrow checker = manual memory safety), which contradicts "stability first". From Erlang/OTP we borrow the **fault-tolerance philosophy** (let-it-crash + supervision), but a GC'd VM is ill-suited to CPU-bound scans of 100GB → implement the philosophy with OS processes in Rust. OCaml is solid but has a GC plus thin libraries/GUI for this use case. Motoko is ICP (blockchain)-only and cannot touch local files — **out of scope**. Conclusion: "Rust + an OTP-style architecture".
 
@@ -98,7 +98,7 @@ Only two things produce stability:
 1. **Ops that run within bounded budgets** (external-merge / partitioned-hash are designed to run within a RAM cap B). This is the **first line of protection**.
 2. **Hard process boundaries.** Even under runaway allocation, OOM, or abort-class panics (stack overflow / double panic / FFI), the kernel reclaims that worker's pages and the OOM killer targets only that worker. The UI (mmap viewport) survives.
 
-`catch_unwind` (inside workers) is the **second line** (catches unwindable panics; we reuse `tower-http`'s CatchPanicLayer, [`serve/mod.rs`](../crates/ayame-cli/src/serve/mod.rs)). Abort-class failures cannot be caught, so the last line of defense is the **process boundary**.
+`catch_unwind` (inside workers) is the **second line** (catches unwindable panics; we reuse `tower-http`'s CatchPanicLayer, [`serve/mod.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-cli/src/serve/mod.rs)). Abort-class failures cannot be caught, so the last line of defense is the **process boundary**.
 
 > **RSS caps via cgroup v2 `memory.max` / Windows Job Objects are not a v1 guarantee (review finding).** In a normal desktop launch, moving oneself into a cgroup requires privilege delegation and cannot always be applied. v1 is protected by "bounded-budget ops + process boundaries"; RSS caps are positioned as **later hardening**.
 
@@ -116,7 +116,7 @@ Do not frame "build in-house vs delegate to DuckDB" as either-or; layer it.
 
 | Op | Implementation | Algorithm | Memory | Reused from |
 |---|---|---|---|---|
-| **GREP** | in-house (top priority, lowest risk) | `search::Matcher` (memmem/regex) chunk-parallel via rayon par_iter, hits into a **bounded** channel | O(hits+viewport) | [`search.rs`](../crates/ayame-core/src/search.rs) reused almost as-is |
+| **GREP** | in-house (top priority, lowest risk) | `search::Matcher` (memmem/regex) chunk-parallel via rayon par_iter, hits into a **bounded** channel | O(hits+viewport) | [`search.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/search.rs) reused almost as-is |
 | **TOP-N** | in-house | per-thread `BinaryHeap` of size N, merged at the end | O(N×threads) | — |
 | **SORT** | in-house (external merge) | run generation (budget B = default 512MB–1GB) → `par_sort_unstable` → spill in ≥1MiB sequential writes, k-way merge (fan-in 64, multi-pass beyond that) | O(B + fan-in) | chunking from `index.rs::build` |
 | **GROUP-BY** | in-house (partitioned hash) | hash keys into P (256–1024) spill partitions, aggregate each partition in parallel | O(B + P) | — |
@@ -132,7 +132,7 @@ The v1 policy:
 
 ### 5.2 Results viewed as a "virtual permutation" (zero copy)
 
-Each op result is materialized as an **ordering (a spilled `Vec<u64>` of line numbers)**. The UI views that permutation through the existing `index.line_ranges` ([`index.rs`](../crates/ayame-core/src/index.rs)), so **even the sort result of 10 billion lines is displayed with no data copy**, through the same sparse-fetch path.
+Each op result is materialized as an **ordering (a spilled `Vec<u64>` of line numbers)**. The UI views that permutation through the existing `index.line_ranges` ([`index.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/index.rs)), so **even the sort result of 10 billion lines is displayed with no data copy**, through the same sparse-fetch path.
 
 ### 5.3 CSV/TSV field model (added by the review)
 
@@ -254,4 +254,4 @@ All verified against real sources during the review.
 - **Zed child-process teardown:** `crates/lsp/src/lsp.rs:429` `.kill_on_drop(true)`.
 - **Zed heartbeat/backoff:** `crates/remote/src/remote_client.rs:160-165` (HEARTBEAT_INTERVAL=5s, etc.).
 - **Zed's SQLite settings (adopted):** `crates/db/src/db.rs:130-133` (WAL / NORMAL / busy_timeout).
-- **Ayame core:** [`crates/ayame-core/src/index.rs`](../crates/ayame-core/src/index.rs) (16B Checkpoint, stride 4096, rayon parallel build, line_ranges/line_of_byte), [`search.rs`](../crates/ayame-core/src/search.rs) (Matcher), [`document.rs`](../crates/ayame-core/src/document.rs) (the open integration point), root [`Cargo.toml`](../Cargo.toml) (`panic=abort` not adopted), [`serve/mod.rs`](../crates/ayame-cli/src/serve/mod.rs) (shared state + CatchPanicLayer).
+- **Ayame core:** [`crates/ayame-core/src/index.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/index.rs) (16B Checkpoint, stride 4096, rayon parallel build, line_ranges/line_of_byte), [`search.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/search.rs) (Matcher), [`document.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/document.rs) (the open integration point), root [`Cargo.toml`](https://github.com/hjosugi/ayame-editor/blob/main/Cargo.toml) (`panic=abort` not adopted), [`serve/mod.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-cli/src/serve/mod.rs) (shared state + CatchPanicLayer).

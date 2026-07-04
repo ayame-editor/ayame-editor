@@ -63,7 +63,7 @@
 | Shift_JIS/EUC-JP | encoding_rs + chardetng（ネイティブ、FFIゼロ） | cgoでICU級コーデック（C toolchain必要） | Rust |
 | 実装済み資産 | `ayame-core` 動作・テスト済み | ゼロから書き直し | **書き直しは要件#1に純粋な負価値リスク** → Rust |
 
-決定打: ルート [`Cargo.toml`](../../Cargo.toml) の `[profile.release]` に「**意図的に `panic = "abort"` を採用しない**（per-request panic を unwind で隔離する）」と明記済み。**unwindベースのパニック隔離は既に安定性の中核として作動している**。Zed も同じ Rust だが巨大ファイルで落ちる事実が、**差別化は言語でなくメモリモデル**であることを裏づける。
+決定打: ルート [`Cargo.toml`](https://github.com/hjosugi/ayame-editor/blob/main/Cargo.toml) の `[profile.release]` に「**意図的に `panic = "abort"` を採用しない**（per-request panic を unwind で隔離する）」と明記済み。**unwindベースのパニック隔離は既に安定性の中核として作動している**。Zed も同じ Rust だが巨大ファイルで落ちる事実が、**差別化は言語でなくメモリモデル**であることを裏づける。
 
 > 他言語の検討（Zig/Erlang/OCaml/Motoko 等）: Zig は2026年時点でまだ pre-1.0（破壊的変更が続く＋borrow checker無＝手動メモリ安全）で「安定第一」に反する。Erlang/OTP は**障害耐性の思想**（let-it-crash＋supervision）を借りるが、GC付きVMでCPUバウンドな100GB走査には不向き → 思想だけ Rust の OS プロセスで実装。OCaml は堅牢だがGC＋この用途のライブラリ/GUIが手薄。Motoko は ICP（ブロックチェーン）専用でローカルファイルに触れず**対象外**。結論は「Rust＋OTP風アーキテクチャ」。
 
@@ -98,7 +98,7 @@ UI は仮想化テキストリストで CSS 依存が薄く、webview 横断の�
 1. **有界予算で動く ops**（external-merge / partitioned-hash は設計上 RAM 上限 B で動く）。これが**第一の保護**。
 2. **ハードなプロセス境界**。暴走・OOM・abort 級パニック（スタックオーバフロー/二重パニック/FFI）でも、カーネルが当該ワーカーのページを回収し OOM killer はそのワーカーだけを狙う。UI（mmap ビューポート）は生存。
 
-`catch_unwind`（ワーカー内）は**第二線**（unwind 可能な panic を捕捉、`tower-http` CatchPanicLayer を流用 [`serve/mod.rs`](../../crates/ayame-cli/src/serve/mod.rs)）。abort 級は捕えられないので、最後の砦は**プロセス境界**。
+`catch_unwind`（ワーカー内）は**第二線**（unwind 可能な panic を捕捉、`tower-http` CatchPanicLayer を流用 [`serve/mod.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-cli/src/serve/mod.rs)）。abort 級は捕えられないので、最後の砦は**プロセス境界**。
 
 > **cgroup v2 `memory.max` / Windows Job Object による RSS 上限は v1 の保証にしない（レビュー指摘）。** 通常のデスクトップ起動では cgroup への自己移動に権限委譲が要り、いつでも掛けられるとは限らない。v1 は「有界予算ops＋プロセス境界」で守り、RSS 上限は**後段のハードニング**として位置づける。
 
@@ -116,7 +116,7 @@ Linux のプロセス spawn は〜1-2ms。数秒の sort や分単位の全イ�
 
 | op | 実装 | アルゴリズム | メモリ | 流用元 |
 |---|---|---|---|---|
-| **GREP** | 自作（最優先・最低リスク） | `search::Matcher`(memmem/regex) を rayon par_iter でチャンク並列、**有界**チャネルへhit | O(hits+viewport) | [`search.rs`](../../crates/ayame-core/src/search.rs) ほぼ流用 |
+| **GREP** | 自作（最優先・最低リスク） | `search::Matcher`(memmem/regex) を rayon par_iter でチャンク並列、**有界**チャネルへhit | O(hits+viewport) | [`search.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/search.rs) ほぼ流用 |
 | **TOP-N** | 自作 | per-thread `BinaryHeap` サイズN、最後にマージ | O(N×threads) | — |
 | **SORT** | 自作（外部マージ） | run生成（予算B=既定512MB-1GB）→ `par_sort_unstable`→ ≥1MiB連続書き込みでスピル、k-way merge（fan-in 64、超過は多段） | O(B + fan-in) | `index.rs::build` のチャンク化 |
 | **GROUP-BY** | 自作（分割hash） | key を P 個（256-1024）のスピルパーティションへ hash、各パーティションを並列集計 | O(B + P) | — |
@@ -132,7 +132,7 @@ v1 の方針:
 
 ### 5.2 結果は「仮想順列」として閲覧（ゼロコピー）
 
-各 op 結果は **ordering（スピルした `Vec<u64>` の行番号列）**として実体化。UI は既存の `index.line_ranges`（[`index.rs`](../../crates/ayame-core/src/index.rs)）経由でその順列を見るので、**100億行のソート結果もデータコピーなし**で同じ疎フェッチ経路から表示できる。
+各 op 結果は **ordering（スピルした `Vec<u64>` の行番号列）**として実体化。UI は既存の `index.line_ranges`（[`index.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/index.rs)）経由でその順列を見るので、**100億行のソート結果もデータコピーなし**で同じ疎フェッチ経路から表示できる。
 
 ### 5.3 CSV/TSV フィールドモデル（レビューで補完）
 
@@ -254,4 +254,4 @@ v1 の方針:
 - **Zed 子プロセステアダウン:** `crates/lsp/src/lsp.rs:429` `.kill_on_drop(true)`。
 - **Zed ハートビート/バックオフ:** `crates/remote/src/remote_client.rs:160-165`（HEARTBEAT_INTERVAL=5s 等）。
 - **Zed の SQLite 設定（踏襲）:** `crates/db/src/db.rs:130-133`（WAL / NORMAL / busy_timeout）。
-- **Ayame コア:** [`crates/ayame-core/src/index.rs`](../../crates/ayame-core/src/index.rs)（16B Checkpoint, stride 4096, rayon 並列ビルド, line_ranges/line_of_byte）, [`search.rs`](../../crates/ayame-core/src/search.rs)（Matcher）, [`document.rs`](../../crates/ayame-core/src/document.rs)（open 統合点）, ルート [`Cargo.toml`](../../Cargo.toml)（`panic=abort` 不採用）, [`serve/mod.rs`](../../crates/ayame-cli/src/serve/mod.rs)（Shared state + CatchPanicLayer）。
+- **Ayame コア:** [`crates/ayame-core/src/index.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/index.rs)（16B Checkpoint, stride 4096, rayon 並列ビルド, line_ranges/line_of_byte）, [`search.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/search.rs)（Matcher）, [`document.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-core/src/document.rs)（open 統合点）, ルート [`Cargo.toml`](https://github.com/hjosugi/ayame-editor/blob/main/Cargo.toml)（`panic=abort` 不採用）, [`serve/mod.rs`](https://github.com/hjosugi/ayame-editor/blob/main/crates/ayame-cli/src/serve/mod.rs)（Shared state + CatchPanicLayer）。

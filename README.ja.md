@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 ## 詳細
 
 ビルド手順、Linux の実行時パッケージ、設計メモ、リリース情報は
-[docs](docs/ja/) にまとめています。
+[ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
 
 ## ライセンス
 

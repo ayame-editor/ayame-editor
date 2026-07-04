@@ -1,0 +1,46 @@
+site_name: Ayame Editor Docs
+site_description: Documentation for Ayame Editor, a desktop text editor for huge files.
+site_url: https://hjosugi.github.io/ayame-editor/
+repo_url: https://github.com/hjosugi/ayame-editor
+repo_name: hjosugi/ayame-editor
+edit_uri: edit/main/docs/
+
+theme:
+  name: mkdocs
+  navigation_depth: 3
+  highlightjs: true
+  hljs_languages:
+    - rust
+    - powershell
+    - yaml
+
+plugins:
+  - search:
+      lang:
+        - en
+        - ja
+
+markdown_extensions:
+  - admonition
+  - fenced_code
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - English:
+      - Development: DEVELOPMENT.md
+      - Implementation Notes: IMPLEMENTATION_NOTES.md
+      - Design: DESIGN.md
+      - Roadmap: ROADMAP.md
+      - Benchmarks: BENCHMARKS.md
+      - Release: RELEASE.md
+  - 日本語:
+      - ホーム: ja/index.md
+      - 開発手順: ja/DEVELOPMENT.md
+      - 実装ノート: ja/IMPLEMENTATION_NOTES.md
+      - 設計: ja/DESIGN.md
+      - ロードマップ: ja/ROADMAP.md
+      - ベンチマーク: ja/BENCHMARKS.md
+      - リリース: ja/RELEASE.md
