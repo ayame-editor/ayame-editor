@@ -5804,7 +5804,7 @@ async function maybeOfferWalRecovery(stat) {
     const restore = await askConfirm(
       "クラッシュ復元",
       `クラッシュ前の未保存の編集が見つかりました（${commas(n)}件）。復元しますか？`,
-      { okLabel: "復元する", cancelLabel: "破棄" }
+      { okLabel: "復元する", cancelLabel: "破棄" },
     );
     await apiPost("/api/edit/recover", restore ? {} : { discard: true });
     clearLineCache();
