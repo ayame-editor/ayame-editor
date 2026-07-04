@@ -17,7 +17,7 @@ use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Icon, Window, WindowBuilder};
-use wry::{http::Request, DragDropEvent, WebViewBuilder};
+use wry::{http::Request, DragDropEvent, WebContext, WebViewBuilder};
 
 use crate::parse_checked;
 
@@ -94,8 +94,20 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         None => String::new(),
     };
 
+    // Pin the webview's profile data to our platform cache directory. Without
+    // this, WebView2 on Windows drops an `ayame.exe.WebView2` folder next to
+    // the executable; macOS (WKWebView -> ~/Library) and Linux (WebKitGTK ->
+    // XDG dirs) already use system locations, and this keeps them under one
+    // predictable `ayame` directory too. Must stay alive as long as the
+    // webview, hence the binding out here.
+    let web_data_dir = crate::default_cache_dir().map(|d| d.join("webview"));
+    if let Some(dir) = &web_data_dir {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut web_context = WebContext::new(web_data_dir);
+
     let dnd_proxy = proxy.clone();
-    let builder = WebViewBuilder::new()
+    let builder = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_url(&url)
         // Paper-tone backdrop while the page loads (matches the default theme).
         .with_background_color((251, 248, 241, 255))
@@ -177,6 +189,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             ControlFlow::WaitUntil(show_deadline)
         };
         let _ = &webview;
+        let _ = &web_context; // keep the webview profile directory binding alive
         #[cfg(target_os = "macos")]
         let _ = &macos_menu;
         match event {
