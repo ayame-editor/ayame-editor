@@ -19,280 +19,300 @@ const RECENT_MAX = 12; // cap on 最近使ったファイル entries
 const MAX_COPY_LINES = 20000; // clipboard cap: copy warns, cut refuses beyond this
 
 const I18N_EN = {
-  "メニュー": "Menu",
-  "ファイル": "File",
-  "新規ファイル": "New File",
-  "新規ウィンドウ": "New Window",
-  "開く": "Open",
-  "保存": "Save",
-  "名前を付けて保存": "Save As",
+  メニュー: "Menu",
+  ファイル: "File",
+  新規ファイル: "New File",
+  新規ウィンドウ: "New Window",
+  開く: "Open",
+  保存: "Save",
+  名前を付けて保存: "Save As",
   "文字コード / 改行コード…": "Encoding / Line Endings...",
-  "編集": "Edit",
-  "元に戻す": "Undo",
-  "やり直す": "Redo",
-  "検索": "Find",
-  "置換": "Replace",
-  "行へ移動": "Go to Line",
-  "行を複製": "Duplicate Line",
-  "行を上へ移動": "Move Line Up",
-  "行を下へ移動": "Move Line Down",
-  "行を削除": "Delete Line",
-  "選択": "Selection",
-  "すべて選択": "Select All",
-  "次の一致を選択": "Select Next Occurrence",
-  "コピー": "Copy",
-  "切り取り": "Cut",
-  "貼り付け": "Paste",
-  "大文字に変換": "Transform to Uppercase",
-  "小文字に変換": "Transform to Lowercase",
-  "カーソルを上に追加": "Add Cursor Above",
-  "カーソルを下に追加": "Add Cursor Below",
-  "表示": "View",
-  "エクスプローラー": "Explorer",
-  "エクスプローラー操作": "Explorer Actions",
-  "検索バー": "Find Bar",
-  "コマンドパレット": "Command Palette",
-  "エクスプローラー表示": "Toggle Explorer",
+  編集: "Edit",
+  元に戻す: "Undo",
+  やり直す: "Redo",
+  検索: "Find",
+  置換: "Replace",
+  行へ移動: "Go to Line",
+  行を複製: "Duplicate Line",
+  行を上へ移動: "Move Line Up",
+  行を下へ移動: "Move Line Down",
+  行を削除: "Delete Line",
+  選択: "Selection",
+  すべて選択: "Select All",
+  次の一致を選択: "Select Next Occurrence",
+  コピー: "Copy",
+  切り取り: "Cut",
+  貼り付け: "Paste",
+  大文字に変換: "Transform to Uppercase",
+  小文字に変換: "Transform to Lowercase",
+  カーソルを上に追加: "Add Cursor Above",
+  カーソルを下に追加: "Add Cursor Below",
+  表示: "View",
+  エクスプローラー: "Explorer",
+  エクスプローラー操作: "Explorer Actions",
+  検索バー: "Find Bar",
+  コマンドパレット: "Command Palette",
+  エクスプローラー表示: "Toggle Explorer",
   "空白・改行を表示": "Show Whitespace and Line Endings",
-  "全角空白を下線で表示": "Underline Full-width Spaces",
-  "折り返し": "Word Wrap",
+  全角空白を下線で表示: "Underline Full-width Spaces",
+  折り返し: "Word Wrap",
   "末尾に追従 (tail -f)": "Follow Tail (tail -f)",
-  "設定": "Settings",
-  "ツール": "Tools",
-  "ソート": "Sort",
+  設定: "Settings",
+  ツール: "Tools",
+  ソート: "Sort",
   "2ファイル差分": "Two-file Diff",
-  "ファイルを分割": "Split File",
-  "フォルダ内検索": "Search Folder",
-  "新規タブ": "New Tab",
-  "エクスプローラーを閉じる": "Close Explorer",
-  "上の階層へ": "Up One Level",
-  "エディタ": "Editor",
-  "検索と置換": "Find and Replace",
-  "置換を表示": "Show Replace",
+  ファイルを分割: "Split File",
+  フォルダ内検索: "Search Folder",
+  新規タブ: "New Tab",
+  エクスプローラーを閉じる: "Close Explorer",
+  上の階層へ: "Up One Level",
+  エディタ: "Editor",
+  検索と置換: "Find and Replace",
+  置換を表示: "Show Replace",
   "検索 (Ctrl+F)": "Find (Ctrl+F)",
-  "大文字小文字を区別": "Match Case",
+  大文字小文字を区別: "Match Case",
   "検索: 大文字小文字": "Search: Match Case",
   "検索: 単語単位": "Search: Whole Word",
   "検索: 正規表現": "Search: Regular Expression",
   "大文字小文字を区別 (Alt+C)": "Match Case (Alt+C)",
-  "単語単位": "Whole Word",
+  単語単位: "Whole Word",
   "単語単位 (Alt+W)": "Whole Word (Alt+W)",
-  "正規表現": "Regular Expression",
+  正規表現: "Regular Expression",
   "正規表現 (Alt+R)": "Regular Expression (Alt+R)",
-  "前の一致": "Previous Match",
+  前の一致: "Previous Match",
   "前の一致 (Shift+F3)": "Previous Match (Shift+F3)",
-  "次の一致": "Next Match",
+  次の一致: "Next Match",
   "次の一致 (F3)": "Next Match (F3)",
-  "検索を閉じる": "Close Find",
+  検索を閉じる: "Close Find",
   "検索を閉じる (Esc)": "Close Find (Esc)",
-  "置換後": "Replace With",
-  "現在の一致を置換して次へ": "Replace Current Match and Go Next",
+  置換後: "Replace With",
+  現在の一致を置換して次へ: "Replace Current Match and Go Next",
   "すべての一致を置換 (元に戻せます)": "Replace All Matches (undoable)",
-  "すべて置換": "Replace All",
+  すべて置換: "Replace All",
   "保存中…": "Saving...",
-  "追従": "Follow",
-  "文字コードを変換して保存": "Convert Encoding and Save",
-  "改行コードを変換して保存": "Convert Line Endings and Save",
-  "ファイルを開く": "Open File",
-  "閉じる": "Close",
+  追従: "Follow",
+  文字コードを変換して保存: "Convert Encoding and Save",
+  改行コードを変換して保存: "Convert Line Endings and Save",
+  ファイルを開く: "Open File",
+  閉じる: "Close",
   "閉じる (Esc)": "Close (Esc)",
-  "パス": "Path",
-  "ファイル名": "File Name",
+  パス: "Path",
+  ファイル名: "File Name",
   "ファイルのパスを入力… (例: /var/log/huge.log)": "Enter a file path... (e.g. /var/log/huge.log)",
   "保存するファイル名、またはフルパス": "File name to save, or a full path",
-  "フォルダ": "Folder",
-  "場所": "Location",
-  "表示中のフォルダをツリーに開く": "Open the current folder in the tree",
-  "表示中のフォルダをエクスプローラーに表示": "Show the current folder in Explorer",
-  "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。": "Drag and drop a file here to open it. For large files, entering a path is faster.",
-  "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。": "Choose a folder and enter a file name. Selecting an existing file asks before overwriting.",
-  "テーマ": "Theme",
+  フォルダ: "Folder",
+  場所: "Location",
+  表示中のフォルダをツリーに開く: "Open the current folder in the tree",
+  表示中のフォルダをエクスプローラーに表示: "Show the current folder in Explorer",
+  "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。":
+    "Drag and drop a file here to open it. For large files, entering a path is faster.",
+  "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。":
+    "Choose a folder and enter a file name. Selecting an existing file asks before overwriting.",
+  テーマ: "Theme",
   "Mono Paper (単色)": "Mono Paper (Solid)",
-  "ダーク": "Dark",
-  "ブラック": "Black",
-  "背景": "Background",
-  "水彩": "Watercolor",
+  ダーク: "Dark",
+  ブラック: "Black",
+  背景: "Background",
+  水彩: "Watercolor",
   "単色（全単色配慮）": "Solid",
-  "イラスト": "Illustration",
-  "フォント": "Font",
+  イラスト: "Illustration",
+  フォント: "Font",
   "等幅 (Consolas / Menlo)": "Monospace (Consolas / Menlo)",
   "等幅 + 日本語 (Noto/MS Gothic)": "Monospace + Japanese (Noto/MS Gothic)",
-  "システムUI": "System UI",
-  "文字サイズ": "Font Size",
-  "列ルーラー": "Column Ruler",
-  "終了確認": "Confirm Exit",
-  "メモの保存先": "Memo Folder",
-  "例: /home/you/memo — 空なら保存ダイアログ": "Example: /home/you/memo - empty uses the save dialog",
-  "メモの名前": "Memo Name",
-  "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}": "Available variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}",
-  "サイドバー": "Sidebar",
-  "サイドバー位置": "Sidebar Position",
-  "左": "Left",
-  "右": "Right",
-  "言語": "Language",
-  "自動": "Auto",
-  "日本語": "Japanese",
-  "英語": "English",
-  "キー設定": "Key Bindings",
-  "テーマJSON": "Theme JSON",
-  "タブで編集": "Edit in Tab",
+  システムUI: "System UI",
+  文字サイズ: "Font Size",
+  列ルーラー: "Column Ruler",
+  終了確認: "Confirm Exit",
+  メモの保存先: "Memo Folder",
+  "例: /home/you/memo — 空なら保存ダイアログ":
+    "Example: /home/you/memo - empty uses the save dialog",
+  メモの名前: "Memo Name",
+  "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}":
+    "Available variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {date} {time} {datetime}",
+  サイドバー: "Sidebar",
+  サイドバー位置: "Sidebar Position",
+  左: "Left",
+  右: "Right",
+  言語: "Language",
+  自動: "Auto",
+  日本語: "Japanese",
+  英語: "English",
+  キー設定: "Key Bindings",
+  テーマJSON: "Theme JSON",
+  タブで編集: "Edit in Tab",
   "文字コード / 改行コード": "Encoding / Line Endings",
-  "文字コード": "Encoding",
-  "改行コード": "Line Endings",
+  文字コード: "Encoding",
+  改行コード: "Line Endings",
   "CR (旧 Mac)": "CR (classic Mac)",
   "BOMを付ける（UTF-8のみ）": "Add BOM (UTF-8 only)",
-  "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。": "\"Reopen\" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.",
-  "「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。": "\"Convert and Save\" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.",
-  "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。\n「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。": "\"Reopen\" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.\n\"Convert and Save\" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.",
-  "キャンセル": "Cancel",
-  "開き直す": "Reopen",
-  "変換して保存": "Convert and Save",
-  "入力欄を選んでキーを押すと変更できます。Backspace / Delete で未設定。": "Focus a field and press keys to change it. Backspace / Delete clears it.",
-  "JSONをタブで編集": "Edit JSON in Tab",
-  "既定に戻す": "Reset to Defaults",
-  "差分": "Diff",
-  "現在": "Current",
-  "比較先": "Compare To",
-  "現在のファイル": "Current File",
-  "比較先ファイル": "Comparison File",
-  "オプション": "Options",
-  "実行": "Run",
-  "入力": "Input",
-  "確認": "Confirm",
-  "OK": "OK",
-  "コンテキストメニュー": "Context Menu",
+  "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。":
+    '"Reopen" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.',
+  "「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。":
+    '"Convert and Save" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.',
+  "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。\n「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。":
+    '"Reopen" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.\n"Convert and Save" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.',
+  キャンセル: "Cancel",
+  開き直す: "Reopen",
+  変換して保存: "Convert and Save",
+  "入力欄を選んでキーを押すと変更できます。Backspace / Delete で未設定。":
+    "Focus a field and press keys to change it. Backspace / Delete clears it.",
+  JSONをタブで編集: "Edit JSON in Tab",
+  既定に戻す: "Reset to Defaults",
+  差分: "Diff",
+  現在: "Current",
+  比較先: "Compare To",
+  現在のファイル: "Current File",
+  比較先ファイル: "Comparison File",
+  オプション: "Options",
+  実行: "Run",
+  入力: "Input",
+  確認: "Confirm",
+  OK: "OK",
+  コンテキストメニュー: "Context Menu",
   "選択箇所をファイルに保存…": "Save Selection to File...",
-  "選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません": "Write only the selected lines to another file. The clipboard line limit does not apply.",
-  "ドロップしてファイルを開く": "Drop to Open File",
-  "このJSONをテーマとして適用": "Apply this JSON as a theme",
-  "テーマ適用": "Apply Theme",
-  "このJSONをキー設定として適用": "Apply this JSON as key bindings",
-  "キー設定適用": "Apply Key Bindings",
+  "選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません":
+    "Write only the selected lines to another file. The clipboard line limit does not apply.",
+  ドロップしてファイルを開く: "Drop to Open File",
+  このJSONをテーマとして適用: "Apply this JSON as a theme",
+  テーマ適用: "Apply Theme",
+  このJSONをキー設定として適用: "Apply this JSON as key bindings",
+  キー設定適用: "Apply Key Bindings",
   "ソート・差分・分割": "Sort, Diff, Split",
-  "行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)": "Sort lines and overwrite the current file. By default it compares whole lines; with a key column it compares that column.",
-  "行数を指定して複数ファイルに分割します (例: 100万行ずつ)": "Split into multiple files by line count.",
-  "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)": "Search files in a folder recursively, with file-name filters and regular expressions.",
-  "未設定": "Unassigned",
-  "保存済": "Saved",
-  "未保存": "Unsaved",
-  "索引OK": "Index OK",
-  "すべての編集は保存済みです": "All edits are saved.",
+  "行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)":
+    "Sort lines and overwrite the current file. By default it compares whole lines; with a key column it compares that column.",
+  "行数を指定して複数ファイルに分割します (例: 100万行ずつ)":
+    "Split into multiple files by line count.",
+  "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)":
+    "Search files in a folder recursively, with file-name filters and regular expressions.",
+  未設定: "Unassigned",
+  保存済: "Saved",
+  未保存: "Unsaved",
+  索引OK: "Index OK",
+  すべての編集は保存済みです: "All edits are saved.",
   "行 0": "Line 0",
-  "正規表現エラー": "Regular expression error",
-  "一致なし": "No matches",
-  "エラー": "Error",
-  "検索エラー": "Search error",
+  正規表現エラー: "Regular expression error",
+  一致なし: "No matches",
+  エラー: "Error",
+  検索エラー: "Search error",
   "矩形選択では Ctrl+D は使えません": "Ctrl+D cannot be used with rectangular selection.",
-  "選択できる単語がありません": "No selectable word.",
+  選択できる単語がありません: "No selectable word.",
   "複数行選択では Ctrl+D は使えません": "Ctrl+D cannot be used with a multi-line selection.",
-  "次の一致はありません": "No next occurrence.",
-  "コピーしました": "Copied",
-  "コピーエラー": "Copy error",
+  次の一致はありません: "No next occurrence.",
+  コピーしました: "Copied",
+  コピーエラー: "Copy error",
   "ここからは貼り付けできません — Ctrl+V を使ってください": "Cannot paste from here. Use Ctrl+V.",
-  "選択がありません": "No selection",
-  "複数選択はコピーまたは切り取りを使ってください": "Use Copy or Cut for multiple selections.",
-  "選択箇所をファイルに保存": "Save Selection to File",
-  "保存先パス": "Save Path",
+  選択がありません: "No selection",
+  複数選択はコピーまたは切り取りを使ってください: "Use Copy or Cut for multiple selections.",
+  選択箇所をファイルに保存: "Save Selection to File",
+  保存先パス: "Save Path",
   "選択を書き出し中…": "Writing selection...",
-  "上書きの確認": "Overwrite Confirmation",
-  "上書き": "Overwrite",
-  "選択の保存エラー": "Selection Save Error",
-  "文字入力と衝突するキーは使えません": "That shortcut conflicts with text input.",
-  "終了の確認": "Confirm Exit",
-  "保存せずに終了": "Exit Without Saving",
-  "終了": "Exit",
-  "保存処理中です。完了後に閉じます…": "Saving is in progress. The window will close when it finishes...",
-  "未保存の編集があります。保存せずに終了しますか?": "There are unsaved edits. Exit without saving?",
-  "最後のタブを閉じると Ayame Editor を終了します。終了しますか?": "Closing the last tab exits Ayame Editor. Exit?",
+  上書きの確認: "Overwrite Confirmation",
+  上書き: "Overwrite",
+  選択の保存エラー: "Selection Save Error",
+  文字入力と衝突するキーは使えません: "That shortcut conflicts with text input.",
+  終了の確認: "Confirm Exit",
+  保存せずに終了: "Exit Without Saving",
+  終了: "Exit",
+  "保存処理中です。完了後に閉じます…":
+    "Saving is in progress. The window will close when it finishes...",
+  "未保存の編集があります。保存せずに終了しますか?":
+    "There are unsaved edits. Exit without saving?",
+  "最後のタブを閉じると Ayame Editor を終了します。終了しますか?":
+    "Closing the last tab exits Ayame Editor. Exit?",
   "保存中です — 完了後に入力します": "Saving. Input will continue after it finishes.",
   "保存中です — 完了までお待ちください": "Saving. Please wait until it finishes.",
-  "編集エラー": "Edit error",
+  編集エラー: "Edit error",
   "末尾に追従中 (tail -f)": "Following tail (tail -f)",
-  "追従を停止しました": "Stopped following tail",
-  "ファイルが外部で変更されました — 追従を停止しました": "The file changed externally. Tail following stopped.",
-  "再読込エラー": "Reload error",
-  "保存エラー": "Save error",
-  "先に保存してください": "Save the file first.",
-  "変換保存エラー": "Convert Save Error",
-  "保存されたファイルがありません": "There is no saved file.",
+  追従を停止しました: "Stopped following tail",
+  "ファイルが外部で変更されました — 追従を停止しました":
+    "The file changed externally. Tail following stopped.",
+  再読込エラー: "Reload error",
+  保存エラー: "Save error",
+  先に保存してください: "Save the file first.",
+  変換保存エラー: "Convert Save Error",
+  保存されたファイルがありません: "There is no saved file.",
   "未保存の編集を破棄して開き直しますか?": "Discard unsaved edits and reopen?",
-  "破棄して開き直す": "Discard and Reopen",
-  "開き直しエラー": "Reopen Error",
+  破棄して開き直す: "Discard and Reopen",
+  開き直しエラー: "Reopen Error",
   "キー列 (1始まり)": "Key Column (1-based)",
-  "空なら行全体で比較": "Leave empty to compare whole lines",
-  "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較": "Empty: compare whole lines as strings. Number: compare that delimited column as the key.",
-  "区切り文字": "Delimiter",
-  "キー列を使うときの列の区切り (例: , やタブ)": "Column delimiter when using a key column, such as comma or tab.",
-  "数値として比較する": "Compare as numbers",
-  "10 と 9 を文字列でなく数値の大小で並べます": "Sort 10 and 9 by numeric value instead of string order.",
-  "並び順": "Order",
+  空なら行全体で比較: "Leave empty to compare whole lines",
+  "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較":
+    "Empty: compare whole lines as strings. Number: compare that delimited column as the key.",
+  区切り文字: "Delimiter",
+  "キー列を使うときの列の区切り (例: , やタブ)":
+    "Column delimiter when using a key column, such as comma or tab.",
+  数値として比較する: "Compare as numbers",
+  "10 と 9 を文字列でなく数値の大小で並べます":
+    "Sort 10 and 9 by numeric value instead of string order.",
+  並び順: "Order",
   "昇順 (A→Z, 小→大)": "Ascending (A to Z, small to large)",
   "降順 (Z→A, 大→小)": "Descending (Z to A, large to small)",
-  "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。": "Sort the current file and overwrite it. Unsaved edits are included. This operation cannot be undone.",
-  "キー列は 1 以上の整数で指定してください": "Key column must be an integer greater than or equal to 1.",
+  "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。":
+    "Sort the current file and overwrite it. Unsaved edits are included. This operation cannot be undone.",
+  "キー列は 1 以上の整数で指定してください":
+    "Key column must be an integer greater than or equal to 1.",
   "ソート実行中…": "Sorting...",
-  "ソートして上書きしました": "Sorted and overwritten.",
-  "ソートエラー": "Sort error",
+  ソートして上書きしました: "Sorted and overwritten.",
+  ソートエラー: "Sort error",
   "1ファイルあたりの行数": "Lines per File",
-  "出力先フォルダ": "Output Folder",
-  "空なら元ファイルと同じ場所": "Leave empty to use the original file's folder",
-  "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。": "Write the current file into parts by line count. Unsaved edits are included. The original file is not changed.",
-  "分割": "Split",
-  "行数は 1 以上の整数で指定してください": "Line count must be an integer greater than or equal to 1.",
+  出力先フォルダ: "Output Folder",
+  空なら元ファイルと同じ場所: "Leave empty to use the original file's folder",
+  "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。":
+    "Write the current file into parts by line count. Unsaved edits are included. The original file is not changed.",
+  分割: "Split",
+  "行数は 1 以上の整数で指定してください":
+    "Line count must be an integer greater than or equal to 1.",
   "分割実行中…": "Splitting...",
-  "分割エラー": "Split error",
-  "検索文字列を入力してください": "Enter a search string.",
-  "一致を特定できません": "Could not identify the match.",
-  "置換エラー": "Replace error",
+  分割エラー: "Split error",
+  検索文字列を入力してください: "Enter a search string.",
+  一致を特定できません: "Could not identify the match.",
+  置換エラー: "Replace error",
   "置換中…": "Replacing...",
-  "追加": "Added",
-  "削除": "Deleted",
-  "変更": "Changed",
-  "差分はありません": "No differences",
-  "比較先ファイルパス": "Comparison File Path",
+  追加: "Added",
+  削除: "Deleted",
+  変更: "Changed",
+  差分はありません: "No differences",
+  比較先ファイルパス: "Comparison File Path",
   "差分を計算中…": "Computing diff...",
-  "差分エラー": "Diff error",
-  "検索語": "Search Term",
+  差分エラー: "Diff error",
+  検索語: "Search Term",
   "検索する文字列 / 正規表現": "String or regular expression to search for",
-  "対象フォルダ": "Target Folder",
-  "空欄で開いているファイルのフォルダ": "Leave empty to use the open file's folder",
-  "ファイル名フィルタ": "File Name Filter",
+  対象フォルダ: "Target Folder",
+  空欄で開いているファイルのフォルダ: "Leave empty to use the open file's folder",
+  ファイル名フィルタ: "File Name Filter",
   "例: *.rs, *.txt (空欄で全て)": "Example: *.rs, *.txt (empty for all)",
-  "大文字小文字を区別しない": "Ignore case",
+  大文字小文字を区別しない: "Ignore case",
   "フォルダ内を検索中…": "Searching folder...",
-  "フォルダ内検索エラー": "Folder Search Error",
-  "一致はありません": "No matches",
-  "変換する範囲を選択してください": "Select a range to transform.",
-  "行番号": "Line Number",
+  フォルダ内検索エラー: "Folder Search Error",
+  一致はありません: "No matches",
+  変換する範囲を選択してください: "Select a range to transform.",
+  行番号: "Line Number",
   "読み込み中…": "Loading...",
-  "未保存編集込み": "includes unsaved edits",
-  "現在のファイル": "Current File",
-  "比較先": "Comparison",
-  "上へ": "Up",
-  "ファイル": "File",
-  "最近使ったファイル": "Recent Files",
-  "最近": "Recent",
-  "保存するファイル名を入力してください": "Enter a file name to save.",
+  未保存編集込み: "includes unsaved edits",
+  上へ: "Up",
+  最近使ったファイル: "Recent Files",
+  最近: "Recent",
+  保存するファイル名を入力してください: "Enter a file name to save.",
   "開いています…": "Opening...",
-  "読み込みエラー": "Load error",
-  "閉じる": "Close",
-  "タブ切替エラー": "Tab switch error",
-  "タブを閉じる": "Close Tab",
-  "破棄して閉じる": "Discard and Close",
-  "タブを閉じられません": "Could not close the tab.",
-  "現在のフォルダをエクスプローラーに表示しました": "Showing the current folder in Explorer.",
-  "テーマを開けません": "Could not open the theme.",
+  読み込みエラー: "Load error",
+  タブ切替エラー: "Tab switch error",
+  タブを閉じる: "Close Tab",
+  破棄して閉じる: "Discard and Close",
+  タブを閉じられません: "Could not close the tab.",
+  現在のフォルダをエクスプローラーに表示しました: "Showing the current folder in Explorer.",
+  テーマを開けません: "Could not open the theme.",
   "color がありません": "Missing color.",
   "テーマ JSON エラー": "Theme JSON error",
-  "キー設定を開けません": "Could not open key bindings.",
+  キー設定を開けません: "Could not open key bindings.",
   "キー設定 JSON エラー": "Key bindings JSON error",
-  "サーバに接続できません": "Cannot connect to the server",
-  "保存先パスが空です": "Save path is empty.",
-  "選択範囲が不正です": "Selection range is invalid.",
-  "矩形選択の列範囲が不正です": "Rectangle selection column range is invalid.",
-  "ファイルが開かれていません": "No file is open.",
+  サーバに接続できません: "Cannot connect to the server",
+  保存先パスが空です: "Save path is empty.",
+  選択範囲が不正です: "Selection range is invalid.",
+  矩形選択の列範囲が不正です: "Rectangle selection column range is invalid.",
+  ファイルが開かれていません: "No file is open.",
   "選択範囲が不正です (行が範囲外)": "Selection range is invalid (line is out of range).",
-  "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください": "Export was interrupted because an edit or tab switch happened while writing. Please try again.",
+  "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください":
+    "Export was interrupted because an edit or tab switch happened while writing. Please try again.",
 };
 
 const I18N_EN_PATTERNS = [
@@ -301,8 +321,14 @@ const I18N_EN_PATTERNS = [
   [/^(.+) は既に存在します$/u, (m) => `${m[1]} already exists.`],
   [/^(.+) での保存は未対応です$/u, (m) => `Saving as ${m[1]} is not supported.`],
   [/^(.+) での再読込は未対応です$/u, (m) => `Reopening as ${m[1]} is not supported.`],
-  [/^(.+) の未保存の編集があります。保存せずに Ayame Editor を終了しますか\?$/u, (m) => `${m[1]} has unsaved edits. Exit Ayame Editor without saving?`],
-  [/^(.+) の未保存の編集を破棄して閉じますか\?$/u, (m) => `Discard unsaved edits in ${m[1]} and close it?`],
+  [
+    /^(.+) の未保存の編集があります。保存せずに Ayame Editor を終了しますか\?$/u,
+    (m) => `${m[1]} has unsaved edits. Exit Ayame Editor without saving?`,
+  ],
+  [
+    /^(.+) の未保存の編集を破棄して閉じますか\?$/u,
+    (m) => `Discard unsaved edits in ${m[1]} and close it?`,
+  ],
   [/^ほか (\d+) 件$/u, (m) => `${m[1]} more`],
   [/^行 ([\d,]+), 列 ([\d,]+)$/u, (m) => `Line ${m[1]}, Column ${m[2]}`],
   [/^(.+) · ([\d,]+) カーソル$/u, (m) => `${m[1]} · ${m[2]} cursors`],
@@ -310,25 +336,65 @@ const I18N_EN_PATTERNS = [
   [/^保存しました: (.+)$/u, (m) => `Saved: ${m[1]}`],
   [/^(.+) で保存しました$/u, (m) => `Saved as ${m[1]}`],
   [/^(.+) で開き直しました$/u, (m) => `Reopened as ${m[1]}`],
-  [/^([\d,]+) 個に分割しました: 最初のファイル (.+)$/u, (m) => `Split into ${m[1]} files: first file ${m[2]}`],
+  [
+    /^([\d,]+) 個に分割しました: 最初のファイル (.+)$/u,
+    (m) => `Split into ${m[1]} files: first file ${m[2]}`,
+  ],
   [/^([\d,]+) 件置換しました$/u, (m) => `Replaced ${m[1]} matches.`],
-  [/^([\d,]+) 件置換しました — 一致が多いため一部です。もう一度実行してください$/u, (m) => `Replaced ${m[1]} matches. There are more matches; run it again.`],
+  [
+    /^([\d,]+) 件置換しました — 一致が多いため一部です。もう一度実行してください$/u,
+    (m) => `Replaced ${m[1]} matches. There are more matches; run it again.`,
+  ],
   [/^差分: ([\d,]+) hunk$/u, (m) => `Diff: ${m[1]} hunk${m[1] === "1" ? "" : "s"}`],
   [/^フォルダ内検索: ([\d,]+) 件$/u, (m) => `Folder search: ${m[1]} matches`],
   [/^選択 ([\d,]+) 行を保存しました: (.+)$/u, (m) => `Saved ${m[1]} selected lines: ${m[2]}`],
-  [/^選択中の ([\d,]+) 行を UTF-8 \/ LF で書き出します。コピーの行数上限 \(([\d,]+) 行\) はかかりません。$/u, (m) => `Writes the selected ${m[1]} lines as UTF-8 / LF. The clipboard limit of ${m[2]} lines does not apply.`],
-  [/^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません$/u, (m) => `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied.`],
-  [/^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます$/u, (m) => `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied. Use right-click > Save Selection to File to write everything.`],
-  [/^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。削除だけなら Delete キー$/u, (m) => `Cut is limited to ${m[1]} lines (${m[2]} selected). Use Delete to delete only.`],
-  [/^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー$/u, (m) => `Cut is limited to ${m[1]} lines (${m[2]} selected). Use right-click > Save Selection to File to keep everything, or Delete to delete only.`],
+  [
+    /^選択中の ([\d,]+) 行を UTF-8 \/ LF で書き出します。コピーの行数上限 \(([\d,]+) 行\) はかかりません。$/u,
+    (m) =>
+      `Writes the selected ${m[1]} lines as UTF-8 / LF. The clipboard limit of ${m[2]} lines does not apply.`,
+  ],
+  [
+    /^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません$/u,
+    (m) => `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied.`,
+  ],
+  [
+    /^コピーは先頭 ([\d,]+) 行まで — 残り ([\d,]+) 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます$/u,
+    (m) =>
+      `Copied only the first ${m[1]} lines. ${m[2]} lines were not copied. Use right-click > Save Selection to File to write everything.`,
+  ],
+  [
+    /^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。削除だけなら Delete キー$/u,
+    (m) => `Cut is limited to ${m[1]} lines (${m[2]} selected). Use Delete to delete only.`,
+  ],
+  [
+    /^切り取りは ([\d,]+) 行まで \(選択は ([\d,]+) 行\)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー$/u,
+    (m) =>
+      `Cut is limited to ${m[1]} lines (${m[2]} selected). Use right-click > Save Selection to File to keep everything, or Delete to delete only.`,
+  ],
   [/^変換は一度に ([\d,]+) 行までです$/u, (m) => `Transform is limited to ${m[1]} lines at once.`],
   [/^複製は一度に ([\d,]+) 行までです$/u, (m) => `Duplicate is limited to ${m[1]} lines at once.`],
-  [/^行の移動は一度に ([\d,]+) 行までです$/u, (m) => `Moving lines is limited to ${m[1]} lines at once.`],
-  [/^このhunkは先頭 ([\d,]+) 行だけ表示しています$/u, (m) => `This hunk shows only the first ${m[1]} lines.`],
+  [
+    /^行の移動は一度に ([\d,]+) 行までです$/u,
+    (m) => `Moving lines is limited to ${m[1]} lines at once.`,
+  ],
+  [
+    /^このhunkは先頭 ([\d,]+) 行だけ表示しています$/u,
+    (m) => `This hunk shows only the first ${m[1]} lines.`,
+  ],
   [/^([\d,]+) 件 \/ ([\d,]+) ファイル$/u, (m) => `${m[1]} matches / ${m[2]} files`],
-  [/^([\d,]+) 件 \/ ([\d,]+) ファイル（上限 ([\d,]+) 件で打ち切り）$/u, (m) => `${m[1]} matches / ${m[2]} files (stopped at the ${m[3]} match limit)`],
-  [/^([\d,]+) 件 \/ ([\d,]+) ファイル \/ 走査ファイル数の上限に達しました$/u, (m) => `${m[1]} matches / ${m[2]} files / reached the scanned-file limit`],
-  [/^([\d,]+) 件 \/ ([\d,]+) ファイル（上限 ([\d,]+) 件で打ち切り） \/ 走査ファイル数の上限に達しました$/u, (m) => `${m[1]} matches / ${m[2]} files (stopped at the ${m[3]} match limit) / reached the scanned-file limit`],
+  [
+    /^([\d,]+) 件 \/ ([\d,]+) ファイル（上限 ([\d,]+) 件で打ち切り）$/u,
+    (m) => `${m[1]} matches / ${m[2]} files (stopped at the ${m[3]} match limit)`,
+  ],
+  [
+    /^([\d,]+) 件 \/ ([\d,]+) ファイル \/ 走査ファイル数の上限に達しました$/u,
+    (m) => `${m[1]} matches / ${m[2]} files / reached the scanned-file limit`,
+  ],
+  [
+    /^([\d,]+) 件 \/ ([\d,]+) ファイル（上限 ([\d,]+) 件で打ち切り） \/ 走査ファイル数の上限に達しました$/u,
+    (m) =>
+      `${m[1]} matches / ${m[2]} files (stopped at the ${m[3]} match limit) / reached the scanned-file limit`,
+  ],
   [/^開けません: (.+)$/u, (m) => `Cannot open: ${m[1]}`],
   [/^読み込みエラー: (.+)$/u, (m) => `Load error: ${m[1]}`],
   [/^読み込み中… \((.+)\)$/u, (m) => `Loading... (${m[1]})`],
@@ -339,7 +405,10 @@ const I18N_EN_PATTERNS = [
   [/^新規バッファを作成できません: (.+)$/u, (m) => `Cannot create a new buffer: ${m[1]}`],
   [/^テーマ適用: (.+)$/u, (m) => `Theme applied: ${m[1]}`],
   [/^(.+) を閉じる$/u, (m) => `Close ${m[1]}`],
-  [/^未保存の編集: \+([\d,]+) 行追加 \/ ~([\d,]+) 行変更 \/ -([\d,]+) 行削除$/u, (m) => `Unsaved edits: +${m[1]} lines added / ~${m[2]} lines changed / -${m[3]} lines deleted`],
+  [
+    /^未保存の編集: \+([\d,]+) 行追加 \/ ~([\d,]+) 行変更 \/ -([\d,]+) 行削除$/u,
+    (m) => `Unsaved edits: +${m[1]} lines added / ~${m[2]} lines changed / -${m[3]} lines deleted`,
+  ],
 ];
 
 function normalizeLanguage(lang) {
@@ -347,7 +416,11 @@ function normalizeLanguage(lang) {
 }
 
 function browserLocale() {
-  return String(navigator.language || "").toLowerCase().startsWith("ja") ? "ja" : "en";
+  return String(navigator.language || "")
+    .toLowerCase()
+    .startsWith("ja")
+    ? "ja"
+    : "en";
 }
 
 function currentLocale() {
@@ -441,7 +514,9 @@ const KEYMAP_ACTIONS = [
   ["settings", "設定", ""],
   ["keymap", "キー設定", ""],
 ];
-const DEFAULT_KEYMAP = Object.fromEntries(KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]));
+const DEFAULT_KEYMAP = Object.fromEntries(
+  KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]),
+);
 
 const state = {
   total: 0,
@@ -710,18 +785,24 @@ function applyLocale() {
 
 function normalizeShortcut(raw) {
   if (!raw) return "";
-  const parts = String(raw).split("+").map((p) => p.trim()).filter(Boolean);
+  const parts = String(raw)
+    .split("+")
+    .map((p) => p.trim())
+    .filter(Boolean);
   const mods = { Ctrl: false, Shift: false, Alt: false };
   let key = "";
   for (const part of parts) {
     const low = part.toLowerCase();
-    if (low === "ctrl" || low === "control" || low === "cmd" || low === "command" || low === "meta") mods.Ctrl = true;
+    if (low === "ctrl" || low === "control" || low === "cmd" || low === "command" || low === "meta")
+      mods.Ctrl = true;
     else if (low === "shift") mods.Shift = true;
     else if (low === "alt" || low === "option") mods.Alt = true;
     else key = part.length === 1 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1);
   }
   if (!key || ["Ctrl", "Shift", "Alt"].includes(key)) return "";
-  return [mods.Ctrl && "Ctrl", mods.Shift && "Shift", mods.Alt && "Alt", key].filter(Boolean).join("+");
+  return [mods.Ctrl && "Ctrl", mods.Shift && "Shift", mods.Alt && "Alt", key]
+    .filter(Boolean)
+    .join("+");
 }
 
 function isBindableShortcut(shortcut) {
@@ -752,18 +833,16 @@ function eventShortcut(e) {
   if (key.length === 1) key = key.toUpperCase();
   else if (/^f\d+$/i.test(key)) key = key.toUpperCase();
   else key = key[0].toUpperCase() + key.slice(1);
-  return [
-    (e.ctrlKey || e.metaKey) && "Ctrl",
-    e.shiftKey && "Shift",
-    e.altKey && "Alt",
-    key,
-  ].filter(Boolean).join("+");
+  return [(e.ctrlKey || e.metaKey) && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt", key]
+    .filter(Boolean)
+    .join("+");
 }
 
 function shortcutList(action) {
-  const custom = state.settings.keymap && Object.prototype.hasOwnProperty.call(state.settings.keymap, action)
-    ? state.settings.keymap[action]
-    : DEFAULT_KEYMAP[action];
+  const custom =
+    state.settings.keymap && Object.prototype.hasOwnProperty.call(state.settings.keymap, action)
+      ? state.settings.keymap[action]
+      : DEFAULT_KEYMAP[action];
   const list = Array.isArray(custom) ? custom : [custom];
   return list.map(normalizeShortcut).filter(Boolean);
 }
@@ -812,9 +891,12 @@ function hasDirtyDocuments() {
 function dirtyCloseMessage() {
   const dirty = dirtyTabNames();
   const shown = dirty.slice(0, 5).join(", ");
-  const more = dirty.length > 5
-    ? (currentLocale() === "en" ? ` ${dirty.length - 5} more` : ` ほか ${dirty.length - 5} 件`)
-    : "";
+  const more =
+    dirty.length > 5
+      ? currentLocale() === "en"
+        ? ` ${dirty.length - 5} more`
+        : ` ほか ${dirty.length - 5} 件`
+      : "";
   const suffix = shown ? `\n\n${shown}${more}` : "";
   return `${t("未保存の編集があります。保存せずに終了しますか?")}${suffix}`;
 }
@@ -848,7 +930,7 @@ async function confirmCloseLastTab(t) {
     return askConfirm(
       "終了の確認",
       `${t.name} の未保存の編集があります。保存せずに Ayame Editor を終了しますか?`,
-      { okLabel: "保存せずに終了", danger: true }
+      { okLabel: "保存せずに終了", danger: true },
     );
   }
   if (state.settings.confirmLastTabClose === false) return true;
@@ -922,7 +1004,7 @@ function setKeymap(action, shortcut) {
   }
   state.settings = {
     ...state.settings,
-    keymap: { ...(state.settings.keymap || {}), [action]: normalized },
+    keymap: { ...state.settings.keymap, [action]: normalized },
   };
   saveSettings(state.settings);
   updateKeyHints();
@@ -1008,8 +1090,14 @@ function renderKeymapRows() {
     input.addEventListener("keydown", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "Escape") { hideKeymap(); return; }
-      if (e.key === "Backspace" || e.key === "Delete") { setKeymap(action, ""); return; }
+      if (e.key === "Escape") {
+        hideKeymap();
+        return;
+      }
+      if (e.key === "Backspace" || e.key === "Delete") {
+        setKeymap(action, "");
+        return;
+      }
       const shortcut = eventShortcut(e);
       if (shortcut) setKeymap(action, shortcut);
     });
@@ -1131,9 +1219,21 @@ function initCommandPalette() {
     renderCommandPalette();
   });
   $("palette-input").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); hideCommandPalette(); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); movePalette(-1); return; }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      hideCommandPalette();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      movePalette(1);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      movePalette(-1);
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       const visible = paletteItems.filter((item) => paletteMatches(item, $("palette-input").value));
@@ -1586,15 +1686,29 @@ async function saveSelectionToFile() {
   }
   const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
   const base = state.stat?.path || "selection";
-  const f = await askForm("選択箇所をファイルに保存", [
-    { id: "path", type: "text", label: "保存先パス", value: `${base}.selection.txt` },
-    { id: "_hint", type: "hint",
-      label: `選択中の ${commas(total)} 行を UTF-8 / LF で書き出します。コピーの行数上限 (${commas(MAX_COPY_LINES)} 行) はかかりません。` },
-  ], "保存");
+  const f = await askForm(
+    "選択箇所をファイルに保存",
+    [
+      { id: "path", type: "text", label: "保存先パス", value: `${base}.selection.txt` },
+      {
+        id: "_hint",
+        type: "hint",
+        label: `選択中の ${commas(total)} 行を UTF-8 / LF で書き出します。コピーの行数上限 (${commas(MAX_COPY_LINES)} 行) はかかりません。`,
+      },
+    ],
+    "保存",
+  );
   if (!f || !f.path.trim()) return;
   const body = rr
     ? { path: f.path.trim(), rect: true, l0: rr.l0, c0: rr.c0, l1: rr.l1, c1: rr.c1 }
-    : { path: f.path.trim(), rect: false, l0: r.start.line, c0: r.start.col, l1: r.end.line, c1: r.end.col };
+    : {
+        path: f.path.trim(),
+        rect: false,
+        l0: r.start.line,
+        c0: r.start.col,
+        l1: r.end.line,
+        c1: r.end.col,
+      };
   showLoading("選択を書き出し中…");
   try {
     const res = await apiPost("/api/selection/save", body);
@@ -1605,7 +1719,7 @@ async function saveSelectionToFile() {
       const overwrite = await askConfirm(
         "上書きの確認",
         `${displayPath(f.path.trim())} は既に存在します。上書きしますか?`,
-        { okLabel: "上書き", danger: true }
+        { okLabel: "上書き", danger: true },
       );
       if (overwrite) {
         showLoading("選択を書き出し中…");
@@ -1726,10 +1840,12 @@ async function selectedText(r = null) {
   if (rr) {
     const count = Math.min(rr.l1 - rr.l0 + 1, MAX_COPY_LINES);
     const res = await api(`/api/lines?start=${rr.l0}&count=${count}`);
-    return res.lines.map((x) => {
-      const chars = Array.from(x.text ?? "");
-      return chars.slice(rr.c0, rr.c1).join("");
-    }).join("\n");
+    return res.lines
+      .map((x) => {
+        const chars = Array.from(x.text ?? "");
+        return chars.slice(rr.c0, rr.c1).join("");
+      })
+      .join("\n");
   }
   const ranges = r ? [r] : selectionRanges();
   const out = [];
@@ -1772,7 +1888,7 @@ async function copySelection() {
         multi
           ? `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません`
           : `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます`,
-        "error"
+        "error",
       );
     } else {
       flashCount("コピーしました");
@@ -1799,7 +1915,7 @@ async function cutSelection() {
       multi
         ? `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。削除だけなら Delete キー`
         : `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー`,
-      "error"
+      "error",
     );
     return;
   }
@@ -1941,7 +2057,8 @@ function renderSearchTicks(vh) {
   const ticks = $("vticks");
   if (!ticks) return;
   ticks.textContent = "";
-  if (!state.query || !state.searchHits || state.searchHits.length === 0 || state.total <= 1) return;
+  if (!state.query || !state.searchHits || state.searchHits.length === 0 || state.total <= 1)
+    return;
   const frag = document.createDocumentFragment();
   const maxTicks = 700;
   const step = Math.max(1, Math.ceil(state.searchHits.length / maxTicks));
@@ -2029,14 +2146,17 @@ function updateStatusMeta() {
   // Deliberately terse: the bar shows state, the tooltip carries the numbers.
   $("st-edit").textContent = s.dirty ? t("未保存") : t("保存済");
   $("st-edit").title = s.dirty
-    ? translateText(`未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`)
+    ? translateText(
+        `未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`,
+      )
     : t("すべての編集は保存済みです");
   $("undo-edit").disabled = !s.can_undo;
   $("redo-edit").disabled = !s.can_redo;
   $("st-index").textContent = t("索引OK");
-  $("st-index").title = currentLocale() === "en"
-    ? `${commas(lines)} lines / ${humanBytes(s.bytes)} / ${commas(s.checkpoints)} index checkpoints (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`
-    : `${commas(lines)} 行 / ${humanBytes(s.bytes)} / 索引 ${commas(s.checkpoints)} 点 (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`;
+  $("st-index").title =
+    currentLocale() === "en"
+      ? `${commas(lines)} lines / ${humanBytes(s.bytes)} / ${commas(s.checkpoints)} index checkpoints (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`
+      : `${commas(lines)} 行 / ${humanBytes(s.bytes)} / 索引 ${commas(s.checkpoints)} 点 (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`;
   // Keep the active tab's unsaved-dot (and the tabs model behind
   // beforeunload / close confirmations) in sync as you type.
   const at = $("tabs").querySelector(".tab.active");
@@ -2127,17 +2247,25 @@ function pathCrumbs(path) {
     return out;
   }
   let acc = "";
-  return clean.split(/[\\/]+/).filter(Boolean).map((part) => {
-    acc = acc ? `${acc}/${part}` : part;
-    return { label: part, path: acc };
-  });
+  return clean
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((part) => {
+      acc = acc ? `${acc}/${part}` : part;
+      return { label: part, path: acc };
+    });
 }
 
 function enc(e) {
   // Keys match the core Encoding enum's kebab-case serialization (Utf8 → "utf8").
   return (
-    { utf8: "UTF-8", "utf-8": "UTF-8", "shift-jis": "Shift_JIS", "euc-jp": "EUC-JP", ascii: "ASCII" }[e] ||
-    String(e)
+    {
+      utf8: "UTF-8",
+      "utf-8": "UTF-8",
+      "shift-jis": "Shift_JIS",
+      "euc-jp": "EUC-JP",
+      ascii: "ASCII",
+    }[e] || String(e)
   );
 }
 function eol(e) {
@@ -2149,7 +2277,9 @@ function updateStatusPos() {
     $("st-pos").textContent = t("行 0");
     return;
   }
-  const pos = translateText(`行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`);
+  const pos = translateText(
+    `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`,
+  );
   const n = state.extraCursors.length;
   $("st-pos").textContent = n ? translateText(`${pos} · ${n + 1} カーソル`) : pos;
 }
@@ -2220,9 +2350,13 @@ async function findStep(dir) {
   saveSearchHistory(state.query);
   let from;
   if (dir === "next") {
-    from = state.lastMatch ? state.lastMatch.byte + Math.max(1, state.lastMatch.len) : await lineByte(state.first);
+    from = state.lastMatch
+      ? state.lastMatch.byte + Math.max(1, state.lastMatch.len)
+      : await lineByte(state.first);
   } else {
-    from = state.lastMatch ? state.lastMatch.byte : await lineByte(Math.min(state.total, state.first + rowsVisible()));
+    from = state.lastMatch
+      ? state.lastMatch.byte
+      : await lineByte(Math.min(state.total, state.first + rowsVisible()));
   }
   try {
     const res = await api(`/api/find?dir=${dir}&from=${from}&${qs()}`);
@@ -2268,7 +2402,8 @@ function selectPrimaryRange(r) {
 
 function promoteSelectionRange(r) {
   const nextKey = rangeKey(r);
-  const old = state.sel && !state.sel.rect ? normalizedRange(state.sel.anchor, state.sel.head) : null;
+  const old =
+    state.sel && !state.sel.rect ? normalizedRange(state.sel.anchor, state.sel.head) : null;
   if (old && !rangeEmpty(old) && rangeKey(old) !== nextKey) {
     const exists = state.extraCursors.some((c) => {
       const cr = cursorSelectionRange(c);
@@ -2371,7 +2506,7 @@ async function updateCount() {
     state.searchTruncated = res.truncated;
     updateFindCountLabel();
     scheduleRender();
-  } catch (e) {
+  } catch {
     $("find-count").textContent = t("正規表現エラー");
     $("find").parentElement.classList.add("error");
     scheduleRender();
@@ -2407,10 +2542,13 @@ function flashCount(msg, kind = "") {
     el.classList.toggle("error", isError);
     clearTimeout(stMsgTimer);
     if (msg) {
-      stMsgTimer = setTimeout(() => {
-        el.textContent = "";
-        el.classList.remove("error");
-      }, isError ? 10000 : 6000);
+      stMsgTimer = setTimeout(
+        () => {
+          el.textContent = "";
+          el.classList.remove("error");
+        },
+        isError ? 10000 : 6000,
+      );
     }
   }
   if (state.findOpen) $("find-count").textContent = msg;
@@ -2444,7 +2582,7 @@ function showSearchHistory(delta) {
   } else {
     state.historyIndex = Math.min(
       state.history.length - 1,
-      Math.max(0, state.historyIndex + delta)
+      Math.max(0, state.historyIndex + delta),
     );
   }
   $("find").value = state.history[state.historyIndex];
@@ -2520,7 +2658,9 @@ function clonePoint(p) {
 }
 
 function cloneSelection(sel) {
-  return sel ? { anchor: clonePoint(sel.anchor), head: clonePoint(sel.head), rect: !!sel.rect } : null;
+  return sel
+    ? { anchor: clonePoint(sel.anchor), head: clonePoint(sel.head), rect: !!sel.rect }
+    : null;
 }
 
 function normalizedRange(anchor, head) {
@@ -2551,7 +2691,9 @@ function allCursors() {
       line: c.line,
       col: c.col,
       primary,
-      sel: primary ? cloneSelection(state.sel && !state.sel.rect ? state.sel : null) : cloneSelection(c.sel),
+      sel: primary
+        ? cloneSelection(state.sel && !state.sel.rect ? state.sel : null)
+        : cloneSelection(c.sel),
     });
   };
   push(state.caret, true);
@@ -2692,9 +2834,7 @@ function positionCaret() {
   const focusVisible = state.focused && !anyModalOpen() && !state.composing;
   positionExtraCarets(vis, focusVisible);
   const onScreen =
-    !!state.stat?.open &&
-    state.caret.line >= state.first &&
-    state.caret.line < state.first + vis;
+    !!state.stat?.open && state.caret.line >= state.first && state.caret.line < state.first + vis;
   const show = onScreen && state.focused && !anyModalOpen();
   caretEl.classList.toggle("on", show && !state.composing);
   if (!onScreen) return;
@@ -2721,8 +2861,7 @@ function positionExtraCarets(vis, focusVisible) {
   for (let i = 0; i < cursors.length; i++) {
     const c = cursors[i];
     const el = extraCaretPool[i];
-    const onScreen =
-      !!state.stat?.open && c.line >= state.first && c.line < state.first + vis;
+    const onScreen = !!state.stat?.open && c.line >= state.first && c.line < state.first + vis;
     el.classList.toggle("on", onScreen && focusVisible);
     if (onScreen) {
       const x = caretX(c.line, c.col);
@@ -2733,7 +2872,18 @@ function positionExtraCarets(vis, focusVisible) {
 }
 
 function anyModalOpen() {
-  return promptVisible() || formVisible() || confirmVisible() || settingsVisible() || keymapVisible() || commandPaletteVisible() || diffVisible() || grepVisible() || openerVisible() || convertVisible();
+  return (
+    promptVisible() ||
+    formVisible() ||
+    confirmVisible() ||
+    settingsVisible() ||
+    keymapVisible() ||
+    commandPaletteVisible() ||
+    diffVisible() ||
+    grepVisible() ||
+    openerVisible() ||
+    convertVisible()
+  );
 }
 
 // ---- the serialized edit queue --------------------------------------------
@@ -2750,18 +2900,20 @@ async function settleEditQueue() {
 }
 function enqueueEdit(fn) {
   const ctx = editContext();
-  editChain = editChain.then(async () => {
-    if (!sameEditContext(ctx)) return null;
-    if (savingCount > 0) {
-      flashCount("保存中です — 完了後に入力します");
-      await waitForSavingDone();
+  editChain = editChain
+    .then(async () => {
       if (!sameEditContext(ctx)) return null;
-    }
-    return fn();
-  }).catch((e) => {
-    flashCount("編集エラー");
-    console.error(e);
-  });
+      if (savingCount > 0) {
+        flashCount("保存中です — 完了後に入力します");
+        await waitForSavingDone();
+        if (!sameEditContext(ctx)) return null;
+      }
+      return fn();
+    })
+    .catch((e) => {
+      flashCount("編集エラー");
+      console.error(e);
+    });
   return editChain;
 }
 
@@ -3005,9 +3157,17 @@ async function applyBatch(edits, cursors, editOf) {
 // cursor i (document order) — a constant for typing, per-line for paste.
 function multiInsert(cursors, textFor) {
   const edits = cursors.map((c, i) => ({
-    l0: c.line, c0: c.col, l1: c.line, c1: c.col, text: textFor(i),
+    l0: c.line,
+    c0: c.col,
+    l1: c.line,
+    c1: c.col,
+    text: textFor(i),
   }));
-  return applyBatch(edits, cursors, cursors.map((_, i) => i));
+  return applyBatch(
+    edits,
+    cursors,
+    cursors.map((_, i) => i),
+  );
 }
 
 function cursorReplaceRange(c) {
@@ -3018,7 +3178,11 @@ function cursorReplaceRange(c) {
 
 function multiReplace(cursors, textFor) {
   const edits = cursors.map((c, i) => ({ ...cursorReplaceRange(c), text: textFor(i) }));
-  return applyBatch(edits, cursors, cursors.map((_, i) => i));
+  return applyBatch(
+    edits,
+    cursors,
+    cursors.map((_, i) => i),
+  );
 }
 
 // Insert (or replace the selection with) `text`, which may contain newlines.
@@ -3033,7 +3197,9 @@ function typeText(text) {
       // Multi-cursor: the same text goes in at every caret, or replaces each
       // cursor's selection, as one undo step.
       const cursors = allCursors();
-      return hasCursorSelections() ? multiReplace(cursors, () => text) : multiInsert(cursors, () => text);
+      return hasCursorSelections()
+        ? multiReplace(cursors, () => text)
+        : multiInsert(cursors, () => text);
     }
     const rr = rectRange();
     if (rr) {
@@ -3063,15 +3229,17 @@ async function lineLensFor(lineNumbers) {
     if (rec != null) out.set(l, Array.from(rec.text ?? "").length);
     else missing.add(l);
   }
-  await Promise.all([...missing].map(async (l) => {
-    try {
-      const res = await api(`/api/lines?start=${l}&count=1`);
-      const text = res.lines?.[0]?.text;
-      if (text != null) out.set(l, Array.from(text).length);
-    } catch {
-      // Leave the line out: the caller drops that cursor's edit, never guesses.
-    }
-  }));
+  await Promise.all(
+    [...missing].map(async (l) => {
+      try {
+        const res = await api(`/api/lines?start=${l}&count=1`);
+        const text = res.lines?.[0]?.text;
+        if (text != null) out.set(l, Array.from(text).length);
+      } catch {
+        // Leave the line out: the caller drops that cursor's edit, never guesses.
+      }
+    }),
+  );
   return out;
 }
 
@@ -3100,7 +3268,7 @@ function backspace() {
       // the previous line's REAL length, which may live outside the cache.
       const cursors = allCursors();
       const lens = await lineLensFor(
-        cursors.filter((c) => c.col === 0 && c.line > 0).map((c) => c.line - 1)
+        cursors.filter((c) => c.col === 0 && c.line > 0).map((c) => c.line - 1),
       );
       const edits = [];
       const editOf = cursors.map((c) => {
@@ -3248,8 +3416,9 @@ async function saveCopy() {
 function suggestedSaveAsPath() {
   const p = state.stat?.path || "";
   if (p && !isUntitled(p)) return p;
-  const name = expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim()
-    || "untitled.txt";
+  const name =
+    expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim() ||
+    "untitled.txt";
   const dir = (state.settings.lastSaveDir || "").trim();
   return dir ? joinPath(dir, name) : name;
 }
@@ -3276,7 +3445,7 @@ function expandNameTemplate(tpl) {
   map["{datetime}"] = `${map["{date}"]}-${map["{time}"]}`;
   return String(tpl || "").replace(
     /\{(?:yyyy|yy|mm|dd|HH|MM|ss|date|time|datetime)\}/g,
-    (m) => map[m]
+    (m) => map[m],
   );
 }
 
@@ -3299,8 +3468,8 @@ function freeMemoName(name, taken) {
 // collision) — Ctrl+S and done, no dialog. Returns true when the save was
 // handled (or failed with its own error UI); false falls back to the dialog.
 async function quickMemoSave(memoDir) {
-  const name = expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim()
-    || "memo.txt";
+  const name =
+    expandNameTemplate(state.settings.memoName || DEFAULT_SETTINGS.memoName).trim() || "memo.txt";
   let listing;
   try {
     listing = await api(`/api/browse?dir=${encodeURIComponent(memoDir)}`);
@@ -3417,7 +3586,12 @@ async function convertSave(encoding, lineEnding, bom) {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", { overwrite: true, encoding, eol: lineEnding, bom });
+    const res = await apiPost("/api/edit/save", {
+      overwrite: true,
+      encoding,
+      eol: lineEnding,
+      bom,
+    });
     if (res.switched) {
       state.docGen++;
       state.editGen++;
@@ -3451,11 +3625,10 @@ async function reopenWithEncoding(encoding) {
     return;
   }
   if (state.stat.dirty) {
-    const ok = await askConfirm(
-      "開き直す",
-      "未保存の編集を破棄して開き直しますか?",
-      { okLabel: "破棄して開き直す", danger: true }
-    );
+    const ok = await askConfirm("開き直す", "未保存の編集を破棄して開き直しますか?", {
+      okLabel: "破棄して開き直す",
+      danger: true,
+    });
     if (!ok) return;
   }
   await settleEditQueue();
@@ -3508,17 +3681,49 @@ async function redoEdit() {
 // overwrites the original file on disk. All options sit in one form.
 async function sortSave() {
   if (!state.stat?.open) return;
-  const f = await askForm("ソート", [
-    { id: "key", type: "text", label: "キー列 (1始まり)", placeholder: "空なら行全体で比較",
-      title: "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較" },
-    { id: "delim", type: "text", label: "区切り文字", value: ",", placeholder: ",",
-      title: "キー列を使うときの列の区切り (例: , やタブ)" },
-    { id: "numeric", type: "check", label: "数値として比較する", value: false,
-      title: "10 と 9 を文字列でなく数値の大小で並べます" },
-    { id: "order", type: "select", label: "並び順",
-      options: [["asc", "昇順 (A→Z, 小→大)"], ["desc", "降順 (Z→A, 大→小)"]] },
-    { id: "_hint", type: "hint", label: "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。" },
-  ], "ソート");
+  const f = await askForm(
+    "ソート",
+    [
+      {
+        id: "key",
+        type: "text",
+        label: "キー列 (1始まり)",
+        placeholder: "空なら行全体で比較",
+        title: "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較",
+      },
+      {
+        id: "delim",
+        type: "text",
+        label: "区切り文字",
+        value: ",",
+        placeholder: ",",
+        title: "キー列を使うときの列の区切り (例: , やタブ)",
+      },
+      {
+        id: "numeric",
+        type: "check",
+        label: "数値として比較する",
+        value: false,
+        title: "10 と 9 を文字列でなく数値の大小で並べます",
+      },
+      {
+        id: "order",
+        type: "select",
+        label: "並び順",
+        options: [
+          ["asc", "昇順 (A→Z, 小→大)"],
+          ["desc", "降順 (Z→A, 大→小)"],
+        ],
+      },
+      {
+        id: "_hint",
+        type: "hint",
+        label:
+          "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。",
+      },
+    ],
+    "ソート",
+  );
   if (!f) return;
   const keyText = String(f.key || "").trim();
   const key = keyText === "" ? null : Number(keyText);
@@ -3555,12 +3760,26 @@ async function sortSave() {
 // multiple files of at most N lines each; the original file is untouched.
 async function splitFile() {
   if (!state.stat?.open) return;
-  const f = await askForm("ファイルを分割", [
-    { id: "lines", type: "text", label: "1ファイルあたりの行数", value: "1000000" },
-    { id: "dir", type: "text", label: "出力先フォルダ", value: "",
-      placeholder: "空なら元ファイルと同じ場所" },
-    { id: "_hint", type: "hint", label: "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。" },
-  ], "分割");
+  const f = await askForm(
+    "ファイルを分割",
+    [
+      { id: "lines", type: "text", label: "1ファイルあたりの行数", value: "1000000" },
+      {
+        id: "dir",
+        type: "text",
+        label: "出力先フォルダ",
+        value: "",
+        placeholder: "空なら元ファイルと同じ場所",
+      },
+      {
+        id: "_hint",
+        type: "hint",
+        label:
+          "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。",
+      },
+    ],
+    "分割",
+  );
   if (!f) return;
   const lines = Number(String(f.lines || "").trim());
   if (!Number.isInteger(lines) || lines < 1) {
@@ -3734,7 +3953,7 @@ async function replaceAll() {
     flashCount(
       replaced
         ? `${commas(replaced)} 件置換しました${res.truncated ? " — 一致が多いため一部です。もう一度実行してください" : ""}`
-        : "一致なし"
+        : "一致なし",
     );
   } catch (e) {
     flashCount("置換エラー", "error");
@@ -3755,10 +3974,11 @@ function hideDiff() {
 
 function showDiff(res) {
   $("diff-summary").textContent =
-    `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}`
-    + (res.current_dirty ? ` / ${t("未保存編集込み")}` : "")
-    + (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
-  $("diff-old-path").textContent = displayPath(res.old_path || t("現在のファイル")) + (res.current_dirty ? " *" : "");
+    `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}` +
+    (res.current_dirty ? ` / ${t("未保存編集込み")}` : "") +
+    (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
+  $("diff-old-path").textContent =
+    displayPath(res.old_path || t("現在のファイル")) + (res.current_dirty ? " *" : "");
   $("diff-new-path").textContent = displayPath(res.new_path || t("比較先"));
   renderDiffView(res);
   setModalOpen($("diff-modal"), true);
@@ -3801,9 +4021,8 @@ function inlineWordDiff(oldText, newText) {
   const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = oldTokens[i] === newTokens[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] =
+        oldTokens[i] === newTokens[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
 
@@ -3865,8 +4084,8 @@ function renderDiffView(res) {
     const title = document.createElement("div");
     title.className = "diff-hunk-title";
     title.textContent =
-      `${diffKindLabel(h.kind)}  ${t("現在")}: ${commas(h.old_start + 1)} (${commas(h.old_len)} ${currentLocale() === "en" ? "lines" : "行"})  `
-      + `${t("比較先")}: ${commas(h.new_start + 1)} (${commas(h.new_len)} ${currentLocale() === "en" ? "lines" : "行"})`;
+      `${diffKindLabel(h.kind)}  ${t("現在")}: ${commas(h.old_start + 1)} (${commas(h.old_len)} ${currentLocale() === "en" ? "lines" : "行"})  ` +
+      `${t("比較先")}: ${commas(h.new_start + 1)} (${commas(h.new_len)} ${currentLocale() === "en" ? "lines" : "行"})`;
     hunk.append(title);
     const oldRows = h.old_preview || [];
     const newRows = h.new_preview || [];
@@ -3876,21 +4095,26 @@ function renderDiffView(res) {
       row.className = "diff-row";
       const oldLine = oldRows[i] || null;
       const newLine = newRows[i] || null;
-      const oldCls = h.kind === "insert" ? "blank" : h.kind === "delete" ? "del" : oldLine ? "mod" : "blank";
-      const newCls = h.kind === "delete" ? "blank" : h.kind === "insert" ? "add" : newLine ? "mod" : "blank";
-      const wordDiff = h.kind === "replace" && oldLine && newLine
-        ? inlineWordDiff(oldLine.text, newLine.text)
-        : null;
+      const oldCls =
+        h.kind === "insert" ? "blank" : h.kind === "delete" ? "del" : oldLine ? "mod" : "blank";
+      const newCls =
+        h.kind === "delete" ? "blank" : h.kind === "insert" ? "add" : newLine ? "mod" : "blank";
+      const wordDiff =
+        h.kind === "replace" && oldLine && newLine
+          ? inlineWordDiff(oldLine.text, newLine.text)
+          : null;
       row.append(
         diffCell(oldLine, oldCls, wordDiff?.oldParts),
-        diffCell(newLine, newCls, wordDiff?.newParts)
+        diffCell(newLine, newCls, wordDiff?.newParts),
       );
       hunk.append(row);
     }
     if (h.old_truncated || h.new_truncated) {
       const tr = document.createElement("div");
       tr.className = "diff-truncated";
-      tr.textContent = translateText(`このhunkは先頭 ${commas(res.max_lines_per_hunk || 80)} 行だけ表示しています`);
+      tr.textContent = translateText(
+        `このhunkは先頭 ${commas(res.max_lines_per_hunk || 80)} 行だけ表示しています`,
+      );
       hunk.append(tr);
     }
     frag.append(hunk);
@@ -3910,7 +4134,9 @@ async function diffFile() {
   if (path == null || path.trim() === "") return;
   showLoading("差分を計算中…");
   try {
-    const res = await api(`/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`);
+    const res = await api(
+      `/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`,
+    );
     flashCount(`差分: ${commas(res.hunk_count)} hunk`);
     showDiff(res);
   } catch (e) {
@@ -3938,21 +4164,37 @@ function hideGrep() {
 
 async function grepFolder() {
   if (anyModalOpen()) return;
-  const base = lastGrep.dir
-    || localStorage.getItem(TREE_KEY)
-    || pathDirName(state.stat?.path || "")
-    || "";
+  const base =
+    lastGrep.dir || localStorage.getItem(TREE_KEY) || pathDirName(state.stat?.path || "") || "";
   const form = await askForm(
     "フォルダ内検索",
     [
-      { id: "query", type: "text", label: "検索語", value: lastGrep.query, placeholder: "検索する文字列 / 正規表現" },
-      { id: "dir", type: "text", label: "対象フォルダ", value: base, placeholder: "空欄で開いているファイルのフォルダ" },
-      { id: "glob", type: "text", label: "ファイル名フィルタ", value: lastGrep.glob, placeholder: "例: *.rs, *.txt (空欄で全て)" },
+      {
+        id: "query",
+        type: "text",
+        label: "検索語",
+        value: lastGrep.query,
+        placeholder: "検索する文字列 / 正規表現",
+      },
+      {
+        id: "dir",
+        type: "text",
+        label: "対象フォルダ",
+        value: base,
+        placeholder: "空欄で開いているファイルのフォルダ",
+      },
+      {
+        id: "glob",
+        type: "text",
+        label: "ファイル名フィルタ",
+        value: lastGrep.glob,
+        placeholder: "例: *.rs, *.txt (空欄で全て)",
+      },
       { id: "ci", type: "check", label: "大文字小文字を区別しない", value: lastGrep.ci },
       { id: "word", type: "check", label: "単語単位", value: lastGrep.word },
       { id: "regex", type: "check", label: "正規表現", value: lastGrep.regex },
     ],
-    "検索"
+    "検索",
   );
   if (!form) return;
   const query = (form.query || "").trim();
@@ -3987,12 +4229,11 @@ async function grepFolder() {
 
 function showGrep(res, query, regex) {
   const files = new Set(res.hits.map((h) => h.path)).size;
-  $("grep-summary").textContent =
-    translateText(
-      `${commas(res.hits.length)} 件 / ${commas(files)} ファイル`
-      + (res.truncated ? `（上限 ${commas(res.hits.length)} 件で打ち切り）` : "")
-      + (res.files_truncated ? " / 走査ファイル数の上限に達しました" : "")
-    );
+  $("grep-summary").textContent = translateText(
+    `${commas(res.hits.length)} 件 / ${commas(files)} ファイル` +
+      (res.truncated ? `（上限 ${commas(res.hits.length)} 件で打ち切り）` : "") +
+      (res.files_truncated ? " / 走査ファイル数の上限に達しました" : ""),
+  );
   renderGrepResults(res, query, regex);
   setModalOpen($("grep-modal"), true);
 }
@@ -4245,14 +4486,20 @@ function moveLines(dir) {
     return;
   }
   const caret = { line: state.caret.line + dir, col: state.caret.col };
-  const sel = shiftLineSelection(cloneSelection(state.sel && !state.sel.rect ? state.sel : null), dir);
+  const sel = shiftLineSelection(
+    cloneSelection(state.sel && !state.sel.rect ? state.sel : null),
+    dir,
+  );
   enqueueEdit(async () => {
     const block = await lineTextsFor(l0, l1 - l0 + 1);
     if (dir < 0) {
       // Up: line (l0-1) drops below the block.
       const above = await oneLineText(l0 - 1);
       const edit = {
-        l0: l0 - 1, c0: 0, l1, c1: charLenOf(block[block.length - 1]),
+        l0: l0 - 1,
+        c0: 0,
+        l1,
+        c1: charLenOf(block[block.length - 1]),
         text: block.join("\n") + "\n" + above,
       };
       return applyLineEdit([edit], caret, sel);
@@ -4260,7 +4507,10 @@ function moveLines(dir) {
     // Down: line (l1+1) rises above the block.
     const below = await oneLineText(l1 + 1);
     const edit = {
-      l0, c0: 0, l1: l1 + 1, c1: charLenOf(below),
+      l0,
+      c0: 0,
+      l1: l1 + 1,
+      c1: charLenOf(below),
       text: below + "\n" + block.join("\n"),
     };
     return applyLineEdit([edit], caret, sel);
@@ -4319,7 +4569,7 @@ function initEvents() {
       state.fracAcc -= whole;
       if (whole !== 0) setFirst(state.first + whole);
     },
-    { passive: false }
+    { passive: false },
   );
 
   const find = $("find");
@@ -4429,7 +4679,9 @@ function toggleOpt(key, id) {
 // ---- generic confirm / message dialog (replaces window.confirm/alert) -----
 // The browser dialogs leak the server origin into their chrome
 // ("127.0.0.1:PORT の内容"); everything user-facing goes through this modal.
-function confirmVisible() { return !$("confirm").classList.contains("hidden"); }
+function confirmVisible() {
+  return !$("confirm").classList.contains("hidden");
+}
 
 function askConfirm(title, message, opts = {}) {
   return new Promise((resolve) => {
@@ -4459,10 +4711,17 @@ function askConfirm(title, message, opts = {}) {
     const onCancel = () => finish(false);
     const onKey = (ev) => {
       ev.stopPropagation();
-      if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
-      else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        finish(true);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        finish(false);
+      }
     };
-    const onBackdrop = (ev) => { if (ev.target === modal) finish(false); };
+    const onBackdrop = (ev) => {
+      if (ev.target === modal) finish(false);
+    };
     okBtn.addEventListener("click", onOk);
     cancelBtn.addEventListener("click", onCancel);
     $("confirm-close").addEventListener("click", onCancel);
@@ -4477,7 +4736,9 @@ function showMessage(title, message) {
 }
 
 // ---- generic input prompt (replaces the browser's window.prompt) ---------
-function promptVisible() { return !$("prompt").classList.contains("hidden"); }
+function promptVisible() {
+  return !$("prompt").classList.contains("hidden");
+}
 function askPrompt(title, label, value = "") {
   return new Promise((resolve) => {
     const modal = $("prompt");
@@ -4486,7 +4747,10 @@ function askPrompt(title, label, value = "") {
     const input = $("prompt-input");
     input.value = value;
     setModalOpen(modal, true);
-    setTimeout(() => { input.focus(); input.select(); }, 0);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
     const finish = (val) => {
       setModalOpen(modal, false);
       input.removeEventListener("keydown", onKey);
@@ -4501,10 +4765,17 @@ function askPrompt(title, label, value = "") {
     const onCancel = () => finish(null);
     const onKey = (ev) => {
       ev.stopPropagation();
-      if (ev.key === "Enter") { ev.preventDefault(); finish(input.value); }
-      else if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        finish(input.value);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        finish(null);
+      }
     };
-    const onBackdrop = (ev) => { if (ev.target === modal) finish(null); };
+    const onBackdrop = (ev) => {
+      if (ev.target === modal) finish(null);
+    };
     input.addEventListener("keydown", onKey);
     $("prompt-ok").addEventListener("click", onOk);
     $("prompt-cancel").addEventListener("click", onCancel);
@@ -4514,7 +4785,9 @@ function askPrompt(title, label, value = "") {
 }
 
 // ---- generic small form dialog (sort / replace / case options) ------------
-function formVisible() { return !$("form-modal").classList.contains("hidden"); }
+function formVisible() {
+  return !$("form-modal").classList.contains("hidden");
+}
 
 // fields: {id, type: "text"|"check"|"select"|"hint", label, value, placeholder,
 // title, options}. Resolves to {id: value} or null on cancel.
@@ -4591,10 +4864,17 @@ function askForm(title, fields, okLabel = "実行") {
     const onCancel = () => finish(null);
     const onKey = (ev) => {
       ev.stopPropagation();
-      if (ev.key === "Enter" && ev.target.tagName !== "SELECT") { ev.preventDefault(); finish(collect()); }
-      else if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
+      if (ev.key === "Enter" && ev.target.tagName !== "SELECT") {
+        ev.preventDefault();
+        finish(collect());
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        finish(null);
+      }
     };
-    const onBackdrop = (ev) => { if (ev.target === modal) finish(null); };
+    const onBackdrop = (ev) => {
+      if (ev.target === modal) finish(null);
+    };
     $("form-ok").addEventListener("click", onOk);
     $("form-cancel").addEventListener("click", onCancel);
     $("form-close").addEventListener("click", onCancel);
@@ -4609,7 +4889,9 @@ function showLoading(text) {
   o.textContent = translateText(text || "読み込み中…");
   o.classList.remove("hidden");
 }
-function hideLoading() { $("overlay").classList.add("hidden"); }
+function hideLoading() {
+  $("overlay").classList.add("hidden");
+}
 
 // Jump the caret to a 1-based line number.
 function gotoLine(n) {
@@ -4629,15 +4911,51 @@ function gotoLine(n) {
 function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
   if (promptVisible() || formVisible() || confirmVisible()) return;
-  if (e.key === "Escape" && ctxMenuVisible()) { e.preventDefault(); hideCtxMenu(); return; }
-  if (e.key === "Escape" && fileMenuVisible()) { e.preventDefault(); hideFileMenu(true); return; }
-  if (e.key === "Escape" && keymapVisible()) { e.preventDefault(); hideKeymap(); return; }
-  if (e.key === "Escape" && commandPaletteVisible()) { e.preventDefault(); hideCommandPalette(); return; }
-  if (e.key === "Escape" && diffVisible()) { e.preventDefault(); hideDiff(); return; }
-  if (e.key === "Escape" && grepVisible()) { e.preventDefault(); hideGrep(); return; }
-  if (e.key === "Escape" && settingsVisible()) { e.preventDefault(); hideSettings(); return; }
-  if (e.key === "Escape" && convertVisible()) { e.preventDefault(); hideConvert(); return; }
-  if (e.key === "Escape" && openerVisible()) { e.preventDefault(); hideOpener(); return; }
+  if (e.key === "Escape" && ctxMenuVisible()) {
+    e.preventDefault();
+    hideCtxMenu();
+    return;
+  }
+  if (e.key === "Escape" && fileMenuVisible()) {
+    e.preventDefault();
+    hideFileMenu(true);
+    return;
+  }
+  if (e.key === "Escape" && keymapVisible()) {
+    e.preventDefault();
+    hideKeymap();
+    return;
+  }
+  if (e.key === "Escape" && commandPaletteVisible()) {
+    e.preventDefault();
+    hideCommandPalette();
+    return;
+  }
+  if (e.key === "Escape" && diffVisible()) {
+    e.preventDefault();
+    hideDiff();
+    return;
+  }
+  if (e.key === "Escape" && grepVisible()) {
+    e.preventDefault();
+    hideGrep();
+    return;
+  }
+  if (e.key === "Escape" && settingsVisible()) {
+    e.preventDefault();
+    hideSettings();
+    return;
+  }
+  if (e.key === "Escape" && convertVisible()) {
+    e.preventDefault();
+    hideConvert();
+    return;
+  }
+  if (e.key === "Escape" && openerVisible()) {
+    e.preventDefault();
+    hideOpener();
+    return;
+  }
   if (!anyModalOpen() && matchesShortcut(e, "commandPalette")) {
     e.preventDefault();
     showCommandPalette();
@@ -4646,13 +4964,34 @@ function onGlobalKey(e) {
   // A modal owns the keyboard: never run editor/clipboard/history/nav commands
   // against the hidden document behind Settings / the Opener / a prompt.
   if (anyModalOpen()) return;
-  if (matchesShortcut(e, "openFile")) { e.preventDefault(); hideFileMenu(); showOpener(); return; }
-  if (matchesShortcut(e, "toggleSidebar")) { e.preventDefault(); setSidebar(!sidebarOpen()); return; }
-  if (matchesShortcut(e, "newFile")) { e.preventDefault(); hideFileMenu(); newUntitled(); return; }
-  if (matchesShortcut(e, "newWindow")) { e.preventDefault(); hideFileMenu(); openNewWindow(); return; }
+  if (matchesShortcut(e, "openFile")) {
+    e.preventDefault();
+    hideFileMenu();
+    showOpener();
+    return;
+  }
+  if (matchesShortcut(e, "toggleSidebar")) {
+    e.preventDefault();
+    setSidebar(!sidebarOpen());
+    return;
+  }
+  if (matchesShortcut(e, "newFile")) {
+    e.preventDefault();
+    hideFileMenu();
+    newUntitled();
+    return;
+  }
+  if (matchesShortcut(e, "newWindow")) {
+    e.preventDefault();
+    hideFileMenu();
+    openNewWindow();
+    return;
+  }
   if (matchesShortcut(e, "gotoLine")) {
     e.preventDefault();
-    askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
+    askPrompt("行へ移動", "行番号").then((v) => {
+      if (v != null) gotoLine(v);
+    });
     return;
   }
   if (matchesShortcut(e, "closeTab")) {
@@ -4661,30 +5000,120 @@ function onGlobalKey(e) {
     if (active) closeTab(active.id);
     return;
   }
-  if (matchesShortcut(e, "find")) { e.preventDefault(); showFind(); return; }
-  if (matchesShortcut(e, "replace")) { e.preventDefault(); showFind(true); return; }
-  if (matchesShortcut(e, "saveAs")) { e.preventDefault(); hideFileMenu(); saveCopy(); return; }
-  if (matchesShortcut(e, "saveFile")) { e.preventDefault(); hideFileMenu(); saveFile(); return; }
-  if (matchesShortcut(e, "findPrev")) { e.preventDefault(); findStep("prev"); return; }
-  if (matchesShortcut(e, "findNext")) { e.preventDefault(); findStep("next"); return; }
-  if (matchesShortcut(e, "searchCase")) { e.preventDefault(); toggleOpt("ci", "opt-case"); return; }
-  if (matchesShortcut(e, "searchRegex")) { e.preventDefault(); toggleOpt("regex", "opt-regex"); return; }
-  if (matchesShortcut(e, "searchWord")) { e.preventDefault(); toggleOpt("word", "opt-word"); return; }
-  if (matchesShortcut(e, "sortSave")) { e.preventDefault(); sortSave(); return; }
-  if (matchesShortcut(e, "diffFile")) { e.preventDefault(); diffFile(); return; }
-  if (matchesShortcut(e, "splitFile")) { e.preventDefault(); splitFile(); return; }
-  if (matchesShortcut(e, "grepFolder")) { e.preventDefault(); grepFolder(); return; }
-  if (matchesShortcut(e, "settings")) { e.preventDefault(); showSettings(); return; }
-  if (matchesShortcut(e, "keymap")) { e.preventDefault(); showKeymap(); return; }
+  if (matchesShortcut(e, "find")) {
+    e.preventDefault();
+    showFind();
+    return;
+  }
+  if (matchesShortcut(e, "replace")) {
+    e.preventDefault();
+    showFind(true);
+    return;
+  }
+  if (matchesShortcut(e, "saveAs")) {
+    e.preventDefault();
+    hideFileMenu();
+    saveCopy();
+    return;
+  }
+  if (matchesShortcut(e, "saveFile")) {
+    e.preventDefault();
+    hideFileMenu();
+    saveFile();
+    return;
+  }
+  if (matchesShortcut(e, "findPrev")) {
+    e.preventDefault();
+    findStep("prev");
+    return;
+  }
+  if (matchesShortcut(e, "findNext")) {
+    e.preventDefault();
+    findStep("next");
+    return;
+  }
+  if (matchesShortcut(e, "searchCase")) {
+    e.preventDefault();
+    toggleOpt("ci", "opt-case");
+    return;
+  }
+  if (matchesShortcut(e, "searchRegex")) {
+    e.preventDefault();
+    toggleOpt("regex", "opt-regex");
+    return;
+  }
+  if (matchesShortcut(e, "searchWord")) {
+    e.preventDefault();
+    toggleOpt("word", "opt-word");
+    return;
+  }
+  if (matchesShortcut(e, "sortSave")) {
+    e.preventDefault();
+    sortSave();
+    return;
+  }
+  if (matchesShortcut(e, "diffFile")) {
+    e.preventDefault();
+    diffFile();
+    return;
+  }
+  if (matchesShortcut(e, "splitFile")) {
+    e.preventDefault();
+    splitFile();
+    return;
+  }
+  if (matchesShortcut(e, "grepFolder")) {
+    e.preventDefault();
+    grepFolder();
+    return;
+  }
+  if (matchesShortcut(e, "settings")) {
+    e.preventDefault();
+    showSettings();
+    return;
+  }
+  if (matchesShortcut(e, "keymap")) {
+    e.preventDefault();
+    showKeymap();
+    return;
+  }
   // Editor clipboard / history — not while typing in a search or dialog field.
   if (inField) return;
-  if (matchesShortcut(e, "selectAll")) { e.preventDefault(); selectAll(); return; }
-  if (matchesShortcut(e, "copy")) { e.preventDefault(); copySelection(); return; }
-  if (matchesShortcut(e, "cut")) { e.preventDefault(); cutSelection(); return; }
-  if (matchesShortcut(e, "caseUpper")) { e.preventDefault(); transformSelection("upper"); return; }
-  if (matchesShortcut(e, "caseLower")) { e.preventDefault(); transformSelection("lower"); return; }
-  if (matchesShortcut(e, "redo")) { e.preventDefault(); redoEdit(); return; }
-  if (matchesShortcut(e, "undo")) { e.preventDefault(); undoEdit(); return; }
+  if (matchesShortcut(e, "selectAll")) {
+    e.preventDefault();
+    selectAll();
+    return;
+  }
+  if (matchesShortcut(e, "copy")) {
+    e.preventDefault();
+    copySelection();
+    return;
+  }
+  if (matchesShortcut(e, "cut")) {
+    e.preventDefault();
+    cutSelection();
+    return;
+  }
+  if (matchesShortcut(e, "caseUpper")) {
+    e.preventDefault();
+    transformSelection("upper");
+    return;
+  }
+  if (matchesShortcut(e, "caseLower")) {
+    e.preventDefault();
+    transformSelection("lower");
+    return;
+  }
+  if (matchesShortcut(e, "redo")) {
+    e.preventDefault();
+    redoEdit();
+    return;
+  }
+  if (matchesShortcut(e, "undo")) {
+    e.preventDefault();
+    undoEdit();
+    return;
+  }
 }
 
 // ---- editor keyboard: caret motion + structural edits ----------------------
@@ -4747,30 +5176,65 @@ function onEditKey(e) {
   const mod = e.ctrlKey || e.metaKey;
   const shift = e.shiftKey;
   const c = state.caret;
-  const take = () => { e.preventDefault(); e.stopPropagation(); };
+  const take = () => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
   // Multi-cursor: add a caret above/below (default Ctrl+Alt+ArrowUp/Down).
   // Checked before the switch so the plain-arrow cases never swallow them.
-  if (matchesShortcut(e, "addCursorAbove")) { take(); addCursorAbove(); return; }
-  if (matchesShortcut(e, "addCursorBelow")) { take(); addCursorBelow(); return; }
-  if (matchesShortcut(e, "selectNextOccurrence")) { take(); selectNextOccurrence(); return; }
+  if (matchesShortcut(e, "addCursorAbove")) {
+    take();
+    addCursorAbove();
+    return;
+  }
+  if (matchesShortcut(e, "addCursorBelow")) {
+    take();
+    addCursorBelow();
+    return;
+  }
+  if (matchesShortcut(e, "selectNextOccurrence")) {
+    take();
+    selectNextOccurrence();
+    return;
+  }
   // Whole-line ops: checked before the switch so the plain-arrow cases never
   // swallow 行を上へ/下へ移動 (default Alt+ArrowUp/Down).
-  if (matchesShortcut(e, "duplicateLine")) { take(); duplicateLines(); return; }
-  if (matchesShortcut(e, "moveLineUp")) { take(); moveLines(-1); return; }
-  if (matchesShortcut(e, "moveLineDown")) { take(); moveLines(1); return; }
-  if (matchesShortcut(e, "deleteLine")) { take(); deleteLines(); return; }
+  if (matchesShortcut(e, "duplicateLine")) {
+    take();
+    duplicateLines();
+    return;
+  }
+  if (matchesShortcut(e, "moveLineUp")) {
+    take();
+    moveLines(-1);
+    return;
+  }
+  if (matchesShortcut(e, "moveLineDown")) {
+    take();
+    moveLines(1);
+    return;
+  }
+  if (matchesShortcut(e, "deleteLine")) {
+    take();
+    deleteLines();
+    return;
+  }
   switch (e.key) {
     case "ArrowLeft":
       take();
-      if (mod) { const [l, col] = wordLeft(c.line, c.col); moveCaret(l, col, shift); }
-      else if (c.col > 0) moveCaret(c.line, c.col - 1, shift);
+      if (mod) {
+        const [l, col] = wordLeft(c.line, c.col);
+        moveCaret(l, col, shift);
+      } else if (c.col > 0) moveCaret(c.line, c.col - 1, shift);
       else if (c.line > 0) moveCaret(c.line - 1, lineLen(c.line - 1), shift);
       state.goalCol = state.caret.col;
       return;
     case "ArrowRight":
       take();
-      if (mod) { const [l, col] = wordRight(c.line, c.col); moveCaret(l, col, shift); }
-      else if (c.col < lineLen(c.line)) moveCaret(c.line, c.col + 1, shift);
+      if (mod) {
+        const [l, col] = wordRight(c.line, c.col);
+        moveCaret(l, col, shift);
+      } else if (c.col < lineLen(c.line)) moveCaret(c.line, c.col + 1, shift);
       else if (c.line < state.total - 1) moveCaret(c.line + 1, 0, shift);
       state.goalCol = state.caret.col;
       return;
@@ -4791,8 +5255,10 @@ function onEditKey(e) {
       return;
     case "End":
       take();
-      if (mod) { const last = state.total - 1; moveCaret(last, lineLen(last), shift); }
-      else moveCaret(c.line, lineLen(c.line), shift);
+      if (mod) {
+        const last = state.total - 1;
+        moveCaret(last, lineLen(last), shift);
+      } else moveCaret(c.line, lineLen(c.line), shift);
       state.goalCol = state.caret.col;
       return;
     case "PageUp":
@@ -4805,11 +5271,13 @@ function onEditKey(e) {
       return;
     case "Backspace":
       take();
-      mod ? deleteWordBack() : backspace();
+      if (mod) deleteWordBack();
+      else backspace();
       return;
     case "Delete":
       take();
-      mod ? deleteWordFwd() : forwardDelete();
+      if (mod) deleteWordFwd();
+      else forwardDelete();
       return;
     case "Enter":
       take();
@@ -4823,8 +5291,16 @@ function onEditKey(e) {
     case "Escape":
       // Collapsing multi-cursor wins over every other Escape meaning here
       // (modals/find never reach this handler — see the guards above).
-      if (state.extraCursors.length) { take(); clearExtraCursors(); return; }
-      if (state.sel) { take(); state.sel = null; scheduleRender(); }
+      if (state.extraCursors.length) {
+        take();
+        clearExtraCursors();
+        return;
+      }
+      if (state.sel) {
+        take();
+        state.sel = null;
+        scheduleRender();
+      }
       return;
     default:
       return; // printable input flows through beforeinput / composition
@@ -4833,7 +5309,10 @@ function onEditKey(e) {
 
 function onBeforeInput(e) {
   if (state.composing) return; // composition text is committed on compositionend
-  if (anyModalOpen()) { e.preventDefault(); return; }
+  if (anyModalOpen()) {
+    e.preventDefault();
+    return;
+  }
   switch (e.inputType) {
     case "insertText":
       e.preventDefault();
@@ -4898,13 +5377,21 @@ function initEditor() {
   const hi = $("hidden-input");
   hi.addEventListener("keydown", onEditKey);
   hi.addEventListener("beforeinput", onBeforeInput);
-  hi.addEventListener("input", () => { if (!state.composing) hi.value = ""; });
+  hi.addEventListener("input", () => {
+    if (!state.composing) hi.value = "";
+  });
   hi.addEventListener("paste", onPaste);
   hi.addEventListener("compositionstart", onCompStart);
   hi.addEventListener("compositionupdate", onCompUpdate);
   hi.addEventListener("compositionend", onCompEnd);
-  hi.addEventListener("focus", () => { state.focused = true; scheduleRender(); });
-  hi.addEventListener("blur", () => { state.focused = false; scheduleRender(); });
+  hi.addEventListener("focus", () => {
+    state.focused = true;
+    scheduleRender();
+  });
+  hi.addEventListener("blur", () => {
+    state.focused = false;
+    scheduleRender();
+  });
   // Keep the caret glued to its cell during horizontal scroll.
   $("content").addEventListener("scroll", positionCaret);
 }
@@ -4945,17 +5432,23 @@ function configureOpener(mode, title) {
   const save = mode === "save";
   const m = $("opener");
   m.classList.toggle("save-mode", save);
-  $("opener-title").textContent = translateText(title || (save ? "名前を付けて保存" : "ファイルを開く"));
+  $("opener-title").textContent = translateText(
+    title || (save ? "名前を付けて保存" : "ファイルを開く"),
+  );
   $("opener-input-label").textContent = save ? t("ファイル名") : t("パス");
   $("opener-input").placeholder = save
     ? t("保存するファイル名、またはフルパス")
     : t("ファイルのパスを入力… (例: /var/log/huge.log)");
   $("opener-open").textContent = save ? t("保存") : t("開く");
   $("opener-folder").textContent = save ? t("場所") : t("フォルダ");
-  $("opener-folder").title = save ? t("表示中のフォルダをエクスプローラーに表示") : t("表示中のフォルダをツリーに開く");
+  $("opener-folder").title = save
+    ? t("表示中のフォルダをエクスプローラーに表示")
+    : t("表示中のフォルダをツリーに開く");
   $("opener-hint").textContent = save
     ? t("フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。")
-    : t("ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。");
+    : t(
+        "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。",
+      );
   openerMsg("");
   renderRecentFiles();
 }
@@ -5044,7 +5537,7 @@ function browseRow(ent, isUp) {
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
     "aria-label",
-    isUp ? t("上の階層へ") : `${ent.is_dir ? t("フォルダ") : t("ファイル")}: ${ent.name}`
+    isUp ? t("上の階層へ") : `${ent.is_dir ? t("フォルダ") : t("ファイル")}: ${ent.name}`,
   );
   const ic = document.createElement("span");
   ic.className = "ic";
@@ -5063,8 +5556,7 @@ function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
-    }
-    else openPath(ent.path);
+    } else openPath(ent.path);
   });
   row.addEventListener("dblclick", () => {
     if (!ent.is_dir && state.openerMode === "save") commitOpener();
@@ -5174,11 +5666,10 @@ async function saveDialogTarget() {
   const existing = state.openerEntries.find((e) => !e.is_dir && e.name === base);
   const overwrite = !!existing;
   if (overwrite) {
-    const ok = await askConfirm(
-      "上書きの確認",
-      `${base} は既に存在します。上書きしますか?`,
-      { okLabel: "上書き", danger: true }
-    );
+    const ok = await askConfirm("上書きの確認", `${base} は既に存在します。上書きしますか?`, {
+      okLabel: "上書き",
+      danger: true,
+    });
     if (!ok) return null;
   }
   return { path, overwrite };
@@ -5414,11 +5905,10 @@ async function closeTab(id) {
     if (!(await confirmCloseLastTab(t))) return;
     if (requestEditorClose()) return;
   } else if (t && t.dirty) {
-    const ok = await askConfirm(
-      "タブを閉じる",
-      `${t.name} の未保存の編集を破棄して閉じますか?`,
-      { okLabel: "破棄して閉じる", danger: true }
-    );
+    const ok = await askConfirm("タブを閉じる", `${t.name} の未保存の編集を破棄して閉じますか?`, {
+      okLabel: "破棄して閉じる",
+      danger: true,
+    });
     if (!ok) return;
   }
   try {
@@ -5468,7 +5958,7 @@ async function treeSetRoot(dir) {
     const tree = $("tree");
     tree.textContent = "";
     tree.append(renderTreeEntries(res.entries, 0));
-  } catch (e) {
+  } catch {
     // A stale saved root: fall back to the server default once.
     if (dir) {
       treeSetRoot(null);
@@ -5551,7 +6041,11 @@ function renderTreeNode(ent, depth) {
 }
 
 function treeFileClass(name) {
-  const ext = String(name || "").split(".").pop()?.toLowerCase() || "";
+  const ext =
+    String(name || "")
+      .split(".")
+      .pop()
+      ?.toLowerCase() || "";
   if (ext === "md" || ext === "markdown") return "md";
   if (ext === "py") return "py";
   if (ext === "json") return "json";
@@ -5615,7 +6109,9 @@ function runMenuAction(action) {
   if (action === "find") return showFind();
   if (action === "replace") return showFind(true);
   if (action === "gotoLine") {
-    askPrompt("行へ移動", "行番号").then((v) => { if (v != null) gotoLine(v); });
+    askPrompt("行へ移動", "行番号").then((v) => {
+      if (v != null) gotoLine(v);
+    });
     return;
   }
   if (action === "selectAll") return selectAll();
@@ -5629,8 +6125,10 @@ function runMenuAction(action) {
   if (action === "copy") return copySelection();
   if (action === "cut") return cutSelection();
   if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
-  if (action === "toggleWhitespace") return updateSetting("showWhitespace", !state.settings.showWhitespace);
-  if (action === "toggleZenkakuUnderline") return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
+  if (action === "toggleWhitespace")
+    return updateSetting("showWhitespace", !state.settings.showWhitespace);
+  if (action === "toggleZenkakuUnderline")
+    return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
   if (action === "toggleWordWrap") return updateSetting("wordWrap", !state.settings.wordWrap);
   if (action === "toggleFollowTail") return setFollowTail(!state.followTail);
   if (action === "settings") return showSettings();
@@ -5662,7 +6160,8 @@ function initMenuBar() {
     button.addEventListener("click", (e) => {
       e.stopPropagation();
       const open = !$(`${id}-menu`).classList.contains("hidden");
-      open ? hideFileMenu() : showAppMenu(id);
+      if (open) hideFileMenu();
+      else showAppMenu(id);
     });
     button.addEventListener("pointerenter", () => {
       if (fileMenuVisible()) showAppMenu(id);
@@ -5733,34 +6232,176 @@ function saveSettings(s) {
 // and act as a base for custom themes. Custom themes apply at runtime by
 // setting the same CSS variables the built-ins use.
 const THEME_PRESETS = {
-  "iris-light": {"name":"Iris Light","type":"light","radius":10,
-    "color":{"paper":"#FBF8F1","paper2":"#FDFCF8","ink":"#2A2140","inkDim":"#6E6383","inkFaint":"#A99DBC","accent":"#7A5CC0","accent2":"#6A4CB0","gold":"#C79A2E","edge":"#E7E0D3","err":"#C0506A","markBg":"#FBEBB0","markFg":"#6B5510","markCur":"#E8B84B","markCurFg":"#2A2205"},
-    "acrylic":{"tint":"rgba(255,253,248,0.72)","blur":20},"background":{"mode":"watercolor","solid":"#FBF8F1"},"illustration":0.18,
-    "watercolor":[{"x":"12%","y":"84%","r":"46vh","color":"rgba(122,92,192,0.12)"},{"x":"88%","y":"14%","r":"42vh","color":"rgba(185,139,214,0.10)"},{"x":"70%","y":"96%","r":"30vh","color":"rgba(231,197,107,0.08)"}]},
-  "iris-mist": {"name":"Iris Mist","type":"light","radius":12,
-    "color":{"paper":"#F7F9FC","paper2":"#FDFEFF","ink":"#26314A","inkDim":"#5E6E8A","inkFaint":"#9DAAC0","accent":"#5B79C9","accent2":"#4A68B8","gold":"#C9A24E","edge":"#DCE4EF","err":"#C05C74","markBg":"#E3ECFB","markFg":"#2C3E6B","markCur":"#7EC7C0","markCurFg":"#0F2A28"},
-    "acrylic":{"tint":"rgba(250,252,255,0.68)","blur":24},"background":{"mode":"watercolor","solid":"#F7F9FC"},"illustration":0.22,
-    "watercolor":[{"x":"14%","y":"82%","r":"44vh","color":"rgba(91,121,201,0.12)"},{"x":"86%","y":"16%","r":"42vh","color":"rgba(143,182,224,0.10)"},{"x":"74%","y":"96%","r":"30vh","color":"rgba(126,199,192,0.08)"}]},
-  "iris-dawn": {"name":"Iris Dawn","type":"light","radius":10,
-    "color":{"paper":"#FDF6EE","paper2":"#FFFBF7","ink":"#3A2438","inkDim":"#7A5A6E","inkFaint":"#B79AA6","accent":"#A65CB0","accent2":"#944EA0","gold":"#E0A94E","edge":"#EFE0D6","err":"#D96A86","markBg":"#FBE7C8","markFg":"#7A4A16","markCur":"#F0B85A","markCurFg":"#3A2205"},
-    "acrylic":{"tint":"rgba(255,250,244,0.70)","blur":20},"background":{"mode":"watercolor","solid":"#FDF6EE"},"illustration":0.22,
-    "watercolor":[{"x":"12%","y":"84%","r":"46vh","color":"rgba(166,92,176,0.13)"},{"x":"84%","y":"16%","r":"42vh","color":"rgba(224,169,78,0.11)"},{"x":"70%","y":"96%","r":"30vh","color":"rgba(227,154,176,0.10)"}]},
-  "sumi-light": {"name":"Sumi Light","type":"light","radius":10,
-    "color":{"paper":"#FAFAF8","paper2":"#FFFFFF","ink":"#222024","inkDim":"#63616A","inkFaint":"#A7A4AE","accent":"#7A5CC0","accent2":"#6A4CB0","gold":"#B7912F","edge":"#E6E4DE","err":"#B24A5E","markBg":"#ECE6FA","markFg":"#3E2E63","markCur":"#7A5CC0","markCurFg":"#FFFFFF"},
-    "acrylic":{"tint":"rgba(252,252,250,0.74)","blur":22},"background":{"mode":"watercolor","solid":"#FAFAF8"},"illustration":0.16,
-    "watercolor":[{"x":"16%","y":"82%","r":"40vh","color":"rgba(122,92,192,0.07)"},{"x":"84%","y":"20%","r":"34vh","color":"rgba(40,36,48,0.03)"}]},
-  "mono-paper": {"name":"Mono Paper (単色)","type":"light","radius":10,
-    "color":{"paper":"#F5F3ED","paper2":"#FBFAF5","ink":"#24231F","inkDim":"#6C6A63","inkFaint":"#A9A69D","accent":"#6F6B79","accent2":"#605C6C","gold":"#7A7568","edge":"#E2DFD6","err":"#9A6A6A","markBg":"#E7E4EC","markFg":"#3A3745","markCur":"#6F6B79","markCurFg":"#FFFFFF"},
-    "acrylic":{"tint":"rgba(245,243,237,0.92)","blur":8},"background":{"mode":"solid","solid":"#F4F2EC"},"illustration":0,"watercolor":[]},
+  "iris-light": {
+    name: "Iris Light",
+    type: "light",
+    radius: 10,
+    color: {
+      paper: "#FBF8F1",
+      paper2: "#FDFCF8",
+      ink: "#2A2140",
+      inkDim: "#6E6383",
+      inkFaint: "#A99DBC",
+      accent: "#7A5CC0",
+      accent2: "#6A4CB0",
+      gold: "#C79A2E",
+      edge: "#E7E0D3",
+      err: "#C0506A",
+      markBg: "#FBEBB0",
+      markFg: "#6B5510",
+      markCur: "#E8B84B",
+      markCurFg: "#2A2205",
+    },
+    acrylic: { tint: "rgba(255,253,248,0.72)", blur: 20 },
+    background: { mode: "watercolor", solid: "#FBF8F1" },
+    illustration: 0.18,
+    watercolor: [
+      { x: "12%", y: "84%", r: "46vh", color: "rgba(122,92,192,0.12)" },
+      { x: "88%", y: "14%", r: "42vh", color: "rgba(185,139,214,0.10)" },
+      { x: "70%", y: "96%", r: "30vh", color: "rgba(231,197,107,0.08)" },
+    ],
+  },
+  "iris-mist": {
+    name: "Iris Mist",
+    type: "light",
+    radius: 12,
+    color: {
+      paper: "#F7F9FC",
+      paper2: "#FDFEFF",
+      ink: "#26314A",
+      inkDim: "#5E6E8A",
+      inkFaint: "#9DAAC0",
+      accent: "#5B79C9",
+      accent2: "#4A68B8",
+      gold: "#C9A24E",
+      edge: "#DCE4EF",
+      err: "#C05C74",
+      markBg: "#E3ECFB",
+      markFg: "#2C3E6B",
+      markCur: "#7EC7C0",
+      markCurFg: "#0F2A28",
+    },
+    acrylic: { tint: "rgba(250,252,255,0.68)", blur: 24 },
+    background: { mode: "watercolor", solid: "#F7F9FC" },
+    illustration: 0.22,
+    watercolor: [
+      { x: "14%", y: "82%", r: "44vh", color: "rgba(91,121,201,0.12)" },
+      { x: "86%", y: "16%", r: "42vh", color: "rgba(143,182,224,0.10)" },
+      { x: "74%", y: "96%", r: "30vh", color: "rgba(126,199,192,0.08)" },
+    ],
+  },
+  "iris-dawn": {
+    name: "Iris Dawn",
+    type: "light",
+    radius: 10,
+    color: {
+      paper: "#FDF6EE",
+      paper2: "#FFFBF7",
+      ink: "#3A2438",
+      inkDim: "#7A5A6E",
+      inkFaint: "#B79AA6",
+      accent: "#A65CB0",
+      accent2: "#944EA0",
+      gold: "#E0A94E",
+      edge: "#EFE0D6",
+      err: "#D96A86",
+      markBg: "#FBE7C8",
+      markFg: "#7A4A16",
+      markCur: "#F0B85A",
+      markCurFg: "#3A2205",
+    },
+    acrylic: { tint: "rgba(255,250,244,0.70)", blur: 20 },
+    background: { mode: "watercolor", solid: "#FDF6EE" },
+    illustration: 0.22,
+    watercolor: [
+      { x: "12%", y: "84%", r: "46vh", color: "rgba(166,92,176,0.13)" },
+      { x: "84%", y: "16%", r: "42vh", color: "rgba(224,169,78,0.11)" },
+      { x: "70%", y: "96%", r: "30vh", color: "rgba(227,154,176,0.10)" },
+    ],
+  },
+  "sumi-light": {
+    name: "Sumi Light",
+    type: "light",
+    radius: 10,
+    color: {
+      paper: "#FAFAF8",
+      paper2: "#FFFFFF",
+      ink: "#222024",
+      inkDim: "#63616A",
+      inkFaint: "#A7A4AE",
+      accent: "#7A5CC0",
+      accent2: "#6A4CB0",
+      gold: "#B7912F",
+      edge: "#E6E4DE",
+      err: "#B24A5E",
+      markBg: "#ECE6FA",
+      markFg: "#3E2E63",
+      markCur: "#7A5CC0",
+      markCurFg: "#FFFFFF",
+    },
+    acrylic: { tint: "rgba(252,252,250,0.74)", blur: 22 },
+    background: { mode: "watercolor", solid: "#FAFAF8" },
+    illustration: 0.16,
+    watercolor: [
+      { x: "16%", y: "82%", r: "40vh", color: "rgba(122,92,192,0.07)" },
+      { x: "84%", y: "20%", r: "34vh", color: "rgba(40,36,48,0.03)" },
+    ],
+  },
+  "mono-paper": {
+    name: "Mono Paper (単色)",
+    type: "light",
+    radius: 10,
+    color: {
+      paper: "#F5F3ED",
+      paper2: "#FBFAF5",
+      ink: "#24231F",
+      inkDim: "#6C6A63",
+      inkFaint: "#A9A69D",
+      accent: "#6F6B79",
+      accent2: "#605C6C",
+      gold: "#7A7568",
+      edge: "#E2DFD6",
+      err: "#9A6A6A",
+      markBg: "#E7E4EC",
+      markFg: "#3A3745",
+      markCur: "#6F6B79",
+      markCurFg: "#FFFFFF",
+    },
+    acrylic: { tint: "rgba(245,243,237,0.92)", blur: 8 },
+    background: { mode: "solid", solid: "#F4F2EC" },
+    illustration: 0,
+    watercolor: [],
+  },
 };
 
 // CSS variables a custom/JSON theme drives (cleared when switching back to a
 // built-in data-theme so its CSS block wins).
 const THEME_VARS = [
-  "--bg","--bg-elevated","--bg-toolbar","--bg-active-line","--gutter-bg","--edit-bg",
-  "--fg","--fg-dim","--fg-faint","--border","--accent","--accent-bright","--status",
-  "--status-fg","--gutter-fg","--mark-bg","--mark-fg","--mark-active-bg","--mark-active-fg",
-  "--danger","--gold","--desk","--illus","--radius","--acrylic-blur",
+  "--bg",
+  "--bg-elevated",
+  "--bg-toolbar",
+  "--bg-active-line",
+  "--gutter-bg",
+  "--edit-bg",
+  "--fg",
+  "--fg-dim",
+  "--fg-faint",
+  "--border",
+  "--accent",
+  "--accent-bright",
+  "--status",
+  "--status-fg",
+  "--gutter-fg",
+  "--mark-bg",
+  "--mark-fg",
+  "--mark-active-bg",
+  "--mark-active-fg",
+  "--danger",
+  "--gold",
+  "--desk",
+  "--illus",
+  "--radius",
+  "--acrylic-blur",
 ];
 function clearCustomVars() {
   const r = document.documentElement.style;
@@ -5770,25 +6411,40 @@ function deskFrom(t) {
   const bg = t.background || { mode: "watercolor" };
   if (bg.mode === "solid") return bg.solid || t.color.paper2 || t.color.paper;
   const layers = (t.watercolor || []).map(
-    (b) => `radial-gradient(${b.r} ${b.r} at ${b.x} ${b.y}, ${b.color}, transparent 62%)`
+    (b) => `radial-gradient(${b.r} ${b.r} at ${b.x} ${b.y}, ${b.color}, transparent 62%)`,
   );
   layers.push(t.color.paper);
   return layers.join(", ");
 }
 function applyCustomVars(t) {
-  const r = document.documentElement.style, c = t.color || {};
+  const r = document.documentElement.style,
+    c = t.color || {};
   const S = (k, v) => v != null && r.setProperty(k, v);
-  S("--bg", c.paper); S("--bg-elevated", c.paper2 || c.paper); S("--bg-toolbar", (t.acrylic && t.acrylic.tint) || c.paper);
+  S("--bg", c.paper);
+  S("--bg-elevated", c.paper2 || c.paper);
+  S("--bg-toolbar", (t.acrylic && t.acrylic.tint) || c.paper);
   S("--bg-active-line", `color-mix(in srgb, ${c.accent} 14%, ${c.paper})`);
-  S("--gutter-bg", c.paper); S("--edit-bg", c.paper2 || c.paper);
-  S("--fg", c.ink); S("--fg-dim", c.inkDim); S("--fg-faint", c.inkFaint); S("--border", c.edge);
-  S("--accent", c.accent); S("--accent-bright", c.accent2 || c.accent);
-  S("--status", (t.acrylic && t.acrylic.tint) || c.paper); S("--status-fg", c.inkDim);
-  S("--gutter-fg", c.inkFaint); S("--mark-bg", c.markBg); S("--mark-fg", c.markFg);
-  S("--mark-active-bg", c.markCur); S("--mark-active-fg", c.markCurFg); S("--danger", c.err);
-  S("--gold", c.gold); S("--radius", (t.radius || 10) + "px");
+  S("--gutter-bg", c.paper);
+  S("--edit-bg", c.paper2 || c.paper);
+  S("--fg", c.ink);
+  S("--fg-dim", c.inkDim);
+  S("--fg-faint", c.inkFaint);
+  S("--border", c.edge);
+  S("--accent", c.accent);
+  S("--accent-bright", c.accent2 || c.accent);
+  S("--status", (t.acrylic && t.acrylic.tint) || c.paper);
+  S("--status-fg", c.inkDim);
+  S("--gutter-fg", c.inkFaint);
+  S("--mark-bg", c.markBg);
+  S("--mark-fg", c.markFg);
+  S("--mark-active-bg", c.markCur);
+  S("--mark-active-fg", c.markCurFg);
+  S("--danger", c.err);
+  S("--gold", c.gold);
+  S("--radius", (t.radius || 10) + "px");
   S("--acrylic-blur", ((t.acrylic && t.acrylic.blur) ?? 20) + "px");
-  S("--desk", deskFrom(t)); S("--illus", String(t.illustration ?? 0.2));
+  S("--desk", deskFrom(t));
+  S("--illus", String(t.illustration ?? 0.2));
 }
 
 function applySettings(s) {
@@ -5853,7 +6509,8 @@ function hideSettings() {
 // ---- theme JSON editor (in Settings) --------------------------------------
 
 function themeJSONFor(id) {
-  if (id && id.startsWith("custom:")) return (state.settings.customThemes || {})[id.slice(7)] || null;
+  if (id && id.startsWith("custom:"))
+    return (state.settings.customThemes || {})[id.slice(7)] || null;
   return THEME_PRESETS[id] || null;
 }
 function themeIllusPct(id) {
@@ -5865,16 +6522,21 @@ function populateThemeSelect() {
   [...sel.querySelectorAll("option[data-custom]")].forEach((o) => o.remove());
   for (const name of Object.keys(state.settings.customThemes || {})) {
     const o = document.createElement("option");
-    o.value = "custom:" + name; o.textContent = "★ " + name; o.dataset.custom = "1";
+    o.value = "custom:" + name;
+    o.textContent = "★ " + name;
+    o.dataset.custom = "1";
     sel.appendChild(o);
   }
 }
 function persistCustomTheme(t) {
-  const customs = { ...(state.settings.customThemes || {}) };
+  const customs = { ...state.settings.customThemes };
   customs[t.name] = t;
   state.settings = {
-    ...state.settings, customThemes: customs, theme: "custom:" + t.name,
-    illus: null, bgMode: (t.background && t.background.mode) || "watercolor",
+    ...state.settings,
+    customThemes: customs,
+    theme: "custom:" + t.name,
+    illus: null,
+    bgMode: (t.background && t.background.mode) || "watercolor",
   };
   saveSettings(state.settings);
   populateThemeSelect();
@@ -5891,8 +6553,10 @@ async function openThemeJsonDoc() {
   hideSettings();
   try {
     await settleEditQueue();
-    const r = await fetch("/api/upload?name=" + encodeURIComponent(base + ".ayame-theme.json"),
-                          { method: "POST", body: jsonText });
+    const r = await fetch("/api/upload?name=" + encodeURIComponent(base + ".ayame-theme.json"), {
+      method: "POST",
+      body: jsonText,
+    });
     if (!r.ok) throw new Error(await r.text());
     onDocumentOpened(await r.json());
   } catch (e) {
@@ -5987,8 +6651,12 @@ function initSettings() {
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
   $("set-language").value = normalizeLanguage(state.settings.language);
-  const illusPct = state.settings.illus == null ? themeIllusPct(state.settings.theme) : Math.round(state.settings.illus * 100);
-  $("set-illus").value = illusPct; $("set-illus-val").textContent = illusPct + "%";
+  const illusPct =
+    state.settings.illus == null
+      ? themeIllusPct(state.settings.theme)
+      : Math.round(state.settings.illus * 100);
+  $("set-illus").value = illusPct;
+  $("set-illus-val").textContent = illusPct + "%";
   $("set-font").value = state.settings.font;
   $("set-fontsize").value = state.settings.fontSize;
   $("set-fontsize-val").textContent = `${state.settings.fontSize}px`;
@@ -5996,11 +6664,16 @@ function initSettings() {
   $("set-theme").addEventListener("change", () => {
     const id = $("set-theme").value;
     state.settings = { ...state.settings, theme: id, illus: null };
-    saveSettings(state.settings); applySettings(state.settings);
-    const pct = themeIllusPct(id); $("set-illus").value = pct; $("set-illus-val").textContent = pct + "%";
+    saveSettings(state.settings);
+    applySettings(state.settings);
+    const pct = themeIllusPct(id);
+    $("set-illus").value = pct;
+    $("set-illus-val").textContent = pct + "%";
   });
   $("set-bg").addEventListener("change", () => updateSetting("bgMode", $("set-bg").value));
-  $("set-language").addEventListener("change", () => updateSetting("language", $("set-language").value));
+  $("set-language").addEventListener("change", () =>
+    updateSetting("language", $("set-language").value),
+  );
   $("set-illus").addEventListener("input", () => {
     const v = Number($("set-illus").value);
     $("set-illus-val").textContent = v + "%";
@@ -6015,13 +6688,17 @@ function initSettings() {
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
   $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
-  $("set-confirm-last-tab-close").addEventListener("change", () => (
-    updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked)
-  ));
+  $("set-confirm-last-tab-close").addEventListener("change", () =>
+    updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked),
+  );
   $("set-memo-dir").value = state.settings.memoDir || "";
-  $("set-memo-dir").addEventListener("input", () => updateSetting("memoDir", $("set-memo-dir").value));
+  $("set-memo-dir").addEventListener("input", () =>
+    updateSetting("memoDir", $("set-memo-dir").value),
+  );
   $("set-memo-name").value = state.settings.memoName || DEFAULT_SETTINGS.memoName;
-  $("set-memo-name").addEventListener("input", () => updateSetting("memoName", $("set-memo-name").value));
+  $("set-memo-name").addEventListener("input", () =>
+    updateSetting("memoName", $("set-memo-name").value),
+  );
   updateSidebarSideButtons();
   document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
     btn.addEventListener("click", () => updateSetting("sidebarSide", btn.dataset.sidebarSide));

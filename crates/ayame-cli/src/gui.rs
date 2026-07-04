@@ -402,11 +402,19 @@ fn build_macos_menu() -> Option<muda::Menu> {
                 }),
             ),
             &PredefinedMenuItem::separator(),
-            &item("settings", label("設定…", "Settings..."), key(cmd, Code::Comma)),
+            &item(
+                "settings",
+                label("設定…", "Settings..."),
+                key(cmd, Code::Comma),
+            ),
             &PredefinedMenuItem::separator(),
             // Not PredefinedMenuItem::quit: quitting must go through the same
             // unsaved-changes confirmation as closing the window.
-            &item("quit", label("Ayame Editor を終了", "Quit Ayame Editor"), key(cmd, Code::KeyQ)),
+            &item(
+                "quit",
+                label("Ayame Editor を終了", "Quit Ayame Editor"),
+                key(cmd, Code::KeyQ),
+            ),
         ],
     )
     .ok()?;
@@ -415,16 +423,32 @@ fn build_macos_menu() -> Option<muda::Menu> {
         label("ファイル", "File"),
         true,
         &[
-            &item("newFile", label("新規ファイル", "New File"), key(cmd, Code::KeyN)),
+            &item(
+                "newFile",
+                label("新規ファイル", "New File"),
+                key(cmd, Code::KeyN),
+            ),
             // Handled natively in the event loop (like "quit"): a new window
             // is a new process, not a page action.
-            &item("newWindow", label("新規ウィンドウ", "New Window"), key(shift_cmd, Code::KeyN)),
+            &item(
+                "newWindow",
+                label("新規ウィンドウ", "New Window"),
+                key(shift_cmd, Code::KeyN),
+            ),
             &item("openFile", label("開く", "Open"), key(cmd, Code::KeyO)),
             &PredefinedMenuItem::separator(),
             &item("saveFile", label("保存", "Save"), key(cmd, Code::KeyS)),
-            &item("saveAs", label("名前を付けて保存", "Save As"), key(shift_cmd, Code::KeyS)),
+            &item(
+                "saveAs",
+                label("名前を付けて保存", "Save As"),
+                key(shift_cmd, Code::KeyS),
+            ),
             &PredefinedMenuItem::separator(),
-            &item("closeTab", label("タブを閉じる", "Close Tab"), key(cmd, Code::KeyW)),
+            &item(
+                "closeTab",
+                label("タブを閉じる", "Close Tab"),
+                key(cmd, Code::KeyW),
+            ),
         ],
     )
     .ok()?;
@@ -434,14 +458,22 @@ fn build_macos_menu() -> Option<muda::Menu> {
         true,
         &[
             &item("undo", label("元に戻す", "Undo"), key(cmd, Code::KeyZ)),
-            &item("redo", label("やり直す", "Redo"), key(shift_cmd, Code::KeyZ)),
+            &item(
+                "redo",
+                label("やり直す", "Redo"),
+                key(shift_cmd, Code::KeyZ),
+            ),
             &PredefinedMenuItem::separator(),
             &item("cut", label("切り取り", "Cut"), key(cmd, Code::KeyX)),
             &item("copy", label("コピー", "Copy"), key(cmd, Code::KeyC)),
             // Paste stays a native selector so the DOM paste event (the only
             // sanctioned clipboard-read path) reaches the hidden textarea.
             &PredefinedMenuItem::paste(Some(label("貼り付け", "Paste"))),
-            &item("selectAll", label("すべて選択", "Select All"), key(cmd, Code::KeyA)),
+            &item(
+                "selectAll",
+                label("すべて選択", "Select All"),
+                key(cmd, Code::KeyA),
+            ),
             &PredefinedMenuItem::separator(),
             &item("find", label("検索", "Find"), key(cmd, Code::KeyF)),
             &item("replace", label("置換", "Replace"), None),
