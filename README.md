@@ -14,7 +14,7 @@ Download the build for your OS from the
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
-- Linux: single executable (`WebKitGTK` required)
+- Linux: single executable
 
 You can also install from the terminal.
 
@@ -24,36 +24,18 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
-Windows: download `ayame-*.exe` from Releases.
+Windows (PowerShell):
 
-Linux: install WebKitGTK 4.1 first, then install Ayame.
+```powershell
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
+```
+
+This installs `ayame.exe`, adds it to the user `PATH`, and updates the Desktop /
+Start Menu shortcuts. You can also download `ayame-*.exe` from Releases.
+
+Linux:
 
 ```sh
-# Debian / Ubuntu / Linux Mint / Pop!_OS
-sudo apt update
-sudo apt install -y libwebkit2gtk-4.1-0
-
-# Fedora
-sudo dnf install -y webkit2gtk4.1
-
-# RHEL / Rocky Linux / AlmaLinux / CentOS Stream
-sudo dnf install -y epel-release
-sudo dnf install -y webkit2gtk4.1
-
-# Arch Linux / Manjaro / EndeavourOS
-sudo pacman -Syu webkit2gtk-4.1
-
-# openSUSE
-sudo zypper refresh
-sudo zypper install -y libwebkit2gtk-4_1-0
-
-# Alpine Linux
-sudo apk add webkit2gtk-4.1
-
-# Gentoo
-sudo emerge --ask net-libs/webkit-gtk
-
-# Then install Ayame
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
@@ -64,7 +46,6 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 - Tabs, explorer, search, edit, selection, multiple cursors, and themes.
 - Sort, two-file diff, bulk transform, and file split tools.
 - Crash recovery for unsaved edits.
-- A default folder and name template for new files, so a new buffer saves with `Ctrl+S` and no dialog.
 
 ## How to build
 

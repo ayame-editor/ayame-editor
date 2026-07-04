@@ -13,7 +13,7 @@ macOS、Windows、Linux で動作します。
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
-- Linux: 単体実行ファイル（`WebKitGTK` が必要）
+- Linux: 単体実行ファイル
 
 ターミナルからインストールすることもできます。
 
@@ -23,36 +23,18 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
-Windows は Releases から `ayame-*.exe` をダウンロードしてください。
+Windows (PowerShell):
 
-Linux: 先に WebKitGTK 4.1 を入れてから Ayame をインストールします。
+```powershell
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
+```
+
+`ayame.exe` をインストールし、ユーザー `PATH` に追加して、デスクトップ /
+スタートメニューのショートカットを更新します。Releases から `ayame-*.exe` を直接ダウンロードすることもできます。
+
+Linux:
 
 ```sh
-# Debian / Ubuntu / Linux Mint / Pop!_OS
-sudo apt update
-sudo apt install -y libwebkit2gtk-4.1-0
-
-# Fedora
-sudo dnf install -y webkit2gtk4.1
-
-# RHEL / Rocky Linux / AlmaLinux / CentOS Stream
-sudo dnf install -y epel-release
-sudo dnf install -y webkit2gtk4.1
-
-# Arch Linux / Manjaro / EndeavourOS
-sudo pacman -Syu webkit2gtk-4.1
-
-# openSUSE
-sudo zypper refresh
-sudo zypper install -y libwebkit2gtk-4_1-0
-
-# Alpine Linux
-sudo apk add webkit2gtk-4.1
-
-# Gentoo
-sudo emerge --ask net-libs/webkit-gtk
-
-# そのあと Ayame をインストール
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
 
@@ -63,7 +45,6 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 - タブ、エクスプローラー、検索、編集、範囲選択、マルチカーソル、テーマ。
 - ソート、2 ファイル差分、一括変換、ファイル分割。
 - 未保存編集のクラッシュ復元。
-- 新規ファイルの既定の保存先と名前を設定でき、新規バッファは `Ctrl+S` でダイアログなしに保存。
 
 ## ビルド方法
 

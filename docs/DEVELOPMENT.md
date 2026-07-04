@@ -168,6 +168,37 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 For the CLI alone, Rust and a C toolchain are enough. If you use `--features gui`,
 GTK / WebKitGTK are required.
 
+If you run the released Linux binary instead of building from source, install the
+WebKitGTK 4.1 runtime package for your distribution:
+
+```sh
+# Debian / Ubuntu / Linux Mint / Pop!_OS
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-0
+
+# Fedora
+sudo dnf install -y webkit2gtk4.1
+
+# RHEL / Rocky Linux / AlmaLinux / CentOS Stream
+sudo dnf install -y epel-release
+sudo dnf install -y webkit2gtk4.1
+
+# Arch Linux / Manjaro / EndeavourOS
+sudo pacman -Syu webkit2gtk-4.1
+
+# openSUSE
+sudo zypper refresh
+sudo zypper install -y libwebkit2gtk-4_1-0
+
+# Alpine Linux
+sudo apk add webkit2gtk-4.1
+
+# Gentoo
+sudo emerge --ask net-libs/webkit-gtk
+```
+
+For local development, install the build dependencies instead:
+
 Debian / Ubuntu:
 
 ```sh

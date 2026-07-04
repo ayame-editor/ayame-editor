@@ -167,6 +167,37 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 CLI だけなら Rust と C toolchain で十分です。`--features gui` を使う場合は
 GTK / WebKitGTK が必要です。
 
+ソースからビルドせず、リリース済み Linux バイナリを動かすだけなら、
+お使いのディストリビューションの WebKitGTK 4.1 runtime package を入れてください。
+
+```sh
+# Debian / Ubuntu / Linux Mint / Pop!_OS
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-0
+
+# Fedora
+sudo dnf install -y webkit2gtk4.1
+
+# RHEL / Rocky Linux / AlmaLinux / CentOS Stream
+sudo dnf install -y epel-release
+sudo dnf install -y webkit2gtk4.1
+
+# Arch Linux / Manjaro / EndeavourOS
+sudo pacman -Syu webkit2gtk-4.1
+
+# openSUSE
+sudo zypper refresh
+sudo zypper install -y libwebkit2gtk-4_1-0
+
+# Alpine Linux
+sudo apk add webkit2gtk-4.1
+
+# Gentoo
+sudo emerge --ask net-libs/webkit-gtk
+```
+
+ローカル開発では、かわりにビルド依存を入れてください。
+
 Debian / Ubuntu:
 
 ```sh
