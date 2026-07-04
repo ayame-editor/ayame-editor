@@ -1027,64 +1027,27 @@ function hideFileMenu(focusButton = false) {
   }
 }
 
-const STATIC_I18N_SKIP = [
-  "#content",
-  "#tabs",
-  "#tree",
-  "#opener-list",
-  "#opener-recent",
-  "#opener-cwd",
-  "#st-msg",
-  "#overlay",
-  "#find-count",
-  "#form-body",
-  "#confirm-message",
-  "#prompt-label",
-  "#keymap-list",
-  "#palette-list",
-  "#diff-view",
-  "#grep-results",
-].join(",");
-const I18N_ATTRS = ["aria-label", "title", "placeholder"];
+// Static HTML is declaratively tagged: data-i18n (textContent) plus
+// data-i18n-title / data-i18n-placeholder / data-i18n-aria-label for
+// attributes. index.html ships with the Japanese literals in place (the ja
+// default before JS runs); applyStaticI18n() re-assigns every tagged node for
+// the active locale — including ja, so keys and markup can never drift apart.
+const I18N_ATTR_MAP = [
+  ["data-i18n-title", "title"],
+  ["data-i18n-placeholder", "placeholder"],
+  ["data-i18n-aria-label", "aria-label"],
+];
 
-function shouldSkipStaticI18nNode(node) {
-  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-  return !!(el && el.closest(STATIC_I18N_SKIP));
-}
-
-function translatePreservingSpace(source) {
-  const leading = source.match(/^\s*/)?.[0] || "";
-  const trailing = source.match(/\s*$/)?.[0] || "";
-  const core = source.trim();
-  if (!core) return source;
-  return `${leading}${translateText(core)}${trailing}`;
-}
-
-function applyStaticI18n(root = document.body) {
+function applyStaticI18n() {
   document.documentElement.lang = currentLocale();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!node.nodeValue.trim() || shouldSkipStaticI18nNode(node)) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.getAttribute("data-i18n"));
   });
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
-  for (const node of nodes) {
-    if (node.__ayameI18nSource == null) node.__ayameI18nSource = node.nodeValue;
-    node.nodeValue = translatePreservingSpace(node.__ayameI18nSource);
+  for (const [dataAttr, attr] of I18N_ATTR_MAP) {
+    document.querySelectorAll(`[${dataAttr}]`).forEach((el) => {
+      el.setAttribute(attr, t(el.getAttribute(dataAttr)));
+    });
   }
-  root.querySelectorAll("*").forEach((el) => {
-    if (shouldSkipStaticI18nNode(el)) return;
-    for (const attr of I18N_ATTRS) {
-      if (!el.hasAttribute(attr)) continue;
-      const store = `__ayameI18nAttr_${attr}`;
-      if (el[store] == null) el[store] = el.getAttribute(attr);
-      el.setAttribute(attr, translateText(el[store]));
-    }
-  });
 }
 
 function applyLocale() {
@@ -1094,6 +1057,8 @@ function applyLocale() {
   updateStatusPos();
   updateFindCountLabel();
   updateTailUI();
+  // The opener sets its texts per mode (open / save); re-derive them.
+  if (openerVisible()) configureOpener(state.openerMode);
   if (state.tabs?.length) renderTabs(state.tabs);
   if (keymapVisible()) renderKeymapRows();
   if (commandPaletteVisible()) {
@@ -1211,14 +1176,9 @@ function hasDirtyDocuments() {
 function dirtyCloseMessage() {
   const dirty = dirtyTabNames();
   const shown = dirty.slice(0, 5).join(", ");
-  const more =
-    dirty.length > 5
-      ? currentLocale() === "en"
-        ? ` ${dirty.length - 5} more`
-        : ` ほか ${dirty.length - 5} 件`
-      : "";
+  const more = dirty.length > 5 ? ` ${t("dialog.exit.moreFiles", { n: dirty.length - 5 })}` : "";
   const suffix = shown ? `\n\n${shown}${more}` : "";
-  return `${t("未保存の編集があります。保存せずに終了しますか?")}${suffix}`;
+  return `${t("dialog.exit.unsavedAsk")}${suffix}`;
 }
 
 function isNativeApp() {
@@ -1245,17 +1205,16 @@ function openNewWindow() {
   window.open(location.href, "_blank");
 }
 
-async function confirmCloseLastTab(t) {
-  if (t?.dirty) {
-    return askConfirm(
-      "終了の確認",
-      `${t.name} の未保存の編集があります。保存せずに Ayame Editor を終了しますか?`,
-      { okLabel: "保存せずに終了", danger: true },
-    );
+async function confirmCloseLastTab(tab) {
+  if (tab?.dirty) {
+    return askConfirm(t("dialog.exit.title"), t("dialog.exit.unsavedNamed", { name: tab.name }), {
+      okLabel: t("dialog.exit.withoutSaving"),
+      danger: true,
+    });
   }
   if (state.settings.confirmLastTabClose === false) return true;
-  return askConfirm("終了の確認", "最後のタブを閉じると Ayame Editor を終了します。終了しますか?", {
-    okLabel: "終了",
+  return askConfirm(t("dialog.exit.title"), t("dialog.exit.lastTabAsk"), {
+    okLabel: t("dialog.exit.exit"),
   });
 }
 
@@ -1283,7 +1242,7 @@ let pendingNativeClose = false;
 window.__ayameNativeCloseRequested = () => {
   if (savingCount > 0) {
     pendingNativeClose = true;
-    flashCount("保存処理中です。完了後に閉じます…");
+    flashCount(t("dialog.exit.savingWillClose"));
     postNativeMessage("ayame:close-cancel");
     return;
   }
@@ -1295,8 +1254,8 @@ window.__ayameNativeCloseRequested = () => {
   // seconds), then ask with the in-app dialog; a confirmed close posts the
   // ok separately — the Rust side exits on it regardless of timing.
   postNativeMessage("ayame:close-cancel");
-  askConfirm("終了の確認", dirtyCloseMessage(), {
-    okLabel: "保存せずに終了",
+  askConfirm(t("dialog.exit.title"), dirtyCloseMessage(), {
+    okLabel: t("dialog.exit.withoutSaving"),
     danger: true,
   }).then((ok) => {
     if (ok) postNativeMessage("ayame:close-ok");
@@ -1319,7 +1278,7 @@ window.addEventListener("beforeunload", (e) => {
 function setKeymap(action, shortcut) {
   const normalized = normalizeShortcut(shortcut);
   if (normalized && !isBindableShortcut(normalized)) {
-    flashCount("文字入力と衝突するキーは使えません");
+    flashCount(t("keymap.conflictKey"));
     return;
   }
   state.settings = {
@@ -1342,30 +1301,30 @@ function updateKeyHints() {
   document.querySelectorAll("[data-key-action]").forEach((el) => {
     el.textContent = displayShortcut(shortcutFor(el.dataset.keyAction));
   });
-  const hint = (label, action) => {
+  const hint = (labelKey, action) => {
     const key = displayShortcut(shortcutFor(action));
-    const text = t(label);
+    const text = t(labelKey);
     return key ? `${text} (${key})` : text;
   };
-  $("toggle-sidebar").title = hint("エクスプローラー", "toggleSidebar");
-  $("toggle-sidebar").setAttribute("aria-label", t("エクスプローラー"));
-  $("undo-edit").title = hint("元に戻す", "undo");
-  $("undo-edit").setAttribute("aria-label", t("元に戻す"));
-  $("redo-edit").title = hint("やり直す", "redo");
-  $("redo-edit").setAttribute("aria-label", t("やり直す"));
-  $("find").placeholder = hint("検索", "find");
-  $("find-expand").title = hint("置換を表示", "replace");
-  $("find-expand").setAttribute("aria-label", t("置換を表示"));
-  $("find-prev").title = hint("前の一致", "findPrev");
-  $("find-prev").setAttribute("aria-label", t("前の一致"));
-  $("find-next").title = hint("次の一致", "findNext");
-  $("find-next").setAttribute("aria-label", t("次の一致"));
-  $("opt-case").title = hint("大文字小文字を区別", "searchCase");
-  $("opt-word").title = hint("単語単位", "searchWord");
-  $("opt-regex").title = hint("正規表現", "searchRegex");
-  $("new-tab").title = hint("新規タブ", "newFile");
-  $("new-tab").setAttribute("aria-label", t("新規タブ"));
-  $("hidden-input").setAttribute("aria-label", t("エディタ"));
+  $("toggle-sidebar").title = hint("menu.explorer", "toggleSidebar");
+  $("toggle-sidebar").setAttribute("aria-label", t("menu.explorer"));
+  $("undo-edit").title = hint("menu.undo", "undo");
+  $("undo-edit").setAttribute("aria-label", t("menu.undo"));
+  $("redo-edit").title = hint("menu.redo", "redo");
+  $("redo-edit").setAttribute("aria-label", t("menu.redo"));
+  $("find").placeholder = hint("menu.find", "find");
+  $("find-expand").title = hint("find.showReplace", "replace");
+  $("find-expand").setAttribute("aria-label", t("find.showReplace"));
+  $("find-prev").title = hint("find.prev", "findPrev");
+  $("find-prev").setAttribute("aria-label", t("find.prev"));
+  $("find-next").title = hint("find.next", "findNext");
+  $("find-next").setAttribute("aria-label", t("find.next"));
+  $("opt-case").title = hint("find.matchCase", "searchCase");
+  $("opt-word").title = hint("find.wholeWord", "searchWord");
+  $("opt-regex").title = hint("find.regex", "searchRegex");
+  $("new-tab").title = hint("toolbar.newTab", "newFile");
+  $("new-tab").setAttribute("aria-label", t("toolbar.newTab"));
+  $("hidden-input").setAttribute("aria-label", t("editor.label"));
 }
 
 function keymapVisible() {
@@ -1405,7 +1364,7 @@ function renderKeymapRows() {
     input.className = "keymap-input";
     input.readOnly = true;
     input.value = displayShortcut(shortcut);
-    input.placeholder = t("未設定");
+    input.placeholder = t("keymap.unassigned");
     input.dataset.action = action;
     input.addEventListener("keydown", (e) => {
       e.preventDefault();
@@ -1445,7 +1404,8 @@ function commandPaletteItems() {
   const add = (action, label = "") => {
     if (!action || seen.has(action)) return;
     seen.add(action);
-    const text = label ? translateText(label) : keymapLabels.get(action) || action;
+    // `label` comes from the DOM, which applyStaticI18n already localized.
+    const text = label || keymapLabels.get(action) || action;
     items.push({
       action,
       label: text.replace(/\.\.\.$/, ""),
@@ -1984,7 +1944,7 @@ async function pasteFromClipboard() {
   } catch {
     // Clipboard read needs a permission some webviews withhold; the keyboard
     // path (paste event on the hidden textarea) always works.
-    flashCount("ここからは貼り付けできません — Ctrl+V を使ってください", "error");
+    flashCount(t("editor.pasteBlocked"), "error");
   }
   focusEditor();
 }
@@ -1997,26 +1957,26 @@ async function saveSelectionToFile() {
   const r = selRange() || (ranges.length === 1 ? ranges[0] : null);
   if ((!rr && !r) || !hasTextSelection()) {
     // A zero-width rect selects no characters — nothing to write out.
-    flashCount("選択がありません", "error");
+    flashCount(t("editor.noSelection"), "error");
     return;
   }
   if (!rr && ranges.length > 1) {
-    flashCount("複数選択はコピーまたは切り取りを使ってください", "error");
+    flashCount(t("editor.multiSelUseCopy"), "error");
     return;
   }
   const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
   const base = state.stat?.path || "selection";
   const f = await askForm(
-    "選択箇所をファイルに保存",
+    t("dialog.saveSel.title"),
     [
-      { id: "path", type: "text", label: "保存先パス", value: `${base}.selection.txt` },
+      { id: "path", type: "text", label: t("dialog.saveSel.path"), value: `${base}.selection.txt` },
       {
         id: "_hint",
         type: "hint",
-        label: `選択中の ${commas(total)} 行を UTF-8 / LF で書き出します。コピーの行数上限 (${commas(MAX_COPY_LINES)} 行) はかかりません。`,
+        label: t("dialog.saveSel.hint", { lines: commas(total), max: commas(MAX_COPY_LINES) }),
       },
     ],
-    "保存",
+    t("menu.save"),
   );
   if (!f || !f.path.trim()) return;
   const body = rr
@@ -2029,31 +1989,35 @@ async function saveSelectionToFile() {
         l1: r.end.line,
         c1: r.end.col,
       };
-  showLoading("選択を書き出し中…");
+  showLoading(t("dialog.saveSel.writing"));
   try {
     const res = await apiPost("/api/selection/save", body);
-    flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${displayPath(res.path)}`);
+    flashCount(t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }));
   } catch (e) {
     hideLoading();
+    // Server-boundary string match: the save endpoint reports an existing
+    // target as a Japanese message (no error codes yet).
     if (String(e.message || "").includes("既に存在")) {
       const overwrite = await askConfirm(
-        "上書きの確認",
-        `${displayPath(f.path.trim())} は既に存在します。上書きしますか?`,
-        { okLabel: "上書き", danger: true },
+        t("dialog.overwrite.title"),
+        t("dialog.overwrite.ask", { name: displayPath(f.path.trim()) }),
+        { okLabel: t("dialog.overwrite.ok"), danger: true },
       );
       if (overwrite) {
-        showLoading("選択を書き出し中…");
+        showLoading(t("dialog.saveSel.writing"));
         try {
           const res = await apiPost("/api/selection/save", { ...body, overwrite: true });
-          flashCount(`選択 ${commas(res.lines)} 行を保存しました: ${displayPath(res.path)}`);
+          flashCount(
+            t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }),
+          );
         } catch (e2) {
-          flashCount("選択の保存エラー", "error");
-          showMessage("選択の保存エラー", e2.message);
+          flashCount(t("dialog.saveSel.error"), "error");
+          showMessage(t("dialog.saveSel.error"), serverMessage(e2.message));
         }
       }
     } else {
-      flashCount("選択の保存エラー", "error");
-      showMessage("選択の保存エラー", e.message);
+      flashCount(t("dialog.saveSel.error"), "error");
+      showMessage(t("dialog.saveSel.error"), serverMessage(e.message));
     }
   } finally {
     hideLoading();
@@ -2204,17 +2168,13 @@ async function copySelection() {
     await copyToClipboard(await selectedText());
     if (total > MAX_COPY_LINES) {
       const multi = selectionRanges().length > 1;
-      flashCount(
-        multi
-          ? `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません`
-          : `コピーは先頭 ${commas(MAX_COPY_LINES)} 行まで — 残り ${commas(total - MAX_COPY_LINES)} 行はコピーされていません。全体は右クリック→「選択箇所をファイルに保存」で書き出せます`,
-        "error",
-      );
+      const vars = { max: commas(MAX_COPY_LINES), rest: commas(total - MAX_COPY_LINES) };
+      flashCount(multi ? t("editor.copyCapped", vars) : t("editor.copyCappedHint", vars), "error");
     } else {
-      flashCount("コピーしました");
+      flashCount(t("editor.copied"));
     }
   } catch (e) {
-    flashCount("コピーエラー", "error");
+    flashCount(t("editor.copyError"), "error");
     console.error(e);
   }
 }
@@ -2231,12 +2191,8 @@ async function cutSelection() {
   const total = selectionLineCount();
   if (total > MAX_COPY_LINES) {
     const multi = selectionRanges().length > 1;
-    flashCount(
-      multi
-        ? `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。削除だけなら Delete キー`
-        : `切り取りは ${commas(MAX_COPY_LINES)} 行まで (選択は ${commas(total)} 行)。全体を残すなら右クリック→「選択箇所をファイルに保存」、削除だけなら Delete キー`,
-      "error",
-    );
+    const vars = { max: commas(MAX_COPY_LINES), total: commas(total) };
+    flashCount(multi ? t("editor.cutCapped", vars) : t("editor.cutCappedHint", vars), "error");
     return;
   }
   await copyToClipboard(await selectedText());
@@ -2447,7 +2403,7 @@ function updateStatusMeta() {
     }
     $("st-edit").title = "";
     $("st-index").title = "";
-    $("st-pos").textContent = t("行 0");
+    $("st-pos").textContent = t("status.line0");
     $("undo-edit").disabled = true;
     $("redo-edit").disabled = true;
     $("apply-theme").classList.add("hidden");
@@ -2464,19 +2420,24 @@ function updateStatusMeta() {
   $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
   $("st-eol").textContent = eol(s.eol);
   // Deliberately terse: the bar shows state, the tooltip carries the numbers.
-  $("st-edit").textContent = s.dirty ? t("未保存") : t("保存済");
+  $("st-edit").textContent = s.dirty ? t("status.unsaved") : t("status.saved");
   $("st-edit").title = s.dirty
-    ? translateText(
-        `未保存の編集: +${commas(s.inserted_lines)} 行追加 / ~${commas(s.replaced_lines)} 行変更 / -${commas(s.deleted_lines)} 行削除`,
-      )
-    : t("すべての編集は保存済みです");
+    ? t("status.unsavedDetail", {
+        added: commas(s.inserted_lines),
+        changed: commas(s.replaced_lines),
+        deleted: commas(s.deleted_lines),
+      })
+    : t("status.allSaved");
   $("undo-edit").disabled = !s.can_undo;
   $("redo-edit").disabled = !s.can_redo;
-  $("st-index").textContent = t("索引OK");
-  $("st-index").title =
-    currentLocale() === "en"
-      ? `${commas(lines)} lines / ${humanBytes(s.bytes)} / ${commas(s.checkpoints)} index checkpoints (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`
-      : `${commas(lines)} 行 / ${humanBytes(s.bytes)} / 索引 ${commas(s.checkpoints)} 点 (${humanBytes(s.index_bytes)}, ${s.index_ms} ms)`;
+  $("st-index").textContent = t("status.indexOk");
+  $("st-index").title = t("status.indexDetail", {
+    lines: commas(lines),
+    bytes: humanBytes(s.bytes),
+    checkpoints: commas(s.checkpoints),
+    indexBytes: humanBytes(s.index_bytes),
+    indexMs: s.index_ms,
+  });
   // Keep the active tab's unsaved-dot (and the tabs model behind
   // beforeunload / close confirmations) in sync as you type.
   const at = $("tabs").querySelector(".tab.active");
@@ -2594,14 +2555,15 @@ function eol(e) {
 
 function updateStatusPos() {
   if (state.total === 0) {
-    $("st-pos").textContent = t("行 0");
+    $("st-pos").textContent = t("status.line0");
     return;
   }
-  const pos = translateText(
-    `行 ${commas(state.caret.line + 1)}, 列 ${commas(state.caret.col + 1)}`,
-  );
+  const pos = t("status.pos", {
+    line: commas(state.caret.line + 1),
+    col: commas(state.caret.col + 1),
+  });
   const n = state.extraCursors.length;
-  $("st-pos").textContent = n ? translateText(`${pos} · ${n + 1} カーソル`) : pos;
+  $("st-pos").textContent = n ? t("status.posCursors", { pos, n: n + 1 }) : pos;
 }
 
 // ---- search ----------------------------------------------------------------
@@ -2664,7 +2626,7 @@ async function findStep(dir) {
   if (!state.query) return;
   buildMatcher();
   if (state.regexError) {
-    flashCount("正規表現エラー", "error");
+    flashCount(t("find.regexError"), "error");
     return;
   }
   saveSearchHistory(state.query);
@@ -2681,7 +2643,7 @@ async function findStep(dir) {
   try {
     const res = await api(`/api/find?dir=${dir}&from=${from}&${qs()}`);
     if (!res.hit) {
-      flashCount("一致なし");
+      flashCount(t("find.noMatch"));
       return;
     }
     const h = res.hit;
@@ -2691,7 +2653,7 @@ async function findStep(dir) {
     revealLine(h.line);
     updateCount();
   } catch (e) {
-    flashCount("エラー");
+    flashCount(t("common.error"));
     console.error(e);
   }
 }
@@ -2779,14 +2741,14 @@ async function findNextOccurrenceRange(query, fromByte, existing) {
 async function selectNextOccurrence() {
   if (!state.stat?.open) return;
   if (rectRange()) {
-    flashCount("矩形選択では Ctrl+D は使えません", "error");
+    flashCount(t("find.rectNoCtrlD"), "error");
     return;
   }
   let ranges = selectionRanges();
   if (!ranges.length) {
     const r = wordRangeAt(state.caret);
     if (!r) {
-      flashCount("選択できる単語がありません");
+      flashCount(t("find.noWordToSelect"));
       return;
     }
     selectPrimaryRange(r);
@@ -2794,7 +2756,7 @@ async function selectNextOccurrence() {
   }
   const query = await selectedTextForRange(ranges[0]);
   if (!query || query.includes("\n")) {
-    flashCount("複数行選択では Ctrl+D は使えません", "error");
+    flashCount(t("find.multiLineNoCtrlD"), "error");
     return;
   }
   ranges = selectionRanges();
@@ -2803,12 +2765,12 @@ async function selectNextOccurrence() {
   try {
     const next = await findNextOccurrenceRange(query, from, ranges);
     if (!next) {
-      flashCount("次の一致はありません");
+      flashCount(t("find.noNextOccurrence"));
       return;
     }
     promoteSelectionRange(next);
   } catch (e) {
-    flashCount("検索エラー", "error");
+    flashCount(t("find.searchError"), "error");
     console.error(e);
   }
 }
@@ -2827,7 +2789,7 @@ async function updateCount() {
     updateFindCountLabel();
     scheduleRender();
   } catch {
-    $("find-count").textContent = t("正規表現エラー");
+    $("find-count").textContent = t("find.regexError");
     $("find").parentElement.classList.add("error");
     scheduleRender();
   }
@@ -2847,14 +2809,15 @@ function updateFindCountLabel() {
       return;
     }
   }
-  $("find-count").textContent = translateText(`${total} 件`);
+  $("find-count").textContent = t("find.matchCount", { total });
 }
 
 // Operation feedback goes to the always-visible status bar (aria-live), and is
 // mirrored into the find bar when that is open. Errors stay a little longer.
+// `msg` arrives already localized — callers pass t("key", vars) results.
 let stMsgTimer = 0;
 function flashCount(msg, kind = "") {
-  msg = msg ? translateText(msg) : "";
+  msg = msg || "";
   const isError = kind === "error";
   const el = $("st-msg");
   if (el) {
@@ -2932,7 +2895,7 @@ async function refreshStat() {
 // reason exactly once, so showing it whenever present shows it once).
 function noteWalError(stat) {
   if (stat && stat.wal_error) {
-    flashCount(`自動保存ログが無効になりました: ${stat.wal_error}`, "error");
+    flashCount(t("recover.walDisabled", { msg: serverMessage(stat.wal_error) }), "error");
   }
 }
 
@@ -3234,14 +3197,14 @@ function enqueueEdit(fn) {
     .then(async () => {
       if (!sameEditContext(ctx)) return null;
       if (savingCount > 0) {
-        flashCount("保存中です — 完了後に入力します");
+        flashCount(t("editor.savingWaitInput"));
         await waitForSavingDone();
         if (!sameEditContext(ctx)) return null;
       }
       return fn();
     })
     .catch((e) => {
-      flashCount("編集エラー");
+      flashCount(t("editor.editError"));
       console.error(e);
     });
   return editChain;
@@ -3297,10 +3260,10 @@ function setFollowTail(on) {
   if (on) {
     state.tailTimer = setInterval(pollTail, TAIL_POLL_MS);
     setFirst(maxFirst()); // jump to the tail so following starts from the end
-    flashCount("末尾に追従中 (tail -f)");
+    flashCount(t("status.followingTail"));
     pollTail(); // don't wait a whole interval for the first check
   } else if (was) {
-    flashCount("追従を停止しました");
+    flashCount(t("status.followStopped"));
   }
   updateTailUI();
 }
@@ -3322,7 +3285,7 @@ async function pollTail() {
   if (resp.changed) {
     // Truncated / rotated / replaced under us: stop and let the user reopen.
     setFollowTail(false);
-    flashCount("ファイルが外部で変更されました — 追従を停止しました", "error");
+    flashCount(t("status.tailFileChanged"), "error");
     return;
   }
   // resp.pending_edits: growth seen but not followed (unsaved edits) — pause
@@ -3383,7 +3346,7 @@ async function applyRange(l0, c0, l1, c1, text) {
     await refreshStat();
   } catch (e) {
     console.error("post-edit refresh failed", e);
-    flashCount("再読込エラー");
+    flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
   revealCaret();
@@ -3409,7 +3372,7 @@ async function applyRect(l0, l1, c0, c1, text) {
     await refreshStat();
   } catch (e) {
     console.error("post-rect-edit refresh failed", e);
-    flashCount("再読込エラー");
+    flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
   revealCaret();
@@ -3476,7 +3439,7 @@ async function applyBatch(edits, cursors, editOf) {
     await refreshStat();
   } catch (e) {
     console.error("post-batch-edit refresh failed", e);
-    flashCount("再読込エラー");
+    flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
   revealCaret();
@@ -3705,7 +3668,7 @@ async function finishSaveAs(res) {
     onDocumentOpened(await apiPost("/api/open", { path: res.path }));
   }
   rememberSaveDir(res.path);
-  flashCount(`保存しました: ${displayPath(res.path)}`);
+  flashCount(t("file.saved", { path: displayPath(res.path) }));
 }
 
 // 前回の保存先: persisted so untitled buffers suggest the folder you last
@@ -3719,11 +3682,11 @@ function rememberSaveDir(path) {
 
 async function saveCopy() {
   if (savingCount > 0) {
-    flashCount("保存中です — 完了までお待ちください");
+    flashCount(t("editor.savingWait"));
     return;
   }
   await settleEditQueue();
-  const target = await showSaveDialog("名前を付けて保存", suggestedSaveAsPath());
+  const target = await showSaveDialog(t("menu.saveAs"), suggestedSaveAsPath());
   if (!target) return;
   savingCount++;
   setSavingUI();
@@ -3731,8 +3694,8 @@ async function saveCopy() {
     const res = await apiPost("/api/edit/save", { ...target, switch_to_saved: true });
     await finishSaveAs(res);
   } catch (e) {
-    flashCount("保存エラー", "error");
-    showMessage("保存エラー", e.message);
+    flashCount(t("error.saveError"), "error");
+    showMessage(t("error.saveError"), serverMessage(e.message));
   } finally {
     savingCount--;
     setSavingUI();
@@ -3804,7 +3767,7 @@ async function quickMemoSave(memoDir) {
   try {
     listing = await api(`/api/browse?dir=${encodeURIComponent(memoDir)}`);
   } catch {
-    flashCount(`メモの保存先を開けません: ${memoDir}`, "error");
+    flashCount(t("error.memoDir", { dir: memoDir }), "error");
     return false; // dir missing / typo → the dialog still gets the memo saved
   }
   const taken = new Set((listing.entries || []).filter((e) => !e.is_dir).map((e) => e.name));
@@ -3820,8 +3783,8 @@ async function quickMemoSave(memoDir) {
     await finishSaveAs(res);
     return true;
   } catch (e) {
-    flashCount("保存エラー", "error");
-    showMessage("保存エラー", e.message);
+    flashCount(t("error.saveError"), "error");
+    showMessage(t("error.saveError"), serverMessage(e.message));
     return true; // reported here — don't surprise with a dialog on top
   } finally {
     savingCount--;
@@ -3833,7 +3796,7 @@ async function quickMemoSave(memoDir) {
 async function saveFile() {
   if (!state.stat?.open) return;
   if (savingCount > 0) {
-    flashCount("保存中です — 完了までお待ちください");
+    flashCount(t("editor.savingWait"));
     return;
   }
   await settleEditQueue();
@@ -3851,10 +3814,10 @@ async function saveFile() {
     await refreshStat();
     await reloadViewport();
     render();
-    flashCount(`保存しました: ${displayPath(res.path)}`);
+    flashCount(t("file.saved", { path: displayPath(res.path) }));
   } catch (e) {
-    flashCount("保存エラー", "error");
-    showMessage("保存エラー", e.message);
+    flashCount(t("error.saveError"), "error");
+    showMessage(t("error.saveError"), serverMessage(e.message));
   } finally {
     savingCount--;
     setSavingUI();
@@ -3872,7 +3835,7 @@ function showConvert() {
   if (!state.stat?.open) return;
   if (isUntitled(state.stat.path)) {
     // Nothing on disk to convert yet — save it first.
-    flashCount("先に保存してください");
+    flashCount(t("dialog.convert.saveFirst"));
     saveCopy();
     return;
   }
@@ -3909,7 +3872,7 @@ function hideConvert() {
 async function convertSave(encoding, lineEnding, bom) {
   if (!state.stat?.open) return;
   if (savingCount > 0) {
-    flashCount("保存中です — 完了までお待ちください");
+    flashCount(t("editor.savingWait"));
     return;
   }
   await settleEditQueue();
@@ -3934,10 +3897,10 @@ async function convertSave(encoding, lineEnding, bom) {
     } else {
       onDocumentOpened(await apiPost("/api/open", { path: res.path }));
     }
-    flashCount(`${enc(encoding)} / ${eol(lineEnding)} で保存しました`);
+    flashCount(t("dialog.convert.savedAs", { enc: enc(encoding), eol: eol(lineEnding) }));
   } catch (e) {
-    flashCount("変換保存エラー", "error");
-    showMessage("変換して保存", e.message);
+    flashCount(t("dialog.convert.saveError"), "error");
+    showMessage(t("dialog.convert.go"), serverMessage(e.message));
   } finally {
     savingCount--;
     setSavingUI();
@@ -3951,12 +3914,12 @@ async function convertSave(encoding, lineEnding, bom) {
 async function reopenWithEncoding(encoding) {
   if (!state.stat?.open) return;
   if (isUntitled(state.stat.path)) {
-    flashCount("保存されたファイルがありません");
+    flashCount(t("dialog.convert.noSavedFile"));
     return;
   }
   if (state.stat.dirty) {
-    const ok = await askConfirm("開き直す", "未保存の編集を破棄して開き直しますか?", {
-      okLabel: "破棄して開き直す",
+    const ok = await askConfirm(t("dialog.convert.reopen"), t("dialog.convert.discardAsk"), {
+      okLabel: t("dialog.convert.discardOk"),
       danger: true,
     });
     if (!ok) return;
@@ -3972,10 +3935,10 @@ async function reopenWithEncoding(encoding) {
     setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
     render();
     refreshTabs();
-    flashCount(`${enc(encoding)} で開き直しました`);
+    flashCount(t("dialog.convert.reopenedAs", { enc: enc(encoding) }));
   } catch (e) {
-    flashCount("開き直しエラー", "error");
-    showMessage("開き直す", e.message);
+    flashCount(t("dialog.convert.reopenError"), "error");
+    showMessage(t("dialog.convert.reopen"), serverMessage(e.message));
   }
 }
 
@@ -4012,56 +3975,55 @@ async function redoEdit() {
 async function sortSave() {
   if (!state.stat?.open) return;
   const f = await askForm(
-    "ソート",
+    t("menu.sort"),
     [
       {
         id: "key",
         type: "text",
-        label: "キー列 (1始まり)",
-        placeholder: "空なら行全体で比較",
-        title: "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較",
+        label: t("dialog.sort.keyColumn"),
+        placeholder: t("dialog.sort.keyPlaceholder"),
+        title: t("dialog.sort.keyTitle"),
       },
       {
         id: "delim",
         type: "text",
-        label: "区切り文字",
+        label: t("dialog.sort.delimiter"),
         value: ",",
         placeholder: ",",
-        title: "キー列を使うときの列の区切り (例: , やタブ)",
+        title: t("dialog.sort.delimiterTitle"),
       },
       {
         id: "numeric",
         type: "check",
-        label: "数値として比較する",
+        label: t("dialog.sort.numeric"),
         value: false,
-        title: "10 と 9 を文字列でなく数値の大小で並べます",
+        title: t("dialog.sort.numericTitle"),
       },
       {
         id: "order",
         type: "select",
-        label: "並び順",
+        label: t("dialog.sort.order"),
         options: [
-          ["asc", "昇順 (A→Z, 小→大)"],
-          ["desc", "降順 (Z→A, 大→小)"],
+          ["asc", t("dialog.sort.asc")],
+          ["desc", t("dialog.sort.desc")],
         ],
       },
       {
         id: "_hint",
         type: "hint",
-        label:
-          "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。",
+        label: t("dialog.sort.hint"),
       },
     ],
-    "ソート",
+    t("menu.sort"),
   );
   if (!f) return;
   const keyText = String(f.key || "").trim();
   const key = keyText === "" ? null : Number(keyText);
   if (keyText !== "" && (!Number.isInteger(key) || key < 1)) {
-    flashCount("キー列は 1 以上の整数で指定してください", "error");
+    flashCount(t("dialog.sort.keyInvalid"), "error");
     return;
   }
-  showLoading("ソート実行中…");
+  showLoading(t("dialog.sort.running"));
   try {
     await apiPost("/api/sort/save", {
       in_place: true,
@@ -4077,10 +4039,10 @@ async function sortSave() {
     await refreshStat();
     await reloadViewport();
     render();
-    flashCount("ソートして上書きしました");
+    flashCount(t("dialog.sort.done"));
   } catch (e) {
-    flashCount("ソートエラー", "error");
-    showMessage("ソートエラー", e.message);
+    flashCount(t("dialog.sort.error"), "error");
+    showMessage(t("dialog.sort.error"), serverMessage(e.message));
   } finally {
     hideLoading();
   }
@@ -4091,39 +4053,38 @@ async function sortSave() {
 async function splitFile() {
   if (!state.stat?.open) return;
   const f = await askForm(
-    "ファイルを分割",
+    t("menu.split"),
     [
-      { id: "lines", type: "text", label: "1ファイルあたりの行数", value: "1000000" },
+      { id: "lines", type: "text", label: t("dialog.split.linesPer"), value: "1000000" },
       {
         id: "dir",
         type: "text",
-        label: "出力先フォルダ",
+        label: t("dialog.split.outDir"),
         value: "",
-        placeholder: "空なら元ファイルと同じ場所",
+        placeholder: t("dialog.split.outDirPlaceholder"),
       },
       {
         id: "_hint",
         type: "hint",
-        label:
-          "現在のファイルを指定行数ごとに分割して書き出します。未保存の編集も含まれます。元のファイルは変更されません。",
+        label: t("dialog.split.hint"),
       },
     ],
-    "分割",
+    t("dialog.split.go"),
   );
   if (!f) return;
   const lines = Number(String(f.lines || "").trim());
   if (!Number.isInteger(lines) || lines < 1) {
-    flashCount("行数は 1 以上の整数で指定してください", "error");
+    flashCount(t("dialog.split.linesInvalid"), "error");
     return;
   }
-  showLoading("分割実行中…");
+  showLoading(t("dialog.split.running"));
   try {
     const dir = String(f.dir || "").trim();
     const res = await apiPost("/api/split/save", { lines, dir: dir || null });
-    flashCount(`${res.count} 個に分割しました: 最初のファイル ${displayPath(res.files[0])}`);
+    flashCount(t("dialog.split.done", { count: res.count, path: displayPath(res.files[0]) }));
   } catch (e) {
-    flashCount("分割エラー", "error");
-    showMessage("分割エラー", e.message);
+    flashCount(t("dialog.split.error"), "error");
+    showMessage(t("dialog.split.error"), serverMessage(e.message));
   } finally {
     hideLoading();
   }
@@ -4175,12 +4136,12 @@ function literalReplacement(replacement) {
 function replaceReady() {
   if (!state.stat?.open) return false;
   if (!state.query) {
-    flashCount("検索文字列を入力してください", "error");
+    flashCount(t("find.enterQuery"), "error");
     return false;
   }
   buildMatcher();
   if (state.regexError || !state.matcher) {
-    flashCount("正規表現エラー", "error");
+    flashCount(t("find.regexError"), "error");
     return false;
   }
   return true;
@@ -4209,7 +4170,7 @@ async function replaceCurrent() {
     re.lastIndex = u16;
     const m = re.exec(text);
     if (!m || m.index !== u16) {
-      flashCount("一致を特定できません", "error");
+      flashCount(t("find.cannotIdentifyMatch"), "error");
       return;
     }
     const rep = replacementFor(m[0], replacement);
@@ -4222,7 +4183,7 @@ async function replaceCurrent() {
     await updateCount();
     await findStep("next");
   } catch (e) {
-    flashCount("置換エラー", "error");
+    flashCount(t("find.replaceError"), "error");
     console.error(e);
   }
 }
@@ -4234,12 +4195,12 @@ async function replaceAll() {
   if (!replaceReady()) return;
   const replacement = $("replace-input").value;
   const literal = literalReplacement(replacement);
-  showLoading("置換中…");
+  showLoading(t("find.replacing"));
   try {
     const res = await api(`/api/search?${qs()}&start=0&max=${REPLACE_ALL_MAX}`);
     const hits = res.hits || [];
     if (!hits.length) {
-      flashCount("一致なし");
+      flashCount(t("find.noMatch"));
       return;
     }
     const lines = [...new Set(hits.map((h) => h.line))].sort((a, b) => a - b);
@@ -4282,11 +4243,13 @@ async function replaceAll() {
     await updateCount();
     flashCount(
       replaced
-        ? `${commas(replaced)} 件置換しました${res.truncated ? " — 一致が多いため一部です。もう一度実行してください" : ""}`
-        : "一致なし",
+        ? res.truncated
+          ? t("find.replacedCountPartial", { n: commas(replaced) })
+          : t("find.replacedCount", { n: commas(replaced) })
+        : t("find.noMatch"),
     );
   } catch (e) {
-    flashCount("置換エラー", "error");
+    flashCount(t("find.replaceError"), "error");
     console.error(e);
   } finally {
     hideLoading();
@@ -4305,19 +4268,22 @@ function hideDiff() {
 function showDiff(res) {
   $("diff-summary").textContent =
     `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}` +
-    (res.current_dirty ? ` / ${t("未保存編集込み")}` : "") +
+    (res.current_dirty ? ` / ${t("dialog.diff.unsavedIncluded")}` : "") +
     (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
   $("diff-old-path").textContent =
-    displayPath(res.old_path || t("現在のファイル")) + (res.current_dirty ? " *" : "");
-  $("diff-new-path").textContent = displayPath(res.new_path || t("比較先"));
+    (res.old_path ? displayPath(res.old_path) : t("dialog.diff.currentFile")) +
+    (res.current_dirty ? " *" : "");
+  $("diff-new-path").textContent = res.new_path
+    ? displayPath(res.new_path)
+    : t("dialog.diff.compareTo");
   renderDiffView(res);
   setModalOpen($("diff-modal"), true);
 }
 
 function diffKindLabel(kind) {
-  if (kind === "insert") return t("追加");
-  if (kind === "delete") return t("削除");
-  return t("変更");
+  if (kind === "insert") return t("dialog.diff.added");
+  if (kind === "delete") return t("dialog.diff.deleted");
+  return t("dialog.diff.changed");
 }
 
 const INLINE_DIFF_MAX_CHARS = 2000;
@@ -4413,9 +4379,13 @@ function renderDiffView(res) {
     hunk.className = "diff-hunk";
     const title = document.createElement("div");
     title.className = "diff-hunk-title";
-    title.textContent =
-      `${diffKindLabel(h.kind)}  ${t("現在")}: ${commas(h.old_start + 1)} (${commas(h.old_len)} ${currentLocale() === "en" ? "lines" : "行"})  ` +
-      `${t("比較先")}: ${commas(h.new_start + 1)} (${commas(h.new_len)} ${currentLocale() === "en" ? "lines" : "行"})`;
+    title.textContent = t("dialog.diff.hunkHeader", {
+      kind: diffKindLabel(h.kind),
+      oldStart: commas(h.old_start + 1),
+      oldLen: commas(h.old_len),
+      newStart: commas(h.new_start + 1),
+      newLen: commas(h.new_len),
+    });
     hunk.append(title);
     const oldRows = h.old_preview || [];
     const newRows = h.new_preview || [];
@@ -4442,9 +4412,7 @@ function renderDiffView(res) {
     if (h.old_truncated || h.new_truncated) {
       const tr = document.createElement("div");
       tr.className = "diff-truncated";
-      tr.textContent = translateText(
-        `このhunkは先頭 ${commas(res.max_lines_per_hunk || 80)} 行だけ表示しています`,
-      );
+      tr.textContent = t("dialog.diff.hunkTruncated", { n: commas(res.max_lines_per_hunk || 80) });
       hunk.append(tr);
     }
     frag.append(hunk);
@@ -4452,7 +4420,7 @@ function renderDiffView(res) {
   if (!res.hunks || res.hunks.length === 0) {
     const empty = document.createElement("div");
     empty.className = "diff-truncated";
-    empty.textContent = t("差分はありません");
+    empty.textContent = t("dialog.diff.none");
     frag.append(empty);
   }
   view.append(frag);
@@ -4460,18 +4428,18 @@ function renderDiffView(res) {
 
 async function diffFile() {
   const base = state.stat?.path || "";
-  const path = await askPrompt("2ファイル差分", "比較先ファイルパス", base);
+  const path = await askPrompt(t("menu.diff"), t("dialog.diff.promptPath"), base);
   if (path == null || path.trim() === "") return;
-  showLoading("差分を計算中…");
+  showLoading(t("dialog.diff.computing"));
   try {
     const res = await api(
       `/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`,
     );
-    flashCount(`差分: ${commas(res.hunk_count)} hunk`);
+    flashCount(t("dialog.diff.hunks", { n: commas(res.hunk_count) }));
     showDiff(res);
   } catch (e) {
-    flashCount("差分エラー", "error");
-    showMessage("差分エラー", e.message);
+    flashCount(t("dialog.diff.error"), "error");
+    showMessage(t("dialog.diff.error"), serverMessage(e.message));
   } finally {
     hideLoading();
   }
@@ -4497,34 +4465,34 @@ async function grepFolder() {
   const base =
     lastGrep.dir || localStorage.getItem(TREE_KEY) || pathDirName(state.stat?.path || "") || "";
   const form = await askForm(
-    "フォルダ内検索",
+    t("menu.grep"),
     [
       {
         id: "query",
         type: "text",
-        label: "検索語",
+        label: t("dialog.grep.query"),
         value: lastGrep.query,
-        placeholder: "検索する文字列 / 正規表現",
+        placeholder: t("dialog.grep.queryPlaceholder"),
       },
       {
         id: "dir",
         type: "text",
-        label: "対象フォルダ",
+        label: t("dialog.grep.dir"),
         value: base,
-        placeholder: "空欄で開いているファイルのフォルダ",
+        placeholder: t("dialog.grep.dirPlaceholder"),
       },
       {
         id: "glob",
         type: "text",
-        label: "ファイル名フィルタ",
+        label: t("dialog.grep.glob"),
         value: lastGrep.glob,
-        placeholder: "例: *.rs, *.txt (空欄で全て)",
+        placeholder: t("dialog.grep.globPlaceholder"),
       },
-      { id: "ci", type: "check", label: "大文字小文字を区別しない", value: lastGrep.ci },
-      { id: "word", type: "check", label: "単語単位", value: lastGrep.word },
-      { id: "regex", type: "check", label: "正規表現", value: lastGrep.regex },
+      { id: "ci", type: "check", label: t("dialog.grep.ignoreCase"), value: lastGrep.ci },
+      { id: "word", type: "check", label: t("find.wholeWord"), value: lastGrep.word },
+      { id: "regex", type: "check", label: t("find.regex"), value: lastGrep.regex },
     ],
-    "検索",
+    t("menu.find"),
   );
   if (!form) return;
   const query = (form.query || "").trim();
@@ -4537,7 +4505,7 @@ async function grepFolder() {
     word: !!form.word,
     regex: !!form.regex,
   };
-  showLoading("フォルダ内を検索中…");
+  showLoading(t("dialog.grep.searching"));
   try {
     const res = await apiPost("/api/grep", {
       query,
@@ -4547,11 +4515,11 @@ async function grepFolder() {
       word: lastGrep.word,
       regex: lastGrep.regex,
     });
-    flashCount(`フォルダ内検索: ${commas(res.hits.length)} 件`);
+    flashCount(t("dialog.grep.flash", { n: commas(res.hits.length) }));
     showGrep(res, query, lastGrep.regex);
   } catch (e) {
-    flashCount("フォルダ内検索エラー", "error");
-    showMessage("フォルダ内検索エラー", e.message);
+    flashCount(t("dialog.grep.error"), "error");
+    showMessage(t("dialog.grep.error"), serverMessage(e.message));
   } finally {
     hideLoading();
   }
@@ -4559,11 +4527,10 @@ async function grepFolder() {
 
 function showGrep(res, query, regex) {
   const files = new Set(res.hits.map((h) => h.path)).size;
-  $("grep-summary").textContent = translateText(
-    `${commas(res.hits.length)} 件 / ${commas(files)} ファイル` +
-      (res.truncated ? `（上限 ${commas(res.hits.length)} 件で打ち切り）` : "") +
-      (res.files_truncated ? " / 走査ファイル数の上限に達しました" : ""),
-  );
+  $("grep-summary").textContent =
+    t("dialog.grep.summary", { hits: commas(res.hits.length), files: commas(files) }) +
+    (res.truncated ? t("dialog.grep.summaryTruncated", { max: commas(res.hits.length) }) : "") +
+    (res.files_truncated ? t("dialog.grep.summaryFiles") : "");
   renderGrepResults(res, query, regex);
   setModalOpen($("grep-modal"), true);
 }
@@ -4595,7 +4562,7 @@ function renderGrepResults(res, query, regex) {
   if (hits.length === 0) {
     const empty = document.createElement("div");
     empty.className = "grep-empty";
-    empty.textContent = t("一致はありません");
+    empty.textContent = t("dialog.grep.noMatches");
     view.append(empty);
     return;
   }
@@ -4642,11 +4609,11 @@ async function transformSelection(mode) {
   if (!state.stat?.open) return;
   const fn = mode === "upper" ? (s) => s.toUpperCase() : (s) => s.toLowerCase();
   if (!hasTextSelection()) {
-    flashCount("変換する範囲を選択してください", "error");
+    flashCount(t("editor.selectRangeFirst"), "error");
     return;
   }
   if (selectionLineCount() > MAX_COPY_LINES) {
-    flashCount(`変換は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    flashCount(t("editor.transformCapped", { max: commas(MAX_COPY_LINES) }), "error");
     return;
   }
   const rr = rectRange();
@@ -4698,7 +4665,7 @@ async function applyBatchPlain(edits) {
     await refreshStat();
   } catch (e) {
     console.error("post-batch refresh failed", e);
-    flashCount("再読込エラー");
+    flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
   setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
@@ -4769,7 +4736,7 @@ async function applyLineEdit(edits, caret, sel) {
     await refreshStat();
   } catch (e) {
     console.error("post-line-edit refresh failed", e);
-    flashCount("再読込エラー");
+    flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
   const last = Math.max(0, state.total - 1);
@@ -4793,7 +4760,7 @@ function duplicateLines() {
   if (!state.stat?.open || state.total === 0) return;
   const { l0, l1 } = lineOpSpan();
   if (l1 - l0 + 1 > MAX_COPY_LINES) {
-    flashCount(`複製は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    flashCount(t("editor.duplicateCapped", { max: commas(MAX_COPY_LINES) }), "error");
     return;
   }
   const caret = { ...state.caret }; // the copy lands below; the caret stays put
@@ -4812,7 +4779,7 @@ function moveLines(dir) {
   const { l0, l1 } = lineOpSpan();
   if (dir < 0 ? l0 === 0 : l1 >= state.total - 1) return; // already at the edge
   if (l1 - l0 + 1 > MAX_COPY_LINES) {
-    flashCount(`行の移動は一度に ${commas(MAX_COPY_LINES)} 行までです`, "error");
+    flashCount(t("editor.moveCapped", { max: commas(MAX_COPY_LINES) }), "error");
     return;
   }
   const caret = { line: state.caret.line + dir, col: state.caret.col };
@@ -4880,7 +4847,7 @@ function setQueryFromInput() {
   state.searchHits = null;
   state.searchTruncated = false;
   buildMatcher();
-  $("find-count").textContent = state.regexError ? t("正規表現エラー") : "";
+  $("find-count").textContent = state.regexError ? t("find.regexError") : "";
   scheduleRender();
 }
 
@@ -5013,17 +4980,19 @@ function confirmVisible() {
   return !$("confirm").classList.contains("hidden");
 }
 
+// Titles, messages and button labels arrive already localized (t() results);
+// server-side error details go through serverMessage() at the call site.
 function askConfirm(title, message, opts = {}) {
   return new Promise((resolve) => {
     const modal = $("confirm");
     const okBtn = $("confirm-ok");
     const cancelBtn = $("confirm-cancel");
-    $("confirm-title").textContent = translateText(title || "確認");
-    $("confirm-message").textContent = translateText(message || "");
-    okBtn.textContent = translateText(opts.okLabel || "OK");
+    $("confirm-title").textContent = title || t("common.confirm");
+    $("confirm-message").textContent = message || "";
+    okBtn.textContent = opts.okLabel || t("common.ok");
     okBtn.classList.toggle("danger", !!opts.danger);
     okBtn.classList.toggle("primary", !opts.danger);
-    cancelBtn.textContent = translateText(opts.cancelLabel || "キャンセル");
+    cancelBtn.textContent = opts.cancelLabel || t("common.cancel");
     cancelBtn.classList.toggle("hidden", !!opts.alert);
     setModalOpen(modal, true);
     queueMicrotask(() => okBtn.focus());
@@ -5072,8 +5041,8 @@ function promptVisible() {
 function askPrompt(title, label, value = "") {
   return new Promise((resolve) => {
     const modal = $("prompt");
-    $("prompt-title").textContent = translateText(title || "入力");
-    $("prompt-label").textContent = translateText(label || "");
+    $("prompt-title").textContent = title || t("common.input");
+    $("prompt-label").textContent = label || "";
     const input = $("prompt-input");
     input.value = value;
     setModalOpen(modal, true);
@@ -5120,31 +5089,32 @@ function formVisible() {
 }
 
 // fields: {id, type: "text"|"check"|"select"|"hint", label, value, placeholder,
-// title, options}. Resolves to {id: value} or null on cancel.
-function askForm(title, fields, okLabel = "実行") {
+// title, options}. All labels/placeholders/titles arrive already localized.
+// Resolves to {id: value} or null on cancel.
+function askForm(title, fields, okLabel = null) {
   return new Promise((resolve) => {
     const modal = $("form-modal");
     const body = $("form-body");
-    $("form-title").textContent = translateText(title || "オプション");
-    $("form-ok").textContent = translateText(okLabel);
+    $("form-title").textContent = title || t("common.options");
+    $("form-ok").textContent = okLabel || t("common.run");
     body.textContent = "";
     const readers = {};
     for (const f of fields) {
       if (f.type === "hint") {
         const hint = document.createElement("div");
         hint.className = "form-hint";
-        hint.textContent = translateText(f.label);
+        hint.textContent = f.label;
         body.append(hint);
         continue;
       }
       if (f.type === "check") {
         const lab = document.createElement("label");
         lab.className = "form-check";
-        if (f.title) lab.title = translateText(f.title);
+        if (f.title) lab.title = f.title;
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = !!f.value;
-        lab.append(cb, document.createTextNode(translateText(f.label)));
+        lab.append(cb, document.createTextNode(f.label));
         body.append(lab);
         readers[f.id] = () => cb.checked;
         continue;
@@ -5152,14 +5122,14 @@ function askForm(title, fields, okLabel = "実行") {
       const row = document.createElement("label");
       row.className = "form-row";
       const span = document.createElement("span");
-      span.textContent = translateText(f.label);
+      span.textContent = f.label;
       row.append(span);
       if (f.type === "select") {
         const sel = document.createElement("select");
         for (const [v, text] of f.options || []) {
           const o = document.createElement("option");
           o.value = v;
-          o.textContent = translateText(text);
+          o.textContent = text;
           sel.append(o);
         }
         if (f.value != null) sel.value = f.value;
@@ -5169,8 +5139,8 @@ function askForm(title, fields, okLabel = "実行") {
         const input = document.createElement("input");
         input.type = "text";
         input.value = f.value ?? "";
-        input.placeholder = translateText(f.placeholder ?? "");
-        if (f.title) input.title = translateText(f.title);
+        input.placeholder = f.placeholder ?? "";
+        if (f.title) input.title = f.title;
         row.append(input);
         readers[f.id] = () => input.value;
       }
@@ -5216,7 +5186,7 @@ function askForm(title, fields, okLabel = "実行") {
 // ---- loading overlay ------------------------------------------------------
 function showLoading(text) {
   const o = $("overlay");
-  o.textContent = translateText(text || "読み込み中…");
+  o.textContent = text || t("dialog.open.loading");
   o.classList.remove("hidden");
 }
 function hideLoading() {
