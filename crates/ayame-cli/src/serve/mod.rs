@@ -254,6 +254,7 @@ async fn serve(
 pub(crate) fn spawn_background(state: SharedState) -> Result<SocketAddr> {
     use std::sync::mpsc;
 
+    spawn_wal_policy(&state);
     let (tx, rx) = mpsc::channel::<Result<SocketAddr>>();
     std::thread::Builder::new()
         .name("ayame-server".into())
@@ -449,6 +450,42 @@ mod tests {
     /// Serve the real router (loopback policy) on an ephemeral port.
     async fn start_server(path: &Path) -> SocketAddr {
         start_server_with_state(path).await.0
+    }
+
+    /// Like [`start_server`] but with explicit open options — the WAL tests
+    /// need a cache dir, which `OpenOptions::default()` deliberately lacks.
+    /// Each call builds a brand-new `AppState` over the same file and cache,
+    /// which is exactly what a process restart after a crash looks like to
+    /// the recovery machinery.
+    async fn start_server_with_opts(path: &Path, opts: OpenOptions) -> SocketAddr {
+        let doc = Document::open(path, &opts).unwrap();
+        let state = Arc::new(AppState::new(Some(doc), opts));
+        let app = router(state.clone(), Arc::new(NetPolicy::loopback()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        addr
+    }
+
+    /// A unique crash-log cache root for one WAL test.
+    fn scratch_cache(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "ayame-wal-test-{}-{}-{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ))
+    }
+
+    fn wal_opts(cache: &Path) -> OpenOptions {
+        OpenOptions {
+            cache_dir: Some(cache.to_path_buf()),
+            ..OpenOptions::default()
+        }
     }
 
     /// Like [`start_server`], but also hands back the shared state so a test
@@ -1038,6 +1075,186 @@ mod tests {
 
         let _ = std::fs::remove_file(&fa);
         let _ = std::fs::remove_file(&fb);
+    }
+
+    /// Crash persistence, scenario 1: unsaved edits survive a "crash" (a
+    /// brand-new `AppState` over the same file and cache dir — the in-process
+    /// equivalent of killing and restarting the server) and are restored by
+    /// `POST /api/edit/recover`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wal_recovers_unsaved_edits_after_a_crash() {
+        let f = scratch_file("wal-recover.txt", b"alpha\nbeta\n");
+        let cache = scratch_cache("recover");
+
+        // Session 1: one committed edit — never saved.
+        let addr = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":5,"text":"ALPHA"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        // The commit was mirrored into the crash log on the spot.
+        let wal_path = ayame_core::wal::wal_path_for(&cache, &f);
+        assert!(wal_path.exists(), "no crash log at {}", wal_path.display());
+
+        // "Crash": the first state is simply never used again; nothing was
+        // saved, the overlay lived in memory only. Restart on the same file.
+        let addr2 = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host2 = format!("127.0.0.1:{}", addr2.port());
+        let origin2 = format!("http://{host2}");
+
+        // The open reports the recoverable log instead of auto-applying it.
+        let (status, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert_eq!(status, 200);
+        assert!(stat.contains("\"recoverable\":1"), "stat: {stat}");
+        assert!(stat.contains("\"dirty\":false"), "stat: {stat}");
+        let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
+        assert!(lines.contains("alpha"), "pre-recover view: {lines}");
+
+        // Restore: the edit is back, dirty, and one transaction was replayed.
+        let (status, body) = send(
+            addr2,
+            post_json("/api/edit/recover", &host2, Some(&origin2), "{}"),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"replayed\":1"), "body: {body}");
+        assert!(body.contains("\"dirty\":true"), "body: {body}");
+        let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
+        assert!(lines.contains("ALPHA"), "post-recover view: {lines}");
+        // The recovered suffix carries real undo history.
+        let (status, body) = send(
+            addr2,
+            post_json("/api/edit/undo", &host2, Some(&origin2), ""),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        // The flag is gone: a second recover has nothing to do.
+        let (_, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert!(!stat.contains("recoverable"), "stat: {stat}");
+        let (status, _) = send(
+            addr2,
+            post_json("/api/edit/recover", &host2, Some(&origin2), "{}"),
+        )
+        .await;
+        assert_eq!(status, 409);
+
+        let _ = std::fs::remove_dir_all(&cache);
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Crash persistence, scenario 2: declining the recovery discards the log
+    /// — the session stays clean and a further restart sees nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wal_discard_declines_the_recovery_and_cleans_the_log() {
+        let f = scratch_file("wal-discard.txt", b"one\ntwo\n");
+        let cache = scratch_cache("discard");
+
+        let addr = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":1,"c0":0,"l1":1,"c1":3,"text":"TWO"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+
+        // Restart, decline.
+        let addr2 = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host2 = format!("127.0.0.1:{}", addr2.port());
+        let origin2 = format!("http://{host2}");
+        let (_, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert!(stat.contains("\"recoverable\":1"), "stat: {stat}");
+        let (status, body) = send(
+            addr2,
+            post_json(
+                "/api/edit/recover",
+                &host2,
+                Some(&origin2),
+                r#"{"discard":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"replayed\":0"), "body: {body}");
+        assert!(body.contains("\"dirty\":false"), "body: {body}");
+        let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
+        assert!(lines.contains("two") && !lines.contains("TWO"), "{lines}");
+        let (_, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert!(!stat.contains("recoverable"), "stat: {stat}");
+
+        // A third "restart" finds a clean log: no recovery offer.
+        let addr3 = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host3 = format!("127.0.0.1:{}", addr3.port());
+        let (_, stat) = send(addr3, get("/api/stat", &host3)).await;
+        assert!(!stat.contains("recoverable"), "stat: {stat}");
+
+        let _ = std::fs::remove_dir_all(&cache);
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Crash persistence, scenario 3: a successful in-place save RESETS the
+    /// log onto the new file identity, so a kill + restart right after the
+    /// save has nothing to recover.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wal_is_reset_by_a_save_so_a_restart_is_clean() {
+        let f = scratch_file("wal-save.txt", b"aaa\nbbb\n");
+        let cache = scratch_cache("save");
+
+        let addr = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":3,"text":"AAA"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"AAA\nbbb\n");
+
+        // Kill + restart: the log was reset at the save commit; the reopened
+        // file matches its (empty) header — nothing to recover.
+        let addr2 = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host2 = format!("127.0.0.1:{}", addr2.port());
+        let (_, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert!(!stat.contains("recoverable"), "stat: {stat}");
+        assert!(stat.contains("\"dirty\":false"), "stat: {stat}");
+        let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
+        assert!(lines.contains("AAA"), "{lines}");
+
+        let _ = std::fs::remove_dir_all(&cache);
+        let _ = std::fs::remove_file(&f);
     }
 
     #[test]

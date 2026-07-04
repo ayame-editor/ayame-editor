@@ -270,6 +270,11 @@ pub(super) async fn api_edit_save(
         let _transitions = state.lock_transitions().await;
         let switched = state.confirm_overwrite(&snap).is_ok()
             && state.reload_reverted(res.path.clone()).await.is_ok();
+        // The switch attached a fresh log to the converted file; the old
+        // path's log now describes saved-elsewhere edits — drop it.
+        if switched && !same_path(&res.path, &active_path) {
+            discard_wal_for(&state, &active_path).await;
+        }
         return Ok(Json(EditSaveResponse::from_result(res, switched)));
     }
 
@@ -300,6 +305,11 @@ pub(super) async fn api_edit_save(
             let _transitions = state.lock_transitions().await;
             if state.confirm_overwrite(&snap).is_ok() {
                 switched = state.reload_reverted(res.path.clone()).await.is_ok();
+            }
+            // The tab now logs against the saved file; the old path's crash
+            // log describes edits that were just saved — drop it.
+            if switched && !same_path(&res.path, &active_path) {
+                discard_wal_for(&state, &active_path).await;
             }
         }
         return Ok(Json(EditSaveResponse::from_result(res, switched)));
@@ -451,6 +461,43 @@ fn keep_stage_error(e: std::io::Error, stage: &Path) -> std::io::Error {
             workspace::display_path(stage)
         ),
     )
+}
+
+/// Apply — or discard — the crash log reported by `stat.recoverable` for the
+/// active document. `{}` restores (replays the log into the live session and
+/// re-arms logging); `{"discard": true}` deletes the log and continues clean.
+#[derive(Deserialize, Default)]
+pub(super) struct RecoverRequest {
+    #[serde(default)]
+    discard: bool,
+}
+
+#[derive(Serialize)]
+pub(super) struct RecoverResponse {
+    stats: EditStats,
+    /// Transactions replayed (0 for a discard, and for a restore whose whole
+    /// state came from a compaction snapshot).
+    replayed: usize,
+}
+
+pub(super) async fn api_edit_recover(
+    State(state): State<SharedState>,
+    Json(req): Json<RecoverRequest>,
+) -> Result<Json<RecoverResponse>, (StatusCode, String)> {
+    let (stats, replayed) = state.recover_wal(req.discard).await?;
+    Ok(Json(RecoverResponse { stats, replayed }))
+}
+
+/// After 名前を付けて保存 switched the active tab to the saved file, the OLD
+/// path's crash log describes edits that now live (saved) in the new file:
+/// drop it so reopening the old path never offers to "recover" edits the
+/// user already saved elsewhere. (The old session — and with it the writer
+/// handle — was already replaced by the switch.)
+async fn discard_wal_for(state: &SharedState, path: &Path) {
+    if let Some(root) = state.wal_root() {
+        let p = ayame_core::wal::wal_path_for(root, path);
+        let _ = tokio::fs::remove_file(p).await;
+    }
 }
 
 /// Revert to the last SAVED state. Since in-place saves leave the on-disk
