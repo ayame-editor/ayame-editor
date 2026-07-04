@@ -71,7 +71,8 @@ const MESSAGES = {
     "menu.split": "ファイルを分割",
     "menu.splitTitle": "行数を指定して複数ファイルに分割します (例: 100万行ずつ)",
     "menu.grep": "フォルダ内検索",
-    "menu.grepTitle": "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)",
+    "menu.grepTitle":
+      "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)",
     // -- toolbar --
     "toolbar.applyTheme": "テーマ適用",
     "toolbar.applyThemeTitle": "このJSONをテーマとして適用",
@@ -130,7 +131,8 @@ const MESSAGES = {
     "status.pos": "行 {line}, 列 {col}",
     "status.posCursors": "{pos} · {n} カーソル",
     "status.unsavedDetail": "未保存の編集: +{added} 行追加 / ~{changed} 行変更 / -{deleted} 行削除",
-    "status.indexDetail": "{lines} 行 / {bytes} / 索引 {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
+    "status.indexDetail":
+      "{lines} 行 / {bytes} / 索引 {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "文字コードを変換して保存",
     "status.eolTitle": "改行コードを変換して保存",
     "status.followingTail": "末尾に追従中 (tail -f)",
@@ -488,7 +490,8 @@ const MESSAGES = {
     "editor.copyCapped": "Copied only the first {max} lines. {rest} lines were not copied.",
     "editor.copyCappedHint":
       "Copied only the first {max} lines. {rest} lines were not copied. Use right-click > Save Selection to File to write everything.",
-    "editor.cutCapped": "Cut is limited to {max} lines ({total} selected). Use Delete to delete only.",
+    "editor.cutCapped":
+      "Cut is limited to {max} lines ({total} selected). Use Delete to delete only.",
     "editor.cutCappedHint":
       "Cut is limited to {max} lines ({total} selected). Use right-click > Save Selection to File to keep everything, or Delete to delete only.",
     "editor.selectRangeFirst": "Select a range to transform.",
@@ -601,8 +604,7 @@ const MESSAGES = {
     "dialog.sort.keyTitle":
       "Empty: compare whole lines as strings. Number: compare that delimited column as the key.",
     "dialog.sort.delimiter": "Delimiter",
-    "dialog.sort.delimiterTitle":
-      "Column delimiter when using a key column, such as comma or tab.",
+    "dialog.sort.delimiterTitle": "Column delimiter when using a key column, such as comma or tab.",
     "dialog.sort.numeric": "Compare as numbers",
     "dialog.sort.numericTitle": "Sort 10 and 9 by numeric value instead of string order.",
     "dialog.sort.order": "Order",
@@ -1416,7 +1418,9 @@ function commandPaletteItems() {
   document.querySelectorAll("[data-menu-action]").forEach((el) => {
     add(el.dataset.menuAction, commandLabelFromElement(el));
   });
-  for (const [action, label] of KEYMAP_ACTIONS) add(action, label);
+  // No explicit label: actions without a DOM menu item resolve through
+  // keymapLabels, which already maps action → t(labelKey).
+  for (const [action] of KEYMAP_ACTIONS) add(action);
   return items;
 }
 
@@ -5289,7 +5293,7 @@ function onGlobalKey(e) {
   }
   if (matchesShortcut(e, "gotoLine")) {
     e.preventDefault();
-    askPrompt("行へ移動", "行番号").then((v) => {
+    askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((v) => {
       if (v != null) gotoLine(v);
     });
     return;
@@ -5470,7 +5474,7 @@ function onEditKey(e) {
     // Edits are blocked while a save is in flight; swallow the key so the
     // hidden textarea can't buffer text that would never be applied.
     e.preventDefault();
-    flashCount("保存中です — 完了までお待ちください");
+    flashCount(t("editor.savingWait"));
     return;
   }
   const mod = e.ctrlKey || e.metaKey;
@@ -5732,23 +5736,15 @@ function configureOpener(mode, title) {
   const save = mode === "save";
   const m = $("opener");
   m.classList.toggle("save-mode", save);
-  $("opener-title").textContent = translateText(
-    title || (save ? "名前を付けて保存" : "ファイルを開く"),
+  $("opener-title").textContent = title || t(save ? "menu.saveAs" : "dialog.open.title");
+  $("opener-input-label").textContent = t(save ? "dialog.open.fileName" : "dialog.open.path");
+  $("opener-input").placeholder = t(
+    save ? "dialog.open.namePlaceholder" : "dialog.open.pathPlaceholder",
   );
-  $("opener-input-label").textContent = save ? t("ファイル名") : t("パス");
-  $("opener-input").placeholder = save
-    ? t("保存するファイル名、またはフルパス")
-    : t("ファイルのパスを入力… (例: /var/log/huge.log)");
-  $("opener-open").textContent = save ? t("保存") : t("開く");
-  $("opener-folder").textContent = save ? t("場所") : t("フォルダ");
-  $("opener-folder").title = save
-    ? t("表示中のフォルダをエクスプローラーに表示")
-    : t("表示中のフォルダをツリーに開く");
-  $("opener-hint").textContent = save
-    ? t("フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。")
-    : t(
-        "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。",
-      );
+  $("opener-open").textContent = t(save ? "menu.save" : "menu.open");
+  $("opener-folder").textContent = t(save ? "dialog.open.location" : "dialog.open.folder");
+  $("opener-folder").title = t(save ? "dialog.open.folderToExplorer" : "dialog.open.folderToTree");
+  $("opener-hint").textContent = t(save ? "dialog.open.hintSave" : "dialog.open.hintOpen");
   openerMsg("");
   renderRecentFiles();
 }
@@ -5777,19 +5773,19 @@ function finishSaveDialog(value) {
 
 function openerMsg(text, busy = false) {
   const el = $("opener-msg");
-  el.textContent = translateText(text || "");
+  el.textContent = text || "";
   el.classList.toggle("busy", !!text && busy);
 }
 
 async function browse(dir) {
-  openerMsg("読み込み中…", true);
+  openerMsg(t("dialog.open.loading"), true);
   try {
     const q = dir == null ? "" : `?dir=${encodeURIComponent(dir)}`;
     const res = await api(`/api/browse${q}`);
     renderBrowse(res);
     openerMsg("");
   } catch (e) {
-    openerMsg("ディレクトリを開けません: " + e.message);
+    openerMsg(t("dialog.open.dirError", { msg: serverMessage(e.message) }));
   }
 }
 
@@ -5837,7 +5833,7 @@ function browseRow(ent, isUp) {
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
     "aria-label",
-    isUp ? t("上の階層へ") : `${ent.is_dir ? t("フォルダ") : t("ファイル")}: ${ent.name}`,
+    isUp ? t("tree.up") : `${ent.is_dir ? t("dialog.open.folder") : t("menu.file")}: ${ent.name}`,
   );
   const ic = document.createElement("span");
   ic.className = "ic";
@@ -5845,7 +5841,7 @@ function browseRow(ent, isUp) {
   ic.append(iconSvg(isUp ? "i-folder-up" : ent.is_dir ? "i-folder" : "i-file"));
   const nm = document.createElement("span");
   nm.className = "nm";
-  nm.textContent = isUp ? t("上の階層へ") : ent.name;
+  nm.textContent = isUp ? t("tree.up") : ent.name;
   const sz = document.createElement("span");
   sz.className = "sz";
   sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
@@ -5922,7 +5918,7 @@ function renderRecentFiles() {
   }
   const head = document.createElement("div");
   head.className = "opener-recent-head";
-  head.textContent = t("最近使ったファイル");
+  head.textContent = t("dialog.open.recent");
   box.append(head);
   for (const path of list) box.append(recentRow(path));
   box.classList.remove("hidden");
@@ -5933,7 +5929,7 @@ function recentRow(path) {
   row.className = "opener-row recent";
   row.type = "button";
   row.title = path;
-  row.setAttribute("aria-label", `${t("最近使ったファイル")}: ${pathBaseName(path) || path}`);
+  row.setAttribute("aria-label", `${t("dialog.open.recent")}: ${pathBaseName(path) || path}`);
   const ic = document.createElement("span");
   ic.className = "ic";
   ic.setAttribute("aria-hidden", "true");
@@ -5958,7 +5954,7 @@ function markPickedFile(name) {
 async function saveDialogTarget() {
   const raw = $("opener-input").value.trim();
   if (!raw) {
-    openerMsg("保存するファイル名を入力してください");
+    openerMsg(t("dialog.open.enterFileName"));
     return null;
   }
   const path = isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw);
@@ -5966,10 +5962,14 @@ async function saveDialogTarget() {
   const existing = state.openerEntries.find((e) => !e.is_dir && e.name === base);
   const overwrite = !!existing;
   if (overwrite) {
-    const ok = await askConfirm("上書きの確認", `${base} は既に存在します。上書きしますか?`, {
-      okLabel: "上書き",
-      danger: true,
-    });
+    const ok = await askConfirm(
+      t("dialog.overwrite.title"),
+      t("dialog.overwrite.ask", { name: base }),
+      {
+        okLabel: t("dialog.overwrite.ok"),
+        danger: true,
+      },
+    );
     if (!ok) return null;
   }
   return { path, overwrite };
@@ -6014,14 +6014,14 @@ async function openPath(path) {
   if (!p) return false;
   await settleEditQueue();
   const pristine = pristineUntitledTabId();
-  openerMsg("開いています…", true);
+  openerMsg(t("dialog.open.opening"), true);
   try {
     const stat = await apiPost("/api/open", { path: p });
     onDocumentOpened(stat);
     await closeTabSilently(pristine);
     return true;
   } catch (e) {
-    reportOpenError("開けません: " + e.message);
+    reportOpenError(t("error.cannotOpen", { msg: serverMessage(e.message) }));
     return false;
   }
 }
@@ -6029,8 +6029,8 @@ async function openPath(path) {
 async function uploadFile(file) {
   await settleEditQueue();
   const pristine = pristineUntitledTabId();
-  openerMsg(`読み込み中… (${file.name})`, true);
-  showLoading(`読み込み中… ${file.name}`);
+  openerMsg(t("dialog.open.loadingName", { name: file.name }), true);
+  showLoading(t("dialog.open.loadingFile", { name: file.name }));
   try {
     const r = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
@@ -6040,7 +6040,7 @@ async function uploadFile(file) {
     onDocumentOpened(await r.json());
     await closeTabSilently(pristine);
   } catch (e) {
-    reportOpenError("読み込みエラー: " + e.message);
+    reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e.message) }));
   } finally {
     hideLoading();
   }
@@ -6052,8 +6052,8 @@ function reportOpenError(msg) {
   if (openerVisible()) {
     openerMsg(msg);
   } else if (state.stat?.open) {
-    flashCount("読み込みエラー", "error");
-    showMessage("読み込みエラー", msg);
+    flashCount(t("error.loadError"), "error");
+    showMessage(t("error.loadError"), msg);
   } else {
     showOpener();
     openerMsg(msg);
@@ -6074,23 +6074,22 @@ async function maybeOfferWalRecovery(stat) {
   if (!n || walPromptBusy) return;
   walPromptBusy = true;
   try {
-    const restore = await askConfirm(
-      "クラッシュ復元",
-      `クラッシュ前の未保存の編集が見つかりました（${commas(n)}件）。復元しますか？`,
-      { okLabel: "復元する", cancelLabel: "破棄" },
-    );
+    const restore = await askConfirm(t("recover.title"), t("recover.found", { n: commas(n) }), {
+      okLabel: t("recover.restore"),
+      cancelLabel: t("recover.discard"),
+    });
     await apiPost("/api/edit/recover", restore ? {} : { discard: true });
     clearLineCache();
     await refreshStat();
     await reloadViewport();
     render();
     if (restore) {
-      flashCount(`クラッシュ前の編集を復元しました（${commas(n)}件）`);
+      flashCount(t("recover.restored", { n: commas(n) }));
     } else {
-      flashCount("クラッシュ前の編集を破棄しました");
+      flashCount(t("recover.discarded"));
     }
   } catch (e) {
-    flashCount("復元エラー", "error");
+    flashCount(t("recover.error"), "error");
     console.error(e);
   } finally {
     walPromptBusy = false;
@@ -6176,47 +6175,47 @@ function renderTabs(list) {
   const c = $("tabs");
   c.setAttribute("role", "tablist");
   c.textContent = "";
-  for (const t of list) {
+  for (const tab of list) {
     const el = document.createElement("div");
-    el.className = "tab" + (t.active ? " active" : "") + (t.dirty ? " dirty" : "");
-    el.dataset.id = String(t.id);
-    el.title = displayPath(t.path);
+    el.className = "tab" + (tab.active ? " active" : "") + (tab.dirty ? " dirty" : "");
+    el.dataset.id = String(tab.id);
+    el.title = displayPath(tab.path);
     el.setAttribute("role", "tab");
-    el.setAttribute("aria-selected", t.active ? "true" : "false");
+    el.setAttribute("aria-selected", tab.active ? "true" : "false");
     el.tabIndex = 0;
     const dot = document.createElement("span");
     dot.className = "tab-dot";
     const nm = document.createElement("span");
     nm.className = "tab-name";
-    nm.textContent = t.name;
+    nm.textContent = tab.name;
     const x = document.createElement("button");
     x.type = "button";
     x.className = "tab-x";
     x.append(iconSvg("i-close"));
-    x.title = translateText("閉じる");
-    x.setAttribute("aria-label", translateText(`${t.name} を閉じる`));
+    x.title = t("common.close");
+    x.setAttribute("aria-label", t("tab.closeName", { name: tab.name }));
     el.append(dot, nm, x);
     el.addEventListener("click", () => {
-      if (!t.active) selectTab(t.id);
+      if (!tab.active) selectTab(tab.id);
     });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        if (!t.active) selectTab(t.id);
+        if (!tab.active) selectTab(tab.id);
       } else if (e.key === "Delete") {
         e.preventDefault();
-        closeTab(t.id);
+        closeTab(tab.id);
       }
     });
     el.addEventListener("mousedown", (e) => {
       if (e.button === 1) {
         e.preventDefault();
-        closeTab(t.id); // middle-click closes
+        closeTab(tab.id); // middle-click closes
       }
     });
     x.addEventListener("click", (e) => {
       e.stopPropagation();
-      closeTab(t.id);
+      closeTab(tab.id);
     });
     c.append(el);
   }
@@ -6227,25 +6226,25 @@ async function selectTab(id) {
     await settleEditQueue();
     onDocumentOpened(await apiPost("/api/tabs/select", { id }));
   } catch (e) {
-    flashCount("タブ切替エラー");
+    flashCount(t("tab.switchError"));
     console.error(e);
   }
 }
 
 async function closeTab(id) {
   await settleEditQueue();
-  const t = state.tabs.find((x) => x.id === id);
+  const tab = state.tabs.find((x) => x.id === id);
   const isLast = (state.tabs || []).length <= 1;
   if (isLast) {
     if (savingCount > 0) {
-      flashCount("保存中です — 完了までお待ちください");
+      flashCount(t("editor.savingWait"));
       return;
     }
-    if (!(await confirmCloseLastTab(t))) return;
+    if (!(await confirmCloseLastTab(tab))) return;
     if (requestEditorClose()) return;
-  } else if (t && t.dirty) {
-    const ok = await askConfirm("タブを閉じる", `${t.name} の未保存の編集を破棄して閉じますか?`, {
-      okLabel: "破棄して閉じる",
+  } else if (tab && tab.dirty) {
+    const ok = await askConfirm(t("tab.close"), t("tab.confirmDiscard", { name: tab.name }), {
+      okLabel: t("tab.discardClose"),
       danger: true,
     });
     if (!ok) return;
@@ -6258,7 +6257,7 @@ async function closeTab(id) {
       onDocumentOpened(stat);
     }
   } catch (e) {
-    flashCount("タブを閉じられません");
+    flashCount(t("tab.closeError"));
     console.error(e);
   }
 }
@@ -6411,7 +6410,7 @@ function initTree() {
     state.treeLoaded = true;
     treeSetRoot(state.openerDir);
     if (state.openerMode === "save") {
-      openerMsg("現在のフォルダをエクスプローラーに表示しました");
+      openerMsg(t("dialog.open.folderShown"));
       return;
     }
     hideOpener();
@@ -6431,7 +6430,7 @@ async function newUntitled() {
     focusEditor();
   } catch (e) {
     showOpener();
-    openerMsg("新規バッファを作成できません: " + e.message);
+    openerMsg(t("error.newBuffer", { msg: serverMessage(e.message) }));
   }
 }
 
@@ -6448,7 +6447,7 @@ function runMenuAction(action) {
   if (action === "find") return showFind();
   if (action === "replace") return showFind(true);
   if (action === "gotoLine") {
-    askPrompt("行へ移動", "行番号").then((v) => {
+    askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((v) => {
       if (v != null) gotoLine(v);
     });
     return;
@@ -6886,8 +6885,8 @@ function persistCustomTheme(t) {
 // like any text file (edit / undo / Ctrl+S), then applied with テーマ適用.
 async function openThemeJsonDoc() {
   const id = state.settings.theme;
-  const t = themeJSONFor(id) || THEME_PRESETS["iris-light"];
-  const jsonText = JSON.stringify(t, null, 2);
+  const preset = themeJSONFor(id) || THEME_PRESETS["iris-light"];
+  const jsonText = JSON.stringify(preset, null, 2);
   const base = (id ? id.replace(/^custom:/, "") : "theme") || "theme";
   hideSettings();
   try {
@@ -6899,7 +6898,7 @@ async function openThemeJsonDoc() {
     if (!r.ok) throw new Error(await r.text());
     onDocumentOpened(await r.json());
   } catch (e) {
-    flashCount("テーマを開けません");
+    flashCount(t("theme.cannotOpen"));
     console.error(e);
   }
 }
@@ -6910,15 +6909,15 @@ async function applyThemeFromBuffer() {
     const count = Math.min(state.total, MAX_COPY_LINES);
     const r = await api(`/api/lines?start=0&count=${count}`);
     const text = r.lines.map((l) => l.text).join("\n");
-    const t = JSON.parse(text);
-    if (!t.color) return flashCount("color がありません");
+    const theme = JSON.parse(text);
+    if (!theme.color) return flashCount(t("theme.missingColor"));
     document.documentElement.dataset.theme = "custom";
     clearCustomVars();
-    applyCustomVars(t);
-    if (t.name) persistCustomTheme(t);
-    flashCount(`テーマ適用${t.name ? `: ${t.name}` : ""}`);
+    applyCustomVars(theme);
+    if (theme.name) persistCustomTheme(theme);
+    flashCount(theme.name ? t("theme.applied", { name: theme.name }) : t("toolbar.applyTheme"));
   } catch (e) {
-    flashCount("テーマ JSON エラー");
+    flashCount(t("theme.jsonError"));
     console.error(e);
   }
 }
@@ -6947,7 +6946,7 @@ async function openKeymapJsonDoc() {
     if (!r.ok) throw new Error(await r.text());
     onDocumentOpened(await r.json());
   } catch (e) {
-    flashCount("キー設定を開けません");
+    flashCount(t("keymap.cannotOpen"));
     console.error(e);
   }
 }
@@ -6963,9 +6962,9 @@ async function applyKeymapFromBuffer() {
     saveSettings(state.settings);
     updateKeyHints();
     renderKeymapRows();
-    flashCount("キー設定適用");
+    flashCount(t("toolbar.applyKeymap"));
   } catch (e) {
-    flashCount("キー設定 JSON エラー");
+    flashCount(t("keymap.jsonError"));
     console.error(e);
   }
 }
@@ -7070,7 +7069,7 @@ window.__ayameOpenNativePaths = (paths) => {
       try {
         await openPath(p);
       } catch (e) {
-        flashCount(`開けません: ${p}`, "error");
+        flashCount(t("error.cannotOpen", { msg: p }), "error");
         console.error(e);
       }
     }
@@ -7092,7 +7091,7 @@ async function boot() {
     await refreshStat();
   } catch (e) {
     $("overlay").classList.remove("hidden");
-    $("overlay").textContent = `${t("サーバに接続できません")}: ${e.message}`;
+    $("overlay").textContent = `${t("error.serverUnreachable")}: ${e.message}`;
     postNativeMessage("ayame:ready"); // still show the window so the error is visible
     return;
   }
@@ -7101,12 +7100,12 @@ async function boot() {
   // (possibly long) first-index happens behind this progress overlay.
   const pending = typeof window.__ayamePendingOpen === "string" ? window.__ayamePendingOpen : "";
   if (!state.stat.open && pending) {
-    showLoading(`開いています: ${displayName(pending)} …`);
+    showLoading(t("dialog.open.openingName", { name: displayName(pending) }));
     postNativeMessage("ayame:ready");
     try {
       onDocumentOpened(await apiPost("/api/open", { path: pending }));
     } catch (e) {
-      flashCount(`開けません: ${pending}`, "error");
+      flashCount(t("error.cannotOpen", { msg: pending }), "error");
       console.error(e);
       await newUntitled();
     } finally {
