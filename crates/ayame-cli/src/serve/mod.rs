@@ -434,16 +434,23 @@ mod tests {
     use super::*;
 
     fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ayame-serve-test-{}", std::process::id()));
+        // Each file gets its OWN unique subdirectory. Tests run concurrently and
+        // some scan `f.parent()` for leftover `.ayame-prev-*` save artifacts; a
+        // shared directory would let one test see another's in-flight save files
+        // and fail spuriously (a real CI flake we hit). Per-file dirs keep every
+        // directory listing isolated to the test that owns it.
+        let dir = std::env::temp_dir()
+            .join(format!("ayame-serve-test-{}", std::process::id()))
+            .join(format!(
+                "{}-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                name.replace(['/', '\\'], "_"),
+            ));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!(
-            "{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            name
-        ));
+        let path = dir.join(name);
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(contents).unwrap();
         path
