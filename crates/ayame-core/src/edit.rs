@@ -2279,6 +2279,93 @@ mod tests {
     }
 
     #[test]
+    fn rebased_overlay_reanchors_the_live_view_onto_the_saved_base() {
+        let (f, doc) = doc_from(b"a\nb\nc\nd\n");
+        let mut s = EditSession::default();
+        s.insert_line_before(&doc, 0, "x".into()).unwrap(); // x a b c d
+        s.replace_line(&doc, 2, "B".into()).unwrap(); // x a B c d
+        s.delete_line(&doc, 3).unwrap(); // x a B d
+        let out = f.path().with_extension("rebase-saved");
+        s.save_to_path(&doc, &out).unwrap(); // disk: x a B d
+        s.mark_saved();
+        let base = s.rebase_source(&doc);
+
+        assert!(s.undo()); // un-delete c: x a B c d
+        s.replace_line(&doc, 1, "A".into()).unwrap(); // x A B c d
+        s.replace_line(&doc, 0, "X".into()).unwrap(); // X A B c d (edits the insert)
+        s.insert_line_before(&doc, 5, "tail".into()).unwrap(); // append
+        let expected = texts(&s, &doc);
+        assert_eq!(expected, vec!["X", "A", "B", "c", "d", "tail"]);
+
+        // The rebased overlay, restored over the SAVED file, reproduces the
+        // live view: the replaced insert, the replacement, the resurrected
+        // deletion (whose text only the old base knew), and the append.
+        let snap = base.rebase(&s);
+        let doc2 = Document::open(&out, &AyameOpenOptions::default()).unwrap();
+        let mut recovered = EditSession::default();
+        recovered.restore_overlay(snap);
+        assert_eq!(texts(&recovered, &doc2), expected);
+        assert!(recovered.is_dirty());
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn rebased_overlay_maps_insert_list_edits_onto_saved_insert_lines() {
+        let (f, doc) = doc_from(b"m\nn\n");
+        let mut s = EditSession::default();
+        s.insert_line_before(&doc, 1, "i0".into()).unwrap();
+        s.insert_line_before(&doc, 2, "i1".into()).unwrap();
+        s.insert_line_before(&doc, 3, "i2".into()).unwrap(); // m i0 i1 i2 n
+        let out = f.path().with_extension("rebase-inserts");
+        s.save_to_path(&doc, &out).unwrap(); // disk: m i0 i1 i2 n
+        s.mark_saved();
+        let base = s.rebase_source(&doc);
+        let doc2 = Document::open(&out, &AyameOpenOptions::default()).unwrap();
+
+        // Shrink the insert list: the surplus saved insert line disappears.
+        s.delete_line(&doc, 2).unwrap(); // m i0 i2 n
+        let mid = texts(&s, &doc);
+        assert_eq!(mid, vec!["m", "i0", "i2", "n"]);
+        let mut recovered = EditSession::default();
+        recovered.restore_overlay(base.rebase(&s));
+        assert_eq!(texts(&recovered, &doc2), mid);
+
+        // Grow it again: the extra live insert lands between the mapped
+        // saved lines, in view order.
+        s.insert_line_before(&doc, 3, "i3".into()).unwrap(); // m i0 i2 i3 n
+        let expected = texts(&s, &doc);
+        assert_eq!(expected, vec!["m", "i0", "i2", "i3", "n"]);
+        let mut recovered = EditSession::default();
+        recovered.restore_overlay(base.rebase(&s));
+        assert_eq!(texts(&recovered, &doc2), expected);
+        assert!(recovered.is_dirty());
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn rebased_overlay_is_empty_and_clean_when_the_view_equals_the_save() {
+        let (f, doc) = doc_from(b"one\ntwo\n");
+        let mut s = EditSession::default();
+        s.replace_line(&doc, 0, "ONE".into()).unwrap();
+        let out = f.path().with_extension("rebase-clean");
+        s.save_to_path(&doc, &out).unwrap();
+        s.mark_saved();
+        let base = s.rebase_source(&doc);
+
+        // Walk away and back: undo dirties, redo returns to the saved view.
+        assert!(s.undo());
+        let undone = base.rebase(&s);
+        assert!(undone.is_effective());
+        assert!(s.redo());
+        let back = base.rebase(&s);
+        assert!(
+            !back.is_effective(),
+            "view == saved content must rebase to an ineffective snapshot"
+        );
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
     fn shift_jis_edits_are_encoded_while_untouched_bytes_are_preserved() {
         let opts = AyameOpenOptions {
             encoding: Some(Encoding::ShiftJis),

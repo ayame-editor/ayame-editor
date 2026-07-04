@@ -877,6 +877,206 @@ mod tests {
         assert!(recovered.is_dirty());
     }
 
+    /// The owner's repro for the wrong-base snapshot: doc ["a","b"] → insert
+    /// "x" → save (reset_for_save; disk now a,x,b) → undo (view a,b;
+    /// unreplayable → degradation snapshot) → crash. Replay onto the SAVED
+    /// file must yield ["a","b"] dirty — not a,x,b (the pre-fix corruption:
+    /// the snapshot's old-base anchors applied to the new base).
+    #[test]
+    fn undo_after_save_reset_recovers_the_undone_view() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.insert_line_before(&doc, 1, "x".into()).unwrap();
+        assert_eq!(texts(&live, &doc), vec!["a", "x", "b"]);
+        live.save_to_path_overwrite(&doc, f.path()).unwrap();
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal_reset_for_save(&doc, header);
+        assert!(live.wal().is_some());
+
+        assert!(live.undo());
+        assert_eq!(texts(&live, &doc), vec!["a", "b"]);
+        assert!(live.is_dirty(), "the view no longer matches the save");
+        assert_eq!(
+            live.take_wal_error(),
+            None,
+            "the degradation snapshot must succeed via the rebase capture"
+        );
+        drop(live); // simulated crash
+
+        let doc2 = reopen(f.path());
+        assert_eq!(
+            std::str::from_utf8(&std::fs::read(f.path()).unwrap()).unwrap(),
+            "a\nx\nb\n",
+            "sanity: the disk holds the saved content"
+        );
+        assert_eq!(
+            inspect(&wal, &Header::for_document(&doc2).unwrap()),
+            RecoveryInfo::Recoverable { transactions: 0 }
+        );
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 0);
+        assert_eq!(texts(&recovered, &doc2), vec!["a", "b"]);
+        assert!(recovered.is_dirty());
+    }
+
+    /// The same walk, redone: undo then redo lands back on the exact saved
+    /// content, so the crash log must read clean and recovery must show the
+    /// saved view — consistent with the live session's content_gen
+    /// dirtiness.
+    #[test]
+    fn redo_after_undo_across_save_reset_recovers_consistently() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.insert_line_before(&doc, 1, "x".into()).unwrap();
+        live.save_to_path_overwrite(&doc, f.path()).unwrap();
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal_reset_for_save(&doc, header);
+
+        assert!(live.undo());
+        assert!(live.redo());
+        assert!(live.wal().is_some());
+        assert_eq!(live.take_wal_error(), None);
+        let expected = texts(&live, &doc);
+        assert_eq!(expected, vec!["a", "x", "b"]);
+        let expected_dirty = live.is_dirty();
+        assert!(!expected_dirty, "redo returned to the exact saved content");
+        drop(live); // simulated crash
+
+        let doc2 = reopen(f.path());
+        assert_eq!(
+            inspect(&wal, &Header::for_document(&doc2).unwrap()),
+            RecoveryInfo::Clean,
+            "view == saved content: nothing to recover"
+        );
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 0);
+        assert_eq!(texts(&recovered, &doc2), expected);
+        assert_eq!(recovered.is_dirty(), expected_dirty);
+    }
+
+    /// Compaction after a save must write the REBASED overlay: save → more
+    /// edits → wal_compact → another edit → crash ⇒ replay equals the live
+    /// view.
+    #[test]
+    fn compaction_after_save_reset_rebases_onto_the_saved_base() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.insert_line_before(&doc, 1, "x".into()).unwrap(); // a x b
+        live.save_to_path_overwrite(&doc, f.path()).unwrap(); // disk: a x b
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal_reset_for_save(&doc, header);
+
+        live.replace_line(&doc, 0, "A".into()).unwrap(); // A x b
+        live.delete_line(&doc, 2).unwrap(); // A x
+        live.wal_compact();
+        assert!(live.wal().is_some(), "post-save compaction must work");
+        assert_eq!(live.take_wal_error(), None);
+        live.insert_line_before(&doc, 2, "z".into()).unwrap(); // A x z
+        let expected = texts(&live, &doc);
+        assert_eq!(expected, vec!["A", "x", "z"]);
+        drop(live); // simulated crash
+
+        let doc2 = reopen(f.path());
+        assert_eq!(
+            inspect(&wal, &Header::for_document(&doc2).unwrap()),
+            RecoveryInfo::Recoverable { transactions: 1 }
+        );
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 1);
+        assert_eq!(texts(&recovered, &doc2), expected);
+        assert!(recovered.is_dirty());
+    }
+
+    /// A plain `reset` (no session capture) must degrade HONESTLY: an
+    /// unreplayable undo rewrites the log clean and surfaces an error, so
+    /// recovery yields the saved content — never a wrongly-anchored overlay.
+    #[test]
+    fn plain_reset_degrades_the_snapshot_to_a_clean_log() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.insert_line_before(&doc, 1, "x".into()).unwrap();
+        live.save_to_path_overwrite(&doc, f.path()).unwrap();
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal().unwrap().reset(header).unwrap();
+        assert!(!live.wal().unwrap().can_snapshot());
+
+        assert!(live.undo()); // view a,b — inexpressible against the new base
+        assert!(
+            live.wal().is_none(),
+            "the writer must drop rather than log wrongly"
+        );
+        let err = live.take_wal_error().expect("the degradation is surfaced");
+        assert!(err.contains("crash log"), "err: {err}");
+        drop(live); // simulated crash
+
+        // Recovery is DISABLED for that window (clean log ⇒ saved content),
+        // never wrong.
+        let doc2 = reopen(f.path());
+        assert_eq!(
+            inspect(&wal, &Header::for_document(&doc2).unwrap()),
+            RecoveryInfo::Clean
+        );
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 0);
+        assert_eq!(texts(&recovered, &doc2), vec!["a", "x", "b"]);
+        assert!(!recovered.is_dirty());
+    }
+
+    /// After a plain `reset`, compaction skips (the txn log is still correct,
+    /// a snapshot would not be) — the writer survives and replay stays right.
+    #[test]
+    fn compaction_after_plain_reset_skips_instead_of_corrupting() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.insert_line_before(&doc, 1, "x".into()).unwrap();
+        live.save_to_path_overwrite(&doc, f.path()).unwrap();
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal().unwrap().reset(header).unwrap();
+
+        live.replace_line(&doc, 0, "A".into()).unwrap(); // logged, logical coords
+        let before = live.wal().unwrap().len_bytes();
+        live.wal_compact();
+        assert!(live.wal().is_some(), "skip keeps the writer");
+        assert_eq!(live.take_wal_error(), None, "a skip is not an error");
+        assert_eq!(
+            live.wal().unwrap().len_bytes(),
+            before,
+            "the log is left as-is"
+        );
+        let expected = texts(&live, &doc);
+        drop(live); // simulated crash
+
+        let doc2 = reopen(f.path());
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 1);
+        assert_eq!(texts(&recovered, &doc2), expected);
+    }
+
     #[test]
     fn stale_log_is_reported_when_the_base_changed() {
         let (f, doc) = doc_from(b"a\nb\n");
