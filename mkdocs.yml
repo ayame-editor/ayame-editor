@@ -7,6 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: mkdocs
+  nav_style: light
   navigation_depth: 3
   highlightjs: true
   hljs_languages:
@@ -26,6 +27,12 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+
+extra_css:
+  - assets/ayame-docs.css
+
+hooks:
+  - docs/hooks/ayame_pages.py
 
 nav:
   - Home: index.md

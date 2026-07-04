@@ -13,6 +13,7 @@ Cargo.lock.bak
 node_modules
 dist
 /site
+__pycache__/
 
 # OS / editor
 .DS_Store
