@@ -20,8 +20,11 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("release") => release(&args[1..]),
+        Some("typegen") => typegen(&args[1..]),
         _ => {
-            eprintln!("usage: cargo xtask release [--bump patch|minor|major|X.Y.Z] [--yes] [--dry-run] [--skip-gate]");
+            eprintln!(
+                "usage: cargo xtask release [--bump ...] [--yes|--dry-run|--skip-gate]\n       cargo xtask typegen [--check]"
+            );
             return std::process::ExitCode::from(2);
         }
     };
@@ -148,6 +151,26 @@ fn bumped(current: &str, how: &str) -> Result<String> {
         explicit if explicit.split('.').count() == 3 => explicit.to_string(),
         _ => bail!("--bump must be patch, minor, major, or X.Y.Z"),
     })
+}
+
+/// Regenerate (or, with --check, verify) web/types/api.d.ts from the serve API
+/// types via the typegen feature — the Rust/TypeScript type-sharing seam
+/// (typeship + ts-rs, dev-only feature, never in shipped builds).
+fn typegen(args: &[String]) -> Result<()> {
+    let mut cargo_args = vec![
+        "run",
+        "--quiet",
+        "-p",
+        "ayame-cli",
+        "--features",
+        "typegen",
+        "--",
+        "typegen",
+    ];
+    if args.iter().any(|a| a == "--check") {
+        cargo_args.push("--check");
+    }
+    run("cargo", &cargo_args)
 }
 
 fn release(args: &[String]) -> Result<()> {

@@ -173,6 +173,12 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
         "distinct" => aggregate::cmd_distinct(rest),
         "gen" => gen::cmd_gen(rest),
         "serve" => serve::cmd_serve(rest),
+        #[cfg(feature = "typegen")]
+        "typegen" => crate::serve::typegen::cmd_typegen(rest),
+        #[cfg(not(feature = "typegen"))]
+        "typegen" => anyhow::bail!(
+            "typegen requires a dev build: cargo run -p ayame-cli --features typegen -- typegen"
+        ),
         #[cfg(feature = "gui")]
         "gui" => gui::cmd_gui(rest),
         "cache" => cache::cmd_cache(rest),

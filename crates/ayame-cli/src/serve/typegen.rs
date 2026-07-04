@@ -58,13 +58,13 @@ pub(crate) fn cmd_typegen(args: &[String]) -> Result<()> {
         let outcome = rendered
             .check(&path)
             .with_context(|| format!("reading {}", path.display()))?;
-        if outcome.is_match() {
-            println!("typegen: {} is up to date", path.display());
+        if outcome.is_up_to_date() {
+            println!("typegen: {}", outcome.summary());
             Ok(())
         } else {
             bail!(
-                "{} is out of date — run `cargo xtask typegen` and commit the result",
-                path.display()
+                "{} — run `cargo xtask typegen` and commit the result",
+                outcome.summary()
             );
         }
     } else {

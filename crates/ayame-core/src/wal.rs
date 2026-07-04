@@ -30,19 +30,28 @@
 //! Every record is written and flushed to the OS on commit, so it survives a
 //! process crash; [`WalWriter::sync`] additionally fsyncs for power-loss
 //! safety, on whatever cadence the caller chooses. Rewrites (create/reset/
-//! compaction) go through a temp file + rename, so a crash leaves either the
-//! old or the new complete log. A torn trailing line (a record cut short by
-//! a crash) is ignored on read; appends only ever go to a file this writer
-//! wrote from scratch, so a torn tail never receives further records.
+//! compaction) go through a temp file + rename — with a rename-aside step
+//! when the target cannot be replaced in place — so a crash leaves either the
+//! old or the new complete log on disk, and the parent directory is fsynced
+//! (best-effort, Unix) after the swap. A torn trailing line (an unterminated
+//! record cut short by a crash mid-append) is ignored on read; a malformed
+//! COMPLETE line, by contrast, marks the whole log [`RecoveryInfo::Invalid`]
+//! — corruption must never silently truncate recovery. Appends only ever go
+//! to a file this writer wrote from scratch, so a torn tail never receives
+//! further records.
 //!
 //! # Known limits (by design)
 //!
 //! * Undo/redo reaching history from before the log's start (a reset-on-save
 //!   or a compaction) cannot be replayed as records; the session degrades
 //!   them to a fresh full snapshot, trading a little log churn for
-//!   correctness.
+//!   correctness. After a save the snapshot is re-anchored onto the new base
+//!   through the capture taken by [`WalWriter::reset_for_save`]; a plain
+//!   [`WalWriter::reset`] has no capture, so such a snapshot degrades further
+//!   to a clean log plus a surfaced error (never a wrongly-anchored one).
 //! * `revert`/`save` are not logged — the caller resets the log instead
-//!   ([`WalWriter::reset`]), because the base identity changed.
+//!   ([`WalWriter::reset_for_save`] after a save of the session's content,
+//!   [`WalWriter::reset`] otherwise), because the base identity changed.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -177,8 +186,10 @@ pub enum RecoveryInfo {
     /// The log was recorded against a different version of the file
     /// (modified, replaced, or reopened with another encoding). Never replay.
     Stale,
-    /// The log is unusable: unreadable, unparseable header, or an unknown
-    /// format version.
+    /// The log is unusable: unreadable, unparseable header, an unknown
+    /// format version, or a corrupted record body (a malformed COMPLETE
+    /// line — as opposed to a benign torn trailing fragment). Never replay,
+    /// never silently truncate.
     Invalid,
 }
 
@@ -515,11 +526,14 @@ fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
     h
 }
 
-/// One read step over the log: a parsed record, a torn/corrupt line (stop
-/// trusting anything after it), or end of file.
+/// One read step over the log: a parsed record, a torn trailing fragment
+/// (benign: a record cut short by a crash mid-append, nothing was committed
+/// after it), corruption (a COMPLETE line that fails to parse — the log
+/// cannot be trusted), or end of file.
 enum Parsed {
     Rec(Record),
     Torn,
+    Invalid,
     Eof,
 }
 
@@ -529,9 +543,15 @@ fn next_record(r: &mut BufReader<File>, buf: &mut Vec<u8>) -> Parsed {
         Ok(0) => Parsed::Eof,
         Ok(_) => match serde_json::from_slice::<Record>(buf) {
             Ok(rec) => Parsed::Rec(rec),
+            // A malformed line that is newline-terminated was written out in
+            // full: that is corruption, and skipping it (or anything after
+            // it) would silently drop committed records. Only an
+            // unterminated final fragment — `read_until` stops short of a
+            // newline solely at EOF — is the benign torn tail.
+            Err(_) if buf.last() == Some(&b'\n') => Parsed::Invalid,
             Err(_) => Parsed::Torn,
         },
-        Err(_) => Parsed::Torn,
+        Err(_) => Parsed::Invalid,
     }
 }
 
@@ -539,9 +559,9 @@ fn next_record(r: &mut BufReader<File>, buf: &mut Vec<u8>) -> Parsed {
 /// described by `expected` (build it with [`Header::for_document`] /
 /// [`Header::for_file`] from the CURRENT file). Never modifies the log.
 pub fn inspect(wal_path: impl AsRef<Path>, expected: &Header) -> RecoveryInfo {
-    let file = match File::open(wal_path.as_ref()) {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return RecoveryInfo::Clean,
+    let file = match open_wal_file(wal_path.as_ref()) {
+        Ok(Some(f)) => f,
+        Ok(None) => return RecoveryInfo::Clean,
         Err(_) => return RecoveryInfo::Invalid,
     };
     let mut r = BufReader::new(file);
@@ -549,7 +569,7 @@ pub fn inspect(wal_path: impl AsRef<Path>, expected: &Header) -> RecoveryInfo {
     let header = match next_record(&mut r, &mut buf) {
         Parsed::Eof => return RecoveryInfo::Clean,
         Parsed::Rec(Record::Header(h)) => h,
-        Parsed::Torn | Parsed::Rec(_) => return RecoveryInfo::Invalid,
+        Parsed::Torn | Parsed::Invalid | Parsed::Rec(_) => return RecoveryInfo::Invalid,
     };
     if header.version != WAL_VERSION {
         return RecoveryInfo::Invalid;
@@ -567,9 +587,13 @@ pub fn inspect(wal_path: impl AsRef<Path>, expected: &Header) -> RecoveryInfo {
                 transactions = 0;
                 snapshot_effective = overlay.is_effective();
             }
-            // A header is only ever the first line; anything else here is
-            // corruption — treat it like a torn tail and stop.
-            Parsed::Rec(Record::Header(_)) | Parsed::Torn | Parsed::Eof => break,
+            // A header is only ever the first line: a second one is body
+            // corruption exactly like an unparseable complete line, and a
+            // corrupt log must never silently truncate recovery.
+            Parsed::Rec(Record::Header(_)) | Parsed::Invalid => return RecoveryInfo::Invalid,
+            // Only an unterminated final fragment (a record cut short by a
+            // crash mid-append) is ignorable.
+            Parsed::Torn | Parsed::Eof => break,
         }
     }
     if transactions > 0 || snapshot_effective {
@@ -601,9 +625,9 @@ pub fn replay(
 }
 
 fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> Result<usize> {
-    let file = match File::open(wal_path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+    let file = match open_wal_file(wal_path) {
+        Ok(Some(f)) => f,
+        Ok(None) => return Ok(0),
         Err(e) => return Err(Error::Io(e)),
     };
     let mut r = BufReader::new(file);
@@ -611,7 +635,7 @@ fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> R
     let header = match next_record(&mut r, &mut buf) {
         Parsed::Eof => return Ok(0),
         Parsed::Rec(Record::Header(h)) => h,
-        Parsed::Torn | Parsed::Rec(_) => {
+        Parsed::Torn | Parsed::Invalid | Parsed::Rec(_) => {
             return Err(Error::Unsupported(
                 "the crash log has no readable header".into(),
             ))
@@ -636,7 +660,15 @@ fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> R
                 apply(doc, session, op)?;
                 count += 1;
             }
-            Parsed::Rec(Record::Header(_)) | Parsed::Torn | Parsed::Eof => break,
+            // Body corruption (a complete-but-unparseable line, or a header
+            // where none may appear): refuse rather than restore a silently
+            // truncated state.
+            Parsed::Rec(Record::Header(_)) | Parsed::Invalid => {
+                return Err(Error::Unsupported(
+                    "the crash log is corrupted; refusing to replay it".into(),
+                ))
+            }
+            Parsed::Torn | Parsed::Eof => break,
         }
     }
     Ok(count)
