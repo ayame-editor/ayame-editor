@@ -30,6 +30,8 @@
 //! * [`document`] — [`Document`], the immutable mmap-backed base handle.
 //!   Editing can be layered above it with a patch/WAL model without copying the
 //!   whole file into memory.
+//! * [`wal`] — the crash-persistence log for that edit overlay: committed
+//!   transactions are mirrored to disk so unsaved edits survive a crash.
 
 pub mod document;
 pub mod edit;
@@ -41,6 +43,7 @@ pub mod ops;
 pub mod search;
 pub mod split;
 pub mod transform;
+pub mod wal;
 
 pub use document::{Document, FileStat, Line, OpenOptions, TailRefresh};
 pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
@@ -57,6 +60,7 @@ pub use transform::{
     case_to_path, replace_to_path, replace_to_path_parallel, CaseMode, CaseOptions,
     ParallelReplaceOptions, ReplaceOptions, TransformResult, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
+pub use wal::{LoggedOp, RecoveryInfo, WalWriter};
 
 /// Errors surfaced by the engine.
 #[derive(Debug, thiserror::Error)]

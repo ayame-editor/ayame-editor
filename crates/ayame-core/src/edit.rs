@@ -636,7 +636,15 @@ impl EditSession {
     ) -> Result<(u64, usize)> {
         let mut record = UndoRecord::new();
         let caret = self.replace_range_inner(doc, l0, c0, l1, c1, text, &mut record)?;
-        self.finish_change(record);
+        if self.finish_change(record) {
+            self.wal_commit(|| LoggedOp::ReplaceRange {
+                l0,
+                c0,
+                l1,
+                c1,
+                text: text.to_string(),
+            });
+        }
         Ok(caret)
     }
 
@@ -798,7 +806,11 @@ impl EditSession {
                 return Err(e);
             }
         }
-        self.finish_change(record);
+        if self.finish_change(record) {
+            self.wal_commit(|| LoggedOp::Batch {
+                edits: edits.to_vec(),
+            });
+        }
 
         // Map each caret into post-batch coordinates by replaying ascending:
         // `line_delta` accumulates the line-count change of everything above,
@@ -872,7 +884,15 @@ impl EditSession {
             let tail: String = original.chars().skip(end).collect();
             self.replace_line_inner(doc, line, format!("{head}{replacement}{tail}"), &mut record)?;
         }
-        self.finish_change(record);
+        if self.finish_change(record) {
+            self.wal_commit(|| LoggedOp::ReplaceRect {
+                l0,
+                l1,
+                c0,
+                c1,
+                text: text.to_string(),
+            });
+        }
         let caret_line = if parts.len() == 1 {
             bottom
         } else {
@@ -1104,9 +1124,13 @@ impl EditSession {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    fn finish_change(&mut self, record: UndoRecord) {
+    /// Commit `record` as one undo generation. Returns whether anything
+    /// actually changed: an empty record is the shared no-op detection for
+    /// every public mutator — nothing is pushed, no generation moves, and the
+    /// caller must not mirror the op into the crash log either.
+    fn finish_change(&mut self, record: UndoRecord) -> bool {
         if record.is_empty() {
-            return;
+            return false;
         }
         push_history(
             &mut self.undo,
@@ -1118,6 +1142,67 @@ impl EditSession {
         self.redo.clear();
         self.content_gen = self.next_gen;
         self.next_gen += 1;
+        self.bump();
+        true
+    }
+
+    /// Mirror a committed transaction into the attached crash log. Called only
+    /// after a mutating public op ACTUALLY changed state (the same condition
+    /// that pushes history and bumps the revision). `make` runs — and the op
+    /// is materialized — only when a writer is attached, so the no-WAL hot
+    /// path pays a single `Option` check.
+    ///
+    /// An undo/redo that walks into history the log cannot replay (entries
+    /// older than the log's start: before a reset-on-save or a compaction
+    /// snapshot) is degraded to a fresh snapshot of the current state, which
+    /// is always replayable. A write failure NEVER fails the edit: the writer
+    /// is dropped and the error kept for [`EditSession::take_wal_error`].
+    fn wal_commit(&mut self, make: impl FnOnce() -> LoggedOp) {
+        if self.wal.is_none() {
+            return;
+        }
+        let op = make();
+        let Some(mut w) = self.wal.take() else { return };
+        let result = if w.can_replay(&op) {
+            w.log(&op)
+        } else {
+            w.snapshot(self)
+        };
+        match result {
+            Ok(()) => self.wal = Some(w),
+            Err(e) => self.wal_error = Some(format!("crash log disabled: {e}")),
+        }
+    }
+
+    /// Detach the writer while [`crate::wal::replay`] drives this session, so
+    /// replayed ops are not logged right back into the file being read.
+    pub(crate) fn wal_detach(&mut self) -> Option<WalWriter> {
+        self.wal.take()
+    }
+
+    pub(crate) fn wal_restore(&mut self, w: Option<WalWriter>) {
+        self.wal = w;
+    }
+
+    /// Serializable image of the overlay for a compaction snapshot.
+    pub(crate) fn overlay_snapshot(&self) -> OverlaySnapshot {
+        OverlaySnapshot {
+            events: self.events.clone(),
+            dirty: self.is_dirty(),
+        }
+    }
+
+    /// Restore a compaction snapshot: the overlay exactly as recorded, an
+    /// empty undo/redo history (deliberately not serialized — see
+    /// [`crate::wal`]), and dirtiness relative to the base file on disk (the
+    /// disk holds the as-opened content after a crash, so `saved_gen` is 0).
+    pub(crate) fn restore_overlay(&mut self, snap: OverlaySnapshot) {
+        self.events = snap.events;
+        self.undo.clear();
+        self.redo.clear();
+        self.saved_gen = 0;
+        self.content_gen = if snap.dirty { 1 } else { 0 };
+        self.next_gen = 2;
         self.bump();
     }
 
