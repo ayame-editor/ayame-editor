@@ -18,11 +18,13 @@ Download the build for your OS from the
 
 You can also install from the terminal.
 
-macOS / Windows:
+macOS:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
+
+Windows: download `ayame-*.exe` from Releases.
 
 Linux: install WebKitGTK 4.1 first, then install Ayame.
 

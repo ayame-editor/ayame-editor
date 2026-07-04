@@ -17,11 +17,13 @@ macOS、Windows、Linux で動作します。
 
 ターミナルからインストールすることもできます。
 
-macOS / Windows:
+macOS:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
+
+Windows は Releases から `ayame-*.exe` をダウンロードしてください。
 
 Linux: 先に WebKitGTK 4.1 を入れてから Ayame をインストールします。
 
