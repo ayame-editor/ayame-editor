@@ -182,6 +182,10 @@ const I18N_EN = {
   "一致なし": "No matches",
   "エラー": "Error",
   "検索エラー": "Search error",
+  "矩形選択では Ctrl+D は使えません": "Ctrl+D cannot be used with rectangular selection.",
+  "選択できる単語がありません": "No selectable word.",
+  "複数行選択では Ctrl+D は使えません": "Ctrl+D cannot be used with a multi-line selection.",
+  "次の一致はありません": "No next occurrence.",
   "コピーしました": "Copied",
   "コピーエラー": "Copy error",
   "ここからは貼り付けできません — Ctrl+V を使ってください": "Cannot paste from here. Use Ctrl+V.",
@@ -3252,8 +3256,9 @@ function suggestedSaveAsPath() {
 
 // Expand the メモの名前 template tokens from the current local time.
 // {date}=YYYYMMDD, {time}=HHMMSS, {datetime}=YYYYMMDD-HHMMSS; note {mm} is the
-// month and {MM} the minutes (all zero-padded).
-function expandNameTemplate(t) {
+// month and {MM} the minutes (all zero-padded). The parameter is deliberately
+// not named `t` — that is the i18n helper.
+function expandNameTemplate(tpl) {
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, "0");
   const yyyy = String(d.getFullYear()).padStart(4, "0");
@@ -3269,7 +3274,7 @@ function expandNameTemplate(t) {
   map["{date}"] = `${yyyy}${map["{mm}"]}${map["{dd}"]}`;
   map["{time}"] = `${map["{HH}"]}${map["{MM}"]}${map["{ss}"]}`;
   map["{datetime}"] = `${map["{date}"]}-${map["{time}"]}`;
-  return String(t || "").replace(
+  return String(tpl || "").replace(
     /\{(?:yyyy|yy|mm|dd|HH|MM|ss|date|time|datetime)\}/g,
     (m) => map[m]
   );

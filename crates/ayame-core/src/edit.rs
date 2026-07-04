@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::wal::{LoggedOp, WalWriter};
 use crate::{Document, Error, Result};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EditSession {
     events: BTreeMap<u64, EditEvent>,
     undo: Vec<HistoryEntry>,
@@ -32,6 +33,14 @@ pub struct EditSession {
     /// The content generation last written to disk (0 = the document as
     /// opened). See [`EditSession::mark_saved`].
     saved_gen: u64,
+    /// Attached crash log ([`crate::wal`]): every committed transaction is
+    /// mirrored into it. Deliberately excluded from `Clone` — see the manual
+    /// impl below.
+    wal: Option<WalWriter>,
+    /// First WAL write failure, kept so the caller can surface it once
+    /// ([`EditSession::take_wal_error`]). The writer itself is dropped: an
+    /// I/O problem with the crash log must never fail the edit.
+    wal_error: Option<String>,
 }
 
 impl Default for EditSession {
@@ -44,11 +53,35 @@ impl Default for EditSession {
             content_gen: 0,
             next_gen: 1,
             saved_gen: 0,
+            wal: None,
+            wal_error: None,
         }
     }
 }
 
-const HISTORY_LIMIT: usize = 256;
+/// Cloning copies the FULL editing state (overlay, history, generations) but
+/// deliberately NOT the WAL attachment. Clones are taken as save snapshots and
+/// parked tab copies; if they carried the writer, one committed transaction
+/// could be logged twice (or the single log file written from two owners).
+/// The live session in the workspace is the only logger — a clone that should
+/// log gets its own writer via [`EditSession::set_wal`].
+impl Clone for EditSession {
+    fn clone(&self) -> EditSession {
+        EditSession {
+            events: self.events.clone(),
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+            revision: self.revision,
+            content_gen: self.content_gen,
+            next_gen: self.next_gen,
+            saved_gen: self.saved_gen,
+            wal: None,
+            wal_error: None,
+        }
+    }
+}
+
+pub(crate) const HISTORY_LIMIT: usize = 256;
 
 /// One undo/redo generation: the inverse steps of a single edit transaction,
 /// stored in the order the forward mutations happened. Rolling back applies
@@ -92,13 +125,33 @@ enum UndoOp {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct EditEvent {
     /// Lines inserted before this original line. The special anchor
     /// `original_line_count` means "append after the original file".
     inserts: Vec<String>,
     replacement: Option<String>,
     deleted: bool,
+}
+
+/// Serializable image of the overlay for WAL compaction snapshots
+/// ([`crate::wal`]). Carries exactly what a recovered session needs to show
+/// the same text again: the anchor map, plus whether that content differed
+/// from the last save. The undo/redo history is deliberately NOT serialized —
+/// a recovered session starts with an empty history below the replayed
+/// suffix.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct OverlaySnapshot {
+    events: BTreeMap<u64, EditEvent>,
+    dirty: bool,
+}
+
+impl OverlaySnapshot {
+    /// Whether restoring this snapshot yields anything besides a clean,
+    /// as-opened session (i.e. it is worth recovering).
+    pub(crate) fn is_effective(&self) -> bool {
+        self.dirty || !self.events.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -133,7 +186,7 @@ pub struct SaveResult {
 /// (l0,c0)..(l1,c1) is replaced by `text`, with exactly the semantics of
 /// [`EditSession::replace_range`]. All coordinates refer to the shared view
 /// BEFORE the batch; columns are Unicode scalar (char) counts.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchEdit {
     pub l0: u64,
     pub c0: usize,
@@ -194,6 +247,45 @@ impl EditSession {
         self.saved_gen = gen;
     }
 
+    /// Attach (or detach) a crash log: every committed transaction is mirrored
+    /// into `w` so unsaved edits survive a process crash (see [`crate::wal`]).
+    /// Replaces any previous writer and clears a pending
+    /// [`EditSession::take_wal_error`]. Attach BEFORE editing (or write a
+    /// [`WalWriter::snapshot`] right after attaching to a session that already
+    /// has edits) — the log only ever contains what happened after it started.
+    pub fn set_wal(&mut self, w: Option<WalWriter>) {
+        self.wal = w;
+        self.wal_error = None;
+    }
+
+    /// The attached crash log, if any — so the caller can drive policy:
+    /// [`WalWriter::reset`] on a successful save, [`WalWriter::sync`] on its
+    /// own fsync cadence, [`WalWriter::len_bytes`] for compaction thresholds.
+    pub fn wal(&mut self) -> Option<&mut WalWriter> {
+        self.wal.as_mut()
+    }
+
+    /// First crash-log write failure, if one occurred; surfacing it consumes
+    /// it. Logging degrades by dropping the writer — an I/O problem with the
+    /// log must never fail the edit itself — so after this returns `Some` the
+    /// session keeps editing, just without crash persistence.
+    pub fn take_wal_error(&mut self) -> Option<String> {
+        self.wal_error.take()
+    }
+
+    /// Compact the attached crash log to its header plus one full-overlay
+    /// snapshot, superseding the per-transaction records. Callers watch
+    /// [`WalWriter::len_bytes`] and compact past their threshold (e.g.
+    /// 64 MiB). Failures degrade exactly like logging failures: the writer is
+    /// dropped and the error kept for [`EditSession::take_wal_error`].
+    pub fn wal_compact(&mut self) {
+        let Some(mut w) = self.wal.take() else { return };
+        match w.snapshot(self) {
+            Ok(()) => self.wal = Some(w),
+            Err(e) => self.wal_error = Some(format!("crash log disabled: {e}")),
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -216,6 +308,7 @@ impl EditSession {
         );
         self.content_gen = entry.gen;
         self.bump();
+        self.wal_commit(|| LoggedOp::Undo);
         true
     }
 
@@ -233,6 +326,7 @@ impl EditSession {
         );
         self.content_gen = entry.gen;
         self.bump();
+        self.wal_commit(|| LoggedOp::Redo);
         true
     }
 
@@ -240,6 +334,10 @@ impl EditSession {
     /// document as opened (generation 0). `saved_gen` is deliberately kept —
     /// if a save has happened since open, the disk holds that saved content,
     /// so a cleared session correctly reads dirty until saved again.
+    ///
+    /// A revert is NOT mirrored into an attached crash log: like a save, the
+    /// caller must [`WalWriter::reset`] the log so its old records never
+    /// replay onto content they no longer describe.
     pub fn clear(&mut self) {
         if !self.events.is_empty()
             || !self.undo.is_empty()
@@ -337,9 +435,19 @@ impl EditSession {
     }
 
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
+        // Pre-clone the text for the log only when a WAL is attached (the
+        // inner call consumes it); the no-WAL path stays allocation-free.
+        let logged = self.wal.is_some().then(|| text.clone());
         let mut record = UndoRecord::new();
         self.replace_line_inner(doc, logical, text, &mut record)?;
-        self.finish_change(record);
+        if self.finish_change(record) {
+            if let Some(text) = logged {
+                self.wal_commit(move || LoggedOp::ReplaceLine {
+                    line: logical,
+                    text,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -402,9 +510,17 @@ impl EditSession {
     /// Insert `text` before logical line `logical`; `logical == total_lines`
     /// appends after the current document.
     pub fn insert_line_before(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
+        let logged = self.wal.is_some().then(|| text.clone());
         let mut record = UndoRecord::new();
         self.insert_line_before_inner(doc, logical, text, &mut record)?;
-        self.finish_change(record);
+        if self.finish_change(record) {
+            if let Some(text) = logged {
+                self.wal_commit(move || LoggedOp::InsertLine {
+                    line: logical,
+                    text,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -456,7 +572,9 @@ impl EditSession {
     pub fn delete_line(&mut self, doc: &Document, logical: u64) -> Result<()> {
         let mut record = UndoRecord::new();
         self.delete_line_inner(doc, logical, &mut record)?;
-        self.finish_change(record);
+        if self.finish_change(record) {
+            self.wal_commit(|| LoggedOp::DeleteLine { line: logical });
+        }
         Ok(())
     }
 
