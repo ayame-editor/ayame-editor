@@ -4,8 +4,7 @@
 
 A fast desktop text editor for huge files.
 
-Ayame opens large logs and CSV files quickly, detects common Japanese encodings
-automatically, and runs on macOS, Windows, and Linux.
+Runs on macOS, Windows, and Linux.
 
 ## Download
 
