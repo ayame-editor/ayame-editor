@@ -1,11 +1,13 @@
-# 開発手順
+# Development Guide
 
-Ayame は Rust workspace です。
+*日本語版: [ja/DEVELOPMENT.md](ja/DEVELOPMENT.md)*
 
-- `ayame-core`: mmap / 疎インデックス / 検索 / 編集エンジン。
-- `ayame-cli`: CLI、ローカル Web エディタ、任意のネイティブウィンドウ。
+Ayame is a Rust workspace.
 
-全 OS 共通の基本ループ:
+- `ayame-core`: mmap / sparse index / search / editing engine.
+- `ayame-cli`: CLI, local web editor, optional native window.
+
+The basic loop, common to all OSes:
 
 ```sh
 cargo fmt --all --check
@@ -13,26 +15,27 @@ cargo test --locked
 cargo run -p ayame-cli -- --help
 ```
 
-通常の CLI / Web エディタ開発は Rust だけで足ります。ネイティブウィンドウ
-（`ayame gui`）を動かす時だけ `--features gui` と OS 別の WebView 依存が必要です。
+For ordinary CLI / web editor development, Rust alone is enough. Only when running
+the native window (`ayame gui`) do you need `--features gui` and the per-OS WebView
+dependencies.
 
 
-## 開発体験 (ツーリング)
+## Developer experience (tooling)
 
-コードの全体像は [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)(実装の地図と主要リファクタの記録)から。
+For a map of the code, start with [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) (a map of the implementation and a record of major refactors).
 
-リポジトリ直下の設定で、誰の環境でも同じ結果になるようにしてある:
+Configuration at the repository root makes results identical on anyone's machine:
 
-- **rust-toolchain.toml** — stable + rustfmt + clippy を自動で揃える(rustup が読む)。
-- **rustfmt.toml / .editorconfig** — 改行は LF、インデントは Rust 4 / それ以外 2。
-- **Cargo.toml `[workspace.lints]`** — `dbg!` / `todo!` / `unimplemented!` はビルドエラー。
-  CI はさらに `cargo clippy -D warnings`(gui feature 込み)を強制。
-- **フロントエンド** — ビルド工程なしの素の JS。CI で `node --check web/app.js` を実行。
-  formatter/linter は **oxfmt / oxlint**(oxc、Rust製の単一バイナリで Node 不要)を採用予定 —
-  進行中の大きな変更が合流した時点で一括フォーマットして CI に組み込む。
-- **リリース** — `cargo xtask release --bump patch` の1コマンド(docs/RELEASE.md)。
+- **rust-toolchain.toml** — automatically pins stable + rustfmt + clippy (read by rustup).
+- **rustfmt.toml / .editorconfig** — LF line endings; indentation is 4 for Rust, 2 for everything else.
+- **Cargo.toml `[workspace.lints]`** — `dbg!` / `todo!` / `unimplemented!` are build errors.
+  CI additionally enforces `cargo clippy -D warnings` (including the gui feature).
+- **Frontend** — plain JS with no build step. CI runs `node --check web/app.js`.
+  The planned formatter/linter is **oxfmt / oxlint** (oxc: single Rust binaries, no Node required) —
+  once the large in-flight changes have merged, everything will be formatted in one pass and wired into CI.
+- **Releases** — a single command, `cargo xtask release --bump patch` (docs/RELEASE.md).
 
-日常のゲートはこれだけ:
+The daily gate is just this:
 
 ```sh
 cargo fmt --all --check
@@ -43,9 +46,9 @@ node --check crates/ayame-cli/web/app.js
 
 ## Windows
 
-PowerShell を使います。
+Use PowerShell.
 
-### 1. 必要なもの
+### 1. Prerequisites
 
 - Git for Windows
 - Visual Studio Build Tools 2022
@@ -53,9 +56,9 @@ PowerShell を使います。
 - rustup
   - toolchain: `stable-x86_64-pc-windows-msvc`
 - Microsoft Edge WebView2 Runtime
-  - `cargo run ... --features gui -- gui` に必要
+  - required for `cargo run ... --features gui -- gui`
 
-### 2. ツールチェーン確認
+### 2. Verify the toolchain
 
 ```powershell
 rustup default stable-x86_64-pc-windows-msvc
@@ -63,7 +66,7 @@ rustc -V
 cargo -V
 ```
 
-### 3. ビルドとテスト
+### 3. Build and test
 
 ```powershell
 cargo fmt --all --check
@@ -72,7 +75,7 @@ cargo build --release --locked
 cargo build --release --locked --features gui
 ```
 
-### 4. CLI / Web エディタ起動
+### 4. Run the CLI / web editor
 
 ```powershell
 New-Item -ItemType Directory -Force samples
@@ -81,18 +84,18 @@ cargo run -p ayame-cli -- stat .\samples\dev.csv
 cargo run -p ayame-cli -- serve .\samples\dev.csv --port 8777
 ```
 
-ブラウザで `http://127.0.0.1:8777/` を開きます。
+Open `http://127.0.0.1:8777/` in a browser.
 
-### 5. ネイティブウィンドウ起動
+### 5. Run the native window
 
 ```powershell
 cargo run -p ayame-cli --features gui -- gui .\samples\dev.csv
 ```
 
-### 6. ローカル release artifact
+### 6. Local release artifact
 
-`scripts/release-local.sh` は Bash スクリプトです。Windows では Git Bash から実行します。
-ネイティブアプリ版（`--features gui`）を作るため、WebView2 Runtime も入れておきます。
+`scripts/release-local.sh` is a Bash script. On Windows, run it from Git Bash.
+Since it builds the native app (`--features gui`), install the WebView2 Runtime as well.
 
 ```sh
 bash scripts/release-local.sh x86_64-pc-windows-msvc
@@ -100,25 +103,25 @@ bash scripts/release-local.sh x86_64-pc-windows-msvc
 
 ## macOS
 
-Terminal を使います。
+Use Terminal.
 
-### 1. 必要なもの
+### 1. Prerequisites
 
 ```sh
 xcode-select --install
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Apple Silicon / Intel どちらも stable Rust で開発できます。
+Both Apple Silicon and Intel can develop on stable Rust.
 
-### 2. ツールチェーン確認
+### 2. Verify the toolchain
 
 ```sh
 rustc -V
 cargo -V
 ```
 
-### 3. ビルドとテスト
+### 3. Build and test
 
 ```sh
 cargo fmt --all --check
@@ -127,7 +130,7 @@ cargo build --release --locked
 cargo build --release --locked --features gui
 ```
 
-### 4. CLI / Web エディタ起動
+### 4. Run the CLI / web editor
 
 ```sh
 mkdir -p samples
@@ -136,15 +139,15 @@ cargo run -p ayame-cli -- stat samples/dev.csv
 cargo run -p ayame-cli -- serve samples/dev.csv --port 8777
 ```
 
-ブラウザで `http://127.0.0.1:8777/` を開きます。
+Open `http://127.0.0.1:8777/` in a browser.
 
-### 5. ネイティブウィンドウ起動
+### 5. Run the native window
 
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
 ```
 
-### 6. ローカル release artifact
+### 6. Local release artifact
 
 ```sh
 scripts/release-local.sh
@@ -152,7 +155,7 @@ scripts/release-local.sh
 
 ## Linux
 
-通常の shell を使います。
+Use your usual shell.
 
 ### 1. Rust
 
@@ -160,10 +163,10 @@ scripts/release-local.sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### 2. OS パッケージ
+### 2. OS packages
 
-CLI だけなら Rust と C toolchain で十分です。`--features gui` を使う場合は
-GTK / WebKitGTK が必要です。
+For the CLI alone, Rust and a C toolchain are enough. If you use `--features gui`,
+GTK / WebKitGTK are required.
 
 Debian / Ubuntu:
 
@@ -184,7 +187,7 @@ Arch:
 sudo pacman -S --needed base-devel pkgconf gtk3 webkit2gtk-4.1
 ```
 
-### 3. ビルドとテスト
+### 3. Build and test
 
 ```sh
 cargo fmt --all --check
@@ -193,7 +196,7 @@ cargo build --release --locked
 cargo build --release --locked --features gui
 ```
 
-### 4. CLI / Web エディタ起動
+### 4. Run the CLI / web editor
 
 ```sh
 mkdir -p samples
@@ -202,15 +205,15 @@ cargo run -p ayame-cli -- stat samples/dev.csv
 cargo run -p ayame-cli -- serve samples/dev.csv --port 8777
 ```
 
-ブラウザで `http://127.0.0.1:8777/` を開きます。
+Open `http://127.0.0.1:8777/` in a browser.
 
-### 5. ネイティブウィンドウ起動
+### 5. Run the native window
 
 ```sh
 cargo run -p ayame-cli --features gui -- gui samples/dev.csv
 ```
 
-### 6. ローカル release artifact
+### 6. Local release artifact
 
 ```sh
 scripts/release-local.sh
@@ -218,7 +221,7 @@ scripts/release-local.sh
 
 ## Release gate
 
-タグを切る前に実行します。
+Run before cutting a tag.
 
 ```sh
 cargo fmt --all --check
@@ -229,5 +232,5 @@ cargo build --release --locked --features gui
 scripts/crash-isolation-test.sh
 ```
 
-GitHub Releases の OS 別 artifact は GitHub Actions が作ります。手元で確認する時は
-`scripts/release-local.sh` を使います。
+The per-OS artifacts on GitHub Releases are built by GitHub Actions. To verify
+locally, use `scripts/release-local.sh`.

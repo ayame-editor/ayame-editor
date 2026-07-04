@@ -16,6 +16,7 @@ use super::{
 // ---- workspace: open / browse / upload --------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct OpenRequest {
     path: String,
 }
@@ -85,6 +86,7 @@ pub(super) struct BrowseQuery {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct BrowseEntry {
     name: String,
     path: String,
@@ -93,6 +95,7 @@ pub(super) struct BrowseEntry {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct BrowseResponse {
     dir: String,
     parent: Option<String>,

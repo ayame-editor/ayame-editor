@@ -1,164 +1,181 @@
-# 実装ノート — 何がどう作られているか (v0.3.x)
+# Implementation Notes — What Is Built, and How (v0.3.x)
 
-コードを読む前の地図。各機構の「なぜこの形か」と、それがどのファイルにあるかをまとめる。
-設計判断の背景は [DESIGN.md](DESIGN.md)、残タスクは [ROADMAP.md](ROADMAP.md)。
+*日本語版: [ja/IMPLEMENTATION_NOTES.md](ja/IMPLEMENTATION_NOTES.md)*
 
-## 全体構造
+A map to read before reading the code. For each mechanism, this collects "why this shape" and which file it lives in.
+Background for the design decisions is in [DESIGN.md](DESIGN.md); remaining tasks are in [ROADMAP.md](ROADMAP.md).
+
+## Overall structure
 
 ```
-ayame (単一バイナリ)
-├─ ayame-core     エンジン: mmap + 疎インデックス + 編集オーバーレイ + 変換/検索/分割
+ayame (single binary)
+├─ ayame-core     engine: mmap + sparse index + edit overlay + transform/search/split
 ├─ ayame-cli
-│   ├─ cli/       CLIサブコマンド (stat/search/sort/replace/case/split/gen/diff/…)
-│   ├─ serve/     ローカルHTTPサーバ = UI層 (axum、ループバック既定)
-│   ├─ gui.rs     ネイティブ窓 (tao + wry = OSのWebView)。serve を裏で起動して指す
-│   └─ web/       フロントエンド (素のJS、ビルド工程なし、バイナリに埋め込み)
-└─ xtask          リポジトリ自動化 (cargo xtask release)
+│   ├─ cli/       CLI subcommands (stat/search/sort/replace/case/split/gen/diff/…)
+│   ├─ serve/     local HTTP server = UI layer (axum, loopback by default)
+│   ├─ gui.rs     native window (tao + wry = the OS WebView). Launches serve in the background and points at it
+│   └─ web/       frontend (plain JS, no build step, embedded in the binary)
+└─ xtask          repository automation (cargo xtask release)
 ```
 
-ネイティブアプリが製品。`gui` は `serve` をエフェメラルポートで裏起動し、
-OSのWebView(WKWebView / WebView2 / WebKitGTK)を向けるだけ — UIスタックは1つしかない。
+The native app is the product. `gui` launches `serve` in the background on an ephemeral port and
+simply points the OS WebView (WKWebView / WebView2 / WebKitGTK) at it — there is only one UI stack.
 
-## エンジン (ayame-core)
+## Engine (ayame-core)
 
-### 読み取り: mmap + 疎行インデックス
-- `document.rs` / `index.rs`: ファイルは immutable に mmap し、`stride`(既定4096)行ごとの
-  チェックポイント(16B)だけ持つ。任意行へのアクセスは「直近チェックポイントから memchr で歩く」
-  O(stride)。100億行でもインデックスは数MB。インデックスはディスクキャッシュされ再オープンは瞬時。
-- **フルインメモリの rope / piece table は作らない**(設計上の禁止事項)。巨大ファイルで
-  メモリが吹き飛ぶ構造を最初から持たないことが「落ちない」の土台。
+### Reading: mmap + sparse line index
+- `document.rs` / `index.rs`: the file is mmap'd immutably, and only a checkpoint (16B) per
+  `stride` (default 4096) lines is kept. Access to an arbitrary line is "walk with memchr from the
+  nearest checkpoint" — O(stride). Even at 10 billion lines the index is a few MB. The index is
+  disk-cached, so reopening is instant.
+- **No fully in-memory rope / piece table will be built** (a design-level prohibition). Never
+  holding a structure whose memory explodes on huge files is the foundation of "does not crash".
 
-### 編集: mmap base + 疎オーバーレイ (`edit.rs`)
-- 編集は元バイトに触れず、`EditSession` が行アンカー単位の差分
-  (置換/削除/挿入行)を BTreeMap で保持する。ビューは「base + オーバーレイ」の合成。
-- **undo/redo は逆デルタ**: 各編集トランザクションは「実際に変えたものを戻す最小ステップ列
-  (`UndoRecord`)」だけ記録する。スナップショット方式(全オーバーレイ複製×256世代)を
-  やめたことで、巨大ペースト後の1打鍵が 1.47s → 0.63ms になった。
-  undo の適用は自分の逆(=redo record)を返すので、undo と redo は同一機構。
-- **マルチカーソルは `replace_batch`**: N個の編集を降順(下から)に適用して座標無効化を防ぎ、
-  逆デルタは1レコードに束ねる = **undo 1回で全カーソル分が戻る**。適用後キャレット位置は
-  昇順リプレイ(行デルタ+同一行の列デルタ)で再計算する。
+### Editing: mmap base + sparse overlay (`edit.rs`)
+- Edits never touch the original bytes; an `EditSession` holds line-anchor-level diffs
+  (replaced/deleted/inserted lines) in a BTreeMap. The view is the composition of "base + overlay".
+- **undo/redo uses inverse deltas**: each edit transaction records only "the minimal sequence of steps
+  that undoes what actually changed" (`UndoRecord`). Abandoning the snapshot approach (full overlay
+  clone × 256 generations) took one keystroke after a huge paste from 1.47s to 0.63ms.
+  Applying an undo returns its own inverse (= the redo record), so undo and redo are one mechanism.
+- **Multiple cursors use `replace_batch`**: N edits are applied in descending order (bottom-up) to
+  avoid coordinate invalidation, and the inverse deltas are bundled into one record = **one undo
+  reverts all cursors**. Post-apply caret positions are recomputed by an ascending replay
+  (line deltas + column deltas within the same line).
 
-### 保存: 「開き直さない」ことが undo を守る
-- 書き出しは全行ループではなく、**編集アンカー間の無傷区間を連続バイト範囲でコピー**
-  (O(edits×stride + bytes)。2M行×3編集で 25s → 15ms)。
-- **保存をまたぐ undo** (`content_gen`/`saved_gen` の2世代方式):
-  `revision` は楽観ロック用に単調増加のまま残し、別に「内容の世代」を履歴レコードに保存して
-  undo/redo がそれを復元する。dirty = `content_gen != saved_gen`。
-  これで undo→redo が保存時点にピタリと戻れる(単調カウンタ比較では不可能)。
-- 保存コミットは**旧ファイルを同ディレクトリに退避リネーム**し、ステージを本名に rename する。
-  ドキュメントを開き直さないので mmap・オーバーレイ・undo履歴が無傷で生き残る
-  (Unixでは旧inodeがmmapで生存、退避ファイルは即削除。Windowsはクローズ時に掃除)。
-  revert は「最後に保存した状態へ」= ディスクから再読込。
+### Saving: "never reopen" is what protects undo
+- Writing out is not a loop over all lines; it **copies the intact spans between edit anchors as
+  contiguous byte ranges** (O(edits×stride + bytes); 2M lines × 3 edits went from 25s to 15ms).
+- **Undo across saves** (the two-generation `content_gen`/`saved_gen` scheme):
+  `revision` remains a monotonically increasing optimistic-locking counter, while a separate
+  "content generation" is stored in each history record and restored by undo/redo.
+  dirty = `content_gen != saved_gen`. This lets undo→redo land exactly on the saved state
+  (impossible with a monotonic counter comparison alone).
+- A save commit **renames the old file aside within the same directory** and renames the staged
+  file into the real name. The document is never reopened, so the mmap, overlay, and undo history
+  survive intact (on Unix the old inode stays alive under the mmap and the aside file is deleted
+  immediately; on Windows it is cleaned up at close time).
+  Revert means "back to the last saved state" = reload from disk.
 
-### 検索・変換・分割
-- `search.rs`: UTF-8 は memmem。**レガシー(Shift_JIS/EUC-JP)はリテラル一致を文字境界検証**
-  (0x5C 問題 =「ソ」の後続バイトに `\` がマッチする偽ヒットの排除)、ci/regex は行単位デコード。
-  後方検索(前の一致)はチャンクを遡る走査。
-- `transform.rs` / `split.rs`: 置換・ケース変換・行分割は**元バイト保持**のストリーミング。
-  分割は `<stem>.partNNNN<.ext>`、パーツ結合＝元バイト列になることをテストが保証。
+### Search, transform, split
+- `search.rs`: UTF-8 uses memmem. **Legacy encodings (Shift_JIS/EUC-JP) verify character boundaries
+  for literal matches** (the 0x5C problem: rejecting false hits where `\` matches the trailing byte
+  of "ソ"); case-insensitive/regex decode line by line. Backward search (previous match) scans
+  chunks walking backward.
+- `transform.rs` / `split.rs`: replace, case conversion, and line splitting are **byte-preserving**
+  streaming. Split produces `<stem>.partNNNN<.ext>`, and tests guarantee that concatenating the
+  parts reproduces the original byte sequence.
 
-## サーバ (serve/)
+## Server (serve/)
 
-### 1ロック + 楽観コミット (`state.rs`)
-- doc / 編集オーバーレイ / タブは **1つの `RwLock<Workspace>`** の下にある
-  (かつては別ロックで、保存とタブ切替の隙間に編集が消えるレースがあった)。
-- 長時間処理(保存・ソート)はロックを持たない: スナップショット → 無ロックで作業 →
-  コミット時に **doc同一性(Arc::ptr_eq) + revision** を再検証、ズレたら 409 でやり直し。
-  「黙って混ざる/消える」を機構的に排除している。
-- ロック毒化は `into_inner()` で回復(1つの panic がエディタを恒久停止させない)。
+### One lock + optimistic commits (`state.rs`)
+- The doc / edit overlay / tabs all live under **a single `RwLock<Workspace>`**
+  (they used to be separate locks, and edits could vanish in the gap between a save and a tab switch).
+- Long-running work (save, sort) holds no lock: snapshot → work without the lock →
+  at commit time re-verify **doc identity (Arc::ptr_eq) + revision**; if they diverged, 409 and retry.
+  "Silently interleaved / silently lost" is ruled out mechanically.
+- Lock poisoning is recovered with `into_inner()` (one panic cannot permanently halt the editor).
 
-### ワーカー分離と dirty 実体化 (`ops.rs`)
-- ソート・置換・ケース・分割・検索(件数)は**子プロセス**(自分自身をサブコマンドで起動)。
-  暴走・OOM・abort してもエディタ本体は死なない(クラッシュ隔離テストが CI で担保)。
-- 未保存編集がある時は**バッファを一時ファイルに実体化**してワーカーに渡す共有ヘルパーを通る。
-  対話的な「次を検索」ジャンプは revision キーのスナップショットキャッシュ
-  (編集1世代につき1回だけ構築、以後再利用)。
-- パスがクライアントへ出る箇所は表示用ヘルパーを通し、Windows の `\\?\` верbatim 接頭辞を剥がす。
+### Worker isolation and dirty materialization (`ops.rs`)
+- Sort, replace, case, split, and search (counts) run as **child processes** (the binary re-invokes
+  itself with a subcommand). Runaway, OOM, or abort cannot kill the editor itself
+  (the crash-isolation test enforces this in CI).
+- When there are unsaved edits, a shared helper **materializes the buffer into a temporary file**
+  handed to the worker. Interactive "find next" jumps use a revision-keyed snapshot cache
+  (built once per edit generation, reused afterwards).
+- Anywhere a path reaches the client goes through a display helper that strips Windows' `\\?\`
+  verbatim prefix.
 
-### ネットワーク境界 (`security.rs`)
-- 既定はループバックのみ。非ループバックは `--allow-remote` 必須。
-- 全リクエストに Host 検証(DNSリバインディング対策)と、状態変更系への Origin 検証(CSRF対策)。
+### Network boundary (`security.rs`)
+- Loopback-only by default. Non-loopback requires `--allow-remote`.
+- Host validation on every request (anti DNS rebinding) and Origin validation on state-changing
+  endpoints (anti CSRF).
 
-## フロントエンド (web/)
+## Frontend (web/)
 
-- **仮想化が前提**: DOM には可視域+パッド行しか存在せず、スクロールは行番号ベースの自作
-  スクロールバー(ピクセル座標だとブラウザの高さ上限で 100億行を表現できない)。
-- 編集は直列キュー(`enqueueEdit`)で1本化。保存はキュー完了を待ってからスナップショット、
-  保存中の新規編集はブロック+スピナー(IME確定は保留して保存後に適用)。
-- マルチカーソルは「複数キャレット + 1バッチ=1undo」。キャッシュ外の行に掛かる削除は
-  先に該当行をフェッチしてからエッジを組む(行長0と誤認して前行を壊さないため)。
-- コマンドは `runMenuAction` に一元化: メニュー/右クリック/コマンドパレット/ネイティブ
-  macOSメニュー(`__ayameMenu`)がすべて同じ表を叩く。文言・ショートカット表示は
-  `KEYMAP_ACTIONS` が単一ソース。
+- **Virtualization is a given**: the DOM contains only the visible range plus pad lines, and
+  scrolling uses a hand-rolled line-number-based scrollbar (pixel coordinates cannot represent
+  10 billion lines within browser height limits).
+- Edits are serialized through a single queue (`enqueueEdit`). Saving waits for the queue to drain
+  before snapshotting; new edits during a save are blocked with a spinner (IME commits are held and
+  applied after the save).
+- Multiple cursors are "several carets + one batch = one undo". Deletions that touch lines outside
+  the cache first fetch those lines before building the edges (so a line is not mistaken for
+  zero-length, corrupting the previous line).
+- Commands are unified in `runMenuAction`: the menu, context menu, command palette, and the native
+  macOS menu (`__ayameMenu`) all hit the same table. Labels and shortcut hints have a single source
+  of truth in `KEYMAP_ACTIONS`.
 
-## ネイティブ窓 (gui.rs)
+## Native window (gui.rs)
 
-- 起動は「窓を先に出す」: FILE引数は非同期に `/api/open` され、初回インデックス構築中も
-  進捗オーバーレイ付きで窓が見える。非表示生成 + `ayame:ready` で白フラッシュ排除。
-- D&D は wry のネイティブハンドラで**実パスを直接 mmap**(DOM経由の全量アップロードはしない)。
-- WebView のプロファイルは `WebContext` で **OS標準のキャッシュ位置**
+- Startup "shows the window first": a FILE argument is `/api/open`ed asynchronously, and the window
+  is visible with a progress overlay even during the initial index build. Created hidden +
+  `ayame:ready` eliminates the white flash.
+- Drag & drop uses wry's native handler to **mmap the real path directly** (no full upload through
+  the DOM).
+- The WebView profile is pinned via `WebContext` to the **OS-standard cache location**
   (`%LOCALAPPDATA%\ayame\webview` / `~/Library/Caches/ayame/webview` / `~/.cache/ayame/webview`)
-  に固定 — WebView2 が exe 横に `ayame.exe.WebView2` を作る既定動作を封じる。
-- ウィンドウ位置/サイズ/最大化は同キャッシュに永続化。クローズ確認が応答しない場合は
-  タイムアウトで強制終了(閉じられない窓を作らない)。
-- macOS のみ muda でネイティブメニュー(WKWebView の Cmd+C/V を成立させるため。
-  貼り付けだけはネイティブセレクタ経由で DOM paste に流す)。
+  — suppressing WebView2's default behavior of creating `ayame.exe.WebView2` next to the exe.
+- Window position/size/maximized state persist in the same cache. If the close-confirmation does
+  not respond, a timeout forces termination (never create a window that cannot be closed).
+- macOS only: a native menu via muda (to make WKWebView's Cmd+C/V work; paste alone is routed
+  through the native selector into a DOM paste).
 
-## リリース自動化 (xtask/)
+## Release automation (xtask/)
 
 `cargo xtask release [--bump patch|minor|major|X.Y.Z] [--yes|--dry-run|--skip-gate]`
-— 純Rustなので全OSで同一動作(bash/node 依存なし)。
-ゲート(fmt / clippy±gui / test / releaseビルド / クラッシュ隔離) → dist成果物+sha256 →
-CLIスモーク → タグ → push → GitHub Actions の Release を watch、まで1コマンド。
+— pure Rust, so it behaves identically on every OS (no bash/node dependency).
+Gate (fmt / clippy±gui / test / release build / crash isolation) → dist artifacts + sha256 →
+CLI smoke → tag → push → watch the GitHub Actions Release — all in one command.
 
-## 主要リファクタの記録 (v0.2.4 → v0.3.x)
+## Record of major refactors (v0.2.4 → v0.3.x)
 
-| 対象 | 前 | 後 |
+| Area | Before | After |
 |---|---|---|
-| undo履歴 | 全オーバーレイのスナップショット×256 | 逆デルタレコード(~2300倍) |
-| 保存 | 全行ランダムアクセス O(行×stride) | アンカー間の連続コピー(~1700倍) |
-| 保存とundo | 保存で履歴消滅(開き直し) | 世代マーカー+退避rename で履歴生存 |
-| serveの状態 | doc/edits/tabs が別ロック | 単一Workspaceロック+楽観コミット(409) |
-| SJIS検索 | 生バイトmemmem(偽ヒット/0件) | 境界検証+行デコード |
-| main.rs | ~1200行の単一ファイル | cli/ 9モジュール |
-| リリース | 手順書(手作業) | cargo xtask release |
+| Undo history | full-overlay snapshots × 256 | inverse-delta records (~2300x) |
+| Save | random access over all lines O(lines×stride) | contiguous copies between anchors (~1700x) |
+| Save vs undo | history destroyed by save (reopen) | generation markers + rename-aside keep history alive |
+| serve state | doc/edits/tabs under separate locks | single Workspace lock + optimistic commit (409) |
+| SJIS search | raw-byte memmem (false hits / zero hits) | boundary verification + line decoding |
+| main.rs | a single ~1200-line file | 9 modules under cli/ |
+| Releases | a manual checklist | cargo xtask release |
 
-## クラッシュ永続化 WAL (crates/ayame-core/src/wal.rs + serve 配線)
+## Crash-persistence WAL (crates/ayame-core/src/wal.rs + serve wiring)
 
-未保存編集のクラッシュ耐性。オーバーレイ本体は従来どおりプロセス内メモリのみで、
-コミット済みトランザクションを JSON Lines の追記ログにミラーする。
+Crash durability for unsaved edits. The overlay itself remains in-process memory only, as before,
+with committed transactions mirrored to an append-only JSON Lines log.
 
-- **フォーマット**: 1行1レコードの外部タグ付き JSON。先頭は必ず Header
-  (ベースファイルの len / mtime_ms / encoding = 同一性)。以降 Txn(公開APIの
-  論理座標呼び出しをそのまま記録)と Snapshot(コンパクション点 = オーバーレイ全量)。
-  置き場所は index キャッシュと同じルート `<cache>/wal/<パスのFNV-1aハッシュ>.wal`
-  (`--cache-dir` / `AYAME_CACHE_DIR` に追従、`--no-cache` なら WAL も無効)。
-- **flush/fsync ポリシー**: コミットごとに OS へ flush(プロセスクラッシュ耐性)。
-  fsync(電源断耐性)と 64 MiB 超のコンパクション、書き込みエラーの一回限りの
-  UI 通知(`stat.wal_error`)は serve のポリシースレッドが約3秒周期で実施。
-  ログI/O失敗は編集を止めず、writer を落として劣化継続。
-- **リカバリフロー**: open 時に `inspect` — Recoverable なら自動適用せず
-  `stat.recoverable = n` を返してフロントが確認ダイアログ(復元/破棄)。
-  `POST /api/edit/recover`(`{}` = replay、`{"discard":true}` = ログ削除)。
-  replay はロック外のスクラッチセッションで行い、インストール時に
-  doc同一性 + revision 0 を再検証(保存コミットと同じ楽観規律)。Stale/Invalid
-  ログは open 時に黙って削除。
-- **ライフサイクル**: writer はワークスペースの「ライブ」セッションだけが持つ
-  (クローン・パーク中タブは非保持 — タブ復帰時に再アタッチ+全量スナップショット)。
-  上書き保存コミット/リバート/エンコーディング再読込/インプレースソート後は
-  新しいファイル同一性で reset。名前を付けて保存(switch)は新パスに新規ログ+
-  旧パスのログ削除。タブを閉じる=そのログ削除(復元未判断のものは残す)。
-  正常終了時はクリーンなセッションのログのみ削除、ダーティは残す(次回復元候補)。
-- **既知の限界(継承した設計上の割り切り)**: reset/コンパクション地点より古い
-  履歴への undo/redo は全量スナップショットに退化。インプレース保存直後の
-  スナップショットは旧 mmap 基準のアンカーを含み得るため、その稀な競合窓では
-  復元内容が「最終保存時点」まで巻き戻ることがある(保存済みデータは失われない)。
+- **Format**: one externally tagged JSON record per line. The first record is always a Header
+  (the base file's len / mtime_ms / encoding = identity). Then Txn records (recording the public
+  API's logical-coordinate calls verbatim) and Snapshot records (compaction points = the full
+  overlay). Location: the same root as the index cache, `<cache>/wal/<FNV-1a hash of path>.wal`
+  (follows `--cache-dir` / `AYAME_CACHE_DIR`; `--no-cache` disables the WAL too).
+- **flush/fsync policy**: flush to the OS on every commit (process-crash durability).
+  fsync (power-loss durability), compaction beyond 64 MiB, and the one-shot UI notification for
+  write errors (`stat.wal_error`) are handled by serve's policy thread on a ~3-second cycle.
+  Log I/O failure never blocks editing: the writer is dropped and operation continues degraded.
+- **Recovery flow**: on open, `inspect` — if Recoverable, nothing is auto-applied;
+  `stat.recoverable = n` is returned and the frontend shows a confirmation dialog (restore/discard).
+  `POST /api/edit/recover` (`{}` = replay, `{"discard":true}` = delete the log).
+  Replay happens in a scratch session outside the lock, and installation re-verifies doc identity +
+  revision 0 (the same optimistic discipline as save commits). Stale/Invalid logs are silently
+  deleted on open.
+- **Lifecycle**: only the workspace's "live" session holds the writer (clones and parked tabs do
+  not — on tab reactivation it re-attaches and takes a full snapshot). After an in-place save
+  commit / revert / encoding reload / in-place sort, the log resets under the new file identity.
+  Save-as (switch) starts a fresh log at the new path and deletes the old path's log. Closing a tab
+  deletes its log (logs pending a restore decision are kept). On clean shutdown only the logs of
+  clean sessions are deleted; dirty ones are kept (candidates for restore next time).
+- **Known limits (inherited design trade-offs)**: undo/redo into history older than a reset/compaction
+  point degrades to the full snapshot. A snapshot taken right after an in-place save may contain
+  anchors based on the old mmap, so in that rare race window the restored content can roll back to
+  "the last saved state" (no saved data is ever lost).
 
-## 意図的にやっていないこと
+## Deliberately not done
 
-- フルインメモリ rope / piece table(禁止事項 — DESIGN.md)。
-- ~~編集WALの永続化は未着手~~ → **v0.3.x で実装済み**(上記「クラッシュ永続化 WAL」)。
-  未実装のまま残しているのは undo 履歴そのものの永続化(復元後は再生サフィックス分のみ)。
-- cgroup RSS上限・fadvise/fallocate チューニング・DuckDB 連携(守る対象ができてから)。
-- ブラウザ単体運用・マルチユーザー(サーバはネイティブ窓のUI層)。
+- A fully in-memory rope / piece table (prohibited — DESIGN.md).
+- ~~Edit-WAL persistence not started~~ → **implemented in v0.3.x** (see "Crash-persistence WAL" above).
+  What remains unimplemented is persistence of the undo history itself (after recovery, only the
+  replayed suffix is undoable).
+- cgroup RSS caps, fadvise/fallocate tuning, DuckDB integration (waiting until there is something to protect).
+- Browser-only operation and multi-user (the server is the UI layer of the native window).

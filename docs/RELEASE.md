@@ -1,5 +1,7 @@
 # Release
 
+*日本語版: [ja/RELEASE.md](ja/RELEASE.md)*
+
 ## One command
 
 Everything below (gate → artifact → smoke → tag → push → watch the workflow)

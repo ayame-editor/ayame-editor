@@ -16,8 +16,14 @@ path = "src/main.rs"
 # stay small and dependency-free.
 default = []
 gui = ["dep:wry", "dep:tao", "dep:muda"]
+# Dev-only: `ayame typegen` emits web/types/api.d.ts from the serve API types
+# via the owner's typeship facade (never enabled in shipped builds).
+typegen = ["dep:ts-rs", "dep:typeship", "dep:typeship-ts-rs"]
 
 [dependencies]
+ts-rs = { version = "12", optional = true }
+typeship = { version = "0.2", optional = true }
+typeship-ts-rs = { version = "0.2", optional = true }
 ayame-core = { path = "../ayame-core" }
 anyhow.workspace = true
 serde.workspace = true

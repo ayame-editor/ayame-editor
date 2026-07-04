@@ -1,66 +1,68 @@
-# Ayame ベンチマーク
+# Ayame Benchmarks
 
-実測環境: 4 vCPU / 15 GiB RAM の Linux VM、ストレージは仮想ディスク（NVMe 相当ではない）。
-数値は控えめな環境のもので、実機 NVMe ではさらに速くなります。
+*日本語版: [ja/BENCHMARKS.md](ja/BENCHMARKS.md)*
 
-再現方法:
+Measurement environment: a Linux VM with 4 vCPUs / 15 GiB RAM; storage is a virtual disk (not NVMe-class).
+The numbers come from a modest environment — real NVMe hardware will be faster.
+
+To reproduce:
 
 ```sh
 cargo build --release
-./target/release/ayame gen huge.csv --lines 300000000   # 約14 GiB の合成CSVを生成
-./target/release/ayame stat huge.csv                    # コールドでの索引構築時間
-./target/release/ayame serve huge.csv --port 8800       # 別端末から API を計測
+./target/release/ayame gen huge.csv --lines 300000000   # generate a synthetic CSV of about 14 GiB
+./target/release/ayame stat huge.csv                    # cold index-build time
+./target/release/ayame serve huge.csv --port 8800       # measure the API from another terminal
 ```
 
-## 3億行 / 14.16 GiB CSV
+## 300 million lines / 14.16 GiB CSV
 
-| 項目 | 実測値 | 備考 |
+| Item | Measured | Notes |
 |---|---|---|
-| 行数 / サイズ | 300,000,000 行 / 14.16 GiB（15,205,557,668 B） | 1行 約47 B |
-| **コールドで開く＋全索引構築** | **2,349 ms** | mmap＋rayon並列 newline スキャン。≈6.0 GiB/s |
-| **索引メモリ** | **2.00 MiB**（73,252 チェックポイント） | stride 4096。**ファイルサイズに対し 0.014%** |
-| **ランダム1行アクセス（ウォーム）** | **平均 0.61 ms** | 50回の無作為行取得（checkpoint＋memchr 前方走査） |
-| **全文スキャン**（該当なしリテラル＝最悪ケース） | **2.81 s** → **5.03 GiB/s** | 14 GiB を一気に memmem 走査 |
-| 最初の一致検索（`error`、先頭から） | 0.0007 s | |
-| 一致件数カウント（上限2000） | 0.036 s | |
-| プロセス常駐メモリ | 索引 2 MiB ＋ 表示ぶんのみ | 14 GiB の本体は**退避可能な OS ページキャッシュ**（自前ヒープではない） |
+| Lines / size | 300,000,000 lines / 14.16 GiB (15,205,557,668 B) | ~47 B per line |
+| **Cold open + full index build** | **2,349 ms** | mmap + rayon-parallel newline scan. ≈6.0 GiB/s |
+| **Index memory** | **2.00 MiB** (73,252 checkpoints) | stride 4096. **0.014% of the file size** |
+| **Random single-line access (warm)** | **0.61 ms average** | 50 random line fetches (checkpoint + forward memchr walk) |
+| **Full scan** (no-match literal = worst case) | **2.81 s** → **5.03 GiB/s** | one memmem sweep over 14 GiB |
+| First-match search (`error`, from the top) | 0.0007 s | |
+| Match count (capped at 2000) | 0.036 s | |
+| Process resident memory | 2 MiB index + only what is displayed | the 14 GiB body lives in the **evictable OS page cache** (not our own heap) |
 
-要点: **15 GiB RAM のマシンで 14 GiB のファイルを開いても、Ayame 自身のメモリは数 MiB**。ファイル本体は OS のページキャッシュに載り、メモリ逼迫時はカーネルが捨てられる。これは Zed が「10GB に 64GB 超」を使い 6GB 以上を拒否するのと正反対。
+Key point: **opening a 14 GiB file on a 15 GiB RAM machine, Ayame itself uses just a few MiB.** The file body sits in the OS page cache, which the kernel can drop under memory pressure. This is the exact opposite of Zed, which uses "in excess of 64GB for a 10GB file" and rejects anything over 6GB.
 
-## 100億行（北極星）への外挿
+## Extrapolation to 10 billion lines (the north star)
 
-索引は「4096行ごとに 16 バイトのチェックポイント」なので**ファイルサイズではなく行数に線形**:
+The index is "one 16-byte checkpoint per 4096 lines", so it is **linear in line count, not file size**:
 
-| 規模 | 索引メモリ（理論） | コールド索引構築（@6 GiB/s 換算） |
+| Scale | Index memory (theoretical) | Cold index build (at 6 GiB/s) |
 |---|---|---|
-| 3億行 / 14 GiB | 2.0 MiB（実測） | 2.3 s（実測） |
-| 10億行 / 47 GiB | 〜6.5 MiB | 〜8 s |
-| **100億行 / 〜475 GiB** | **〜40–70 MiB** | **〜80 s** |
+| 300M lines / 14 GiB | 2.0 MiB (measured) | 2.3 s (measured) |
+| 1B lines / 47 GiB | ~6.5 MiB | ~8 s |
+| **10B lines / ~475 GiB** | **~40–70 MiB** | **~80 s** |
 
-- ランダム行アクセスは規模に依らず **sub-ms**（必ず最寄り checkpoint から最大 4096 行ぶんの memchr 走査で済む）。
-- 構築中も「索引済みの先頭部分」から閲覧を始められるよう、インクリメンタル索引はロードマップ（§ DESIGN.md）。
-- 構築時間は実機 NVMe（数 GB/s）ではページキャッシュ未ヒット時でも I/O バウンドで上記程度に収まる。
+- Random line access stays **sub-ms** regardless of scale (always at most a 4096-line memchr walk from the nearest checkpoint).
+- Incremental indexing — so browsing can begin from the already-indexed head while the build runs — is on the roadmap (§ DESIGN.md).
+- On real NVMe (several GB/s), build time stays I/O-bound around the figures above even without page-cache hits.
 
-> これらは v0.1 の**シングルプロセス・コールド**計測。`DESIGN.md` のディスクキャッシュ（Step 2）導入後は、2回目以降のオープンが「構築」から「mmap＋検証」になり、ほぼ瞬時になります。
+> These are **single-process cold** measurements from v0.1. Once the disk cache from `DESIGN.md` (Step 2) landed, second and later opens become "mmap + verify" instead of "build" — near-instant.
 
-## 永続インデックスキャッシュ（Step 2）
+## Persistent index cache (Step 2)
 
-| 操作 | 時間 |
+| Operation | Time |
 |---|---|
-| 初回オープン（300万行 / 135 MiB、索引構築） | 24 ms |
-| 2回目以降（mmap ＋ checksum 検証） | **0 ms** |
+| First open (3M lines / 135 MiB, index build) | 24 ms |
+| Subsequent opens (mmap + checksum verification) | **0 ms** |
 
-キャッシュ blob は索引のみ（300万行で 11.5 KiB）。ソース変更時は size/mtime 不一致で自動失効し再構築。
+The cache blob holds only the index (11.5 KiB for 3M lines). When the source changes, a size/mtime mismatch auto-invalidates it and the index is rebuilt.
 
-## 外部マージソート（メモリ有界・ディスク spill）
+## External merge sort (memory-bounded, disk spill)
 
-`ayame sort` は明示メモリ予算でラン生成し、超過分をディスクへ spill して k-way マージする。**予算 ≪ データ量**でも安定して完了することが要点。
+`ayame sort` generates runs under an explicit memory budget, spills the excess to disk, and k-way merges. The point is that it completes reliably even with a **budget ≪ data size**.
 
-| データ | 予算 | ラン数 | spill | 時間 | 検証 |
+| Data | Budget | Runs | Spill | Time | Verification |
 |---|---|---|---|---|---|
-| 500万行 / 244 MiB（5列目 数値昇順） | **16 MiB** | 15 | 95.4 MiB | **3.25 s** | ordering 出力 |
-| 100万行 / 48 MiB（5列目 数値昇順） | **8 MiB** | 6 | 19.1 MiB | <1 s | `sort -c -n` 合格 |
+| 5M lines / 244 MiB (column 5, numeric ascending) | **16 MiB** | 15 | 95.4 MiB | **3.25 s** | ordering output |
+| 1M lines / 48 MiB (column 5, numeric ascending) | **8 MiB** | 6 | 19.1 MiB | <1 s | passes `sort -c -n` |
 
-- 予算（16 MiB）はデータ（244 MiB）の **1/15**。全キーを RAM に保持できないため**必ず spill が発生**し、それでも正しくソートされる＝真の out-of-core。
-- メモリ常駐は概ね「予算 ＋ ラン数ぶんのヒープ」。ファイルサイズに依存しない。
-- 結果は**行番号の順列**（`u64` 列）。将来エディタはこの順列を既存の疎フェッチで辿り、**ソート結果をコピーせず**表示する。
+- The budget (16 MiB) is **1/15** of the data (244 MiB). All keys cannot fit in RAM, so **spilling necessarily occurs** — and the sort is still correct: true out-of-core.
+- Memory residency is roughly "budget + heap proportional to run count", independent of file size.
+- The result is a **permutation of line numbers** (a `u64` column). In the future, the editor will walk this permutation through the existing sparse fetch and display **the sorted result without copying it**.

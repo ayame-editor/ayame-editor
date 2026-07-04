@@ -51,7 +51,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use crate::edit::{BatchEdit, EditSession, OverlaySnapshot, HISTORY_LIMIT};
+use crate::edit::{BatchEdit, EditSession, OverlaySnapshot, RebaseSource, HISTORY_LIMIT};
 use crate::{Document, Error, Result};
 
 /// Format version. Bumped on any incompatible change; a log with a different
@@ -200,6 +200,17 @@ pub struct WalWriter {
     /// exposes that and the session degrades such ops to a fresh snapshot.
     replay_undo: usize,
     replay_redo: usize,
+    /// Base generation: bumped on every reset. While it is 0 the header still
+    /// describes the base the attached session's overlay anchors refer to, so
+    /// a snapshot may serialize that overlay verbatim; after a reset it may
+    /// not (the session keeps editing against the OLD mmap base) — see
+    /// [`WalWriter::snapshot`].
+    base_gen: u64,
+    /// Captured by [`WalWriter::reset_for_save`]: what a snapshot needs to
+    /// re-anchor the session overlay onto the (new) header base. `None` after
+    /// a plain [`WalWriter::reset`], which forces the conservative snapshot
+    /// fallback.
+    rebase: Option<RebaseSource>,
 }
 
 impl WalWriter {
@@ -215,6 +226,8 @@ impl WalWriter {
             len,
             replay_undo: 0,
             replay_redo: 0,
+            base_gen: 0,
+            rebase: None,
         })
     }
 
@@ -257,30 +270,98 @@ impl WalWriter {
         Ok(())
     }
 
-    /// Truncate back to a fresh log carrying `header`. Called on a successful
-    /// save (or revert): the base identity changed, and the old records must
-    /// never replay onto the new base.
+    /// Truncate back to a fresh log carrying `header`, WITHOUT capturing the
+    /// session (conservative). The base identity changed, and the old records
+    /// must never replay onto the new base.
+    ///
+    /// Because nothing records how the session's overlay relates to the new
+    /// base, any later snapshot ([`WalWriter::snapshot`], compaction, or the
+    /// unreplayable-undo degradation) cannot be expressed correctly:
+    /// compaction is skipped and a degradation snapshot falls back to a CLEAN
+    /// log plus an error (recovery for that window is disabled rather than
+    /// wrong). After a save of the session's content, prefer
+    /// [`WalWriter::reset_for_save`], which keeps snapshots working. Use this
+    /// variant for a revert, or when no session capture is possible.
     pub fn reset(&mut self, header: Header) -> Result<()> {
+        self.reset_with(header, None)
+    }
+
+    /// Reset after a successful save: `header` describes the NEW on-disk base
+    /// — the old base with `session`'s overlay applied. Pass the session
+    /// whose content was actually materialized to disk (the live session, or
+    /// the save snapshot if live edits may have raced the write) together
+    /// with `doc`, the still-mapped PRE-save document it edits against.
+    ///
+    /// On top of what [`WalWriter::reset`] does, this captures the save-time
+    /// overlay so later snapshots (compaction, unreplayable undo/redo
+    /// degradation) re-anchor the live overlay onto the new base instead of
+    /// serializing anchors that refer to the old one — replaying old-base
+    /// anchors onto the new file would restore corrupted content.
+    pub fn reset_for_save(
+        &mut self,
+        header: Header,
+        doc: &Document,
+        session: &EditSession,
+    ) -> Result<()> {
+        let rebase = session.rebase_source(doc);
+        self.reset_with(header, Some(rebase))
+    }
+
+    fn reset_with(&mut self, header: Header, rebase: Option<RebaseSource>) -> Result<()> {
         let (file, len) = write_fresh(&self.path, &header, None)?;
         self.file = file;
         self.header = header;
         self.len = len;
         self.replay_undo = 0;
         self.replay_redo = 0;
+        self.base_gen += 1;
+        self.rebase = rebase;
         Ok(())
+    }
+
+    /// Whether [`WalWriter::snapshot`] can express a session overlay against
+    /// the current header base: true until a plain [`WalWriter::reset`] moves
+    /// the base without a session capture ([`WalWriter::reset_for_save`]
+    /// keeps this true).
+    pub fn can_snapshot(&self) -> bool {
+        self.base_gen == 0 || self.rebase.is_some()
     }
 
     /// Compaction: atomically rewrite the log as its header plus one full
     /// overlay snapshot of `session`, superseding all per-transaction
     /// records. Watch [`WalWriter::len_bytes`] to decide when (e.g. past
     /// 64 MiB). Prefer [`EditSession::wal_compact`] on the owning session.
+    ///
+    /// The overlay is serialized against the HEADER's base: verbatim while no
+    /// reset has happened (the session overlay anchors that very base), and
+    /// re-anchored through the save-time capture after a
+    /// [`WalWriter::reset_for_save`]. After a plain [`WalWriter::reset`]
+    /// neither is possible — the log is then rewritten CLEAN (header only)
+    /// and an error is returned, so recovery of the un-expressible window is
+    /// disabled rather than silently wrong; callers should stop using the
+    /// writer and surface the error (check [`WalWriter::can_snapshot`] first
+    /// to skip instead, as compaction does).
     pub fn snapshot(&mut self, session: &EditSession) -> Result<()> {
-        let (file, len) = write_fresh(&self.path, &self.header, Some(session.overlay_snapshot()))?;
+        let overlay = if self.base_gen == 0 {
+            Some(session.overlay_snapshot())
+        } else {
+            self.rebase.as_ref().map(|r| r.rebase(session))
+        };
+        let honest = overlay.is_some();
+        let (file, len) = write_fresh(&self.path, &self.header, overlay)?;
         self.file = file;
         self.len = len;
         self.replay_undo = 0;
         self.replay_redo = 0;
-        Ok(())
+        if honest {
+            Ok(())
+        } else {
+            Err(Error::Unsupported(
+                "the crash log was reset without a session capture; edits since the last save \
+                 are not crash-protected — save the file to re-arm crash recovery"
+                    .into(),
+            ))
+        }
     }
 
     /// Current size of the log in bytes (as written by this writer).
@@ -309,7 +390,10 @@ fn write_record(w: &mut impl Write, rec: &Record) -> Result<u64> {
 
 /// Atomically (re)write the log at `path` as `header` (+ optional overlay
 /// snapshot) via temp file + rename, then reopen it for appending. A crash at
-/// any point leaves either the previous or the new complete log on disk.
+/// any point leaves either the previous or the new complete log on disk (the
+/// previous one possibly under its rename-aside name — see
+/// [`rename_via_aside`]); the parent directory is fsynced (best-effort, Unix)
+/// so the rename itself survives power loss.
 fn write_fresh(
     path: &Path,
     header: &Header,
@@ -333,15 +417,79 @@ fn write_fresh(
         f.sync_data()?;
     }
     if let Err(first) = std::fs::rename(&tmp, path) {
-        // Windows can refuse to rename over an existing file: replace, retry.
-        let retried = std::fs::remove_file(path).and_then(|()| std::fs::rename(&tmp, path));
-        if retried.is_err() {
+        // Windows can refuse to rename over an existing file. Never delete
+        // the existing log before its replacement is in place: go through
+        // the rename-aside route, which keeps a recoverable log on disk at
+        // every intermediate step.
+        if rename_via_aside(&tmp, path).is_err() {
             let _ = std::fs::remove_file(&tmp);
             return Err(Error::Io(first));
         }
     }
+    // The target is authoritative now; a leftover aside copy (from an
+    // interrupted earlier fallback) must not shadow future crash windows.
+    let _ = std::fs::remove_file(aside_path(path));
+    if let Some(parent) = path.parent() {
+        fsync_dir(parent);
+    }
     let file = OpenOptions::new().append(true).open(path)?;
     Ok((file, len))
+}
+
+/// The rename-aside name of a log: `<name>.old`, in the same directory.
+/// Readers fall back to it when the target is missing (the crash window of
+/// [`rename_via_aside`]).
+fn aside_path(path: &Path) -> PathBuf {
+    path.with_file_name(format!(
+        "{}.old",
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("ayame")
+    ))
+}
+
+/// Replace `path` with `tmp` without ever deleting the only copy of the log:
+/// the existing target is renamed aside first, then the temp file renamed
+/// into place, then the aside copy dropped. A crash between the two renames
+/// leaves the previous log under the aside name, which [`inspect`] and
+/// [`replay`] fall back to; at every other point the target itself is a
+/// complete log.
+fn rename_via_aside(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    let aside = aside_path(path);
+    if path.exists() {
+        // A stale aside (target existed, so it is dead weight) would make
+        // the rename below fail on Windows.
+        let _ = std::fs::remove_file(&aside);
+        std::fs::rename(path, &aside)?;
+    }
+    std::fs::rename(tmp, path)?;
+    let _ = std::fs::remove_file(&aside);
+    Ok(())
+}
+
+/// fsync the directory so a completed rename survives power loss.
+/// Best-effort: errors are ignored, and Windows has no directory handles to
+/// sync (its rename metadata semantics differ anyway).
+#[cfg(unix)]
+fn fsync_dir(dir: &Path) {
+    if let Ok(d) = File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn fsync_dir(_dir: &Path) {}
+
+/// Open the log at `path` for reading, falling back to its rename-aside copy
+/// when the target is missing. `Ok(None)` means neither exists.
+fn open_wal_file(path: &Path) -> std::io::Result<Option<File>> {
+    match File::open(path) {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match File::open(aside_path(path)) {
+            Ok(f) => Ok(Some(f)),
+            Err(e2) if e2.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e2) => Err(e2),
+        },
+        Err(e) => Err(e),
+    }
 }
 
 /// Deterministic per-file log location: `<cache_root>/wal/<hash>.wal`, hashed

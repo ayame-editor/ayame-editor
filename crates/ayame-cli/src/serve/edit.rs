@@ -52,6 +52,7 @@ pub(super) async fn api_lines(
 /// undo step — the primitive the Notepad-style editor commits against. Column
 /// offsets are Unicode scalar (char) counts into the decoded line text.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ReplaceRangeRequest {
     l0: u64,
     c0: usize,
@@ -94,6 +95,7 @@ pub(super) struct ReplaceBatchRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct CaretPosition {
     line: u64,
     col: usize,
@@ -467,6 +469,7 @@ fn keep_stage_error(e: std::io::Error, stage: &Path) -> std::io::Error {
 /// active document. `{}` restores (replays the log into the live session and
 /// re-arms logging); `{"discard": true}` deletes the log and continues clean.
 #[derive(Deserialize, Default)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct RecoverRequest {
     #[serde(default)]
     discard: bool,
@@ -579,6 +582,7 @@ pub(super) async fn api_edit_redo(
 /// a mixed-generation file. Output is the same text the clipboard copy would
 /// produce: decoded view lines joined with '\n'.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SelectionSaveRequest {
     path: String,
     #[serde(default)]
@@ -592,6 +596,7 @@ pub(super) struct SelectionSaveRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SelectionSaveResponse {
     path: String,
     lines: u64,

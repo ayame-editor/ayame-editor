@@ -35,6 +35,8 @@ mod edit;
 mod ops;
 mod security;
 mod state;
+#[cfg(feature = "typegen")]
+pub(crate) mod typegen;
 pub(crate) mod workspace;
 
 use security::NetPolicy;

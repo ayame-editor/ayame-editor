@@ -189,6 +189,7 @@ async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, Strin
 // ---- save-to-artifact endpoints -----------------------------------------------
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ArtifactResponse {
     /// UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
     path: String,
@@ -197,6 +198,7 @@ pub(super) struct ArtifactResponse {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SortSaveRequest {
     #[serde(default)]
     path: Option<String>,
@@ -367,6 +369,7 @@ fn default_sorted_temp_path(source: &Path) -> std::io::Result<PathBuf> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ReplaceSaveRequest {
     #[serde(default)]
     path: Option<String>,
@@ -415,6 +418,7 @@ pub(super) async fn api_replace_save(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct CaseSaveRequest {
     #[serde(default)]
     path: Option<String>,
