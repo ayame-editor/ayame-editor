@@ -122,6 +122,35 @@ EXAMPLES:
     ayame serve huge.csv --port 8777
 ";
 
+#[cfg(any(feature = "gui", test))]
+const COMMANDS: &[&str] = &[
+    "stat",
+    "head",
+    "tail",
+    "line",
+    "lines",
+    "search",
+    "diff",
+    "sort",
+    "sortdiff",
+    "sort-diff",
+    "replace",
+    "case",
+    "split",
+    "group",
+    "top",
+    "distinct",
+    "gen",
+    "serve",
+    "typegen",
+    "cache",
+];
+
+#[cfg(any(feature = "gui", test))]
+fn is_known_command(cmd: &str) -> bool {
+    COMMANDS.contains(&cmd) || (cfg!(feature = "gui") && cmd == "gui")
+}
+
 pub(crate) fn run(args: Vec<String>) -> Result<()> {
     let cmd = match args.first() {
         Some(c) => c.clone(),
@@ -191,27 +220,38 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
 
 #[cfg(feature = "gui")]
 fn should_open_path_in_gui(cmd: &str) -> bool {
-    !matches!(
-        cmd,
-        "stat"
-            | "head"
-            | "tail"
-            | "line"
-            | "lines"
-            | "search"
-            | "diff"
-            | "sort"
-            | "sortdiff"
-            | "sort-diff"
-            | "replace"
-            | "case"
-            | "split"
-            | "group"
-            | "top"
-            | "distinct"
-            | "gen"
-            | "serve"
-            | "gui"
-            | "cache"
-    ) && std::path::Path::new(cmd).exists()
+    !is_known_command(cmd) && std::path::Path::new(cmd).exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_table_covers_dispatch_names() {
+        for cmd in [
+            "stat",
+            "head",
+            "tail",
+            "line",
+            "lines",
+            "search",
+            "diff",
+            "sort",
+            "sortdiff",
+            "sort-diff",
+            "replace",
+            "case",
+            "split",
+            "group",
+            "top",
+            "distinct",
+            "gen",
+            "serve",
+            "typegen",
+            "cache",
+        ] {
+            assert!(is_known_command(cmd), "{cmd}");
+        }
+    }
 }

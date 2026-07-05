@@ -10,32 +10,56 @@ export function confirmVisible() {
   return !$("confirm").classList.contains("hidden");
 }
 
+type Listener = [EventTarget, string, EventListener];
+
+function runModal(
+  modal,
+  focus: () => void,
+  setup: (
+    finish: (value: any) => void,
+    on: (target: EventTarget, event: string, listener: EventListener) => void
+  ) => void
+): Promise<any> {
+  return new Promise((resolve) => {
+    const listeners: Listener[] = [];
+    const on = (target: EventTarget, event: string, listener: EventListener) => {
+      target.addEventListener(event, listener);
+      listeners.push([target, event, listener]);
+    };
+    const finish = (value) => {
+      setModalOpen(modal, false);
+      for (const [target, event, listener] of listeners) {
+        target.removeEventListener(event, listener);
+      }
+      focusEditor();
+      resolve(value);
+    };
+    setModalOpen(modal, true);
+    setup(finish, on);
+    focus();
+  });
+}
+
+function backdropCancel(modal, finish: (value: any) => void) {
+  return (ev) => {
+    if (ev.target === modal) finish(null);
+  };
+}
+
 // Titles, messages and button labels arrive already localized (t() results);
 // server-side error details go through serverMessage() at the call site.
 export function askConfirm(title, message, opts: any = {}): Promise<any> {
-  return new Promise((resolve) => {
-    const modal = $("confirm");
-    const okBtn = $("confirm-ok");
-    const cancelBtn = $("confirm-cancel");
-    $("confirm-title").textContent = title || t("common.confirm");
-    $("confirm-message").textContent = message || "";
-    okBtn.textContent = opts.okLabel || t("common.ok");
-    okBtn.classList.toggle("danger", !!opts.danger);
-    okBtn.classList.toggle("primary", !opts.danger);
-    cancelBtn.textContent = opts.cancelLabel || t("common.cancel");
-    cancelBtn.classList.toggle("hidden", !!opts.alert);
-    setModalOpen(modal, true);
-    queueMicrotask(() => okBtn.focus());
-    const finish = (val) => {
-      setModalOpen(modal, false);
-      okBtn.removeEventListener("click", onOk);
-      cancelBtn.removeEventListener("click", onCancel);
-      $("confirm-close").removeEventListener("click", onCancel);
-      modal.removeEventListener("mousedown", onBackdrop);
-      modal.removeEventListener("keydown", onKey);
-      focusEditor();
-      resolve(val);
-    };
+  const modal = $("confirm");
+  const okBtn = $("confirm-ok");
+  const cancelBtn = $("confirm-cancel");
+  $("confirm-title").textContent = title || t("common.confirm");
+  $("confirm-message").textContent = message || "";
+  okBtn.textContent = opts.okLabel || t("common.ok");
+  okBtn.classList.toggle("danger", !!opts.danger);
+  okBtn.classList.toggle("primary", !opts.danger);
+  cancelBtn.textContent = opts.cancelLabel || t("common.cancel");
+  cancelBtn.classList.toggle("hidden", !!opts.alert);
+  return runModal(modal, () => queueMicrotask(() => okBtn.focus()), (finish, on) => {
     const onOk = () => finish(true);
     const onCancel = () => finish(false);
     const onKey = (ev) => {
@@ -51,11 +75,11 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
     const onBackdrop = (ev) => {
       if (ev.target === modal) finish(false);
     };
-    okBtn.addEventListener("click", onOk);
-    cancelBtn.addEventListener("click", onCancel);
-    $("confirm-close").addEventListener("click", onCancel);
-    modal.addEventListener("mousedown", onBackdrop);
-    modal.addEventListener("keydown", onKey);
+    on(okBtn, "click", onOk);
+    on(cancelBtn, "click", onCancel);
+    on($("confirm-close"), "click", onCancel);
+    on(modal, "mousedown", onBackdrop);
+    on(modal, "keydown", onKey);
   });
 }
 
@@ -70,48 +94,38 @@ export function promptVisible() {
 }
 
 export function askPrompt(title, label, value = ""): Promise<any> {
-  return new Promise((resolve) => {
-    const modal = $("prompt");
-    $("prompt-title").textContent = title || t("common.input");
-    $("prompt-label").textContent = label || "";
-    const input = $("prompt-input");
-    input.value = value;
-    setModalOpen(modal, true);
-    setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 0);
-    const finish = (val) => {
-      setModalOpen(modal, false);
-      input.removeEventListener("keydown", onKey);
-      $("prompt-ok").removeEventListener("click", onOk);
-      $("prompt-cancel").removeEventListener("click", onCancel);
-      $("prompt-close").removeEventListener("click", onCancel);
-      modal.removeEventListener("mousedown", onBackdrop);
-      focusEditor();
-      resolve(val);
-    };
-    const onOk = () => finish(input.value);
-    const onCancel = () => finish(null);
-    const onKey = (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        finish(input.value);
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        finish(null);
-      }
-    };
-    const onBackdrop = (ev) => {
-      if (ev.target === modal) finish(null);
-    };
-    input.addEventListener("keydown", onKey);
-    $("prompt-ok").addEventListener("click", onOk);
-    $("prompt-cancel").addEventListener("click", onCancel);
-    $("prompt-close").addEventListener("click", onCancel);
-    modal.addEventListener("mousedown", onBackdrop);
-  });
+  const modal = $("prompt");
+  $("prompt-title").textContent = title || t("common.input");
+  $("prompt-label").textContent = label || "";
+  const input = $("prompt-input");
+  input.value = value;
+  return runModal(
+    modal,
+    () =>
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 0),
+    (finish, on) => {
+      const onOk = () => finish(input.value);
+      const onCancel = () => finish(null);
+      const onKey = (ev) => {
+        ev.stopPropagation();
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          finish(input.value);
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          finish(null);
+        }
+      };
+      on(input, "keydown", onKey);
+      on($("prompt-ok"), "click", onOk);
+      on($("prompt-cancel"), "click", onCancel);
+      on($("prompt-close"), "click", onCancel);
+      on(modal, "mousedown", backdropCancel(modal, finish));
+    }
+  );
 }
 
 // ---- generic small form dialog (sort / replace / case options) ------------
@@ -123,72 +137,60 @@ export function formVisible() {
 // title, options}. All labels/placeholders/titles arrive already localized.
 // Resolves to {id: value} or null on cancel.
 export function askForm(title, fields, okLabel = null): Promise<any> {
-  return new Promise((resolve) => {
-    const modal = $("form-modal");
-    const body = $("form-body");
-    $("form-title").textContent = title || t("common.options");
-    $("form-ok").textContent = okLabel || t("common.run");
-    body.textContent = "";
-    const readers: Record<string, () => any> = {};
-    for (const f of fields) {
-      if (f.type === "hint") {
-        const hint = document.createElement("div");
-        hint.className = "form-hint";
-        hint.textContent = f.label;
-        body.append(hint);
-        continue;
-      }
-      if (f.type === "check") {
-        const lab = document.createElement("label");
-        lab.className = "form-check";
-        if (f.title) lab.title = f.title;
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = !!f.value;
-        lab.append(cb, document.createTextNode(f.label));
-        body.append(lab);
-        readers[f.id] = () => cb.checked;
-        continue;
-      }
-      const row = document.createElement("label");
-      row.className = "form-row";
-      const span = document.createElement("span");
-      span.textContent = f.label;
-      row.append(span);
-      if (f.type === "select") {
-        const sel = document.createElement("select");
-        for (const [v, text] of f.options || []) {
-          const o = document.createElement("option");
-          o.value = v;
-          o.textContent = text;
-          sel.append(o);
-        }
-        if (f.value != null) sel.value = f.value;
-        row.append(sel);
-        readers[f.id] = () => sel.value;
-      } else {
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = f.value ?? "";
-        input.placeholder = f.placeholder ?? "";
-        if (f.title) input.title = f.title;
-        row.append(input);
-        readers[f.id] = () => input.value;
-      }
-      body.append(row);
+  const modal = $("form-modal");
+  const body = $("form-body");
+  $("form-title").textContent = title || t("common.options");
+  $("form-ok").textContent = okLabel || t("common.run");
+  body.textContent = "";
+  const readers: Record<string, () => any> = {};
+  for (const f of fields) {
+    if (f.type === "hint") {
+      const hint = document.createElement("div");
+      hint.className = "form-hint";
+      hint.textContent = f.label;
+      body.append(hint);
+      continue;
     }
-    setModalOpen(modal, true);
-    queueMicrotask(() => body.querySelector("input, select")?.focus());
-    const finish = (val) => {
-      setModalOpen(modal, false);
-      $("form-ok").removeEventListener("click", onOk);
-      $("form-cancel").removeEventListener("click", onCancel);
-      $("form-close").removeEventListener("click", onCancel);
-      modal.removeEventListener("mousedown", onBackdrop);
-      modal.removeEventListener("keydown", onKey);
-      focusEditor();
-      resolve(val);
-    };
+    if (f.type === "check") {
+      const lab = document.createElement("label");
+      lab.className = "form-check";
+      if (f.title) lab.title = f.title;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!f.value;
+      lab.append(cb, document.createTextNode(f.label));
+      body.append(lab);
+      readers[f.id] = () => cb.checked;
+      continue;
+    }
+    const row = document.createElement("label");
+    row.className = "form-row";
+    const span = document.createElement("span");
+    span.textContent = f.label;
+    row.append(span);
+    if (f.type === "select") {
+      const sel = document.createElement("select");
+      for (const [v, text] of f.options || []) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = text;
+        sel.append(o);
+      }
+      if (f.value != null) sel.value = f.value;
+      row.append(sel);
+      readers[f.id] = () => sel.value;
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = f.value ?? "";
+      input.placeholder = f.placeholder ?? "";
+      if (f.title) input.title = f.title;
+      row.append(input);
+      readers[f.id] = () => input.value;
+    }
+    body.append(row);
+  }
+  return runModal(modal, () => queueMicrotask(() => body.querySelector("input, select")?.focus()), (finish, on) => {
     const collect = () =>
       Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
     const onOk = () => finish(collect());
@@ -203,14 +205,11 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
         finish(null);
       }
     };
-    const onBackdrop = (ev) => {
-      if (ev.target === modal) finish(null);
-    };
-    $("form-ok").addEventListener("click", onOk);
-    $("form-cancel").addEventListener("click", onCancel);
-    $("form-close").addEventListener("click", onCancel);
-    modal.addEventListener("mousedown", onBackdrop);
-    modal.addEventListener("keydown", onKey);
+    on($("form-ok"), "click", onOk);
+    on($("form-cancel"), "click", onCancel);
+    on($("form-close"), "click", onCancel);
+    on(modal, "mousedown", backdropCancel(modal, finish));
+    on(modal, "keydown", onKey);
   });
 }
 

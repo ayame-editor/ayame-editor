@@ -231,4 +231,13 @@ mod tests {
         csv_nth_field(line, b',', b'"', 4, &mut out);
         assert!(out.is_empty());
     }
+
+    #[test]
+    fn csv_field_streams_quoted_fields_larger_than_internal_buffer() {
+        let long = "x".repeat(900);
+        let line = format!("a,\"{long}\",z");
+        let mut out = Vec::new();
+        csv_nth_field(line.as_bytes(), b',', b'"', 2, &mut out);
+        assert_eq!(out, long.as_bytes());
+    }
 }

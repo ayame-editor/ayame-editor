@@ -744,4 +744,28 @@ mod tests {
             .unwrap();
         assert_eq!(hit.line, 1000);
     }
+
+    #[test]
+    fn forced_legacy_search_handles_empty_and_bom_only_files() {
+        for bytes in [&b""[..], &b"\xEF\xBB\xBF"[..]] {
+            let f = write_temp(bytes);
+            let doc = Document::open(
+                f.path(),
+                &OpenOptions {
+                    encoding: Some(Encoding::ShiftJis),
+                    ..OpenOptions::default()
+                },
+            )
+            .unwrap();
+            let res = doc
+                .search(&SearchOptions {
+                    query: "needle".into(),
+                    max_hits: 10,
+                    ..SearchOptions::default()
+                })
+                .unwrap();
+            assert!(res.hits.is_empty());
+            assert!(!res.truncated);
+        }
+    }
 }

@@ -235,9 +235,7 @@ impl LineIndex {
         Self::checkpoint_count_for_lines(line_count, stride) * CHECKPOINT_BYTES
     }
 
-    /// Byte range `[start, end)` of line `i`, excluding the line terminator.
-    /// A trailing `\r` (CRLF) is trimmed from `end`. Returns `None` if out of range.
-    pub fn line_range(&self, buf: &[u8], i: u64) -> Option<(u64, u64)> {
+    fn line_start(&self, buf: &[u8], i: u64) -> Option<u64> {
         if i >= self.line_count {
             return None;
         }
@@ -248,48 +246,9 @@ impl LineIndex {
         let cp = self.checkpoints[k];
         let mut off = cp.off;
         let mut cur = cp.line;
-        let end_limit = self.len;
 
         while cur < i {
-            match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
-                Some(rel) => {
-                    off += rel as u64 + 1;
-                    cur += 1;
-                }
-                None => return None, // unreachable while i < line_count
-            }
-        }
-
-        let mut end = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
-            Some(rel) => off + rel as u64,
-            None => end_limit,
-        };
-        if end > off && buf[(end - 1) as usize] == b'\r' {
-            end -= 1; // trim CR of a CRLF terminator
-        }
-        Some((off, end))
-    }
-
-    /// Byte ranges for line `i`: `(text_start, text_end, raw_end)`.
-    ///
-    /// `text_end` excludes the terminator and trims the `\r` in CRLF. `raw_end`
-    /// includes the original line terminator, if one exists. This is used by the
-    /// edit/save layer so untouched lines can be streamed out byte-for-byte.
-    pub fn line_range_with_terminator(&self, buf: &[u8], i: u64) -> Option<(u64, u64, u64)> {
-        if i >= self.line_count {
-            return None;
-        }
-        let k = self
-            .checkpoints
-            .partition_point(|c| c.line <= i)
-            .saturating_sub(1);
-        let cp = self.checkpoints[k];
-        let mut off = cp.off;
-        let mut cur = cp.line;
-        let end_limit = self.len;
-
-        while cur < i {
-            match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
+            match memchr(b'\n', &buf[off as usize..self.len as usize]) {
                 Some(rel) => {
                     off += rel as u64 + 1;
                     cur += 1;
@@ -298,10 +257,17 @@ impl LineIndex {
             }
         }
 
-        let raw_end = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
+        Some(off)
+    }
+
+    fn raw_end_from(&self, buf: &[u8], off: u64) -> u64 {
+        match memchr(b'\n', &buf[off as usize..self.len as usize]) {
             Some(rel) => off + rel as u64 + 1,
-            None => end_limit,
-        };
+            None => self.len,
+        }
+    }
+
+    fn text_end_from_raw(buf: &[u8], off: u64, raw_end: u64) -> u64 {
         let mut text_end = if raw_end > off && buf[(raw_end - 1) as usize] == b'\n' {
             raw_end - 1
         } else {
@@ -310,6 +276,26 @@ impl LineIndex {
         if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
             text_end -= 1;
         }
+        text_end
+    }
+
+    /// Byte range `[start, end)` of line `i`, excluding the line terminator.
+    /// A trailing `\r` (CRLF) is trimmed from `end`. Returns `None` if out of range.
+    pub fn line_range(&self, buf: &[u8], i: u64) -> Option<(u64, u64)> {
+        let off = self.line_start(buf, i)?;
+        let raw_end = self.raw_end_from(buf, off);
+        Some((off, Self::text_end_from_raw(buf, off, raw_end)))
+    }
+
+    /// Byte ranges for line `i`: `(text_start, text_end, raw_end)`.
+    ///
+    /// `text_end` excludes the terminator and trims the `\r` in CRLF. `raw_end`
+    /// includes the original line terminator, if one exists. This is used by the
+    /// edit/save layer so untouched lines can be streamed out byte-for-byte.
+    pub fn line_range_with_terminator(&self, buf: &[u8], i: u64) -> Option<(u64, u64, u64)> {
+        let off = self.line_start(buf, i)?;
+        let raw_end = self.raw_end_from(buf, off);
+        let text_end = Self::text_end_from_raw(buf, off, raw_end);
         Some((off, text_end, raw_end))
     }
 
@@ -321,24 +307,17 @@ impl LineIndex {
         if start >= self.line_count || count == 0 {
             return out;
         }
-        let (mut off, _e) = match self.line_range(buf, start) {
-            Some(r) => r,
+        let mut off = match self.line_start(buf, start) {
+            Some(off) => off,
             None => return out,
         };
-        let end_limit = self.len;
         let last = (start + count).min(self.line_count);
         let mut line = start;
         while line < last {
-            let (end, next) = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
-                Some(rel) => (off + rel as u64, off + rel as u64 + 1),
-                None => (end_limit, end_limit),
-            };
-            let mut text_end = end;
-            if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
-                text_end -= 1;
-            }
+            let raw_end = self.raw_end_from(buf, off);
+            let text_end = Self::text_end_from_raw(buf, off, raw_end);
             out.push((line, off, text_end));
-            off = next;
+            off = raw_end;
             line += 1;
         }
         out
@@ -360,26 +339,15 @@ impl LineIndex {
         if start >= self.line_count || count == 0 {
             return out;
         }
-        let (mut off, _text_end, _raw_end) = match self.line_range_with_terminator(buf, start) {
-            Some(r) => r,
+        let mut off = match self.line_start(buf, start) {
+            Some(off) => off,
             None => return out,
         };
-        let end_limit = self.len;
         let last = (start + count).min(self.line_count);
         let mut line = start;
         while line < last {
-            let raw_end = match memchr(b'\n', &buf[off as usize..end_limit as usize]) {
-                Some(rel) => off + rel as u64 + 1,
-                None => end_limit,
-            };
-            let mut text_end = if raw_end > off && buf[(raw_end - 1) as usize] == b'\n' {
-                raw_end - 1
-            } else {
-                raw_end
-            };
-            if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
-                text_end -= 1;
-            }
+            let raw_end = self.raw_end_from(buf, off);
+            let text_end = Self::text_end_from_raw(buf, off, raw_end);
             out.push((line, off, text_end, raw_end));
             off = raw_end;
             line += 1;

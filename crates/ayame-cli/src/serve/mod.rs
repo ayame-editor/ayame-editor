@@ -550,6 +550,23 @@ mod tests {
         )
     }
 
+    fn post_raw(
+        path: &str,
+        host: &str,
+        origin: Option<&str>,
+        content_type: &str,
+        body: &[u8],
+    ) -> String {
+        let origin_line = origin
+            .map(|o| format!("Origin: {o}\r\n"))
+            .unwrap_or_default();
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: {host}\r\n{origin_line}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            String::from_utf8_lossy(body)
+        )
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stat_answers_and_rebinding_host_is_blocked() {
         let f = scratch_file("stat.txt", b"hello\nworld\n");
@@ -640,6 +657,42 @@ mod tests {
         assert_eq!(status, 200);
 
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn upload_sanitizes_name_and_opens_uploaded_file() {
+        let f = scratch_file("upload-base.txt", b"base\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let _ = std::fs::remove_dir_all(workspace::uploads_dir());
+
+        let (status, body) = send(
+            addr,
+            post_raw(
+                "/api/upload?name=..%2F..%2Fescape.txt",
+                &host,
+                Some(&origin),
+                "text/plain",
+                b"uploaded\n",
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let path = json["path"].as_str().unwrap();
+        assert!(path.ends_with("escape.txt"), "path: {path}");
+        assert!(
+            Path::new(path).starts_with(workspace::uploads_dir()),
+            "upload escaped scratch dir: {path}"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"uploaded\n");
+
+        let (_, lines) = send(addr, get("/api/lines?start=0&count=2", &host)).await;
+        assert!(lines.contains("uploaded"), "body: {lines}");
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir_all(workspace::uploads_dir());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -847,6 +900,35 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("\"open\":true"), "body: {body}");
         assert!(body.contains("\"dirty\":false"), "body: {body}");
+
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn edit_save_converts_encoding_eol_and_bom_then_reloads_tab() {
+        let f = scratch_file("convert-save.txt", b"alpha\nbeta\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true,"encoding":"utf-8","eol":"crlf","bom":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"switched\":true"), "body: {body}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"\xEF\xBB\xBFalpha\r\nbeta\r\n");
+
+        let (status, stat) = send(addr, get("/api/stat", &host)).await;
+        assert_eq!(status, 200, "body: {stat}");
+        assert!(stat.contains("\"eol\":\"crlf\""), "body: {stat}");
+        assert!(stat.contains("\"bom_bytes\":3"), "body: {stat}");
 
         let _ = std::fs::remove_file(&f);
     }

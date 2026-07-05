@@ -164,7 +164,7 @@ impl OverlaySnapshot {
 /// therefore keep referring to the old base, and serializing it verbatim into
 /// a log whose header names the NEW base would replay onto the wrong lines.
 /// [`RebaseSource::rebase`] converts between the two coordinate spaces.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct RebaseSource {
     /// The overlay at the moment of the save — exactly the delta
     /// `old base → new (saved) base`, anchored to the old base.
@@ -410,6 +410,39 @@ impl EditSession {
     /// [`WalWriter::len_bytes`] for compaction thresholds.
     pub fn wal(&mut self) -> Option<&mut WalWriter> {
         self.wal.as_mut()
+    }
+
+    /// Duplicate the attached log's file handle so policy code can fsync it
+    /// without borrowing the live writer. A cloned handle syncs the same file
+    /// description on platforms Ayame supports; if cloning fails, the caller
+    /// treats that like a sync failure and disables crash logging.
+    pub fn wal_sync_file(&self) -> std::io::Result<Option<std::fs::File>> {
+        self.wal.as_ref().map(WalWriter::sync_file).transpose()
+    }
+
+    /// Current crash-log size, if logging is attached.
+    pub fn wal_len_bytes(&self) -> Option<u64> {
+        self.wal.as_ref().map(WalWriter::len_bytes)
+    }
+
+    /// Capture everything needed to compact the log outside the workspace
+    /// lock. The returned plan does not touch the live writer or its path
+    /// until [`EditSession::wal_install_compaction`] is called.
+    pub fn wal_compaction_plan(&self) -> Option<crate::wal::WalCompactionPlan> {
+        self.wal.as_ref().and_then(WalWriter::compaction_plan)
+    }
+
+    /// Replace the attached writer with a staged compaction result. On any
+    /// install error, logging degrades exactly like a write failure.
+    pub fn wal_install_compaction(&mut self, staged: crate::wal::StagedWalCompaction) {
+        let Some(w) = self.wal.take() else {
+            staged.cleanup();
+            return;
+        };
+        match w.install_compaction(staged) {
+            Ok(w) => self.wal = Some(w),
+            Err(e) => self.wal_error = Some(format!("crash log disabled: {e}")),
+        }
     }
 
     /// First crash-log write failure, if one occurred; surfacing it consumes

@@ -90,6 +90,25 @@ export function noteWalError(stat) {
   }
 }
 
+export async function reloadActiveDocument({
+  bumpGeneration = true,
+  keepCaret = true,
+  refreshTabList = true,
+  refreshTree = false,
+} = {}) {
+  if (bumpGeneration) {
+    state.docGen++;
+    state.editGen++;
+  }
+  clearLineCache();
+  await refreshStat();
+  await reloadViewport();
+  if (keepCaret) setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+  render();
+  if (refreshTabList) refreshTabs();
+  if (refreshTree) updateTreeActive();
+}
+
 // Shared tail of every save-as-style save (名前を付けて保存 / クイックメモ保存):
 // the current tab becomes the saved file (the server swaps the active tab's
 // document to the new path), exactly like every desktop editor — no leftover
@@ -98,15 +117,7 @@ export function noteWalError(stat) {
 export async function finishSaveAs(res) {
   if (res.switched) {
     // Same tab, new document identity: refresh in place, keep the caret.
-    state.docGen++;
-    state.editGen++;
-    clearLineCache();
-    await refreshStat();
-    await reloadViewport();
-    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
-    render();
-    refreshTabs();
-    updateTreeActive();
+    await reloadActiveDocument({ refreshTree: true });
   } else {
     // The workspace changed while saving (rare): fall back to focusing the
     // saved file — the server dedupes, so this never duplicates a tab.
@@ -364,14 +375,7 @@ export async function convertSave(encoding, lineEnding, bom) {
       bom,
     });
     if (res.switched) {
-      state.docGen++;
-      state.editGen++;
-      clearLineCache();
-      await refreshStat();
-      await reloadViewport();
-      setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
-      render();
-      refreshTabs();
+      await reloadActiveDocument();
     } else {
       onDocumentOpened(await apiPost("/api/open", { path: res.path }));
     }
@@ -405,14 +409,7 @@ export async function reopenWithEncoding(encoding) {
   await settleEditQueue();
   try {
     await apiPost("/api/reopen_encoding", { encoding });
-    state.docGen++;
-    state.editGen++;
-    clearLineCache();
-    await refreshStat();
-    await reloadViewport();
-    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
-    render();
-    refreshTabs();
+    await reloadActiveDocument();
     flashCount(t("dialog.convert.reopenedAs", { enc: enc(encoding) }));
   } catch (e) {
     flashCount(t("dialog.convert.reopenError"), "error");
@@ -485,10 +482,7 @@ export async function sortSave() {
     state.sel = null;
     state.extraCursors = [];
     setCaret(0, 0);
-    clearLineCache();
-    await refreshStat();
-    await reloadViewport();
-    render();
+    await reloadActiveDocument({ bumpGeneration: false, keepCaret: false, refreshTabList: false });
     flashCount(t("dialog.sort.done"));
   } catch (e) {
     flashCount(t("dialog.sort.error"), "error");

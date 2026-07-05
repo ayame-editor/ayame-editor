@@ -2,7 +2,6 @@
 import { $ } from "./dom.js";
 import { LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
-import { openNewWindow } from "./app.js";
 import {
   convertSave,
   convertVisible,
@@ -12,8 +11,6 @@ import {
   saveFile,
   savingCount,
   showConvert,
-  sortSave,
-  splitFile,
   syncConvertBom,
 } from "./save.js";
 import {
@@ -30,10 +27,7 @@ import {
   addCursorAbove,
   addCursorBelow,
   clearExtraCursors,
-  copySelection,
-  cutSelection,
   caretToDocEnd,
-  selectAll,
 } from "./selection.js";
 import {
   commandPaletteVisible,
@@ -45,8 +39,9 @@ import {
   hideKeymap,
   keymapVisible,
   matchesShortcut,
-  showCommandPalette,
-  showKeymap,
+  runAction,
+  shortcutActionFromEvent,
+  toggleOpt,
 } from "./menus.js";
 import {
   applyRange,
@@ -56,23 +51,19 @@ import {
   duplicateLines,
   enqueueEdit,
   forwardDelete,
-  gotoLine,
   insertNewline,
   moveLines,
   pasteText,
   redoEdit,
   setFollowTail,
-  transformSelection,
   typeText,
   undoEdit,
 } from "./edits.js";
 import {
   buildMatcher,
-  diffFile,
   diffVisible,
   findStep,
   flashCount,
-  grepFolder,
   grepVisible,
   hideDiff,
   hideFind,
@@ -81,26 +72,19 @@ import {
   replaceCurrent,
   selectNextOccurrence,
   setReplaceRow,
-  showFind,
   showSearchHistory,
   updateCount,
 } from "./search.js";
-import { askPrompt, confirmVisible, formVisible, promptVisible } from "./dialogs.js";
+import { confirmVisible, formVisible, promptVisible } from "./dialogs.js";
 import {
-  closeTab,
   hideOpener,
-  newUntitled,
   openerVisible,
-  setSidebar,
-  showOpener,
-  sidebarOpen,
 } from "./workspace.js";
 import {
   applyKeymapFromBuffer,
   applyThemeFromBuffer,
   hideSettings,
   settingsVisible,
-  showSettings,
 } from "./settings.js";
 
 export function anyModalOpen() {
@@ -241,17 +225,6 @@ export function initEvents() {
   window.addEventListener("resize", scheduleRender);
 }
 
-export function toggleOpt(key, id) {
-  state[key] = !state[key];
-  $(id).classList.toggle("on", state[key]);
-  state.lastMatch = null;
-  state.searchHits = null;
-  state.searchTruncated = false;
-  buildMatcher();
-  scheduleRender();
-  if (state.query) updateCount();
-}
-
 // App-level shortcuts. Caret motion and text editing live in onEditKey (bound
 // to the hidden input); those keys never reach here because onEditKey stops
 // their propagation. `inField` is true only for the real text inputs (find /
@@ -304,163 +277,15 @@ export function onGlobalKey(e) {
     hideOpener();
     return;
   }
-  if (!anyModalOpen() && matchesShortcut(e, "commandPalette")) {
-    e.preventDefault();
-    showCommandPalette();
-    return;
-  }
   // A modal owns the keyboard: never run editor/clipboard/history/nav commands
   // against the hidden document behind Settings / the Opener / a prompt.
   if (anyModalOpen()) return;
-  if (matchesShortcut(e, "openFile")) {
+
+  const action = shortcutActionFromEvent(e, inField);
+  if (action) {
     e.preventDefault();
     hideFileMenu();
-    showOpener();
-    return;
-  }
-  if (matchesShortcut(e, "toggleSidebar")) {
-    e.preventDefault();
-    setSidebar(!sidebarOpen());
-    return;
-  }
-  if (matchesShortcut(e, "newFile")) {
-    e.preventDefault();
-    hideFileMenu();
-    newUntitled();
-    return;
-  }
-  if (matchesShortcut(e, "newWindow")) {
-    e.preventDefault();
-    hideFileMenu();
-    openNewWindow();
-    return;
-  }
-  if (matchesShortcut(e, "gotoLine")) {
-    e.preventDefault();
-    askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((v) => {
-      if (v != null) gotoLine(v);
-    });
-    return;
-  }
-  if (matchesShortcut(e, "closeTab")) {
-    e.preventDefault();
-    const active = state.tabs.find((t) => t.active);
-    if (active) closeTab(active.id);
-    return;
-  }
-  if (matchesShortcut(e, "find")) {
-    e.preventDefault();
-    showFind();
-    return;
-  }
-  if (matchesShortcut(e, "replace")) {
-    e.preventDefault();
-    showFind(true);
-    return;
-  }
-  if (matchesShortcut(e, "saveAs")) {
-    e.preventDefault();
-    hideFileMenu();
-    saveCopy();
-    return;
-  }
-  if (matchesShortcut(e, "saveFile")) {
-    e.preventDefault();
-    hideFileMenu();
-    saveFile();
-    return;
-  }
-  if (matchesShortcut(e, "findPrev")) {
-    e.preventDefault();
-    findStep("prev");
-    return;
-  }
-  if (matchesShortcut(e, "findNext")) {
-    e.preventDefault();
-    findStep("next");
-    return;
-  }
-  if (matchesShortcut(e, "searchCase")) {
-    e.preventDefault();
-    toggleOpt("ci", "opt-case");
-    return;
-  }
-  if (matchesShortcut(e, "searchRegex")) {
-    e.preventDefault();
-    toggleOpt("regex", "opt-regex");
-    return;
-  }
-  if (matchesShortcut(e, "searchWord")) {
-    e.preventDefault();
-    toggleOpt("word", "opt-word");
-    return;
-  }
-  if (matchesShortcut(e, "sortSave")) {
-    e.preventDefault();
-    sortSave();
-    return;
-  }
-  if (matchesShortcut(e, "diffFile")) {
-    e.preventDefault();
-    diffFile();
-    return;
-  }
-  if (matchesShortcut(e, "splitFile")) {
-    e.preventDefault();
-    splitFile();
-    return;
-  }
-  if (matchesShortcut(e, "grepFolder")) {
-    e.preventDefault();
-    grepFolder();
-    return;
-  }
-  if (matchesShortcut(e, "settings")) {
-    e.preventDefault();
-    showSettings();
-    return;
-  }
-  if (matchesShortcut(e, "keymap")) {
-    e.preventDefault();
-    showKeymap();
-    return;
-  }
-  // Editor clipboard / history — not while typing in a search or dialog field.
-  if (inField) return;
-  if (matchesShortcut(e, "selectAll")) {
-    e.preventDefault();
-    selectAll();
-    return;
-  }
-  if (matchesShortcut(e, "copy")) {
-    e.preventDefault();
-    copySelection();
-    return;
-  }
-  if (matchesShortcut(e, "cut")) {
-    e.preventDefault();
-    cutSelection();
-    return;
-  }
-  if (matchesShortcut(e, "caseUpper")) {
-    e.preventDefault();
-    transformSelection("upper");
-    return;
-  }
-  if (matchesShortcut(e, "caseLower")) {
-    e.preventDefault();
-    transformSelection("lower");
-    return;
-  }
-  if (matchesShortcut(e, "redo")) {
-    e.preventDefault();
-    redoEdit();
-    return;
-  }
-  if (matchesShortcut(e, "undo")) {
-    e.preventDefault();
-    undoEdit();
-    return;
+    runAction(action);
   }
 }
 

@@ -224,6 +224,31 @@ pub struct WalWriter {
     rebase: Option<RebaseSource>,
 }
 
+/// Immutable description of a possible compaction, cheap to copy while the
+/// live writer remains attached to the editing session.
+#[derive(Clone, Debug)]
+pub struct WalCompactionPlan {
+    path: PathBuf,
+    header: Header,
+    base_gen: u64,
+    rebase: Option<RebaseSource>,
+}
+
+/// A fully written, fsynced compact log waiting to replace the live log.
+#[derive(Debug)]
+pub struct StagedWalCompaction {
+    path: PathBuf,
+    tmp: PathBuf,
+    header: Header,
+    len: u64,
+}
+
+impl StagedWalCompaction {
+    pub fn cleanup(self) {
+        let _ = std::fs::remove_file(self.tmp);
+    }
+}
+
 impl WalWriter {
     /// Create (or atomically replace) the log at `wal_path`, writing `header`
     /// as its first record. Parent directories are created as needed.
@@ -279,6 +304,11 @@ impl WalWriter {
     pub fn sync(&mut self) -> Result<()> {
         self.file.sync_data()?;
         Ok(())
+    }
+
+    /// Duplicate the underlying file handle for off-lock policy fsyncs.
+    pub fn sync_file(&self) -> std::io::Result<File> {
+        self.file.try_clone()
     }
 
     /// Truncate back to a fresh log carrying `header`, WITHOUT capturing the
@@ -338,6 +368,18 @@ impl WalWriter {
         self.base_gen == 0 || self.rebase.is_some()
     }
 
+    /// Capture metadata needed to compact this writer without touching the
+    /// live log path. Returns `None` for reset states whose overlay cannot be
+    /// represented honestly as a snapshot.
+    pub fn compaction_plan(&self) -> Option<WalCompactionPlan> {
+        self.can_snapshot().then(|| WalCompactionPlan {
+            path: self.path.clone(),
+            header: self.header.clone(),
+            base_gen: self.base_gen,
+            rebase: self.rebase.clone(),
+        })
+    }
+
     /// Compaction: atomically rewrite the log as its header plus one full
     /// overlay snapshot of `session`, superseding all per-transaction
     /// records. Watch [`WalWriter::len_bytes`] to decide when (e.g. past
@@ -387,6 +429,63 @@ impl WalWriter {
     pub fn header(&self) -> &Header {
         &self.header
     }
+
+    /// Install a compact log that was staged from this writer. Consumes the
+    /// old writer first so Windows can replace the path.
+    pub fn install_compaction(self, staged: StagedWalCompaction) -> Result<WalWriter> {
+        if self.path != staged.path || self.header != staged.header {
+            staged.cleanup();
+            return Err(Error::Unsupported(
+                "staged crash-log compaction no longer matches the live writer".into(),
+            ));
+        }
+        let path = staged.path;
+        let tmp = staged.tmp;
+        let header = staged.header;
+        let len = staged.len;
+        let base_gen = self.base_gen;
+        let rebase = self.rebase.clone();
+        drop(self);
+        install_staged(&tmp, &path)?;
+        let file = OpenOptions::new().append(true).open(&path)?;
+        Ok(WalWriter {
+            file,
+            path,
+            header,
+            len,
+            replay_undo: 0,
+            replay_redo: 0,
+            base_gen,
+            rebase,
+        })
+    }
+}
+
+impl WalCompactionPlan {
+    /// Write and fsync the compact log to a side path. The live writer can keep
+    /// appending to the current log while this runs; callers install the stage
+    /// only after proving the editing session revision did not change.
+    pub fn stage(&self, session: &EditSession) -> Result<StagedWalCompaction> {
+        let overlay = if self.base_gen == 0 {
+            Some(session.overlay_snapshot())
+        } else {
+            self.rebase.as_ref().map(|r| r.rebase(session))
+        };
+        let Some(overlay) = overlay else {
+            return Err(Error::Unsupported(
+                "the crash log was reset without a session capture; edits since the last save \
+                 are not crash-protected — save the file to re-arm crash recovery"
+                    .into(),
+            ));
+        };
+        let (tmp, len) = write_staged(&self.path, &self.header, Some(overlay))?;
+        Ok(StagedWalCompaction {
+            path: self.path.clone(),
+            tmp,
+            header: self.header.clone(),
+            len,
+        })
+    }
 }
 
 /// Serialize one record as a JSON line and flush it to the OS.
@@ -410,13 +509,25 @@ fn write_fresh(
     header: &Header,
     overlay: Option<OverlaySnapshot>,
 ) -> Result<(File, u64)> {
+    let (tmp, len) = write_staged(path, header, overlay)?;
+    install_staged(&tmp, path)?;
+    let file = OpenOptions::new().append(true).open(path)?;
+    Ok((file, len))
+}
+
+fn write_staged(
+    path: &Path,
+    header: &Header,
+    overlay: Option<OverlaySnapshot>,
+) -> Result<(PathBuf, u64)> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = path.with_file_name(format!(
-        ".{}.tmp-{}",
+        ".{}.tmp-{}-{:?}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("ayame"),
-        std::process::id()
+        std::process::id(),
+        std::thread::current().id()
     ));
     let mut len = 0u64;
     {
@@ -427,13 +538,17 @@ fn write_fresh(
         }
         f.sync_data()?;
     }
-    if let Err(first) = std::fs::rename(&tmp, path) {
+    Ok((tmp, len))
+}
+
+fn install_staged(tmp: &Path, path: &Path) -> Result<()> {
+    if let Err(first) = std::fs::rename(tmp, path) {
         // Windows can refuse to rename over an existing file. Never delete
         // the existing log before its replacement is in place: go through
         // the rename-aside route, which keeps a recoverable log on disk at
         // every intermediate step.
-        if rename_via_aside(&tmp, path).is_err() {
-            let _ = std::fs::remove_file(&tmp);
+        if rename_via_aside(tmp, path).is_err() {
+            let _ = std::fs::remove_file(tmp);
             return Err(Error::Io(first));
         }
     }
@@ -443,8 +558,7 @@ fn write_fresh(
     if let Some(parent) = path.parent() {
         fsync_dir(parent);
     }
-    let file = OpenOptions::new().append(true).open(path)?;
-    Ok((file, len))
+    Ok(())
 }
 
 /// The rename-aside name of a log: `<name>.old`, in the same directory.
@@ -838,6 +952,39 @@ mod tests {
         assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 2);
         assert_eq!(texts(&recovered, &doc2), expected);
         assert!(recovered.is_dirty());
+    }
+
+    #[test]
+    fn staged_compaction_installs_and_replays() {
+        let (f, doc) = doc_from(b"seed\nline\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        for k in 0..100u32 {
+            live.replace_line(&doc, 0, format!("v{k}")).unwrap();
+        }
+        let before = live.wal_len_bytes().unwrap();
+        let plan = live.wal_compaction_plan().unwrap();
+        let snapshot = live.clone();
+        let staged = plan.stage(&snapshot).unwrap();
+        live.wal_install_compaction(staged);
+        assert!(live.wal().is_some(), "install must keep logging attached");
+        let after = live.wal_len_bytes().unwrap();
+        assert!(
+            after < before,
+            "staged snapshot must supersede txn records ({after} !< {before})"
+        );
+
+        live.replace_range(&doc, 1, 0, 1, 0, "tail ").unwrap();
+        let expected = texts(&live, &doc);
+        drop(live);
+
+        let doc2 = reopen(f.path());
+        let mut recovered = EditSession::default();
+        assert_eq!(replay(&wal, &doc2, &mut recovered).unwrap(), 1);
+        assert_eq!(texts(&recovered, &doc2), expected);
     }
 
     #[test]

@@ -28,11 +28,14 @@ import {
   updateTailUI,
 } from "./edits.js";
 import {
+  buildMatcher,
   diffFile,
   flashCount,
+  findStep,
   grepFolder,
   selectNextOccurrence,
   showFind,
+  updateCount,
   updateFindCountLabel,
 } from "./search.js";
 import { askPrompt, formVisible, promptVisible } from "./dialogs.js";
@@ -574,6 +577,120 @@ export function updateStatusPos() {
   $("st-pos").textContent = n ? t("status.posCursors", { pos, n: n + 1 }) : pos;
 }
 
+const closeActiveTab = () => {
+  const active = state.tabs.find((t) => t.active);
+  if (active) closeTab(active.id);
+};
+
+const promptGotoLine = () => {
+  askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((v) => {
+    if (v != null) gotoLine(v);
+  });
+};
+
+export function toggleOpt(key, id) {
+  state[key] = !state[key];
+  $(id).classList.toggle("on", state[key]);
+  state.lastMatch = null;
+  state.searchHits = null;
+  state.searchTruncated = false;
+  buildMatcher();
+  scheduleRender();
+  if (state.query) updateCount();
+}
+
+export const ACTIONS: Record<string, { run: () => any; globalShortcut?: boolean; editorOnly?: boolean }> = {
+  commandPalette: { run: showCommandPalette, globalShortcut: true },
+  undo: { run: undoEdit, globalShortcut: true, editorOnly: true },
+  redo: { run: redoEdit, globalShortcut: true, editorOnly: true },
+  find: { run: () => showFind(), globalShortcut: true },
+  replace: { run: () => showFind(true), globalShortcut: true },
+  gotoLine: { run: promptGotoLine, globalShortcut: true },
+  selectAll: { run: selectAll, globalShortcut: true, editorOnly: true },
+  selectNextOccurrence: { run: selectNextOccurrence },
+  addCursorAbove: { run: addCursorAbove },
+  addCursorBelow: { run: addCursorBelow },
+  duplicateLine: { run: duplicateLines },
+  moveLineUp: { run: () => moveLines(-1) },
+  moveLineDown: { run: () => moveLines(1) },
+  deleteLine: { run: deleteLines },
+  copy: { run: copySelection, globalShortcut: true, editorOnly: true },
+  cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
+  toggleSidebar: { run: () => setSidebar(!sidebarOpen()), globalShortcut: true },
+  toggleWhitespace: {
+    run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
+  },
+  toggleZenkakuUnderline: {
+    run: () => updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline),
+  },
+  toggleWordWrap: { run: () => updateSetting("wordWrap", !state.settings.wordWrap) },
+  toggleFollowTail: { run: () => setFollowTail(!state.followTail) },
+  settings: { run: showSettings, globalShortcut: true },
+  sortSave: { run: sortSave, globalShortcut: true },
+  diffFile: { run: diffFile, globalShortcut: true },
+  splitFile: { run: splitFile, globalShortcut: true },
+  grepFolder: { run: grepFolder, globalShortcut: true },
+  caseUpper: { run: () => transformSelection("upper"), globalShortcut: true, editorOnly: true },
+  caseLower: { run: () => transformSelection("lower"), globalShortcut: true, editorOnly: true },
+  keymap: { run: showKeymap, globalShortcut: true },
+  newFile: { run: newUntitled, globalShortcut: true },
+  newWindow: { run: openNewWindow, globalShortcut: true },
+  openFile: { run: showOpener, globalShortcut: true },
+  saveFile: { run: saveFile, globalShortcut: true },
+  saveAs: { run: saveCopy, globalShortcut: true },
+  closeTab: { run: closeActiveTab, globalShortcut: true },
+  findPrev: { run: () => findStep("prev"), globalShortcut: true },
+  findNext: { run: () => findStep("next"), globalShortcut: true },
+  searchCase: { run: () => toggleOpt("ci", "opt-case"), globalShortcut: true },
+  searchRegex: { run: () => toggleOpt("regex", "opt-regex"), globalShortcut: true },
+  searchWord: { run: () => toggleOpt("word", "opt-word"), globalShortcut: true },
+};
+
+export function runAction(action) {
+  return ACTIONS[action]?.run();
+}
+
+const GLOBAL_SHORTCUT_ACTIONS = [
+  "commandPalette",
+  "openFile",
+  "toggleSidebar",
+  "newFile",
+  "newWindow",
+  "gotoLine",
+  "closeTab",
+  "find",
+  "replace",
+  "saveAs",
+  "saveFile",
+  "findPrev",
+  "findNext",
+  "searchCase",
+  "searchRegex",
+  "searchWord",
+  "sortSave",
+  "diffFile",
+  "splitFile",
+  "grepFolder",
+  "settings",
+  "keymap",
+  "selectAll",
+  "copy",
+  "cut",
+  "caseUpper",
+  "caseLower",
+  "redo",
+  "undo",
+];
+
+export function shortcutActionFromEvent(e, inField = false) {
+  for (const action of GLOBAL_SHORTCUT_ACTIONS) {
+    const entry = ACTIONS[action];
+    if (!entry?.globalShortcut || (inField && entry.editorOnly)) continue;
+    if (matchesShortcut(e, action)) return action;
+  }
+  return null;
+}
+
 export function runMenuAction(action) {
   hideFileMenu();
   // A modal owns the UI. Every menu action either opens a dialog or acts on
@@ -581,51 +698,7 @@ export function runMenuAction(action) {
   // at any time — so ALL actions are ignored while a modal is open. (In-page
   // menus are unreachable then; this guards the native path.)
   if (anyModalOpen()) return;
-  if (action === "commandPalette") return showCommandPalette();
-  if (action === "undo") return undoEdit();
-  if (action === "redo") return redoEdit();
-  if (action === "find") return showFind();
-  if (action === "replace") return showFind(true);
-  if (action === "gotoLine") {
-    askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((v) => {
-      if (v != null) gotoLine(v);
-    });
-    return;
-  }
-  if (action === "selectAll") return selectAll();
-  if (action === "selectNextOccurrence") return selectNextOccurrence();
-  if (action === "addCursorAbove") return addCursorAbove();
-  if (action === "addCursorBelow") return addCursorBelow();
-  if (action === "duplicateLine") return duplicateLines();
-  if (action === "moveLineUp") return moveLines(-1);
-  if (action === "moveLineDown") return moveLines(1);
-  if (action === "deleteLine") return deleteLines();
-  if (action === "copy") return copySelection();
-  if (action === "cut") return cutSelection();
-  if (action === "toggleSidebar") return setSidebar(!sidebarOpen());
-  if (action === "toggleWhitespace")
-    return updateSetting("showWhitespace", !state.settings.showWhitespace);
-  if (action === "toggleZenkakuUnderline")
-    return updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline);
-  if (action === "toggleWordWrap") return updateSetting("wordWrap", !state.settings.wordWrap);
-  if (action === "toggleFollowTail") return setFollowTail(!state.followTail);
-  if (action === "settings") return showSettings();
-  if (action === "sortSave") return sortSave();
-  if (action === "diffFile") return diffFile();
-  if (action === "splitFile") return splitFile();
-  if (action === "grepFolder") return grepFolder();
-  if (action === "caseUpper") return transformSelection("upper");
-  if (action === "caseLower") return transformSelection("lower");
-  if (action === "keymap") return showKeymap();
-  if (action === "newFile") return newUntitled();
-  if (action === "newWindow") return openNewWindow();
-  if (action === "openFile") return showOpener();
-  if (action === "saveFile") return saveFile();
-  if (action === "saveAs") return saveCopy();
-  if (action === "closeTab") {
-    const active = state.tabs.find((t) => t.active);
-    if (active) closeTab(active.id);
-  }
+  return runAction(action);
 }
 
 // Native menu dispatcher: the macOS (Rust) side calls this via evaluate_script

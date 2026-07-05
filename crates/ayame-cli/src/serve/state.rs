@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
-use ayame_core::wal::{self, WalWriter};
-use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions, TailRefresh};
+use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
+use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
 use serde::Serialize;
 
 use super::ops::WorkerInput;
@@ -363,6 +363,21 @@ pub(super) struct DirtySnapshotCache {
     pub(super) snapshot: Arc<Document>,
 }
 
+struct TailPollSnapshot {
+    doc: Shared,
+    revision: u64,
+    has_edits: bool,
+    known_bytes: u64,
+    known_lines: u64,
+}
+
+struct WalPolicyWork {
+    doc: Shared,
+    revision: u64,
+    sync_file: Option<std::fs::File>,
+    compact: Option<(EditSession, WalCompactionPlan)>,
+}
+
 pub(crate) struct AppState {
     /// The whole mutable workspace behind a single `RwLock`.
     ///
@@ -693,76 +708,97 @@ impl AppState {
     }
 
     /// Poll the active document for appended data (`tail -f`). When it grew and
-    /// the session has no pending edits, the line index is extended in place
-    /// over just the new bytes; a shrink or external replacement reports
+    /// the session has no pending edits, the refreshed document is opened off
+    /// the workspace lock and installed only if the active tab and edit
+    /// revision are still unchanged; a shrink or external replacement reports
     /// `changed` so the client can reopen. Blocking (stat + mmap + scan), so
     /// callers should run it off the async runtime.
     pub(super) fn poll_tail(&self) -> TailStatus {
         // Cheap peek under a short read lock: an Arc handle plus whether the
         // overlay holds edits (we only follow a clean, unedited view — the
         // overlay's line anchors reference the original document).
-        let (doc, has_edits) = self.read(|ws| match ws.doc() {
-            Some(d) => (Some(d.clone()), ws.edits.has_edits()),
-            None => (None, false),
+        let snap = self.read(|ws| {
+            ws.doc().map(|doc| TailPollSnapshot {
+                doc: doc.clone(),
+                revision: ws.edits.revision(),
+                has_edits: ws.edits.has_edits(),
+                known_bytes: doc.byte_len(),
+                known_lines: doc.line_count(),
+            })
         });
-        let Some(doc) = doc else {
+        let Some(snap) = snap else {
             return TailStatus::closed();
         };
-        let known = doc.byte_len();
-        let disk = match doc.disk_len() {
+        let disk = match snap.doc.disk_len() {
             Ok(n) => n,
             // A stat failure (the file vanished) reads as "changed externally".
             Err(_) => {
-                let mut s = TailStatus::at(doc.line_count(), known);
+                let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
                 s.changed = true;
                 return s;
             }
         };
-        if disk == known {
-            return TailStatus::at(doc.line_count(), known);
+        if disk == snap.known_bytes {
+            return TailStatus::at(snap.known_lines, snap.known_bytes);
         }
-        if disk < known || known == 0 {
+        if disk < snap.known_bytes || snap.known_bytes == 0 {
             // Shrunk/rotated, or grown from empty (encoding never detected).
-            let mut s = TailStatus::at(doc.line_count(), known);
+            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
             s.changed = true;
             return s;
         }
         // Growth detected. If edits are pending we do not follow — report it so
         // the client stops auto-scrolling into a view its overlay predates.
-        if has_edits {
-            let mut s = TailStatus::at(doc.line_count(), known);
+        if snap.has_edits {
+            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
             s.pending_edits = true;
             return s;
         }
-        // Release our extra handle and the find snapshot's handle so the live
-        // document becomes uniquely owned and can be extended in place. (The
-        // find snapshot is a leaf lock, taken here with no ws guard held.)
-        drop(doc);
-        self.invalidate_dirty_snapshot();
-        self.write(|ws| {
-            let Some(arc) = ws.doc.as_mut() else {
-                return TailStatus::closed();
-            };
-            match Arc::get_mut(arc) {
-                Some(doc) => match doc.refresh_tail() {
-                    Ok(TailRefresh::Grew) => {
-                        let mut s = TailStatus::at(doc.line_count(), doc.byte_len());
-                        s.grew = true;
-                        s
-                    }
-                    Ok(TailRefresh::Reindex) => {
-                        let mut s = TailStatus::at(doc.line_count(), doc.byte_len());
-                        s.changed = true;
-                        s
-                    }
-                    Ok(TailRefresh::Unchanged) | Err(_) => {
-                        TailStatus::at(doc.line_count(), doc.byte_len())
-                    }
-                },
-                // An in-flight op still holds a handle: leave it for next tick.
-                None => TailStatus::at(arc.line_count(), arc.byte_len()),
+
+        let path = snap.doc.path().to_path_buf();
+        let opened = Document::open(&path, &self.open_opts);
+        let Ok(new_doc) = opened else {
+            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
+            s.changed = true;
+            return s;
+        };
+        match new_doc.byte_len().cmp(&snap.known_bytes) {
+            std::cmp::Ordering::Less => {
+                let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
+                s.changed = true;
+                s
             }
-        })
+            std::cmp::Ordering::Equal => TailStatus::at(snap.known_lines, snap.known_bytes),
+            std::cmp::Ordering::Greater => {
+                let lines = new_doc.line_count();
+                let bytes = new_doc.byte_len();
+                let mut new_doc = Some(new_doc);
+                let status = self.write(|ws| {
+                    let Some(cur) = ws.doc.as_ref() else {
+                        return TailStatus::closed();
+                    };
+                    let unchanged = Arc::ptr_eq(cur, &snap.doc)
+                        && ws.edits.revision() == snap.revision
+                        && !ws.edits.has_edits()
+                        && cur.byte_len() == snap.known_bytes;
+                    if unchanged {
+                        ws.doc = Some(Arc::new(new_doc.take().unwrap()));
+                        let mut s = TailStatus::at(lines, bytes);
+                        s.grew = true;
+                        return s;
+                    }
+                    let mut s = TailStatus::at(cur.line_count(), cur.byte_len());
+                    if Arc::ptr_eq(cur, &snap.doc) && ws.edits.has_edits() {
+                        s.pending_edits = true;
+                    }
+                    s
+                });
+                if status.grew {
+                    self.invalidate_dirty_snapshot();
+                }
+                status
+            }
+        }
     }
 
     /// Serialize a multi-step doc-slot transition against all others. See the
@@ -1149,23 +1185,97 @@ impl AppState {
     /// thread): fsync the live log so committed transactions also survive
     /// power loss, compact it past the size threshold, and pick up the
     /// session's deferred write error for one-shot surfacing via stat.
+    /// Potentially slow sync/stage work happens off the workspace lock; the
+    /// compacted writer is installed only if no edit landed meanwhile.
     pub(super) fn wal_policy_tick(&self) {
         /// Compact (header + one overlay snapshot) once the append log grows
         /// past this many bytes.
         const WAL_COMPACT_BYTES: u64 = 64 << 20; // 64 MiB
-        let err = self.write(|ws| {
-            if let Some(w) = ws.edits.wal() {
-                if let Err(e) = w.sync() {
-                    // An unsyncable log gives no durability promise: degrade
-                    // exactly like a write failure — detach, surface once.
-                    ws.edits.set_wal(None);
-                    return Some(format!("crash log disabled: {e}"));
-                }
-                if w.len_bytes() > WAL_COMPACT_BYTES {
-                    ws.edits.wal_compact();
-                }
+        if let Some(e) = self.write(|ws| ws.edits.take_wal_error()) {
+            self.note_wal_error(e);
+        }
+        let work = self.read(|ws| {
+            let doc = ws.doc()?.clone();
+            let revision = ws.edits.revision();
+            let sync_file = match ws.edits.wal_sync_file() {
+                Ok(f) => f,
+                Err(e) => return Some(Err((doc, revision, format!("crash log disabled: {e}")))),
+            };
+            let compact = ws
+                .edits
+                .wal_len_bytes()
+                .is_some_and(|n| n > WAL_COMPACT_BYTES)
+                .then(|| {
+                    ws.edits
+                        .wal_compaction_plan()
+                        .map(|p| (ws.edits.clone(), p))
+                })
+                .flatten();
+            Some(Ok(WalPolicyWork {
+                doc,
+                revision,
+                sync_file,
+                compact,
+            }))
+        });
+        let Some(work) = work else { return };
+        let work = match work {
+            Ok(work) => work,
+            Err((doc, revision, e)) => {
+                self.disable_wal_if_unchanged(&doc, revision, e);
+                return;
             }
-            ws.edits.take_wal_error()
+        };
+
+        if let Some(file) = work.sync_file {
+            if let Err(e) = file.sync_data() {
+                self.disable_wal_if_unchanged(
+                    &work.doc,
+                    work.revision,
+                    format!("crash log disabled: {e}"),
+                );
+                return;
+            }
+        }
+
+        let Some((edits, plan)) = work.compact else {
+            return;
+        };
+        let staged = match plan.stage(&edits) {
+            Ok(staged) => staged,
+            Err(e) => {
+                self.disable_wal_if_unchanged(
+                    &work.doc,
+                    work.revision,
+                    format!("crash log disabled: {e}"),
+                );
+                return;
+            }
+        };
+        let err = self.write(|ws| {
+            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &work.doc));
+            if same_doc && ws.edits.revision() == work.revision {
+                ws.edits.wal_install_compaction(staged);
+                ws.edits.take_wal_error()
+            } else {
+                staged.cleanup();
+                None
+            }
+        });
+        if let Some(e) = err {
+            self.note_wal_error(e);
+        }
+    }
+
+    fn disable_wal_if_unchanged(&self, doc: &Shared, revision: u64, error: String) {
+        let err = self.write(|ws| {
+            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, doc));
+            if same_doc && ws.edits.revision() == revision {
+                ws.edits.set_wal(None);
+                Some(error)
+            } else {
+                None
+            }
         });
         if let Some(e) = err {
             self.note_wal_error(e);

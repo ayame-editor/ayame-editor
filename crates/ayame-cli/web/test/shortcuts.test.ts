@@ -25,3 +25,15 @@ describe("shortcut normalization", () => {
     expect(clean.addCursorAbove).toBe("Ctrl+Alt+ArrowUp");
   });
 });
+
+describe("KeyboardEvent shortcut conversion", () => {
+  it("uses the same spelling as normalized known keys", async () => {
+    const { eventShortcut } = await import("../src/menus.js");
+    const ev = new KeyboardEvent("keydown", {
+      key: "ArrowUp",
+      ctrlKey: true,
+      altKey: true,
+    });
+    expect(eventShortcut(ev)).toBe(normalizeShortcut("ctrl+alt+arrowup"));
+  });
+});
