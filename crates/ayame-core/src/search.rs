@@ -71,59 +71,95 @@ pub struct FindOptions {
     pub byte: u64,
 }
 
-enum Matcher {
-    Literal(Box<memmem::Finder<'static>>),
-    Regex(regex::bytes::Regex),
+pub(crate) enum MatchPlan {
+    Literal {
+        finder: Box<memmem::Finder<'static>>,
+        validate_legacy_boundary: bool,
+    },
+    Regex {
+        bytes: regex::bytes::Regex,
+        text: regex::Regex,
+    },
     /// Legacy multi-byte encodings (Shift_JIS / EUC-JP) with a case-insensitive
     /// or regex query: decode each line to UTF-8 and match on the text.
     DecodeLine(regex::Regex),
 }
 
-impl Matcher {
-    fn build(opts: &SearchOptions, enc: Encoding) -> Result<Matcher> {
-        if opts.query.is_empty() {
-            return Err(Error::Search("empty query".into()));
+impl MatchPlan {
+    fn build(
+        enc: Encoding,
+        query: &str,
+        regex: bool,
+        case_sensitive: bool,
+        error: impl Fn(String) -> Error,
+    ) -> Result<MatchPlan> {
+        if query.is_empty() {
+            return Err(error("empty query".into()));
         }
-        if !opts.regex && opts.case_sensitive {
+        if !regex && case_sensitive {
             // Fast path: encode the needle into the file's encoding and scan bytes.
             // For legacy multi-byte encodings the call sites boundary-validate
             // every raw hit so a match can't start inside a double-byte
             // character (the classic 0x5C trail-byte problem).
             let needle = enc
-                .encode_query(&opts.query)
-                .ok_or_else(|| Error::Search("query not representable in file encoding".into()))?;
-            Ok(Matcher::Literal(Box::new(
-                memmem::Finder::new(&needle).into_owned(),
-            )))
+                .encode_query(query)
+                .ok_or_else(|| error("query not representable in file encoding".into()))?;
+            Ok(MatchPlan::Literal {
+                finder: Box::new(memmem::Finder::new(&needle).into_owned()),
+                validate_legacy_boundary: is_legacy_multibyte(enc),
+            })
         } else if is_legacy_multibyte(enc) {
             // A byte regex assumes a UTF-8 haystack, so applying it to raw
             // Shift_JIS / EUC-JP bytes silently misses Japanese text. Decode
             // line-by-line and match against the decoded text instead.
             // (Patterns spanning a line boundary will not match on this path.)
-            let pat = if opts.regex {
-                opts.query.clone()
+            let pat = if regex {
+                query.to_string()
             } else {
-                regex::escape(&opts.query)
+                regex::escape(query)
             };
             let re = regex::RegexBuilder::new(&pat)
-                .case_insensitive(!opts.case_sensitive)
+                .case_insensitive(!case_sensitive)
                 .build()
-                .map_err(|e| Error::Search(format!("invalid regex: {e}")))?;
-            Ok(Matcher::DecodeLine(re))
+                .map_err(|e| error(format!("invalid regex: {e}")))?;
+            Ok(MatchPlan::DecodeLine(re))
         } else {
             // Case-insensitive or regex -> compile a byte regex. A non-regex query
             // is escaped so it stays literal but gains the `i` flag.
-            let pat = if opts.regex {
-                opts.query.clone()
+            let pat = if regex {
+                query.to_string()
             } else {
-                regex::escape(&opts.query)
+                regex::escape(query)
             };
-            let re = regex::bytes::RegexBuilder::new(&pat)
-                .case_insensitive(!opts.case_sensitive)
+            let bytes = regex::bytes::RegexBuilder::new(&pat)
+                .case_insensitive(!case_sensitive)
                 .build()
-                .map_err(|e| Error::Search(format!("invalid regex: {e}")))?;
-            Ok(Matcher::Regex(re))
+                .map_err(|e| error(format!("invalid regex: {e}")))?;
+            let text = regex::RegexBuilder::new(&pat)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| error(format!("invalid regex: {e}")))?;
+            Ok(MatchPlan::Regex { bytes, text })
         }
+    }
+
+    pub(crate) fn for_search(opts: &SearchOptions, enc: Encoding) -> Result<MatchPlan> {
+        Self::build(
+            enc,
+            &opts.query,
+            opts.regex,
+            opts.case_sensitive,
+            Error::Search,
+        )
+    }
+
+    pub(crate) fn for_replace(
+        enc: Encoding,
+        query: &str,
+        regex: bool,
+        case_sensitive: bool,
+    ) -> Result<MatchPlan> {
+        Self::build(enc, query, regex, case_sensitive, Error::InvalidInput)
     }
 }
 
@@ -136,17 +172,21 @@ pub fn search(
     enc: Encoding,
     opts: &SearchOptions,
 ) -> Result<SearchResult> {
-    let matcher = Matcher::build(opts, enc)?;
+    let matcher = MatchPlan::for_search(opts, enc)?;
     let start = opts.start_byte.clamp(base, len) as usize;
     let hay = &buf[start..len as usize];
     let mut hits = Vec::new();
     let mut truncated = false;
 
     match matcher {
-        Matcher::Literal(finder) => {
-            let check_boundary = is_legacy_multibyte(enc);
+        MatchPlan::Literal {
+            finder,
+            validate_legacy_boundary,
+        } => {
             for pos in finder.find_iter(hay) {
-                if check_boundary && !is_legacy_char_boundary(enc, buf, index, start + pos) {
+                if validate_legacy_boundary
+                    && !is_legacy_char_boundary(enc, buf, index, start + pos)
+                {
                     continue;
                 }
                 if opts.whole_word
@@ -167,7 +207,7 @@ pub fn search(
                 hits.push(hit_at(buf, index, enc, start + pos, finder.needle().len()));
             }
         }
-        Matcher::Regex(re) => {
+        MatchPlan::Regex { bytes: re, .. } => {
             for m in re.find_iter(hay) {
                 // Skip zero-width matches so we always make progress.
                 if m.end() == m.start() {
@@ -191,7 +231,7 @@ pub fn search(
                 ));
             }
         }
-        Matcher::DecodeLine(re) => {
+        MatchPlan::DecodeLine(re) => {
             let from_line = index.line_of_byte(buf, start as u64);
             scan_decoded_lines(
                 buf,
@@ -263,14 +303,16 @@ pub fn find_prev(
         start_byte: base,
         max_hits: usize::MAX,
     };
-    let matcher = Matcher::build(&search_opts, enc)?;
+    let matcher = MatchPlan::for_search(&search_opts, enc)?;
     let before_byte = opts.byte.clamp(base, buf.len() as u64);
     if before_byte <= base {
         return Ok(None);
     }
     match matcher {
-        Matcher::Literal(finder) => {
-            let check_boundary = is_legacy_multibyte(enc);
+        MatchPlan::Literal {
+            finder,
+            validate_legacy_boundary,
+        } => {
             let needle = finder.needle();
             let overlap = needle.len().saturating_sub(1);
             let base = base as usize;
@@ -284,7 +326,7 @@ pub fn find_prev(
                     if abs >= cursor {
                         continue;
                     }
-                    if check_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
+                    if validate_legacy_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
                         continue;
                     }
                     if opts.whole_word
@@ -298,7 +340,7 @@ pub fn find_prev(
             }
             Ok(None)
         }
-        Matcher::Regex(re) => {
+        MatchPlan::Regex { bytes: re, .. } => {
             // Byte regexes may span arbitrary distances, so keep the exact
             // whole-prefix scan. Literal and decoded-line searches above/below
             // are the latency-sensitive interactive cases.
@@ -316,7 +358,7 @@ pub fn find_prev(
             }
             Ok(last.map(|(abs, mlen)| hit_at(buf, index, enc, abs, mlen)))
         }
-        Matcher::DecodeLine(re) => Ok(find_prev_decoded_line(
+        MatchPlan::DecodeLine(re) => Ok(find_prev_decoded_line(
             buf,
             index,
             enc,
@@ -384,7 +426,7 @@ fn is_whole_word_text(text: &str, start: usize, end: usize) -> bool {
 /// Encodings whose double-byte characters have trail bytes overlapping ASCII,
 /// so raw byte matches must be validated against character boundaries.
 #[inline]
-fn is_legacy_multibyte(enc: Encoding) -> bool {
+pub(crate) fn is_legacy_multibyte(enc: Encoding) -> bool {
     matches!(enc, Encoding::ShiftJis | Encoding::EucJp)
 }
 
@@ -416,6 +458,14 @@ fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
         },
         _ => 1,
     }
+}
+
+pub(crate) fn is_legacy_char_boundary_in_line(enc: Encoding, raw: &[u8], abs: usize) -> bool {
+    let mut p = 0usize;
+    while p < abs && p < raw.len() {
+        p += legacy_step(enc, raw, p);
+    }
+    p == abs
 }
 
 /// True if `abs` lies on a character boundary of the legacy-encoded line
@@ -731,10 +781,10 @@ mod tests {
     #[test]
     fn prev_literal_search_finds_match_crossing_chunk_boundary() {
         let needle = b"ABCDE";
-        let mut buf = vec![b'x'; FIND_PREV_CHUNK - 2];
-        let match_start = buf.len() as u64;
-        buf.extend_from_slice(needle);
-        buf.extend_from_slice(&[b'y'; FIND_PREV_CHUNK]);
+        let mut buf = vec![b'x'; 67];
+        let match_start = FIND_PREV_CHUNK - 1;
+        buf[match_start..match_start + needle.len()].copy_from_slice(needle);
+        let match_start = match_start as u64;
         let idx = LineIndex::build(&buf, 0, 4);
 
         let hit = find_prev(

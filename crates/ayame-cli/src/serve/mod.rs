@@ -216,11 +216,7 @@ async fn serve(
     // Resolve rather than parse: the loopback policy blesses the NAME
     // "localhost", so binding must accept it too (SocketAddr::from_str takes
     // only IP literals). Bare IPv6 literals like `::1` also come out right.
-    let addr: SocketAddr = (host.as_str(), port)
-        .to_socket_addrs()
-        .with_context(|| format!("invalid host/port '{host}:{port}'"))?
-        .next()
-        .with_context(|| format!("host '{host}' resolved to no addresses"))?;
+    let addr = resolve_bind_addr(&host, port)?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
@@ -249,6 +245,14 @@ async fn serve(
     state.cleanup_aside_files();
     workspace::cleanup_temp_dirs();
     result
+}
+
+fn resolve_bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
+    (host, port)
+        .to_socket_addrs()
+        .with_context(|| format!("invalid host/port '{host}:{port}'"))?
+        .next()
+        .with_context(|| format!("host '{host}' resolved to no addresses"))
 }
 
 /// Start the editor server on an ephemeral loopback port in a dedicated
@@ -438,6 +442,8 @@ mod tests {
 
     use super::*;
 
+    static UPLOAD_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
         // Each file gets its OWN unique subdirectory. Tests run concurrently and
         // some scan `f.parent()` for leftover `.ayame-prev-*` save artifacts; a
@@ -589,6 +595,14 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn localhost_bind_name_resolves_to_a_bindable_socket() {
+        let addr = resolve_bind_addr("localhost", 0).unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        assert!(bound.ip().is_loopback(), "bound non-loopback addr: {bound}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn tail_poll_follows_appended_data() {
         use std::io::Write as _;
         let f = scratch_file("tail.log", b"line 0\nline 1\n");
@@ -661,6 +675,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn upload_sanitizes_name_and_opens_uploaded_file() {
+        let _upload_guard = UPLOAD_TEST_LOCK.lock().await;
         let f = scratch_file("upload-base.txt", b"base\n");
         let addr = start_server(&f).await;
         let host = format!("127.0.0.1:{}", addr.port());
@@ -690,6 +705,36 @@ mod tests {
 
         let (_, lines) = send(addr, get("/api/lines?start=0&count=2", &host)).await;
         assert!(lines.contains("uploaded"), "body: {lines}");
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir_all(workspace::uploads_dir());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn upload_over_limit_returns_413_and_removes_partial_file() {
+        let _upload_guard = UPLOAD_TEST_LOCK.lock().await;
+        let f = scratch_file("upload-limit-base.txt", b"base\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let _ = std::fs::remove_dir_all(workspace::uploads_dir());
+
+        let (status, body) = send(
+            addr,
+            post_raw(
+                "/api/upload?name=too-big.txt",
+                &host,
+                Some(&origin),
+                "text/plain",
+                b"0123456789abcdefx",
+            ),
+        )
+        .await;
+        assert_eq!(status, 413, "body: {body}");
+        assert!(
+            !workspace::uploads_dir().join("too-big.txt").exists(),
+            "partial upload was not cleaned up"
+        );
 
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir_all(workspace::uploads_dir());

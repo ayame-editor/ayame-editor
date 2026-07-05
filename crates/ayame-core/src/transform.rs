@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::fsync::fsync_parent;
+use crate::search::{is_legacy_char_boundary_in_line, MatchPlan};
 use crate::{Document, Encoding, Error, Result};
 
 const BATCH: u64 = 8192;
@@ -91,7 +92,7 @@ pub fn replace_to_path(
     let target = target.as_ref();
     ensure_new_target(target)?;
     if opts.find.is_empty() {
-        return Err(Error::Unsupported(
+        return Err(Error::InvalidInput(
             "replace pattern must not be empty".into(),
         ));
     }
@@ -114,7 +115,7 @@ pub fn replace_to_path_parallel(
     let target = target.as_ref();
     ensure_new_target(target)?;
     if opts.find.is_empty() {
-        return Err(Error::Unsupported(
+        return Err(Error::InvalidInput(
             "replace pattern must not be empty".into(),
         ));
     }
@@ -159,7 +160,7 @@ pub fn replace_to_path_parallel(
         jobs => rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
             .build()
-            .map_err(|e| Error::Unsupported(format!("invalid replace worker pool: {e}")))?
+            .map_err(|e| Error::InvalidInput(format!("invalid replace worker pool: {e}")))?
             .install(|| {
                 chunks
                     .par_iter()
@@ -306,62 +307,45 @@ enum ReplacePlan {
         finder: Box<memmem::Finder<'static>>,
         needle: Vec<u8>,
         replacement: Vec<u8>,
+        enc: Encoding,
+        validate_legacy_boundary: bool,
     },
     Regex {
         re: regex::Regex,
-        replacement: String,
-    },
-    LiteralText {
-        find: String,
         replacement: String,
     },
 }
 
 impl ReplacePlan {
     fn new(doc: &Document, opts: &ReplaceOptions) -> Result<Self> {
-        if can_use_raw_literal_fast_path(doc.encoding(), opts) {
-            let needle = doc.encoding().encode_text(&opts.find).ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "replace pattern cannot be encoded as {}",
-                    doc.encoding().label()
-                ))
-            })?;
-            let replacement = doc
-                .encoding()
-                .encode_text(&opts.replacement)
-                .ok_or_else(|| {
-                    Error::Unsupported(format!(
-                        "replacement cannot be encoded as {}",
-                        doc.encoding().label()
-                    ))
-                })?;
-            let finder = memmem::Finder::new(&needle).into_owned();
-            return Ok(Self::RawLiteral {
-                finder: Box::new(finder),
-                needle,
-                replacement,
-            });
-        }
-
-        if opts.regex || !opts.case_sensitive {
-            let pat = if opts.regex {
-                opts.find.clone()
-            } else {
-                regex::escape(&opts.find)
-            };
-            return Ok(Self::Regex {
-                re: regex::RegexBuilder::new(&pat)
-                    .case_insensitive(!opts.case_sensitive)
-                    .build()
-                    .map_err(|e| Error::Unsupported(format!("invalid regex: {e}")))?,
+        match MatchPlan::for_replace(doc.encoding(), &opts.find, opts.regex, opts.case_sensitive)? {
+            MatchPlan::Literal {
+                finder,
+                validate_legacy_boundary,
+            } => {
+                let needle = finder.needle().to_vec();
+                let replacement =
+                    doc.encoding()
+                        .encode_text(&opts.replacement)
+                        .ok_or_else(|| {
+                            Error::InvalidInput(format!(
+                                "replacement cannot be encoded as {}",
+                                doc.encoding().label()
+                            ))
+                        })?;
+                Ok(Self::RawLiteral {
+                    finder,
+                    needle,
+                    replacement,
+                    enc: doc.encoding(),
+                    validate_legacy_boundary,
+                })
+            }
+            MatchPlan::Regex { text, .. } | MatchPlan::DecodeLine(text) => Ok(Self::Regex {
+                re: text,
                 replacement: opts.replacement.clone(),
-            });
+            }),
         }
-
-        Ok(Self::LiteralText {
-            find: opts.find.clone(),
-            replacement: opts.replacement.clone(),
-        })
     }
 }
 
@@ -415,7 +399,17 @@ fn write_replaced_line(
             finder,
             needle,
             replacement,
-        } => write_raw_replaced(raw, finder, needle, replacement, w),
+            enc,
+            validate_legacy_boundary,
+        } => write_raw_replaced(
+            raw,
+            *enc,
+            *validate_legacy_boundary,
+            finder,
+            needle,
+            replacement,
+            w,
+        ),
         ReplacePlan::Regex { re, replacement } => {
             let text = doc.encoding().decode_line(raw);
             let count = re.find_iter(&text).count() as u64;
@@ -425,7 +419,7 @@ fn write_replaced_line(
             }
             let replaced = re.replace_all(&text, replacement.as_str()).into_owned();
             let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
-                Error::Unsupported(format!(
+                Error::InvalidInput(format!(
                     "replacement result cannot be encoded as {}",
                     doc.encoding().label()
                 ))
@@ -433,31 +427,13 @@ fn write_replaced_line(
             w.write_all(&bytes)?;
             Ok((true, count))
         }
-        ReplacePlan::LiteralText { find, replacement } => {
-            let text = doc.encoding().decode_line(raw);
-            if !text.contains(find) {
-                w.write_all(raw)?;
-                return Ok((false, 0));
-            }
-            let replaced = text.replace(find, replacement);
-            let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "replacement result cannot be encoded as {}",
-                    doc.encoding().label()
-                ))
-            })?;
-            w.write_all(&bytes)?;
-            Ok((true, text.matches(find).count() as u64))
-        }
     }
-}
-
-fn can_use_raw_literal_fast_path(enc: Encoding, opts: &ReplaceOptions) -> bool {
-    !opts.regex && opts.case_sensitive && matches!(enc, Encoding::Utf8 | Encoding::Ascii)
 }
 
 fn write_raw_replaced(
     raw: &[u8],
+    enc: Encoding,
+    validate_legacy_boundary: bool,
     finder: &memmem::Finder<'_>,
     needle: &[u8],
     replacement: &[u8],
@@ -465,15 +441,27 @@ fn write_raw_replaced(
 ) -> Result<(bool, u64)> {
     let mut pos = 0usize;
     let mut count = 0u64;
+    let mut emitted = false;
     while let Some(rel) = finder.find(&raw[pos..]) {
         let abs = pos + rel;
+        if validate_legacy_boundary && !is_legacy_char_boundary_in_line(enc, raw, abs) {
+            w.write_all(&raw[pos..abs + 1])?;
+            pos = abs + 1;
+            emitted = true;
+            continue;
+        }
         w.write_all(&raw[pos..abs])?;
         w.write_all(replacement)?;
         pos = abs + needle.len();
         count += 1;
+        emitted = true;
     }
     if count == 0 {
-        w.write_all(raw)?;
+        if emitted {
+            w.write_all(&raw[pos..])?;
+        } else {
+            w.write_all(raw)?;
+        }
         Ok((false, 0))
     } else {
         w.write_all(&raw[pos..])?;
@@ -530,7 +518,7 @@ fn is_shift_jis_lead(b: u8) -> bool {
 
 fn ensure_new_target(target: &Path) -> Result<()> {
     if target.exists() {
-        return Err(Error::Unsupported(format!(
+        return Err(Error::Conflict(format!(
             "'{}' already exists; choose another output path",
             target.display()
         )));
@@ -697,6 +685,35 @@ mod tests {
         .unwrap();
         assert_eq!(res.changed_lines, 1);
         assert_eq!(std::fs::read(&out).unwrap(), b"\x82\x60 ABC\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn shift_jis_literal_replace_skips_trail_byte_matches() {
+        let opts = AyameOpenOptions {
+            encoding: Some(Encoding::ShiftJis),
+            ..AyameOpenOptions::default()
+        };
+        let mut f = NamedTempFile::new().unwrap();
+        // "ソ" is 0x83 0x5C in Shift_JIS. Replacing a literal backslash must
+        // leave that trail byte alone while still replacing a real ASCII '\'.
+        f.write_all(b"\x83\x5c path\\file\n").unwrap();
+        let doc = Document::open(f.path(), &opts).unwrap();
+        let out = f.path().with_extension("sjis-replace");
+        let res = replace_to_path(
+            &doc,
+            &out,
+            &ReplaceOptions {
+                find: "\\".into(),
+                replacement: "/".into(),
+                regex: false,
+                case_sensitive: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(res.replacements, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"\x83\x5c path/file\n");
         let _ = std::fs::remove_file(out);
     }
 }

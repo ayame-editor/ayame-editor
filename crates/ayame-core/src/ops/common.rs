@@ -24,6 +24,12 @@ pub(super) fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<bool> {
     Ok(true)
 }
 
+/// Create one private spill directory owned by the current operation.
+///
+/// Callers may put large intermediate run files here and must remove the
+/// returned directory after a successful or failed operation. The helper uses
+/// `create_dir` with mode 0700 on Unix and retries on collision, so it never
+/// accepts a pre-created/squatted directory.
 pub(super) fn unique_spill_dir(base: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(base)?;
     let seed = SystemTime::now()
@@ -38,7 +44,7 @@ pub(super) fn unique_spill_dir(base: &Path) -> Result<PathBuf> {
             Err(e) => return Err(Error::Io(e)),
         }
     }
-    Err(Error::Unsupported(format!(
+    Err(Error::Conflict(format!(
         "could not create a unique spill directory under {}",
         base.display()
     )))

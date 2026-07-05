@@ -2,7 +2,7 @@
 import { $, commas } from "./dom.js";
 import { MAX_COPY_LINES, OVERSCAN, PAD, state } from "./state.js";
 import { t } from "./i18n.js";
-import { api, apiPost } from "./api.js";
+import { api, apiPost, type BatchEditResponse, type LinesResponse } from "./api.js";
 import { refreshStat, savingCount, waitForSavingDone } from "./save.js";
 import {
   cachedLine,
@@ -29,6 +29,13 @@ import {
   selectionLineCount,
 } from "./selection.js";
 import { charLenOf, flashCount } from "./search.js";
+import type { ReplaceRangeRequest, ReplaceRectRequest } from "./types/api.js";
+
+type ReplaceEditResponse = {
+  stats: { total_lines: number };
+  caret_line: number;
+  caret_col: number;
+};
 
 // ---- the serialized edit queue --------------------------------------------
 
@@ -70,7 +77,7 @@ export function enqueueEdit(fn) {
 export async function reloadViewport() {
   const start = Math.max(0, state.first - PAD);
   const count = rowsVisible() + OVERSCAN + 2 * PAD;
-  const res = await api(`/api/lines?start=${start}&count=${count}`);
+  const res = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
   state.cache = { start, lines: res.lines };
   state.total = res.total;
   state.loadToken++; // cancel any in-flight ensureData for the old contents
@@ -178,7 +185,11 @@ export function replaceTarget() {
 export async function applyRange(l0, c0, l1, c1, text) {
   const ctx = editContext();
   const gen = state.editGen;
-  const res = await apiPost("/api/edit/replace_range", { l0, c0, l1, c1, text });
+  const body: ReplaceRangeRequest = { l0, c0, l1, c1, text };
+  const res = await apiPost<ReplaceEditResponse, ReplaceRangeRequest>(
+    "/api/edit/replace_range",
+    body,
+  );
   if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
@@ -211,7 +222,11 @@ export async function applyRange(l0, c0, l1, c1, text) {
 export async function applyRect(l0, l1, c0, c1, text) {
   const ctx = editContext();
   const gen = state.editGen;
-  const res = await apiPost("/api/edit/replace_rect", { l0, l1, c0, c1, text });
+  const body: ReplaceRectRequest = { l0, l1, c0, c1, text };
+  const res = await apiPost<ReplaceEditResponse, ReplaceRectRequest>(
+    "/api/edit/replace_rect",
+    body,
+  );
   if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
@@ -242,7 +257,10 @@ export async function applyRect(l0, l1, c0, c1, text) {
 export async function applyBatch(edits, cursors, editOf) {
   const ctx = editContext();
   const gen = state.editGen;
-  const res = await apiPost("/api/edit/replace_batch", { edits });
+  const res = await apiPost<BatchEditResponse, { edits: unknown[] }>(
+    "/api/edit/replace_batch",
+    { edits },
+  );
   if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
@@ -380,7 +398,7 @@ export async function lineLensFor(lineNumbers) {
   await Promise.all(
     [...missing].map(async (l) => {
       try {
-        const res = await api(`/api/lines?start=${l}&count=1`);
+        const res = await api<LinesResponse>(`/api/lines?start=${l}&count=1`);
         const text = res.lines?.[0]?.text;
         if (text != null) out.set(l, Array.from(text).length);
       } catch {
@@ -545,7 +563,7 @@ export async function transformSelection(mode) {
   enqueueEdit(async () => {
     if (rr) {
       const total = rr.l1 - rr.l0 + 1;
-      const res = await api(`/api/lines?start=${rr.l0}&count=${total}`);
+      const res = await api<LinesResponse>(`/api/lines?start=${rr.l0}&count=${total}`);
       const edits = [];
       res.lines.forEach((rec, i) => {
         const chars = Array.from(rec.text ?? "");
@@ -624,7 +642,7 @@ export function lineOpSpan() {
 export async function oneLineText(line) {
   const c = cachedLine(line);
   if (c != null) return c.text ?? "";
-  const res = await api(`/api/lines?start=${line}&count=1`);
+  const res = await api<LinesResponse>(`/api/lines?start=${line}&count=1`);
   return res.lines[0]?.text ?? "";
 }
 
@@ -634,7 +652,7 @@ export async function lineLenAt(line) {
 
 // Decoded text of the lines [start, start+count) as a plain string array.
 export async function lineTextsFor(start, count) {
-  const res = await api(`/api/lines?start=${start}&count=${count}`);
+  const res = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
   return res.lines.map((r) => r.text ?? "");
 }
 

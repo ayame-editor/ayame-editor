@@ -11,7 +11,7 @@ import {
   state,
 } from "./state.js";
 import { availableLocales, localeLabel, normalizeLanguage, t } from "./i18n.js";
-import { api } from "./api.js";
+import { api, type LinesResponse } from "./api.js";
 import { focusEditor, invalidateFontMetrics, scheduleRender } from "./editor.js";
 import {
   applyLocale,
@@ -413,7 +413,7 @@ export async function openThemeJsonDoc() {
 export async function applyThemeFromBuffer() {
   try {
     const count = Math.min(state.total, MAX_COPY_LINES);
-    const r = await api(`/api/lines?start=0&count=${count}`);
+    const r = await api<LinesResponse>(`/api/lines?start=0&count=${count}`);
     const text = r.lines.map((l) => l.text).join("\n");
     const theme = JSON.parse(text);
     if (!theme.color) return flashCount(t("theme.missingColor"));
@@ -461,7 +461,7 @@ export async function openKeymapJsonDoc() {
 export async function applyKeymapFromBuffer() {
   try {
     const count = Math.min(state.total, MAX_COPY_LINES);
-    const r = await api(`/api/lines?start=0&count=${count}`);
+    const r = await api<LinesResponse>(`/api/lines?start=0&count=${count}`);
     const text = r.lines.map((l) => l.text).join("\n");
     const parsed = JSON.parse(text);
     const clean = sanitizeKeymap(parsed);
@@ -500,10 +500,10 @@ export function initSettings() {
     state.settings.illus == null
       ? themeIllusPct(state.settings.theme)
       : Math.round(state.settings.illus * 100);
-  $("set-illus").value = illusPct;
+  $("set-illus").value = String(illusPct);
   $("set-illus-val").textContent = illusPct + "%";
   $("set-font").value = state.settings.font;
-  $("set-fontsize").value = state.settings.fontSize;
+  $("set-fontsize").value = String(state.settings.fontSize);
   $("set-fontsize-val").textContent = `${state.settings.fontSize}px`;
 
   $("set-theme").addEventListener("change", () => {
@@ -512,7 +512,7 @@ export function initSettings() {
     saveSettings(state.settings);
     applySettings(state.settings);
     const pct = themeIllusPct(id);
-    $("set-illus").value = pct;
+    $("set-illus").value = String(pct);
     $("set-illus-val").textContent = pct + "%";
   });
   $("set-bg").addEventListener("change", () => updateSetting("bgMode", $("set-bg").value));

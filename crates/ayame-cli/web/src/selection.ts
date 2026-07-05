@@ -2,7 +2,7 @@
 import { $, commas, displayPath } from "./dom.js";
 import { LINE_HEIGHT, MAX_COPY_LINES, OVERSCAN, state } from "./state.js";
 import { isExistsError, serverMessage, t } from "./i18n.js";
-import { api, apiPost } from "./api.js";
+import { api, apiPost, type LinesResponse } from "./api.js";
 import {
   caretX,
   charWidth,
@@ -19,6 +19,7 @@ import {
 import { lineLensFor, pasteText, typeText } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import type { SelectionSaveRequest, SelectionSaveResponse } from "./types/api.js";
 
 // Normalized selection: { start, end } with start <= end, or null.
 export function selRange() {
@@ -249,10 +250,19 @@ export async function saveSelectionToFile() {
     t("menu.save"),
   );
   if (!f || !f.path.trim()) return;
-  const body = rr
-    ? { path: f.path.trim(), rect: true, l0: rr.l0, c0: rr.c0, l1: rr.l1, c1: rr.c1 }
+  const body: SelectionSaveRequest = rr
+    ? {
+        path: f.path.trim(),
+        overwrite: false,
+        rect: true,
+        l0: rr.l0,
+        c0: rr.c0,
+        l1: rr.l1,
+        c1: rr.c1,
+      }
     : {
         path: f.path.trim(),
+        overwrite: false,
         rect: false,
         l0: r.start.line,
         c0: r.start.col,
@@ -261,7 +271,10 @@ export async function saveSelectionToFile() {
       };
   showLoading(t("dialog.saveSel.writing"));
   try {
-    const res = await apiPost("/api/selection/save", body);
+    const res = await apiPost<SelectionSaveResponse, SelectionSaveRequest>(
+      "/api/selection/save",
+      body,
+    );
     flashCount(t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }));
   } catch (e) {
     hideLoading();
@@ -276,7 +289,10 @@ export async function saveSelectionToFile() {
       if (overwrite) {
         showLoading(t("dialog.saveSel.writing"));
         try {
-          const res = await apiPost("/api/selection/save", { ...body, overwrite: true });
+          const res = await apiPost<SelectionSaveResponse, SelectionSaveRequest>(
+            "/api/selection/save",
+            { ...body, overwrite: true },
+          );
           flashCount(
             t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }),
           );
@@ -336,7 +352,7 @@ export function selectionLineCount(r = null) {
 
 export async function selectedTextForRange(r, maxLines = MAX_COPY_LINES) {
   const count = Math.min(rangeLineCount(r), maxLines);
-  const res = await api(`/api/lines?start=${r.start.line}&count=${count}`);
+  const res = await api<LinesResponse>(`/api/lines?start=${r.start.line}&count=${count}`);
   // Columns are Unicode scalar counts (the server contract); slicing UTF-16
   // units here would split surrogate pairs (emoji etc.).
   const L = res.lines.map((x) => Array.from(x.text ?? ""));
@@ -360,7 +376,7 @@ export async function selectedText(r = null) {
   const rr = rectRange();
   if (rr) {
     const count = Math.min(rr.l1 - rr.l0 + 1, MAX_COPY_LINES);
-    const res = await api(`/api/lines?start=${rr.l0}&count=${count}`);
+    const res = await api<LinesResponse>(`/api/lines?start=${rr.l0}&count=${count}`);
     return res.lines
       .map((x) => {
         const chars = Array.from(x.text ?? "");

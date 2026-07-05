@@ -13,6 +13,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
 use crate::diff::{diff_documents, DiffKind, DiffResult};
+use crate::temp_paths;
 
 use super::state::DirtySnapshotCache;
 use super::{bad_request, default_suffix_path, edit, internal, workspace, SharedState};
@@ -63,8 +64,7 @@ pub(super) fn materialize_worker_input(
     let Some(edits) = dirty_edits else {
         return Ok(WorkerInput::OnDisk(doc.path().to_path_buf()));
     };
-    let dir = spawn_dir(kind);
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let dir = spawn_dir(kind).with_context(|| format!("creating private worker dir for {kind}"))?;
     let path = dir.join("current.txt");
     let input = WorkerInput::Materialized {
         path: path.clone(),
@@ -231,8 +231,7 @@ pub(super) async fn api_sort_save(
         Some(p) => PathBuf::from(p),
         None => default_sorted_temp_path(wd.doc.path()).map_err(internal)?,
     };
-    let dir = spawn_dir("sort-save-spill");
-    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let dir = spawn_dir("sort-save-spill").map_err(internal)?;
     let mut cmd = sort_command(&wd.doc, wd.input.path(), &target, &req, &dir)?;
     let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -268,8 +267,7 @@ async fn sort_save_in_place(
     // Phase 1 — sort into a stage sibling of the target (same volume, so the
     // final rename is atomic). No lock is held: typing stays live.
     let stage = edit::overwrite_stage_path(&target);
-    let dir = spawn_dir("sort-save-spill");
-    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let dir = spawn_dir("sort-save-spill").map_err(internal)?;
     let mut cmd = sort_command(&snap.doc, input.path(), &stage, &req, &dir)?;
     let res = run_artifact_worker("sort", &mut cmd, &stage, total_lines).await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -351,8 +349,7 @@ fn sort_command(
 /// file under the OS temp dir, named after the source ("app.log" →
 /// "app.sorted.log"), unique within this server's scratch directory.
 fn default_sorted_temp_path(source: &Path) -> std::io::Result<PathBuf> {
-    let dir = workspace::sorted_dir();
-    std::fs::create_dir_all(&dir)?;
+    let dir = workspace::sorted_dir_result()?;
     let stem = source
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -447,6 +444,7 @@ pub(super) async fn api_case_save(
 // ---- split --------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SplitSaveRequest {
     /// Lines per output part (must be >= 1).
     lines: u64,
@@ -576,6 +574,7 @@ pub(super) async fn api_search(
 // ---- grep (recursive directory search) -----------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct GrepRequest {
     query: String,
     /// Root directory to search; null/absent = the open file's directory.
@@ -901,38 +900,9 @@ fn requested_or_default(path: &Path, requested: Option<&str>, suffix: &str) -> P
         .unwrap_or_else(|| default_suffix_path(path, suffix))
 }
 
-fn spawn_dir(kind: &str) -> PathBuf {
+fn spawn_dir(kind: &str) -> std::io::Result<PathBuf> {
     let n = REQ_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    for attempt in 0..1000u32 {
-        let dir = std::env::temp_dir().join(format!(
-            "ayame-srv-{kind}-{}-{n}-{seed:x}-{attempt}",
-            std::process::id()
-        ));
-        match create_private_dir(&dir) {
-            Ok(()) => return dir,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(_) => continue,
-        }
-    }
-    std::env::temp_dir().join(format!(
-        "ayame-srv-{kind}-{}-{n}-{seed:x}",
-        std::process::id()
-    ))
-}
-
-#[cfg(unix)]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().mode(0o700).create(path)
-}
-
-#[cfg(not(unix))]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir(path)
+    temp_paths::create_private_temp_dir(&format!("srv-{kind}-{n}"))
 }
 
 /// A [`Command`] re-invoking this same binary — every op worker is an isolated

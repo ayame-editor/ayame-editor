@@ -16,14 +16,23 @@ type JsonWire<T> = T extends bigint
       : T;
 
 export type OpenRequest = JsonWire<Wire.OpenRequest>;
+export type TabIdRequest = JsonWire<Wire.TabIdRequest>;
 export type BrowseEntry = JsonWire<Wire.BrowseEntry>;
 export type BrowseResponse = JsonWire<Wire.BrowseResponse>;
 export type ReplaceRangeRequest = JsonWire<Wire.ReplaceRangeRequest>;
+export type ReplaceRectRequest = JsonWire<Wire.ReplaceRectRequest>;
 export type CaretPosition = JsonWire<Wire.CaretPosition>;
+export type EditSaveRequest = JsonWire<Wire.EditSaveRequest>;
+export type EditSaveResponse = JsonWire<Wire.EditSaveResponse>;
 export type RecoverRequest = JsonWire<Wire.RecoverRequest>;
+export type ReopenRequest = JsonWire<Wire.ReopenRequest>;
 export type SelectionSaveRequest = JsonWire<Wire.SelectionSaveRequest>;
 export type SelectionSaveResponse = JsonWire<Wire.SelectionSaveResponse>;
 export type ArtifactResponse = JsonWire<Wire.ArtifactResponse>;
 export type SortSaveRequest = JsonWire<Wire.SortSaveRequest>;
 export type ReplaceSaveRequest = JsonWire<Wire.ReplaceSaveRequest>;
 export type CaseSaveRequest = JsonWire<Wire.CaseSaveRequest>;
+export type SplitSaveRequest = JsonWire<Wire.SplitSaveRequest>;
+export type GrepRequest = JsonWire<Wire.GrepRequest>;
+export type TabInfo = JsonWire<Wire.TabInfo>;
+export type TabsResponse = JsonWire<Wire.TabsResponse>;

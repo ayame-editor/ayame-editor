@@ -20,10 +20,15 @@ use typeship::Bridge;
 use typeship_ts_rs::decl;
 
 use super::edit::{
-    CaretPosition, RecoverRequest, ReplaceRangeRequest, SelectionSaveRequest, SelectionSaveResponse,
+    CaretPosition, EditSaveRequest, EditSaveResponse, RecoverRequest, ReopenRequest,
+    ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
-use super::ops::{ArtifactResponse, CaseSaveRequest, ReplaceSaveRequest, SortSaveRequest};
-use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest};
+use super::ops::{
+    ArtifactResponse, CaseSaveRequest, GrepRequest, ReplaceSaveRequest, SortSaveRequest,
+    SplitSaveRequest,
+};
+use super::state::{TabInfo, TabsResponse};
+use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest};
 
 fn output_path() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/ayame-cli; the generated file lives next to
@@ -34,24 +39,40 @@ fn output_path() -> PathBuf {
 fn bridge() -> Bridge {
     Bridge::fetch()
         .decl(&decl::<OpenRequest>())
+        .decl(&decl::<TabIdRequest>())
         .decl(&decl::<BrowseEntry>())
         .decl(&decl::<BrowseResponse>())
         .decl(&decl::<ReplaceRangeRequest>())
+        .decl(&decl::<ReplaceRectRequest>())
         .decl(&decl::<CaretPosition>())
+        .decl(&decl::<EditSaveRequest>())
+        .decl(&decl::<EditSaveResponse>())
         .decl(&decl::<RecoverRequest>())
+        .decl(&decl::<ReopenRequest>())
         .decl(&decl::<SelectionSaveRequest>())
         .decl(&decl::<SelectionSaveResponse>())
         .decl(&decl::<ArtifactResponse>())
         .decl(&decl::<SortSaveRequest>())
         .decl(&decl::<ReplaceSaveRequest>())
         .decl(&decl::<CaseSaveRequest>())
+        .decl(&decl::<SplitSaveRequest>())
+        .decl(&decl::<GrepRequest>())
+        .decl(&decl::<TabInfo>())
+        .decl(&decl::<TabsResponse>())
+}
+
+fn strip_trailing_ws(mut s: String) -> String {
+    s = s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+    s.push('\n');
+    s
 }
 
 /// Entry point for the `typegen` subcommand. `--check` verifies the committed
 /// file instead of writing it (the CI mode).
 pub(crate) fn cmd_typegen(args: &[String]) -> Result<()> {
     let check = args.iter().any(|a| a == "--check");
-    let rendered = bridge().render();
+    let mut rendered = bridge().render();
+    rendered.contents = strip_trailing_ws(rendered.contents);
     let path = output_path();
     if check {
         let outcome = rendered

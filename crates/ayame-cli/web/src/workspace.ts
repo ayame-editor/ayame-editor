@@ -23,6 +23,7 @@ import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { saveSettings } from "./settings.js";
+import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
 
@@ -105,7 +106,7 @@ export async function browse(dir) {
   openerMsg(t("dialog.open.loading"), true);
   try {
     const q = dir == null ? "" : `?dir=${encodeURIComponent(dir)}`;
-    const res = await api(`/api/browse${q}`);
+    const res = await api<BrowseResponse>(`/api/browse${q}`);
     renderBrowse(res);
     openerMsg("");
   } catch (e) {
@@ -327,10 +328,10 @@ export async function closeTabSilently(id) {
   try {
     // Re-check against the server's current truth: only a still-open,
     // background, still-clean tab is closed.
-    const r = await api("/api/tabs");
+    const r = await api<TabsResponse>("/api/tabs");
     const tab = (r.tabs || []).find((t) => t.id === id);
     if (!tab || tab.active || tab.dirty) return;
-    await apiPost("/api/tabs/close", { id });
+    await apiPost<unknown, TabIdRequest>("/api/tabs/close", { id });
     refreshTabs();
   } catch {
     // non-fatal: the extra tab just stays
@@ -345,7 +346,7 @@ export async function openPath(path) {
   openerMsg(t("dialog.open.opening"), true);
   showLoading(t("dialog.open.loadingFile", { name: pathBaseName(p) || p }));
   try {
-    const stat = await apiPost("/api/open", { path: p });
+    const stat = await apiPost<unknown, OpenRequest>("/api/open", { path: p });
     onDocumentOpened(stat);
     await closeTabSilently(pristine);
     return true;
@@ -466,7 +467,7 @@ let refreshTabsSeq = 0;
 export async function refreshTabs() {
   const seq = ++refreshTabsSeq;
   try {
-    const r = await api("/api/tabs");
+    const r = await api<TabsResponse>("/api/tabs");
     if (seq !== refreshTabsSeq) return;
     renderTabs(r.tabs);
   } catch {
@@ -528,7 +529,7 @@ export function renderTabs(list) {
 export async function selectTab(id) {
   try {
     await settleEditQueue();
-    onDocumentOpened(await apiPost("/api/tabs/select", { id }));
+    onDocumentOpened(await apiPost<unknown, TabIdRequest>("/api/tabs/select", { id }));
   } catch (e) {
     flashCount(t("tab.switchError"));
     console.error(e);
@@ -556,7 +557,7 @@ export async function closeTab(id) {
     if (!ok) return;
   }
   try {
-    const stat = await apiPost("/api/tabs/close", { id });
+    const stat = await apiPost<{ open: boolean }, TabIdRequest>("/api/tabs/close", { id });
     if (!stat.open) {
       await newUntitled(); // closed the last tab → open a fresh page
     } else {
@@ -590,7 +591,7 @@ export function setSidebar(open) {
 export async function treeSetRoot(dir) {
   try {
     const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
-    const res = await api(`/api/browse${q}`);
+    const res = await api<BrowseResponse>(`/api/browse${q}`);
     state.treeParent = res.parent;
     $("sb-root").textContent = displayPath(res.dir);
     $("sb-root").title = displayPath(res.dir);
@@ -671,7 +672,7 @@ export function renderTreeNode(ent, depth) {
     if (opening && !loaded) {
       loaded = true;
       try {
-        const res = await api(`/api/browse?dir=${encodeURIComponent(ent.path)}`);
+        const res = await api<BrowseResponse>(`/api/browse?dir=${encodeURIComponent(ent.path)}`);
         kids.append(renderTreeEntries(res.entries, depth + 1));
       } catch {
         loaded = false;

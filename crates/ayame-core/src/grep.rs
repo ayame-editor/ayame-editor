@@ -361,6 +361,43 @@ mod tests {
     }
 
     #[test]
+    fn grep_dir_reports_file_count_truncation_and_skips_large_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.txt"), b"needle a\n").unwrap();
+        fs::write(root.join("b.txt"), b"needle b\n").unwrap();
+        fs::write(root.join("c.txt"), b"needle c\n").unwrap();
+
+        let res = grep_dir(
+            root,
+            &GrepOptions {
+                query: "needle".into(),
+                max_files: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(res.files_scanned, 2);
+        assert!(res.files_truncated);
+        assert!(!res.truncated);
+
+        let large = root.join("large.txt");
+        fs::write(&large, b"needle in a file that is too large\n").unwrap();
+        let res = grep_dir(
+            root,
+            &GrepOptions {
+                query: "needle".into(),
+                glob: "large.txt".into(),
+                max_file_bytes: 8,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(res.files_scanned, 1);
+        assert!(res.hits.is_empty());
+    }
+
+    #[test]
     fn glob_match_handles_wildcards() {
         assert!(glob_match(b"*.rs", b"main.rs"));
         assert!(glob_match(b"*.rs", b".rs")); // '*' matches the empty string

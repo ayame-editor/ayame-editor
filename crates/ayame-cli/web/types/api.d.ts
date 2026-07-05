@@ -2,27 +2,63 @@
 
 export type OpenRequest = { path: string, };
 
+export type TabIdRequest = { id: bigint, };
+
 export type BrowseEntry = { name: string, path: string, is_dir: boolean, size: bigint, };
 
 export type BrowseResponse = { dir: string, parent: string | null, entries: Array<BrowseEntry>, };
 
 export type ReplaceRangeRequest = { l0: bigint, c0: number, l1: bigint, c1: number, text: string, };
 
+export type ReplaceRectRequest = { l0: bigint, l1: bigint, c0: number, c1: number, text: string, };
+
 export type CaretPosition = { line: bigint, col: number, };
 
+export type EditSaveRequest = { path: string | null, overwrite: boolean,
+/**
+ * 名前を付けて保存 semantics: after a successful save the ACTIVE TAB shows
+ * the saved file (instead of leaving the tab on the old document and
+ * opening the saved copy as a second tab).
+ */
+switch_to_saved: boolean,
+/**
+ * 変換して保存: target 文字コード (e.g. "shift_jis"). When either this or
+ * `eol` is set the whole file is re-encoded, so the save runs as a
+ * rewrite-then-reload rather than the fast incremental path.
+ */
+encoding: string | null,
+/**
+ * 変換して保存: target 改行コード ("lf" / "crlf" / "cr").
+ */
+eol: string | null,
+/**
+ * 変換して保存: whether a UTF-8 target file gets a leading BOM. Only
+ * meaningful when the target 文字コード is UTF-8 (ignored otherwise). When
+ * omitted the file's current BOM state is preserved.
+ */
+bom: boolean | null, };
+
+export type EditSaveResponse = {
+/**
+ * UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
+ */
+path: string, bytes: bigint, lines: bigint, switched: boolean, };
+
 export type RecoverRequest = { discard: boolean, };
+
+export type ReopenRequest = { encoding: string, };
 
 export type SelectionSaveRequest = { path: string, overwrite: boolean, rect: boolean, l0: bigint, c0: number, l1: bigint, c1: number, };
 
 export type SelectionSaveResponse = { path: string, lines: bigint, bytes: bigint, };
 
-export type ArtifactResponse = { 
+export type ArtifactResponse = {
 /**
  * UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
  */
 path: string, bytes: bigint, lines: bigint, };
 
-export type SortSaveRequest = { path: string | null, 
+export type SortSaveRequest = { path: string | null,
 /**
  * Sort the open file onto itself (the `path` field is ignored): the sort
  * output atomically replaces the file, the document reloads, and the
@@ -33,3 +69,27 @@ in_place: boolean, key: number | null, numeric: boolean, reverse: boolean, delim
 export type ReplaceSaveRequest = { path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
 
 export type CaseSaveRequest = { path: string | null, mode: string, };
+
+export type SplitSaveRequest = {
+/**
+ * Lines per output part (must be >= 1).
+ */
+lines: bigint,
+/**
+ * Output directory; null/absent = the source file's directory.
+ */
+dir: string | null, };
+
+export type GrepRequest = { query: string,
+/**
+ * Root directory to search; null/absent = the open file's directory.
+ */
+dir: string | null,
+/**
+ * Comma/space separated filename globs (`*.rs, *.toml`); empty = every file.
+ */
+glob: string | null, regex: boolean, ci: boolean, word: boolean, max: number, };
+
+export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
+
+export type TabsResponse = { tabs: Array<TabInfo>, };

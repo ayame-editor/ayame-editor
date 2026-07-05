@@ -124,6 +124,7 @@ export function askPrompt(title, label, value = ""): Promise<any> {
         }
       };
       on(input, "keydown", onKey);
+      on(modal, "keydown", onKey);
       on($("prompt-ok"), "click", onOk);
       on($("prompt-cancel"), "click", onCancel);
       on($("prompt-close"), "click", onCancel);
@@ -196,7 +197,8 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
   }
   return runModal(
     modal,
-    () => queueMicrotask(() => body.querySelector("input, select")?.focus()),
+    () =>
+      queueMicrotask(() => body.querySelector<HTMLInputElement | HTMLSelectElement>("input, select")?.focus()),
     (finish, on) => {
       const collect = () =>
         Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));

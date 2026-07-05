@@ -70,8 +70,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("search error: {0}")]
     Search(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("unsupported: {0}")]
-    Unsupported(String),
+    UnsupportedFeature(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

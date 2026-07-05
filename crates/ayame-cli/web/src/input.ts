@@ -94,6 +94,25 @@ export function anyModalOpen() {
   );
 }
 
+const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
+  [ctxMenuVisible, hideCtxMenu],
+  [fileMenuVisible, () => hideFileMenu(true)],
+  [keymapVisible, hideKeymap],
+  [commandPaletteVisible, hideCommandPalette],
+  [diffVisible, hideDiff],
+  [grepVisible, hideGrep],
+  [settingsVisible, hideSettings],
+  [convertVisible, hideConvert],
+  [openerVisible, hideOpener],
+  [
+    () => state.findOpen,
+    () => {
+      hideFind();
+      focusEditor();
+    },
+  ],
+];
+
 // ---- input wiring ----------------------------------------------------------
 
 export function setQueryFromInput() {
@@ -224,50 +243,13 @@ export function initEvents() {
 export function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
   if (promptVisible() || formVisible() || confirmVisible()) return;
-  if (e.key === "Escape" && ctxMenuVisible()) {
-    e.preventDefault();
-    hideCtxMenu();
-    return;
-  }
-  if (e.key === "Escape" && fileMenuVisible()) {
-    e.preventDefault();
-    hideFileMenu(true);
-    return;
-  }
-  if (e.key === "Escape" && keymapVisible()) {
-    e.preventDefault();
-    hideKeymap();
-    return;
-  }
-  if (e.key === "Escape" && commandPaletteVisible()) {
-    e.preventDefault();
-    hideCommandPalette();
-    return;
-  }
-  if (e.key === "Escape" && diffVisible()) {
-    e.preventDefault();
-    hideDiff();
-    return;
-  }
-  if (e.key === "Escape" && grepVisible()) {
-    e.preventDefault();
-    hideGrep();
-    return;
-  }
-  if (e.key === "Escape" && settingsVisible()) {
-    e.preventDefault();
-    hideSettings();
-    return;
-  }
-  if (e.key === "Escape" && convertVisible()) {
-    e.preventDefault();
-    hideConvert();
-    return;
-  }
-  if (e.key === "Escape" && openerVisible()) {
-    e.preventDefault();
-    hideOpener();
-    return;
+  if (e.key === "Escape") {
+    const handler = ESCAPE_CLOSE_HANDLERS.find(([visible]) => visible());
+    if (handler) {
+      e.preventDefault();
+      handler[1]();
+      return;
+    }
   }
   // A modal owns the keyboard: never run editor/clipboard/history/nav commands
   // against the hidden document behind Settings / the Opener / a prompt.
@@ -456,7 +438,7 @@ export function onEditKey(e) {
       return;
     case "Escape":
       // Collapsing multi-cursor wins over every other Escape meaning here
-      // (modals/find never reach this handler — see the guards above).
+      // (modals never reach this handler — see the guards above).
       if (state.extraCursors.length) {
         take();
         clearExtraCursors();
@@ -466,6 +448,11 @@ export function onEditKey(e) {
         take();
         state.sel = null;
         scheduleRender();
+      }
+      if (state.findOpen) {
+        take();
+        hideFind();
+        focusEditor();
       }
       return;
     default:

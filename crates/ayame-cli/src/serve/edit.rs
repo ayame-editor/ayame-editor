@@ -8,6 +8,8 @@ use axum::Json;
 use ayame_core::{BatchEdit, EditLine, EditStats, Encoding, Eol, SaveResult};
 use serde::{Deserialize, Serialize};
 
+use crate::temp_paths;
+
 use super::{bad_request, default_save_copy_path, internal, workspace, SharedState, MAX_VIEW};
 
 #[derive(Deserialize)]
@@ -134,6 +136,7 @@ pub(super) async fn api_edit_replace_batch(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ReplaceRectRequest {
     l0: u64,
     l1: u64,
@@ -160,6 +163,7 @@ pub(super) async fn api_edit_replace_rect(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct EditSaveRequest {
     #[serde(default)]
     path: Option<String>,
@@ -187,6 +191,7 @@ pub(super) struct EditSaveRequest {
 
 /// [`SaveResult`] plus whether the active tab now shows the saved file.
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct EditSaveResponse {
     /// UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
     path: String,
@@ -429,23 +434,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// the in-place sort in `ops`): same directory, hence same volume, so the
 /// final rename is atomic.
 pub(super) fn overwrite_stage_path(target: &Path) -> PathBuf {
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let name = target
-        .file_name()
-        .map(|s| s.to_string_lossy())
-        .unwrap_or_else(|| "ayame-save".into());
-    parent.join(format!(
-        ".{name}.ayame-overwrite-{}-{}.tmp",
-        std::process::id(),
-        unique_suffix()
-    ))
-}
-
-fn unique_suffix() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
+    temp_paths::temp_sibling_with_label(target, "ayame-overwrite")
 }
 
 /// Move the fully-written stage file onto `target`. On failure the stage file
@@ -539,6 +528,7 @@ pub(super) async fn api_edit_revert(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ReopenRequest {
     encoding: String,
 }

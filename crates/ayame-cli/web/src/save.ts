@@ -11,6 +11,16 @@ import { flashCount } from "./search.js";
 import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { onDocumentOpened, refreshTabs, showSaveDialog, updateTreeActive } from "./workspace.js";
 import { saveSettings } from "./settings.js";
+import type {
+  BrowseResponse,
+  EditSaveRequest,
+  EditSaveResponse,
+  OpenRequest,
+  RecoverRequest,
+  ReopenRequest,
+  SortSaveRequest,
+  SplitSaveRequest,
+} from "./types/api.js";
 
 // Never let the native window kill the process while a save is in flight; the
 // close request is answered "cancel" and retried once the save settles.
@@ -19,6 +29,18 @@ import { saveSettings } from "./settings.js";
 export let savingCount = 0;
 
 export let savingWaiters = [];
+
+function editSaveRequest(req: Partial<EditSaveRequest>): EditSaveRequest {
+  return {
+    path: null,
+    overwrite: false,
+    switch_to_saved: false,
+    encoding: null,
+    eol: null,
+    bom: null,
+    ...req,
+  };
+}
 
 export function setSavingUI() {
   const on = savingCount > 0;
@@ -122,7 +144,7 @@ export async function finishSaveAs(res) {
   } else {
     // The workspace changed while saving (rare): fall back to focusing the
     // saved file — the server dedupes, so this never duplicates a tab.
-    onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+    onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: res.path }));
   }
   rememberSaveDir(res.path);
   flashCount(t("file.saved", { path: displayPath(res.path) }));
@@ -148,7 +170,10 @@ export async function saveCopy() {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", { ...target, switch_to_saved: true });
+    const res = await apiPost<EditSaveResponse, EditSaveRequest>(
+      "/api/edit/save",
+      editSaveRequest({ ...target, switch_to_saved: true }),
+    );
     await finishSaveAs(res);
   } catch (e) {
     let finalError = e;
@@ -163,11 +188,14 @@ export async function saveCopy() {
       );
       if (ok) {
         try {
-          const res = await apiPost("/api/edit/save", {
-            ...target,
-            overwrite: true,
-            switch_to_saved: true,
-          });
+          const res = await apiPost<EditSaveResponse, EditSaveRequest>(
+            "/api/edit/save",
+            editSaveRequest({
+              ...target,
+              overwrite: true,
+              switch_to_saved: true,
+            }),
+          );
           await finishSaveAs(res);
           return;
         } catch (retryError) {
@@ -201,7 +229,7 @@ export async function suggestedSaveAsPath() {
   const dir = (state.settings.lastSaveDir || "").trim();
   let listing = null;
   try {
-    listing = await api(`/api/browse?dir=${encodeURIComponent(dir)}`);
+    listing = await api<BrowseResponse>(`/api/browse?dir=${encodeURIComponent(dir)}`);
   } catch {
     listing = null; // folder gone / unreadable → suggest without collision info
   }
@@ -299,7 +327,10 @@ export async function saveFile() {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", { overwrite: true });
+    const res = await apiPost<EditSaveResponse, EditSaveRequest>(
+      "/api/edit/save",
+      editSaveRequest({ overwrite: true }),
+    );
     clearLineCache();
     await refreshStat();
     await reloadViewport();
@@ -369,16 +400,19 @@ export async function convertSave(encoding, lineEnding, bom) {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost("/api/edit/save", {
-      overwrite: true,
-      encoding,
-      eol: lineEnding,
-      bom,
-    });
+    const res = await apiPost<EditSaveResponse, EditSaveRequest>(
+      "/api/edit/save",
+      editSaveRequest({
+        overwrite: true,
+        encoding,
+        eol: lineEnding,
+        bom,
+      }),
+    );
     if (res.switched) {
       await reloadActiveDocument();
     } else {
-      onDocumentOpened(await apiPost("/api/open", { path: res.path }));
+      onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: res.path }));
     }
     flashCount(t("dialog.convert.savedAs", { enc: enc(encoding), eol: eol(lineEnding) }));
   } catch (e) {
@@ -409,7 +443,7 @@ export async function reopenWithEncoding(encoding) {
   }
   await settleEditQueue();
   try {
-    await apiPost("/api/reopen_encoding", { encoding });
+    await apiPost<unknown, ReopenRequest>("/api/reopen_encoding", { encoding });
     await reloadActiveDocument();
     flashCount(t("dialog.convert.reopenedAs", { enc: enc(encoding) }));
   } catch (e) {
@@ -473,7 +507,8 @@ export async function sortSave() {
   }
   showLoading(t("dialog.sort.running"));
   try {
-    await apiPost("/api/sort/save", {
+    await apiPost<unknown, SortSaveRequest>("/api/sort/save", {
+      path: null,
       in_place: true,
       key,
       numeric: !!f.numeric,
@@ -525,7 +560,10 @@ export async function splitFile() {
   showLoading(t("dialog.split.running"));
   try {
     const dir = String(f.dir || "").trim();
-    const res = await apiPost("/api/split/save", { lines, dir: dir || null });
+    const res = await apiPost<{ files: string[]; count: number }, SplitSaveRequest>(
+      "/api/split/save",
+      { lines, dir: dir || null },
+    );
     flashCount(t("dialog.split.done", { count: res.count, path: displayPath(res.files[0]) }));
   } catch (e) {
     flashCount(t("dialog.split.error"), "error");
@@ -553,7 +591,7 @@ export async function maybeOfferWalRecovery(stat) {
       okLabel: t("recover.restore"),
       cancelLabel: t("recover.discard"),
     });
-    await apiPost("/api/edit/recover", restore ? {} : { discard: true });
+    await apiPost<unknown, RecoverRequest>("/api/edit/recover", { discard: !restore });
     clearLineCache();
     await refreshStat();
     await reloadViewport();

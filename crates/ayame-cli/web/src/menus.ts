@@ -472,7 +472,7 @@ export function initContextMenu() {
     }
     // Zero-width rect selections count as empty for the text actions.
     const hasSel = hasTextSelection();
-    menu.querySelectorAll("[data-ctx]").forEach((el) => {
+    menu.querySelectorAll<HTMLButtonElement>("[data-ctx]").forEach((el) => {
       const a = el.dataset.ctx;
       el.disabled = (a === "cut" || a === "copy" || a === "saveSelection") && !hasSel;
     });
@@ -482,7 +482,7 @@ export function initContextMenu() {
     menu.style.left = `${Math.max(4, Math.min(e.clientX, window.innerWidth - mw - 8))}px`;
     menu.style.top = `${Math.max(4, Math.min(e.clientY, window.innerHeight - mh - 8))}px`;
   });
-  menu.querySelectorAll("[data-ctx]").forEach((el) => {
+  menu.querySelectorAll<HTMLButtonElement>("[data-ctx]").forEach((el) => {
     el.addEventListener("click", () => runCtxAction(el.dataset.ctx));
   });
   document.addEventListener("pointerdown", (e) => {

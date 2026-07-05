@@ -34,7 +34,8 @@ impl Default for FieldSpec {
 /// Build a byte key whose `Ord` matches the desired sort order: an
 /// order-preserving 8-byte encoding for numeric keys, else the field decoded to
 /// NFC-normalized UTF-8 (byte order == code-point order). Shared by sort and
-/// top-n.
+/// top-n. Numeric fields that cannot be parsed, or parse to NaN, are treated as
+/// negative infinity so they sort before every finite number.
 pub(crate) fn comparable_key(
     raw: &[u8],
     enc: Encoding,

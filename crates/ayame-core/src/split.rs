@@ -64,13 +64,13 @@ pub fn split_by_lines(
     opts: &SplitOptions,
 ) -> Result<SplitResult> {
     if lines_per_file == 0 {
-        return Err(Error::Unsupported(
+        return Err(Error::InvalidInput(
             "split requires at least 1 line per file".into(),
         ));
     }
     let total = doc.line_count();
     if total == 0 {
-        return Err(Error::Unsupported("the file has no lines to split".into()));
+        return Err(Error::InvalidInput("the file has no lines to split".into()));
     }
     let count = total.div_ceil(lines_per_file);
     let width = part_width(count);
@@ -84,7 +84,7 @@ pub fn split_by_lines(
         for part in 1..=count {
             let target = dir.join(part_file_name(&stem, &ext, part, width));
             if target.exists() {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::Conflict(format!(
                     "'{}' already exists; choose another output directory",
                     target.display()
                 )));
@@ -143,7 +143,7 @@ fn write_part_bytes(doc: &Document, start: u64, end: u64, first: bool, tmp: &Pat
     while s < end {
         let span_end = (s + SPAN_LINES).min(end);
         let span = doc.raw_lines_span(s, span_end).ok_or_else(|| {
-            Error::Unsupported(format!(
+            Error::InvalidInput(format!(
                 "line range {s}..{span_end} out of bounds during split"
             ))
         })?;

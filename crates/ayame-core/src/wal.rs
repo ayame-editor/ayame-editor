@@ -410,7 +410,7 @@ impl WalWriter {
         if honest {
             Ok(())
         } else {
-            Err(Error::Unsupported(
+            Err(Error::UnsupportedFeature(
                 "the crash log was reset without a session capture; edits since the last save \
                  are not crash-protected — save the file to re-arm crash recovery"
                     .into(),
@@ -436,7 +436,7 @@ impl WalWriter {
     pub fn install_compaction(self, staged: StagedWalCompaction) -> Result<WalWriter> {
         if self.path != staged.path || self.header != staged.header {
             staged.cleanup();
-            return Err(Error::Unsupported(
+            return Err(Error::Conflict(
                 "staged crash-log compaction no longer matches the live writer".into(),
             ));
         }
@@ -473,7 +473,7 @@ impl WalCompactionPlan {
             self.rebase.as_ref().map(|r| r.rebase(session))
         };
         let Some(overlay) = overlay else {
-            return Err(Error::Unsupported(
+            return Err(Error::UnsupportedFeature(
                 "the crash log was reset without a session capture; edits since the last save \
                  are not crash-protected — save the file to re-arm crash recovery"
                     .into(),
@@ -736,7 +736,7 @@ fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> R
         Parsed::Eof => return Ok(0),
         Parsed::Rec(Record::Header(h)) => h,
         Parsed::Torn | Parsed::Invalid | Parsed::Rec(_) => {
-            return Err(Error::Unsupported(
+            return Err(Error::Conflict(
                 "the crash log has no readable header".into(),
             ))
         }
@@ -745,7 +745,7 @@ fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> R
     // log onto a base it was not recorded against.
     let current = Header::for_document(doc)?;
     if header.version != WAL_VERSION || !header.matches(&current) {
-        return Err(Error::Unsupported(
+        return Err(Error::Conflict(
             "the crash log does not match the file on disk (stale log)".into(),
         ));
     }
@@ -764,7 +764,7 @@ fn replay_inner(wal_path: &Path, doc: &Document, session: &mut EditSession) -> R
             // where none may appear): refuse rather than restore a silently
             // truncated state.
             Parsed::Rec(Record::Header(_)) | Parsed::Invalid => {
-                return Err(Error::Unsupported(
+                return Err(Error::Conflict(
                     "the crash log is corrupted; refusing to replay it".into(),
                 ))
             }

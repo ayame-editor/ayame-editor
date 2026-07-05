@@ -1,7 +1,7 @@
 // Ayame Editor — editor module. Type-stripped to JS at build time (build.rs, oxc).
 import { $ } from "./dom.js";
 import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
-import { api } from "./api.js";
+import { api, type LineByteResponse, type LinesResponse } from "./api.js";
 import { t } from "./i18n.js";
 import { hasSelection, renderSelection } from "./selection.js";
 import { updateStatusPos } from "./menus.js";
@@ -76,10 +76,10 @@ export function ensureData(start, count) {
   const fcount = count + 2 * PAD;
   const token = ++state.loadToken;
   const url = `/api/lines?start=${fstart}&count=${fcount}`;
-  api(url)
+  api<LinesResponse>(url)
     .catch(async (firstError) => {
       if (token !== state.loadToken) throw firstError;
-      return api(url);
+      return api<LinesResponse>(url);
     })
     .then((res) => {
       if (token !== state.loadToken) return; // a newer request superseded us
@@ -99,7 +99,7 @@ export function ensureData(start, count) {
 export async function lineByte(line, col = null) {
   try {
     const q = col == null ? "" : `&col=${Math.max(0, col)}`;
-    const r = await api(`/api/linebyte?line=${Math.max(0, line)}${q}`);
+    const r = await api<LineByteResponse>(`/api/linebyte?line=${Math.max(0, line)}${q}`);
     return r.byte ?? 0;
   } catch {
     return 0;

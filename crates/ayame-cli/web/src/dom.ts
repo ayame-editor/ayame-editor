@@ -1,7 +1,20 @@
 // Ayame Editor — dom module. Type-stripped to JS at build time (build.rs, oxc).
-// `any`: the port reads .value/.checked/.dataset off looked-up elements
-// everywhere; exact element types are out of scope for the first TS pass.
-export const $ = (id: string): any => document.getElementById(id);
+type AyameElement = HTMLElement & {
+  checked: boolean;
+  disabled: boolean;
+  files: FileList | null;
+  placeholder: string;
+  selected: boolean;
+  type: string;
+  value: string;
+  select(): void;
+};
+
+export function $<T extends HTMLElement = AyameElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`missing element #${id}`);
+  return el as T;
+}
 
 export function commas(n) {
   return n.toLocaleString("en-US");

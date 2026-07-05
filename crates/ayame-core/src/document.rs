@@ -107,7 +107,7 @@ impl Document {
             let buf: &[u8] = mmap.as_deref().unwrap_or(&[]);
             let (encoding, base_us) = encoding::detect(buf, opts.encoding);
             if encoding.is_wide() {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::UnsupportedFeature(format!(
                     "{} detected; wide-encoding indexing is not supported yet. \
                      Re-open with an 8-bit encoding override if the bytes are single-byte.",
                     encoding.label()
@@ -727,6 +727,22 @@ mod tests {
         // Truncating (a shrink) signals that a full reindex is needed.
         std::fs::write(&path, b"fresh\n").unwrap();
         assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Reindex);
+    }
+
+    #[test]
+    fn refresh_tail_shrink_signals_reindex_without_adopting_new_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shrink.log");
+        std::fs::write(&path, b"old 0\nold 1\nold 2\n").unwrap();
+        let mut doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let old_len = doc.byte_len();
+
+        std::fs::write(&path, b"new\n").unwrap();
+
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Reindex);
+        assert_eq!(doc.byte_len(), old_len);
+        assert_ne!(doc.byte_len(), std::fs::metadata(&path).unwrap().len());
+        assert_eq!(doc.line_count(), 3);
     }
 
     #[test]

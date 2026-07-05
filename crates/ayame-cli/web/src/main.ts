@@ -28,6 +28,7 @@ import {
   refreshTabs,
 } from "./workspace.js";
 import { initSettings } from "./settings.js";
+import type { OpenRequest } from "./types/api.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -74,7 +75,7 @@ export async function boot() {
     showLoading(t("dialog.open.openingName", { name: displayName(pending) }));
     postNativeMessage("ayame:ready");
     try {
-      onDocumentOpened(await apiPost("/api/open", { path: pending }));
+      onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: pending }));
     } catch (e) {
       flashCount(t("error.cannotOpen", { msg: pending }), "error");
       console.error(e);

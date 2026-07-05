@@ -2,7 +2,14 @@
 import { $, commas, displayPath, escapeRegExp, pathDirName, setModalOpen } from "./dom.js";
 import { SEARCH_HISTORY_KEY, TREE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
-import { api, apiPost } from "./api.js";
+import {
+  api,
+  apiPost,
+  type DiffResponse,
+  type FindResponse,
+  type LinesResponse,
+  type SearchResponse,
+} from "./api.js";
 import {
   focusEditor,
   lineByte,
@@ -27,6 +34,14 @@ import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
 import { openPath } from "./workspace.js";
+import type { GrepRequest } from "./types/api.js";
+
+type GrepResponse = {
+  hits: { path: string; line: number; col: number; text: string }[];
+  truncated: boolean;
+  files_scanned: number;
+  files_truncated: boolean;
+};
 
 // ---- search ----------------------------------------------------------------
 
@@ -105,7 +120,7 @@ export async function findStep(dir) {
       : await lineByte(Math.min(state.total, state.first + rowsVisible()));
   }
   try {
-    const res = await api(`/api/find?dir=${dir}&from=${from}&${qs()}`);
+    const res = await api<FindResponse>(`/api/find?dir=${dir}&from=${from}&${qs()}`);
     if (!res.hit) {
       flashCount(t("find.noMatch"));
       return;
@@ -184,7 +199,7 @@ export async function findNextOccurrenceRange(query, fromByte, existing) {
       ci: "false",
       word: "false",
     });
-    const res = await api(`/api/find?${params.toString()}`);
+    const res = await api<FindResponse>(`/api/find?${params.toString()}`);
     if (!res.hit) {
       if (wrapped) return null;
       from = 0;
@@ -247,7 +262,7 @@ export async function updateCount() {
     return;
   }
   try {
-    const res = await api(`/api/search?${qs()}&start=0&max=2000`);
+    const res = await api<SearchResponse>(`/api/search?${qs()}&start=0&max=2000`);
     state.searchHits = res.hits;
     state.searchTruncated = res.truncated;
     updateFindCountLabel();
@@ -411,13 +426,15 @@ export async function replaceCurrent() {
     return;
   }
   try {
-    const res = await api(`/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`);
+    const res = await api<FindResponse>(
+      `/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`,
+    );
     const h = res.hit;
     if (!h || h.byte !== state.lastMatch.byte) {
       await findStep("next");
       return;
     }
-    const lr = await api(`/api/lines?start=${h.line}&count=1`);
+    const lr = await api<LinesResponse>(`/api/lines?start=${h.line}&count=1`);
     const text = lr.lines?.[0]?.text ?? "";
     const u16 = utf16IndexOfCol(text, h.column);
     const re = new RegExp(state.matcher.source, state.matcher.flags);
@@ -451,7 +468,7 @@ export async function replaceAll() {
   const literal = literalReplacement(replacement);
   showLoading(t("find.replacing"));
   try {
-    const res = await api(`/api/search?${qs()}&start=0&max=${REPLACE_ALL_MAX}`);
+    const res = await api<SearchResponse>(`/api/search?${qs()}&start=0&max=${REPLACE_ALL_MAX}`);
     const hits = res.hits || [];
     if (!hits.length) {
       flashCount(t("find.noMatch"));
@@ -465,7 +482,7 @@ export async function replaceAll() {
       while (j + 1 < lines.length && lines[j + 1] - lines[i] < 2000) j++;
       const start = lines[i];
       const count = lines[j] - lines[i] + 1;
-      const r = await api(`/api/lines?start=${start}&count=${count}`);
+      const r = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
       r.lines.forEach((rec, k) => texts.set(start + k, rec.text ?? ""));
       i = j + 1;
     }
@@ -687,7 +704,7 @@ export async function diffFile() {
   if (path == null || path.trim() === "") return;
   showLoading(t("dialog.diff.computing"));
   try {
-    const res = await api(
+    const res = await api<DiffResponse>(
       `/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`,
     );
     flashCount(t("dialog.diff.hunks", { n: commas(res.hunk_count) }));
@@ -762,13 +779,14 @@ export async function grepFolder() {
   };
   showLoading(t("dialog.grep.searching"));
   try {
-    const res = await apiPost("/api/grep", {
+    const res = await apiPost<GrepResponse, GrepRequest>("/api/grep", {
       query,
-      dir: lastGrep.dir,
+      dir: lastGrep.dir || null,
       glob: (form.glob || "").trim(),
       ci: lastGrep.ci,
       word: lastGrep.word,
       regex: lastGrep.regex,
+      max: 2000,
     });
     flashCount(t("dialog.grep.flash", { n: commas(res.hits.length) }));
     showGrep(res, query, lastGrep.regex);

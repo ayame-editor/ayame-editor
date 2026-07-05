@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -8,6 +9,8 @@ use axum::Json;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
+
+use crate::temp_paths;
 
 use super::{
     bad_request, internal, stat_response, AppState, SharedState, StatResponse, TabsResponse,
@@ -40,8 +43,7 @@ pub(super) async fn api_open(
 pub(super) async fn api_new(
     State(state): State<SharedState>,
 ) -> Result<Json<StatResponse>, (StatusCode, String)> {
-    let dir = untitled_dir();
-    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let dir = untitled_dir_result().map_err(internal)?;
     let target = unique_upload_path(&dir, &untitled_template_name());
     // One empty line, so the buffer is immediately editable yet still "clean"
     // (no pending edits) — closing a pristine untitled won't prompt.
@@ -59,6 +61,7 @@ pub(super) async fn api_tabs(State(state): State<SharedState>) -> Json<TabsRespo
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct TabIdRequest {
     id: u64,
 }
@@ -206,7 +209,10 @@ pub(super) struct UploadQuery {
 /// disk. NOTE: this must be enforced by hand below — the handler consumes the
 /// raw `Request`, and axum's `DefaultBodyLimit` is only consulted by the
 /// buffering extractors (`Bytes`/`Json`/...), never by a raw body stream.
+#[cfg(not(test))]
 pub(super) const MAX_UPLOAD_BYTES: u64 = 4 << 30; // 4 GiB
+#[cfg(test)]
+pub(super) const MAX_UPLOAD_BYTES: u64 = 16;
 
 /// Accept a file dropped into the browser: stream its bytes to a temp file
 /// (bounded memory, matching Ayame's design) and open it. Intended for pulling
@@ -217,15 +223,21 @@ pub(super) async fn api_upload(
     request: Request,
 ) -> Result<Json<StatResponse>, (StatusCode, String)> {
     let name = sanitize_filename(q.name.as_deref().unwrap_or("dropped.txt"));
-    let dir = uploads_dir();
-    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let dir = uploads_dir_result().map_err(internal)?;
     let (target, mut file) = create_unique_upload_file(&dir, &name)
         .await
         .map_err(internal)?;
     let mut stream = request.into_body().into_data_stream();
     let mut written: u64 = 0;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| bad_request(format!("upload stream error: {e}")))?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&target).await;
+                return Err(bad_request(format!("upload stream error: {e}")));
+            }
+        };
         written = written.saturating_add(chunk.len() as u64);
         if written > MAX_UPLOAD_BYTES {
             drop(file);
@@ -233,35 +245,87 @@ pub(super) async fn api_upload(
             return Err((
                 StatusCode::PAYLOAD_TOO_LARGE,
                 format!(
-                    "upload exceeds the {} GiB limit — open large files by path instead",
-                    MAX_UPLOAD_BYTES >> 30
+                    "upload exceeds the {} limit — open large files by path instead",
+                    upload_limit_label()
                 ),
             ));
         }
-        file.write_all(&chunk).await.map_err(internal)?;
+        if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&target).await;
+            return Err(internal(e));
+        }
     }
-    file.flush().await.map_err(internal)?;
+    if let Err(e) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&target).await;
+        return Err(internal(e));
+    }
     drop(file);
 
-    state
-        .open_path(target.to_string_lossy().to_string())
-        .await?;
+    if let Err(e) = state.open_path(target.to_string_lossy().to_string()).await {
+        let _ = tokio::fs::remove_file(&target).await;
+        return Err(e);
+    }
     Ok(Json(stat_response(&state)))
 }
 
 // ---- per-process scratch directories ------------------------------------------
 
-pub(super) fn uploads_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("ayame-uploads-{}", std::process::id()))
+fn upload_limit_label() -> String {
+    if MAX_UPLOAD_BYTES >= (1 << 30) && MAX_UPLOAD_BYTES % (1 << 30) == 0 {
+        format!("{} GiB", MAX_UPLOAD_BYTES >> 30)
+    } else {
+        format!("{} bytes", MAX_UPLOAD_BYTES)
+    }
 }
 
+static UPLOADS_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+static UNTITLED_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+static SORTED_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+
+fn scratch_dir_result(
+    cell: &'static OnceLock<Result<PathBuf, String>>,
+    kind: &str,
+) -> std::io::Result<PathBuf> {
+    match cell.get_or_init(|| temp_paths::create_private_temp_dir(kind).map_err(|e| e.to_string()))
+    {
+        Ok(path) => {
+            if !path.exists() {
+                temp_paths::create_private_dir(path)?;
+            }
+            Ok(path.clone())
+        }
+        Err(msg) => Err(std::io::Error::new(std::io::ErrorKind::Other, msg.clone())),
+    }
+}
+
+fn uploads_dir_result() -> std::io::Result<PathBuf> {
+    scratch_dir_result(&UPLOADS_DIR, "srv-uploads")
+}
+
+fn untitled_dir_result() -> std::io::Result<PathBuf> {
+    scratch_dir_result(&UNTITLED_DIR, "srv-untitled")
+}
+
+pub(super) fn sorted_dir_result() -> std::io::Result<PathBuf> {
+    scratch_dir_result(&SORTED_DIR, "srv-sorted")
+}
+
+#[cfg(test)]
+pub(super) fn uploads_dir() -> PathBuf {
+    uploads_dir_result().expect("create private uploads scratch directory")
+}
+
+#[cfg(test)]
 pub(super) fn untitled_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("ayame-untitled-{}", std::process::id()))
+    untitled_dir_result().expect("create private untitled scratch directory")
 }
 
 /// Scratch home for sort results the client didn't pick a destination for.
+#[cfg(test)]
 pub(super) fn sorted_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("ayame-sorted-{}", std::process::id()))
+    sorted_dir_result().expect("create private sorted scratch directory")
 }
 
 /// Best-effort removal of this process's scratch directories (uploads,
@@ -269,8 +333,10 @@ pub(super) fn sorted_dir() -> PathBuf {
 /// ignored: files may be mmap'd on platforms that refuse deletion of mapped
 /// files, and the names are pid-scoped so leftovers never collide.
 pub(super) fn cleanup_temp_dirs() {
-    for dir in [uploads_dir(), untitled_dir(), sorted_dir()] {
-        let _ = std::fs::remove_dir_all(dir);
+    for cell in [&UPLOADS_DIR, &UNTITLED_DIR, &SORTED_DIR] {
+        if let Some(Ok(dir)) = cell.get() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -290,12 +356,8 @@ pub(super) fn aside_path(target: &Path) -> PathBuf {
         .map(|s| s.to_string_lossy())
         .unwrap_or_else(|| "ayame-save".into());
     parent.join(format!(
-        ".{name}{ASIDE_MARKER}{}-{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+        ".{name}{ASIDE_MARKER}{}.tmp",
+        temp_paths::unique_component()
     ))
 }
 
@@ -468,5 +530,28 @@ mod tests {
             utc_date_time(UNIX_EPOCH + Duration::from_secs(1_704_067_205)),
             (2024, 1, 1, 0, 0, 5)
         );
+    }
+
+    #[test]
+    fn scratch_dirs_are_randomized_created_private_dirs() {
+        let pid = std::process::id();
+        for (kind, dir) in [
+            ("uploads", uploads_dir()),
+            ("untitled", untitled_dir()),
+            ("sorted", sorted_dir()),
+        ] {
+            let name = dir.file_name().unwrap().to_string_lossy();
+            assert!(
+                !name.eq(&format!("ayame-{kind}-{pid}")),
+                "scratch dir is still pid-predictable: {name}"
+            );
+            assert!(dir.is_dir(), "scratch dir missing: {}", dir.display());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o700, "scratch dir mode for {}", dir.display());
+            }
+        }
     }
 }

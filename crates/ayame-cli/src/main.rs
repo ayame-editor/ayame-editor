@@ -14,6 +14,7 @@ mod gen;
 #[cfg(feature = "gui")]
 mod gui;
 mod serve;
+mod temp_paths;
 
 #[cfg(feature = "gui")]
 pub(crate) use cli::default_cache_dir;

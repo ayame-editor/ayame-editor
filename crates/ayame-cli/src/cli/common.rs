@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+
+use crate::temp_paths;
 
 /// Test/operational hook: when running as a spawned op worker, optionally crash
 /// in a specific way so the supervisor's isolation can be exercised
@@ -33,49 +34,11 @@ pub(crate) fn rename_or_copy(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 pub(crate) fn temp_sibling_with_label(path: &Path, label: &str) -> PathBuf {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_else(|| label.into());
-    let mut tmp = path.to_path_buf();
-    tmp.set_file_name(format!(
-        ".{name}.{label}.{}-{}.tmp",
-        std::process::id(),
-        unique_suffix()
-    ));
-    tmp
+    temp_paths::temp_sibling_with_label(path, label)
 }
 
 pub(crate) fn temp_work_dir(kind: &str) -> PathBuf {
-    let seed = unique_suffix();
-    for attempt in 0..1000u32 {
-        let dir = std::env::temp_dir().join(format!(
-            "ayame-{kind}-{}-{seed:x}-{attempt}",
-            std::process::id()
-        ));
-        match create_private_dir(&dir) {
-            Ok(()) => return dir,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(_) => continue,
-        }
-    }
-    std::env::temp_dir().join(format!("ayame-{kind}-{}-{seed:x}", std::process::id()))
-}
-
-fn unique_suffix() -> u128 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
-}
-
-#[cfg(unix)]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().mode(0o700).create(path)
-}
-
-#[cfg(not(unix))]
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir(path)
+    temp_paths::create_private_temp_dir(kind).unwrap_or_else(|_| {
+        std::env::temp_dir().join(format!("ayame-{kind}-{}", temp_paths::unique_component()))
+    })
 }

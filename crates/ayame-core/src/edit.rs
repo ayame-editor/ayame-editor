@@ -710,7 +710,7 @@ impl EditSession {
     fn line_text(&self, doc: &Document, logical: u64) -> Result<String> {
         self.line(doc, logical)
             .map(|l| l.text)
-            .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))
+            .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))
     }
 
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
@@ -741,7 +741,7 @@ impl EditSession {
     ) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
-            .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
+            .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))?
         {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
                 let replacement = if doc.line(orig).as_deref() == Some(text.as_str()) {
@@ -812,7 +812,7 @@ impl EditSession {
     ) -> Result<()> {
         let total = self.total_lines(doc);
         if logical > total {
-            return Err(Error::Unsupported(format!(
+            return Err(Error::InvalidInput(format!(
                 "line {} is beyond end of document",
                 logical + 1
             )));
@@ -865,7 +865,7 @@ impl EditSession {
     ) -> Result<()> {
         match self
             .locate(logical, doc.line_count())
-            .ok_or_else(|| Error::Unsupported(format!("line {} is out of range", logical + 1)))?
+            .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))?
         {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
                 let prior = self.events.get(&orig);
@@ -947,7 +947,7 @@ impl EditSession {
         // insertion at the very start, which seeds the first line(s).
         if total == 0 {
             if l0 != 0 || c0 != 0 || l1 != 0 || c1 != 0 {
-                return Err(Error::Unsupported(
+                return Err(Error::InvalidInput(
                     "the document is empty; only an insertion at line 1 is valid".into(),
                 ));
             }
@@ -959,7 +959,7 @@ impl EditSession {
             return Ok((last as u64, parts[last].chars().count()));
         }
         if l0 > l1 || l1 >= total {
-            return Err(Error::Unsupported(format!(
+            return Err(Error::InvalidInput(format!(
                 "range spans lines {}..{} outside the document",
                 l0 + 1,
                 l1 + 1
@@ -1023,7 +1023,7 @@ impl EditSession {
         for e in edits {
             if total == 0 {
                 if e.l0 != 0 || e.c0 != 0 || e.l1 != 0 || e.c1 != 0 {
-                    return Err(Error::Unsupported(
+                    return Err(Error::InvalidInput(
                         "the document is empty; only an insertion at line 1 is valid".into(),
                     ));
                 }
@@ -1031,7 +1031,7 @@ impl EditSession {
                 continue;
             }
             if e.l0 > e.l1 || e.l1 >= total {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::InvalidInput(format!(
                     "range spans lines {}..{} outside the document",
                     e.l0 + 1,
                     e.l1 + 1
@@ -1046,7 +1046,7 @@ impl EditSession {
             let c0 = e.c0.min(first_len);
             let c1 = e.c1.min(last_len);
             if e.l0 == e.l1 && c0 > c1 {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::InvalidInput(format!(
                     "range on line {} is reversed (column {} comes after {})",
                     e.l0 + 1,
                     e.c0 + 1,
@@ -1061,7 +1061,7 @@ impl EditSession {
             let (.., al1, ac1) = clamped[w[0]];
             let (bl0, bc0, ..) = clamped[w[1]];
             if (bl0, bc0) < (al1, ac1) {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::InvalidInput(format!(
                     "batch edits overlap around line {}",
                     bl0 + 1
                 )));
@@ -1132,14 +1132,14 @@ impl EditSession {
     ) -> Result<(u64, usize)> {
         let total = self.total_lines(doc);
         if total == 0 {
-            return Err(Error::Unsupported(
+            return Err(Error::InvalidInput(
                 "rectangular selection is not valid in an empty document".into(),
             ));
         }
         let top = l0.min(l1);
         let bottom = l0.max(l1);
         if bottom >= total {
-            return Err(Error::Unsupported(format!(
+            return Err(Error::InvalidInput(format!(
                 "rectangle spans lines {}..{} outside the document",
                 top + 1,
                 bottom + 1
@@ -1222,7 +1222,7 @@ impl EditSession {
     ) -> Result<SaveResult> {
         let target = target.as_ref();
         if target.exists() && !overwrite {
-            return Err(Error::Unsupported(format!(
+            return Err(Error::Conflict(format!(
                 "'{}' already exists; choose another save path",
                 target.display()
             )));
@@ -1295,7 +1295,7 @@ impl EditSession {
         overwrite: bool,
     ) -> Result<SaveResult> {
         if target.exists() && !overwrite {
-            return Err(Error::Unsupported(format!(
+            return Err(Error::Conflict(format!(
                 "'{}' already exists; choose another save path",
                 target.display()
             )));
@@ -1671,7 +1671,7 @@ impl<W: Write> ConvertedWriter<'_, W> {
         while pos < end {
             let batch = doc.raw_line_ranges(pos, (end - pos).min(BATCH));
             if batch.is_empty() {
-                return Err(Error::Unsupported(format!(
+                return Err(Error::InvalidInput(format!(
                     "original lines {}..{} are out of range while converting",
                     start + 1,
                     end
@@ -1690,7 +1690,7 @@ impl<W: Write> ConvertedWriter<'_, W> {
     fn write_text(&mut self, text: &str) -> Result<()> {
         let line_no = self.logical + 1;
         let bytes = self.enc.encode_text(text).ok_or_else(|| {
-            Error::Unsupported(format!(
+            Error::InvalidInput(format!(
                 "line {line_no} has characters that cannot be written as {}",
                 self.enc.label()
             ))
@@ -1738,7 +1738,7 @@ fn copy_original_span(
         return Ok(());
     }
     let bytes = doc.raw_lines_span(start, end).ok_or_else(|| {
-        Error::Unsupported(format!(
+        Error::InvalidInput(format!(
             "original lines {}..{} are out of range while saving",
             start + 1,
             end
@@ -1757,7 +1757,7 @@ fn write_edited_line(
     output: &mut OutputState,
 ) -> Result<()> {
     let bytes = doc.encoding().encode_text(text).ok_or_else(|| {
-        Error::Unsupported(format!(
+        Error::InvalidInput(format!(
             "edited text cannot be encoded as {}",
             doc.encoding().label()
         ))
