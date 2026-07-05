@@ -14,6 +14,7 @@ use crate::temp_paths;
 
 use super::{
     bad_request, internal, stat_response, AppState, SharedState, StatResponse, TabsResponse,
+    UiState,
 };
 
 // ---- workspace: open / browse / upload --------------------------------------
@@ -80,6 +81,30 @@ pub(super) async fn api_tabs_close(
 ) -> Json<StatResponse> {
     state.close_tab(req.id).await;
     Json(stat_response(&state))
+}
+
+pub(super) async fn api_ui_state(State(state): State<SharedState>) -> Json<UiState> {
+    Json(state.load_ui_state())
+}
+
+pub(super) async fn api_ui_state_save(
+    State(state): State<SharedState>,
+    Json(req): Json<UiState>,
+) -> Result<Json<UiState>, (StatusCode, String)> {
+    Ok(Json(state.save_ui_state(req)?))
+}
+
+pub(super) async fn api_session_save(
+    State(state): State<SharedState>,
+) -> Result<Json<UiState>, (StatusCode, String)> {
+    Ok(Json(state.save_session_snapshot()?))
+}
+
+pub(super) async fn api_session_restore(
+    State(state): State<SharedState>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    state.restore_session().await?;
+    Ok(Json(stat_response(&state)))
 }
 
 #[derive(Deserialize)]

@@ -1,6 +1,6 @@
 // Ayame Editor — search module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath, escapeRegExp, pathDirName, setModalOpen } from "./dom.js";
-import { SEARCH_HISTORY_KEY, TREE_KEY, state } from "./state.js";
+import { TREE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import {
   api,
@@ -34,6 +34,7 @@ import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
 import { openPath } from "./workspace.js";
+import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
 
 type GrepResponse = {
@@ -319,12 +320,7 @@ export function flashCount(msg, kind = "") {
 }
 
 export function loadSearchHistory() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]");
-    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string").slice(0, 50) : [];
-  } catch {
-    return [];
-  }
+  return loadSearchHistoryShared();
 }
 
 export function saveSearchHistory(q) {
@@ -332,11 +328,7 @@ export function saveSearchHistory(q) {
   if (!value) return;
   state.history = [value, ...state.history.filter((x) => x !== value)].slice(0, 50);
   state.historyIndex = -1;
-  try {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(state.history));
-  } catch {
-    // Ignore private-mode quota errors; search still works.
-  }
+  saveSearchHistoryShared(state.history);
 }
 
 export function showSearchHistory(delta) {
@@ -466,13 +458,28 @@ export async function replaceAll() {
   const literal = literalReplacement(replacement);
   showLoading(t("find.replacing"));
   try {
-    const res = await api<SearchResponse>(`/api/search?${qs()}&start=0&max=${REPLACE_ALL_MAX}`);
-    const hits = res.hits || [];
-    if (!hits.length) {
+    const lineSet = new Set<number>();
+    let totalHits = 0;
+    let start = 0;
+    for (let pass = 0; pass < 10000; pass++) {
+      const res = await api<SearchResponse>(
+        `/api/search?${qs()}&start=${start}&max=${REPLACE_ALL_MAX}`,
+      );
+      const hits = res.hits || [];
+      for (const h of hits) lineSet.add(h.line);
+      totalHits += hits.length;
+      if (!hits.length || !res.truncated) break;
+      const last = hits[hits.length - 1];
+      const next = last.byte + Math.max(1, last.byte_len || 0);
+      if (next <= start) break;
+      start = next;
+      flashCount(t("find.matchCount", { total: `${commas(totalHits)}+` }));
+    }
+    if (!lineSet.size) {
       flashCount(t("find.noMatch"));
       return;
     }
-    const lines: number[] = [...new Set<number>(hits.map((h) => h.line))].sort((a, b) => a - b);
+    const lines: number[] = [...lineSet].sort((a, b) => a - b);
     // Fetch the affected lines in contiguous chunks (≤2000 lines per request).
     const texts = new Map();
     for (let i = 0; i < lines.length; ) {
@@ -512,9 +519,7 @@ export async function replaceAll() {
     await updateCount();
     flashCount(
       replaced
-        ? res.truncated
-          ? t("find.replacedCountPartial", { n: commas(replaced) })
-          : t("find.replacedCount", { n: commas(replaced) })
+        ? t("find.replacedCount", { n: commas(replaced) })
         : t("find.noMatch"),
     );
   } catch (e) {

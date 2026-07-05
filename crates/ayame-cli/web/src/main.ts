@@ -28,6 +28,7 @@ import {
   refreshTabs,
 } from "./workspace.js";
 import { initSettings } from "./settings.js";
+import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest } from "./types/api.js";
 
 // ---- boot ------------------------------------------------------------------
@@ -51,6 +52,8 @@ window.__ayameOpenNativePaths = (paths) => {
 export async function boot() {
   state.history = loadSearchHistory();
   initSettings();
+  await hydrateSharedUiState();
+  state.history = loadSearchHistory();
   initCommandPalette();
   initScrollbar();
   initEvents();
@@ -79,6 +82,23 @@ export async function boot() {
     } catch (e) {
       flashCount(t("error.cannotOpen", { msg: pending }), "error");
       console.error(e);
+      await newUntitled();
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
+  if (!state.stat.open && state.settings.restoreSession !== false) {
+    showLoading(t("dialog.open.loading"));
+    postNativeMessage("ayame:ready");
+    try {
+      const stat = await restoreSessionSnapshot();
+      if (stat?.open) {
+        onDocumentOpened(stat);
+      } else {
+        await newUntitled();
+      }
+    } catch {
       await newUntitled();
     } finally {
       hideLoading();

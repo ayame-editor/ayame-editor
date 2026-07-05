@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS = {
   sidebarSide: "left",
   ruler: true,
   confirmLastTabClose: true,
+  restoreSession: true,
   showWhitespace: false,
   zenkakuUnderline: false,
   wordWrap: false,
@@ -96,6 +97,10 @@ export const DEFAULT_KEYMAP = Object.fromEntries(
 );
 
 export const state = {
+  windowId:
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : String(Date.now()) + "-" + Math.random().toString(36).slice(2),
   total: 0,
   first: 0, // top visible line (0-based)
   fracAcc: 0, // sub-line wheel accumulator

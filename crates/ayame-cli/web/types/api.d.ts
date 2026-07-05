@@ -90,6 +90,10 @@ dir: string | null,
  */
 glob: string | null, regex: boolean, ci: boolean, word: boolean, max: number, };
 
+export type SessionState = { paths: Array<string>, active_path: string | null, };
+
+export type UiState = { recent_files: Array<string>, search_history: Array<string>, session: SessionState, };
+
 export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
 
 export type TabsResponse = { tabs: Array<TabInfo>, };

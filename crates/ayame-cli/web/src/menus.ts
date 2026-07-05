@@ -3,7 +3,7 @@ import { $, commas, displayName, displayShortcut, humanBytes, setModalOpen } fro
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { applyStaticI18n, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
-import { saveCopy, saveFile, sortSave, splitFile } from "./save.js";
+import { saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
 import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
 import {
   addCursorAbove,
@@ -553,6 +553,8 @@ export function enc(e) {
     {
       utf8: "UTF-8",
       "utf-8": "UTF-8",
+      "utf-16le": "UTF-16 LE",
+      "utf-16be": "UTF-16 BE",
       "shift-jis": "Shift_JIS",
       "euc-jp": "EUC-JP",
       ascii: "ASCII",
@@ -641,6 +643,7 @@ export const ACTIONS: Record<
   openFile: { run: showOpener, globalShortcut: true },
   saveFile: { run: saveFile, globalShortcut: true },
   saveAs: { run: saveCopy, globalShortcut: true },
+  encoding: { run: showConvert },
   closeTab: { run: closeActiveTab, globalShortcut: true },
   findPrev: { run: () => findStep("prev"), globalShortcut: true },
   findNext: { run: () => findStep("next"), globalShortcut: true },

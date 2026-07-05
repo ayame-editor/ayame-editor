@@ -62,9 +62,9 @@ export function requestEditorClose() {
 // 新規ウィンドウ: native builds ask the Rust side to spawn a fresh window
 // process (contract: the "ayame:new-window" IPC message); the plain browser
 // build just opens the app URL in a new tab/window.
-export function openNewWindow() {
+export function openNewWindow(path = "") {
   if (isNativeApp()) {
-    postNativeMessage("ayame:new-window");
+    postNativeMessage(path ? `ayame:new-window:${path}` : "ayame:new-window");
     return;
   }
   window.open(location.href, "_blank");

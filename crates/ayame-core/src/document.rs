@@ -18,7 +18,7 @@ use serde::Serialize;
 use crate::encoding::{self, Encoding, Eol};
 use crate::index::{LineIndex, DEFAULT_STRIDE};
 use crate::search::{self, SearchHit, SearchOptions, SearchResult};
-use crate::{Error, Result};
+use crate::Result;
 
 /// Options for [`Document::open`].
 #[derive(Clone, Debug, Default)]
@@ -106,15 +106,8 @@ impl Document {
         let (encoding, base, index, eol, index_ms, from_cache) = {
             let buf: &[u8] = mmap.as_deref().unwrap_or(&[]);
             let (encoding, base_us) = encoding::detect(buf, opts.encoding);
-            if encoding.is_wide() {
-                return Err(Error::UnsupportedFeature(format!(
-                    "{} detected; wide-encoding indexing is not supported yet. \
-                     Re-open with an 8-bit encoding override if the bytes are single-byte.",
-                    encoding.label()
-                )));
-            }
             let base = base_us as u64;
-            let eol = encoding::detect_eol(&buf[base_us..]);
+            let eol = encoding::detect_eol_for(&buf[base_us..], encoding);
 
             // Try the on-disk index cache for files large enough to be worth it.
             // The index only depends on (bytes, stride) — not on the encoding —
@@ -123,7 +116,7 @@ impl Document {
             let t0 = Instant::now();
             let mut from_cache = false;
             let index = match opts.cache_dir.as_deref() {
-                Some(dir) if len >= CACHE_MIN_BYTES => {
+                Some(dir) if len >= CACHE_MIN_BYTES && !encoding.is_wide() => {
                     let key = cache::key(&path, len, mtime, stride);
                     match cache::load(dir, &key, len, mtime) {
                         Some(idx) if idx.source_len() == len && idx.base() == base => {
@@ -131,13 +124,13 @@ impl Document {
                             idx
                         }
                         _ => {
-                            let idx = LineIndex::build(buf, base, stride);
+                            let idx = line_index_for(buf, base, stride, encoding);
                             cache::store(dir, &key, len, mtime, &idx);
                             idx
                         }
                     }
                 }
-                _ => LineIndex::build(buf, base, stride),
+                _ => line_index_for(buf, base, stride, encoding),
             };
             let index_ms = t0.elapsed().as_millis();
             (encoding, base, index, eol, index_ms, from_cache)
@@ -382,7 +375,15 @@ impl Document {
 
     /// Preferred terminator for newly inserted text.
     pub fn default_terminator(&self) -> &'static [u8] {
-        self.eol.bytes()
+        match (self.encoding, self.eol) {
+            (Encoding::Utf16Le, Eol::Crlf) => b"\r\0\n\0",
+            (Encoding::Utf16Le, Eol::Cr) => b"\r\0",
+            (Encoding::Utf16Le, _) => b"\n\0",
+            (Encoding::Utf16Be, Eol::Crlf) => b"\0\r\0\n",
+            (Encoding::Utf16Be, Eol::Cr) => b"\0\r",
+            (Encoding::Utf16Be, _) => b"\0\n",
+            _ => self.eol.bytes(),
+        }
     }
 
     pub fn search(&self, opts: &SearchOptions) -> Result<SearchResult> {
@@ -437,6 +438,16 @@ impl Document {
             byte: before_byte,
         };
         search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)
+    }
+}
+
+fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding) -> LineIndex {
+    match encoding {
+        Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, stride),
+        Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, stride),
+        Encoding::Utf8 | Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => {
+            LineIndex::build(buf, base, stride)
+        }
     }
 }
 
@@ -613,6 +624,21 @@ mod tests {
         f
     }
 
+    fn utf16_bytes(text: &str, le: bool, bom: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        if bom {
+            out.extend_from_slice(if le { &[0xFF, 0xFE] } else { &[0xFE, 0xFF] });
+        }
+        for unit in text.encode_utf16() {
+            out.extend_from_slice(&if le {
+                unit.to_le_bytes()
+            } else {
+                unit.to_be_bytes()
+            });
+        }
+        out
+    }
+
     #[test]
     fn open_and_navigate() {
         let mut data = Vec::new();
@@ -638,6 +664,38 @@ mod tests {
         assert_eq!(doc.line_count(), 0);
         assert!(doc.line(0).is_none());
         assert!(doc.lines(0, 10).is_empty());
+    }
+
+    #[test]
+    fn opens_utf16le_with_bom_and_crlf() {
+        let f = write_temp(&utf16_bytes("alpha\r\n日本語\r\nomega", true, true));
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Le);
+        assert_eq!(doc.stat().bom_bytes, 2);
+        assert_eq!(doc.stat().eol, Eol::Crlf);
+        assert_eq!(doc.line_count(), 3);
+        assert_eq!(doc.line(1).unwrap(), "日本語");
+        assert_eq!(
+            doc.line_col_byte(1, 2),
+            Some(2 + ("alpha\r\n".encode_utf16().count() as u64 + 2) * 2)
+        );
+    }
+
+    #[test]
+    fn opens_forced_utf16be_without_bom() {
+        let f = write_temp(&utf16_bytes("one\ntwo\n", false, false));
+        let doc = Document::open(
+            f.path(),
+            &OpenOptions {
+                encoding: Some(Encoding::Utf16Be),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Be);
+        assert_eq!(doc.stat().eol, Eol::Lf);
+        assert_eq!(doc.line_count(), 2);
+        assert_eq!(doc.lines(0, 2)[1].text, "two");
     }
 
     #[test]

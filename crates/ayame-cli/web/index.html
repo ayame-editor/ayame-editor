@@ -90,7 +90,7 @@
             <button id="save-copy" class="menu-item" role="menuitem">
               <span class="menu-label" data-i18n="menu.saveAs">名前を付けて保存</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
             </button>
-            <button id="convert-save-item" class="menu-item" role="menuitem">
+            <button id="convert-save-item" class="menu-item" data-menu-action="encoding" role="menuitem">
               <span class="menu-label" data-i18n="menu.encoding">文字コード / 改行コード…</span><span class="menu-key"></span>
             </button>
           </div>
@@ -358,6 +358,26 @@
             <span class="set-val"></span>
           </label>
           <label class="set-row">
+            <span class="set-label" data-i18n="menu.showWhitespace">空白・改行を表示</span>
+            <input id="set-show-whitespace" type="checkbox" />
+            <span class="set-val"></span>
+          </label>
+          <label class="set-row">
+            <span class="set-label" data-i18n="menu.zenkakuUnderline">全角空白を下線で表示</span>
+            <input id="set-zenkaku-underline" type="checkbox" />
+            <span class="set-val"></span>
+          </label>
+          <label class="set-row">
+            <span class="set-label" data-i18n="menu.wordWrap">折り返し</span>
+            <input id="set-word-wrap" type="checkbox" />
+            <span class="set-val"></span>
+          </label>
+          <label class="set-row">
+            <span class="set-label" data-i18n="settings.restoreSession">セッション復元</span>
+            <input id="set-restore-session" type="checkbox" />
+            <span class="set-val"></span>
+          </label>
+          <label class="set-row">
             <span class="set-label" data-i18n="settings.confirmExit">終了確認</span>
             <input id="set-confirm-last-tab-close" type="checkbox" />
             <span class="set-val"></span>
@@ -402,6 +422,8 @@
             <span class="set-label" data-i18n="dialog.convert.encoding">文字コード</span>
             <select id="convert-enc">
               <option value="utf-8">UTF-8</option>
+              <option value="utf-16le">UTF-16 LE</option>
+              <option value="utf-16be">UTF-16 BE</option>
               <option value="shift-jis">Shift_JIS</option>
               <option value="euc-jp">EUC-JP</option>
             </select>

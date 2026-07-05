@@ -140,7 +140,14 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 let _ = ipc_proxy.send_event(GuiEvent::NewWindow);
             }
             msg => {
-                if let Some(title) = msg.strip_prefix("ayame:title:") {
+                if let Some(path) = msg.strip_prefix("ayame:new-window:") {
+                    let _ = ipc_proxy.send_event(GuiEvent::NewWindowPath(path.to_string()));
+                } else if let Some(lang) = msg.strip_prefix("ayame:language:") {
+                    #[cfg(target_os = "macos")]
+                    let _ = ipc_proxy.send_event(GuiEvent::Language(lang.to_string()));
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = lang;
+                } else if let Some(title) = msg.strip_prefix("ayame:title:") {
                     let _ = ipc_proxy.send_event(GuiEvent::SetTitle(clean_window_title(title)));
                 }
             }
@@ -162,7 +169,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // The native menu bar must exist before the loop runs and must stay alive
     // for the whole app lifetime, so it is created here and captured below.
     #[cfg(target_os = "macos")]
-    let macos_menu = setup_macos_menu(&proxy);
+    let mut macos_menu = setup_macos_menu(&proxy, None);
 
     // Keep the webview alive for the lifetime of the window.
     let mut close_pending = false;
@@ -293,6 +300,13 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             Event::UserEvent(GuiEvent::NewWindow) => {
                 spawn_new_window();
             }
+            Event::UserEvent(GuiEvent::NewWindowPath(path)) => {
+                spawn_new_window_with_path(&path);
+            }
+            #[cfg(target_os = "macos")]
+            Event::UserEvent(GuiEvent::Language(lang)) => {
+                macos_menu = setup_macos_menu(&proxy, Some(UiLocale::from_setting(&lang)));
+            }
             _ => {}
         }
     })
@@ -307,6 +321,9 @@ enum GuiEvent {
     OpenPaths(Vec<String>),
     /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
     NewWindow,
+    NewWindowPath(String),
+    #[cfg(target_os = "macos")]
+    Language(String),
     /// A native menu item was activated; carries the muda item id, which is
     /// the frozen action name understood by `window.__ayameMenu` in the page.
     #[cfg(target_os = "macos")]
@@ -328,6 +345,30 @@ fn spawn_new_window() {
     }
 }
 
+fn spawn_new_window_with_path(path: &str) {
+    let clean: String = path
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(4096)
+        .collect();
+    if clean.trim().is_empty() {
+        spawn_new_window();
+        return;
+    }
+    match std::env::current_exe() {
+        Ok(exe) => {
+            if let Err(e) = std::process::Command::new(exe)
+                .arg("gui")
+                .arg(clean)
+                .spawn()
+            {
+                eprintln!("ayame: opening a new window failed: {e}");
+            }
+        }
+        Err(e) => eprintln!("ayame: opening a new window failed (current_exe): {e}"),
+    }
+}
+
 /// Registers the muda event forwarder and attaches the menu bar to NSApp.
 ///
 /// Returns the menu so the caller keeps it (and every item hanging off it)
@@ -335,35 +376,27 @@ fn spawn_new_window() {
 /// root would tear the bar down. `None` (menu construction failed) simply
 /// leaves the app without a menu bar — everything else still works.
 #[cfg(target_os = "macos")]
-fn setup_macos_menu(proxy: &tao::event_loop::EventLoopProxy<GuiEvent>) -> Option<muda::Menu> {
-    let proxy = proxy.clone();
-    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
-        let _ = proxy.send_event(GuiEvent::Menu(event.id.0));
-    }));
-    let menu = build_macos_menu()?;
-    // tao's macOS event loop drives NSApp itself, so attaching here — on the
-    // main thread, after the event loop exists and before `run` — is the
-    // whole interop story.
-    menu.init_for_nsapp();
-    Some(menu)
+#[derive(Clone, Copy)]
+enum UiLocale {
+    Ja,
+    En,
 }
 
-/// The native macOS menu bar. Beyond convention, this is what makes
-/// Cmd+C/V/X/A work inside WKWebView: AppKit only routes the standard edit
-/// selectors to the focused view when NSMenu items carry those key
-/// equivalents. Windows/Linux use the in-page menubar instead.
 #[cfg(target_os = "macos")]
-fn build_macos_menu() -> Option<muda::Menu> {
-    use muda::accelerator::{Accelerator, Code, Modifiers};
-    use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-
-    #[derive(Clone, Copy)]
-    enum UiLocale {
-        Ja,
-        En,
+impl UiLocale {
+    fn from_setting(lang: &str) -> UiLocale {
+        let lang = lang.trim().to_ascii_lowercase();
+        if lang == "auto" || lang.is_empty() {
+            return UiLocale::from_env();
+        }
+        if lang == "ja" || lang.starts_with("ja-") || lang.starts_with("ja_") {
+            UiLocale::Ja
+        } else {
+            UiLocale::En
+        }
     }
 
-    fn ui_locale() -> UiLocale {
+    fn from_env() -> UiLocale {
         let lang = ["AYAME_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
             .iter()
             .filter_map(|key| std::env::var(key).ok())
@@ -376,6 +409,33 @@ fn build_macos_menu() -> Option<muda::Menu> {
             UiLocale::En
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn setup_macos_menu(
+    proxy: &tao::event_loop::EventLoopProxy<GuiEvent>,
+    locale: Option<UiLocale>,
+) -> Option<muda::Menu> {
+    let proxy = proxy.clone();
+    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
+        let _ = proxy.send_event(GuiEvent::Menu(event.id.0));
+    }));
+    let menu = build_macos_menu(locale.unwrap_or_else(UiLocale::from_env))?;
+    // tao's macOS event loop drives NSApp itself, so attaching here — on the
+    // main thread, after the event loop exists and before `run` — is the
+    // whole interop story.
+    menu.init_for_nsapp();
+    Some(menu)
+}
+
+/// The native macOS menu bar. Beyond convention, this is what makes
+/// Cmd+C/V/X/A work inside WKWebView: AppKit only routes the standard edit
+/// selectors to the focused view when NSMenu items carry those key
+/// equivalents. Windows/Linux use the in-page menubar instead.
+#[cfg(target_os = "macos")]
+fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
     let cmd = Modifiers::SUPER;
     let shift_cmd = Modifiers::SUPER | Modifiers::SHIFT;
@@ -383,7 +443,6 @@ fn build_macos_menu() -> Option<muda::Menu> {
     // Ids are the frozen `window.__ayameMenu` action names, except "quit"
     // which is intercepted natively in the event loop.
     let item = |id: &str, text: &str, accel| MenuItem::with_id(id, text, true, accel);
-    let locale = ui_locale();
     let label = |ja: &'static str, en: &'static str| match locale {
         UiLocale::Ja => ja,
         UiLocale::En => en,
@@ -443,6 +502,11 @@ fn build_macos_menu() -> Option<muda::Menu> {
                 label("名前を付けて保存", "Save As"),
                 key(shift_cmd, Code::KeyS),
             ),
+            &item(
+                "encoding",
+                label("文字コード / 改行コード…", "Encoding / Line Endings..."),
+                None,
+            ),
             &PredefinedMenuItem::separator(),
             &item(
                 "closeTab",
@@ -477,6 +541,87 @@ fn build_macos_menu() -> Option<muda::Menu> {
             &PredefinedMenuItem::separator(),
             &item("find", label("検索", "Find"), key(cmd, Code::KeyF)),
             &item("replace", label("置換", "Replace"), None),
+            &item(
+                "gotoLine",
+                label("行へ移動", "Go to Line"),
+                key(cmd, Code::KeyG),
+            ),
+            &PredefinedMenuItem::separator(),
+            &item(
+                "duplicateLine",
+                label("行を複製", "Duplicate Line"),
+                key(shift_cmd, Code::KeyD),
+            ),
+            &item("deleteLine", label("行を削除", "Delete Line"), None),
+        ],
+    )
+    .ok()?;
+
+    let selection = Submenu::with_items(
+        label("選択", "Selection"),
+        true,
+        &[
+            &item(
+                "selectNextOccurrence",
+                label("次の一致を選択", "Select Next Occurrence"),
+                key(cmd, Code::KeyD),
+            ),
+            &item("caseUpper", label("大文字に変換", "Uppercase"), None),
+            &item("caseLower", label("小文字に変換", "Lowercase"), None),
+            &PredefinedMenuItem::separator(),
+            &item(
+                "addCursorAbove",
+                label("カーソルを上に追加", "Add Cursor Above"),
+                None,
+            ),
+            &item(
+                "addCursorBelow",
+                label("カーソルを下に追加", "Add Cursor Below"),
+                None,
+            ),
+        ],
+    )
+    .ok()?;
+
+    let view = Submenu::with_items(
+        label("表示", "View"),
+        true,
+        &[
+            &item(
+                "toggleSidebar",
+                label("エクスプローラー", "Explorer"),
+                key(cmd, Code::KeyB),
+            ),
+            &item(
+                "commandPalette",
+                label("コマンドパレット", "Command Palette"),
+                key(shift_cmd, Code::KeyP),
+            ),
+            &PredefinedMenuItem::separator(),
+            &item(
+                "toggleWhitespace",
+                label("空白・改行を表示", "Show Whitespace"),
+                None,
+            ),
+            &item(
+                "toggleZenkakuUnderline",
+                label("全角空白を下線で表示", "Underline Full-width Spaces"),
+                None,
+            ),
+            &item("toggleWordWrap", label("折り返し", "Word Wrap"), None),
+            &item("toggleFollowTail", label("末尾に追従", "Follow Tail"), None),
+        ],
+    )
+    .ok()?;
+
+    let tools = Submenu::with_items(
+        label("ツール", "Tools"),
+        true,
+        &[
+            &item("sortSave", label("ソート", "Sort"), None),
+            &item("diffFile", label("2ファイル差分", "Diff Files"), None),
+            &item("splitFile", label("ファイルを分割", "Split File"), None),
+            &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
         ],
     )
     .ok()?;
@@ -493,7 +638,7 @@ fn build_macos_menu() -> Option<muda::Menu> {
     // Let AppKit append the standard window list to this submenu.
     window.set_as_windows_menu_for_nsapp();
 
-    Menu::with_items(&[&app, &file, &edit, &window]).ok()
+    Menu::with_items(&[&app, &file, &edit, &selection, &view, &tools, &window]).ok()
 }
 
 const NATIVE_CLOSE_SCRIPT: &str = r#"

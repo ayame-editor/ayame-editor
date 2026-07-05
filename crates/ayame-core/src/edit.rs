@@ -1208,9 +1208,8 @@ impl EditSession {
     /// source file. Fails if a line holds a character `enc` cannot represent,
     /// rather than writing a lossy file.
     ///
-    /// When `with_bom` is set and `enc` is UTF-8 a byte-order mark
-    /// (0xEF 0xBB 0xBF) is written at the very start; the flag is ignored for
-    /// every other encoding (a UTF-8 BOM is the only one this path emits).
+    /// When `with_bom` is set, a byte-order mark is written for Unicode
+    /// encodings that define one (UTF-8 / UTF-16LE / UTF-16BE).
     pub fn save_converted(
         &self,
         doc: &Document,
@@ -1230,17 +1229,23 @@ impl EditSession {
         let tmp = temp_path(target);
         let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         let mut w = BufWriter::new(file);
-        if with_bom && enc == crate::Encoding::Utf8 {
-            w.write_all(&[0xEF, 0xBB, 0xBF])?;
+        if with_bom {
+            w.write_all(enc.bom())?;
         }
-        let term = eol.bytes();
+        let term = enc.encode_text(eol_text(eol)).ok_or_else(|| {
+            Error::InvalidInput(format!(
+                "{} line endings cannot be written as {}",
+                eol.label(),
+                enc.label()
+            ))
+        })?;
         let total = self.total_lines(doc);
         let ends_nl = document_ends_with_newline(doc);
         let original_total = doc.line_count();
         {
             let mut converted = ConvertedWriter {
                 enc,
-                terminator: term,
+                terminator: &term,
                 total,
                 ends_nl,
                 logical: 0,
@@ -1609,6 +1614,14 @@ impl EditSession {
     }
 }
 
+fn eol_text(eol: crate::Eol) -> &'static str {
+    match eol {
+        crate::Eol::Crlf => "\r\n",
+        crate::Eol::Cr => "\r",
+        crate::Eol::Lf | crate::Eol::Mixed | crate::Eol::None => "\n",
+    }
+}
+
 fn push_history(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
     if stack.len() == HISTORY_LIMIT {
         stack.remove(0);
@@ -1917,7 +1930,7 @@ mod tests {
     }
 
     #[test]
-    fn save_converted_prepends_utf8_bom_only_for_utf8() {
+    fn save_converted_prepends_unicode_boms() {
         let (_f, doc) = doc_from(b"a\nb\n");
         let edits = EditSession::default();
         // UTF-8 target with the flag: a leading BOM precedes the content.
@@ -1929,8 +1942,15 @@ mod tests {
             std::fs::read(utf8.path()).unwrap(),
             b"\xEF\xBB\xBFa\nb\n".to_vec()
         );
-        // A UTF-8 BOM is meaningless for other encodings, so the flag is
-        // ignored — no stray 0xEF 0xBB 0xBF is written.
+        let utf16 = NamedTempFile::new().unwrap();
+        edits
+            .save_converted(&doc, utf16.path(), Encoding::Utf16Le, Eol::Lf, true, true)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(utf16.path()).unwrap(),
+            vec![0xFF, 0xFE, b'a', 0, b'\n', 0, b'b', 0, b'\n', 0]
+        );
+        // Legacy encodings do not define a Unicode BOM, so the flag is ignored.
         let sjis = NamedTempFile::new().unwrap();
         edits
             .save_converted(&doc, sjis.path(), Encoding::ShiftJis, Eol::Lf, true, true)

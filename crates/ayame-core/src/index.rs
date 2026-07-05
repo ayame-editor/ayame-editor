@@ -40,6 +40,39 @@ struct Checkpoint {
     off: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NewlineKind {
+    Byte,
+    Utf16Le,
+    Utf16Be,
+}
+
+impl NewlineKind {
+    fn width(self) -> u64 {
+        match self {
+            NewlineKind::Byte => 1,
+            NewlineKind::Utf16Le | NewlineKind::Utf16Be => 2,
+        }
+    }
+
+    fn as_u32(self) -> u32 {
+        match self {
+            NewlineKind::Byte => 0,
+            NewlineKind::Utf16Le => 1,
+            NewlineKind::Utf16Be => 2,
+        }
+    }
+
+    fn from_u32(v: u32) -> Option<Self> {
+        Some(match v {
+            0 => NewlineKind::Byte,
+            1 => NewlineKind::Utf16Le,
+            2 => NewlineKind::Utf16Be,
+            _ => return None,
+        })
+    }
+}
+
 /// A sparse index mapping line numbers <-> byte offsets for one buffer.
 pub struct LineIndex {
     checkpoints: Vec<Checkpoint>, // sorted ascending by both `line` and `off`
@@ -47,6 +80,7 @@ pub struct LineIndex {
     line_count: u64,
     base: u64, // first content byte (after any BOM)
     len: u64,  // total buffer length in bytes
+    newline: NewlineKind,
 }
 
 impl LineIndex {
@@ -65,6 +99,7 @@ impl LineIndex {
                 line_count: 0,
                 base,
                 len,
+                newline: NewlineKind::Byte,
             };
         }
         let content = &buf[base as usize..];
@@ -118,6 +153,57 @@ impl LineIndex {
             line_count: g,
             base,
             len,
+            newline: NewlineKind::Byte,
+        }
+    }
+
+    /// Build an index over UTF-16LE content. Newline detection walks aligned
+    /// 16-bit code units, so bytes inside ordinary characters are never treated
+    /// as line breaks.
+    pub fn build_utf16_le(buf: &[u8], base: u64, stride: u64) -> LineIndex {
+        Self::build_utf16(buf, base, stride, NewlineKind::Utf16Le)
+    }
+
+    /// Build an index over UTF-16BE content.
+    pub fn build_utf16_be(buf: &[u8], base: u64, stride: u64) -> LineIndex {
+        Self::build_utf16(buf, base, stride, NewlineKind::Utf16Be)
+    }
+
+    fn build_utf16(buf: &[u8], base: u64, stride: u64, newline: NewlineKind) -> LineIndex {
+        let stride = stride.max(1);
+        let len = buf.len() as u64;
+        if base >= len {
+            return LineIndex {
+                checkpoints: Vec::new(),
+                stride,
+                line_count: 0,
+                base,
+                len,
+                newline,
+            };
+        }
+        let mut checkpoints = vec![Checkpoint { line: 0, off: base }];
+        let mut line = 0u64;
+        let mut off = base;
+        while let Some(lf) = find_utf16_lf(buf, off, len, base, newline) {
+            let next = lf + newline.width();
+            if next < len {
+                line += 1;
+                if line.is_multiple_of(stride) {
+                    checkpoints.push(Checkpoint { line, off: next });
+                }
+                off = next;
+            } else {
+                break;
+            }
+        }
+        LineIndex {
+            checkpoints,
+            stride,
+            line_count: line + 1,
+            base,
+            len,
+            newline,
         }
     }
 
@@ -134,6 +220,10 @@ impl LineIndex {
         let new_len = buf.len() as u64;
         if new_len <= self.len {
             // Nothing appended: the index already describes this buffer.
+            return self.line_count;
+        }
+        if self.newline != NewlineKind::Byte {
+            *self = Self::build_utf16(buf, self.base, self.stride, self.newline);
             return self.line_count;
         }
 
@@ -174,9 +264,9 @@ impl LineIndex {
         let mut off = restart_off;
         let mut line = restart_line;
         while off < new_len {
-            match memchr(b'\n', &buf[off as usize..new_len as usize]) {
-                Some(rel) => {
-                    let nxt = off + rel as u64 + 1;
+            match self.find_lf(buf, off, new_len) {
+                Some(lf) => {
+                    let nxt = lf + self.newline.width();
                     if nxt < new_len {
                         line += 1;
                         if line.is_multiple_of(self.stride) {
@@ -248,9 +338,9 @@ impl LineIndex {
         let mut cur = cp.line;
 
         while cur < i {
-            match memchr(b'\n', &buf[off as usize..self.len as usize]) {
-                Some(rel) => {
-                    off += rel as u64 + 1;
+            match self.find_lf(buf, off, self.len) {
+                Some(lf) => {
+                    off = lf + self.newline.width();
                     cur += 1;
                 }
                 None => return None,
@@ -261,20 +351,24 @@ impl LineIndex {
     }
 
     fn raw_end_from(&self, buf: &[u8], off: u64) -> u64 {
-        match memchr(b'\n', &buf[off as usize..self.len as usize]) {
-            Some(rel) => off + rel as u64 + 1,
+        match self.find_lf(buf, off, self.len) {
+            Some(lf) => lf + self.newline.width(),
             None => self.len,
         }
     }
 
-    fn text_end_from_raw(buf: &[u8], off: u64, raw_end: u64) -> u64 {
-        let mut text_end = if raw_end > off && buf[(raw_end - 1) as usize] == b'\n' {
-            raw_end - 1
+    fn text_end_from_raw(&self, buf: &[u8], off: u64, raw_end: u64) -> u64 {
+        let width = self.newline.width();
+        let mut text_end = if raw_end >= off + width
+            && self.code_unit_at(buf, raw_end - width) == Some(b'\n' as u16)
+        {
+            raw_end - width
         } else {
             raw_end
         };
-        if text_end > off && buf[(text_end - 1) as usize] == b'\r' {
-            text_end -= 1;
+        if text_end >= off + width && self.code_unit_at(buf, text_end - width) == Some(b'\r' as u16)
+        {
+            text_end -= width;
         }
         text_end
     }
@@ -284,7 +378,7 @@ impl LineIndex {
     pub fn line_range(&self, buf: &[u8], i: u64) -> Option<(u64, u64)> {
         let off = self.line_start(buf, i)?;
         let raw_end = self.raw_end_from(buf, off);
-        Some((off, Self::text_end_from_raw(buf, off, raw_end)))
+        Some((off, self.text_end_from_raw(buf, off, raw_end)))
     }
 
     /// Byte ranges for line `i`: `(text_start, text_end, raw_end)`.
@@ -295,7 +389,7 @@ impl LineIndex {
     pub fn line_range_with_terminator(&self, buf: &[u8], i: u64) -> Option<(u64, u64, u64)> {
         let off = self.line_start(buf, i)?;
         let raw_end = self.raw_end_from(buf, off);
-        let text_end = Self::text_end_from_raw(buf, off, raw_end);
+        let text_end = self.text_end_from_raw(buf, off, raw_end);
         Some((off, text_end, raw_end))
     }
 
@@ -315,7 +409,7 @@ impl LineIndex {
         let mut line = start;
         while line < last {
             let raw_end = self.raw_end_from(buf, off);
-            let text_end = Self::text_end_from_raw(buf, off, raw_end);
+            let text_end = self.text_end_from_raw(buf, off, raw_end);
             out.push((line, off, text_end));
             off = raw_end;
             line += 1;
@@ -347,7 +441,7 @@ impl LineIndex {
         let mut line = start;
         while line < last {
             let raw_end = self.raw_end_from(buf, off);
-            let text_end = Self::text_end_from_raw(buf, off, raw_end);
+            let text_end = self.text_end_from_raw(buf, off, raw_end);
             out.push((line, off, text_end, raw_end));
             off = raw_end;
             line += 1;
@@ -367,8 +461,43 @@ impl LineIndex {
             .partition_point(|c| c.off <= b)
             .saturating_sub(1);
         let cp = self.checkpoints[k];
-        let extra = memchr_iter(b'\n', &buf[cp.off as usize..b as usize]).count() as u64;
+        let extra = self.count_lfs(buf, cp.off, b);
         cp.line + extra
+    }
+
+    fn find_lf(&self, buf: &[u8], off: u64, limit: u64) -> Option<u64> {
+        match self.newline {
+            NewlineKind::Byte => {
+                memchr(b'\n', &buf[off as usize..limit as usize]).map(|rel| off + rel as u64)
+            }
+            kind => find_utf16_lf(buf, off, limit, self.base, kind),
+        }
+    }
+
+    fn count_lfs(&self, buf: &[u8], off: u64, limit: u64) -> u64 {
+        match self.newline {
+            NewlineKind::Byte => {
+                memchr_iter(b'\n', &buf[off as usize..limit as usize]).count() as u64
+            }
+            kind => {
+                let mut n = 0u64;
+                let mut pos = off;
+                while let Some(lf) = find_utf16_lf(buf, pos, limit, self.base, kind) {
+                    n += 1;
+                    pos = lf + kind.width();
+                }
+                n
+            }
+        }
+    }
+
+    fn code_unit_at(&self, buf: &[u8], off: u64) -> Option<u16> {
+        let i = off as usize;
+        match self.newline {
+            NewlineKind::Byte => buf.get(i).map(|b| *b as u16),
+            NewlineKind::Utf16Le => Some(u16::from_le_bytes([*buf.get(i)?, *buf.get(i + 1)?])),
+            NewlineKind::Utf16Be => Some(u16::from_be_bytes([*buf.get(i)?, *buf.get(i + 1)?])),
+        }
     }
 
     // ---- persistence for the on-disk index cache ---------------------------
@@ -385,8 +514,8 @@ impl LineIndex {
         let n = self.checkpoints.len();
         let mut v = Vec::with_capacity(56 + n * 16 + 8);
         v.extend_from_slice(b"AYIDX\x01\0\0");
-        v.extend_from_slice(&1u32.to_le_bytes()); // version
-        v.extend_from_slice(&0u32.to_le_bytes()); // pad
+        v.extend_from_slice(&2u32.to_le_bytes()); // version
+        v.extend_from_slice(&self.newline.as_u32().to_le_bytes());
         v.extend_from_slice(&self.stride.to_le_bytes());
         v.extend_from_slice(&self.base.to_le_bytes());
         v.extend_from_slice(&self.len.to_le_bytes());
@@ -409,9 +538,14 @@ impl LineIndex {
             return None;
         }
         let version = u32::from_le_bytes(b[8..12].try_into().ok()?);
-        if version != 1 {
+        if !matches!(version, 1 | 2) {
             return None;
         }
+        let newline = if version == 1 {
+            NewlineKind::Byte
+        } else {
+            NewlineKind::from_u32(u32::from_le_bytes(b[12..16].try_into().ok()?))?
+        };
         let (body, trailer) = b.split_at(b.len() - 8);
         if fnv1a64(body) != u64::from_le_bytes(trailer.try_into().ok()?) {
             return None;
@@ -442,6 +576,7 @@ impl LineIndex {
             line_count,
             base,
             len,
+            newline,
         })
     }
 
@@ -456,6 +591,28 @@ impl LineIndex {
     pub fn base(&self) -> u64 {
         self.base
     }
+}
+
+fn find_utf16_lf(buf: &[u8], off: u64, limit: u64, base: u64, newline: NewlineKind) -> Option<u64> {
+    let limit = limit.min(buf.len() as u64);
+    let mut pos = off.max(base);
+    let parity = base % 2;
+    if pos % 2 != parity {
+        pos += 1;
+    }
+    while pos + 1 < limit {
+        let i = pos as usize;
+        let unit = match newline {
+            NewlineKind::Utf16Le => u16::from_le_bytes([buf[i], buf[i + 1]]),
+            NewlineKind::Utf16Be => u16::from_be_bytes([buf[i], buf[i + 1]]),
+            NewlineKind::Byte => unreachable!("byte newlines use memchr"),
+        };
+        if unit == b'\n' as u16 {
+            return Some(pos);
+        }
+        pos += 2;
+    }
+    None
 }
 
 /// FNV-1a 64-bit — a small, dependency-free checksum for cache-integrity checks

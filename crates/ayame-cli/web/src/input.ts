@@ -196,8 +196,7 @@ export function initEvents() {
   $("convert-go").addEventListener("click", () => {
     const encoding = $("convert-enc").value;
     const eolVal = $("convert-eol").value;
-    // A UTF-8 BOM is the only one we emit; force it off for other encodings.
-    const bom = encoding === "utf-8" && $("convert-bom").checked;
+    const bom = ["utf-8", "utf-16le", "utf-16be"].includes(encoding) && $("convert-bom").checked;
     hideConvert();
     convertSave(encoding, eolVal, bom);
   });

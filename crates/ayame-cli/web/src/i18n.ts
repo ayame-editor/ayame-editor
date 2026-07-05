@@ -82,6 +82,7 @@ export const MESSAGES = {
     "tab.discardClose": "破棄して閉じる",
     "tab.switchError": "タブ切替エラー",
     "tab.closeError": "タブを閉じられません",
+    "tab.moveDirty": "未保存のタブは保存してから移動してください",
     // -- explorer sidebar --
     "tree.close": "エクスプローラーを閉じる",
     "tree.actions": "エクスプローラー操作",
@@ -219,6 +220,7 @@ export const MESSAGES = {
     "settings.fontSystem": "システムUI",
     "settings.fontSize": "文字サイズ",
     "settings.ruler": "列ルーラー",
+    "settings.restoreSession": "セッション復元",
     "settings.confirmExit": "終了確認",
     "settings.memoName": "新規ファイルの名前",
     "settings.memoNameHint":
@@ -234,7 +236,7 @@ export const MESSAGES = {
     "dialog.convert.encoding": "文字コード",
     "dialog.convert.eol": "改行コード",
     "dialog.convert.eolCr": "CR (旧 Mac)",
-    "dialog.convert.bom": "BOMを付ける（UTF-8のみ）",
+    "dialog.convert.bom": "BOMを付ける（UTF-8 / UTF-16）",
     "dialog.convert.noteReopen":
       "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。",
     "dialog.convert.noteConvert":
@@ -432,6 +434,7 @@ export const MESSAGES = {
     "tab.discardClose": "Discard and Close",
     "tab.switchError": "Tab switch error",
     "tab.closeError": "Could not close the tab.",
+    "tab.moveDirty": "Save the tab before moving it to another window.",
     "tree.close": "Close Explorer",
     "tree.actions": "Explorer Actions",
     "tree.up": "Up One Level",
@@ -558,6 +561,7 @@ export const MESSAGES = {
     "settings.fontSystem": "System UI",
     "settings.fontSize": "Font Size",
     "settings.ruler": "Column Ruler",
+    "settings.restoreSession": "Restore Session",
     "settings.confirmExit": "Confirm Exit",
     "settings.memoName": "New file name",
     "settings.memoNameHint":
@@ -572,7 +576,7 @@ export const MESSAGES = {
     "dialog.convert.encoding": "Encoding",
     "dialog.convert.eol": "Line Endings",
     "dialog.convert.eolCr": "CR (classic Mac)",
-    "dialog.convert.bom": "Add BOM (UTF-8 only)",
+    "dialog.convert.bom": "Add BOM (UTF-8 / UTF-16)",
     "dialog.convert.noteReopen":
       '"Reopen" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.',
     "dialog.convert.noteConvert":

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use axum::http::StatusCode;
 use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
 use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::ops::WorkerInput;
 use super::{bad_request, internal};
@@ -425,6 +425,21 @@ pub(crate) struct AppState {
     wal_error: Mutex<Option<String>>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct SessionState {
+    pub(super) paths: Vec<String>,
+    pub(super) active_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct UiState {
+    pub(super) recent_files: Vec<String>,
+    pub(super) search_history: Vec<String>,
+    pub(super) session: SessionState,
+}
+
 impl AppState {
     pub(super) fn new(doc: Option<Document>, open_opts: OpenOptions) -> AppState {
         // The document passed on the command line is an "open" like any
@@ -472,6 +487,71 @@ impl AppState {
     /// uses (`--cache-dir` / `AYAME_CACHE_DIR`; `None` under `--no-cache`).
     pub(super) fn wal_root(&self) -> Option<&Path> {
         self.open_opts.cache_dir.as_deref()
+    }
+
+    fn ui_state_path(&self) -> Option<PathBuf> {
+        self.open_opts
+            .cache_dir
+            .as_ref()
+            .map(|d| d.join("ui-state.json"))
+    }
+
+    pub(super) fn load_ui_state(&self) -> UiState {
+        let Some(path) = self.ui_state_path() else {
+            return UiState::default();
+        };
+        let Ok(bytes) = std::fs::read(path) else {
+            return UiState::default();
+        };
+        serde_json::from_slice(&bytes).unwrap_or_default()
+    }
+
+    pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, (StatusCode, String)> {
+        ui.recent_files = clean_path_list(ui.recent_files, 24);
+        ui.search_history = clean_string_list(ui.search_history, 50);
+        ui.session.paths = clean_path_list(ui.session.paths, 64);
+        if let Some(active) = ui.session.active_path.take() {
+            ui.session.active_path = clean_one_string(active);
+        }
+        let Some(path) = self.ui_state_path() else {
+            return Ok(ui);
+        };
+        let json = serde_json::to_vec_pretty(&ui).map_err(internal)?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(internal)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(internal)?;
+        std::fs::rename(&tmp, &path).map_err(internal)?;
+        Ok(ui)
+    }
+
+    pub(super) fn save_session_snapshot(&self) -> Result<UiState, (StatusCode, String)> {
+        let mut ui = self.load_ui_state();
+        let tabs = self.tabs_response().tabs;
+        ui.session.paths = tabs.iter().map(|t| t.path.clone()).collect();
+        ui.session.active_path = tabs.iter().find(|t| t.active).map(|t| t.path.clone());
+        self.save_ui_state(ui)
+    }
+
+    pub(super) async fn restore_session(&self) -> Result<(), (StatusCode, String)> {
+        let session = self.load_ui_state().session;
+        if session.paths.is_empty() {
+            return Ok(());
+        }
+        let paths = clean_path_list(session.paths, 64);
+        for path in &paths {
+            if let Err(e) = self.open_path(path.clone()).await {
+                eprintln!("ayame: session restore skipped '{}': {}", path, e.1);
+            }
+        }
+        if let Some(active) = session.active_path {
+            let tabs = self.tabs_response().tabs;
+            if let Some(tab) = tabs.iter().find(|t| t.path == active) {
+                self.switch_tab(tab.id).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Record a crash-log failure for one-shot surfacing via stat.
@@ -1395,6 +1475,48 @@ fn tab_name(path: &str) -> String {
         };
     }
     basename
+}
+
+fn clean_path_list(list: Vec<String>, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in list {
+        let Some(value) = clean_one_string(value) else {
+            continue;
+        };
+        if !out.iter().any(|x| x == &value) {
+            out.push(value);
+        }
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+fn clean_string_list(list: Vec<String>, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in list {
+        let Some(value) = clean_one_string(value) else {
+            continue;
+        };
+        if !out.iter().any(|x| x == &value) {
+            out.push(value);
+        }
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+fn clean_one_string(value: String) -> Option<String> {
+    let value: String = value
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(4096)
+        .collect();
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 /// Result of a `tail -f` poll on the active document. `lines`/`bytes` are the

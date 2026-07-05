@@ -27,7 +27,7 @@ use super::ops::{
     ArtifactResponse, CaseSaveRequest, GrepRequest, ReplaceSaveRequest, SortSaveRequest,
     SplitSaveRequest,
 };
-use super::state::{TabInfo, TabsResponse};
+use super::state::{SessionState, TabInfo, TabsResponse, UiState};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest};
 
 fn output_path() -> PathBuf {
@@ -57,6 +57,8 @@ fn bridge() -> Bridge {
         .decl(&decl::<CaseSaveRequest>())
         .decl(&decl::<SplitSaveRequest>())
         .decl(&decl::<GrepRequest>())
+        .decl(&decl::<SessionState>())
+        .decl(&decl::<UiState>())
         .decl(&decl::<TabInfo>())
         .decl(&decl::<TabsResponse>())
 }

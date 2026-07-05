@@ -10,10 +10,9 @@ use serde::Serialize;
 
 /// Encodings Ayame understands for indexed display and edit-save round trips.
 ///
-/// All of these are ASCII-transparent for `0x0A`, which is what lets the line
-/// index scan raw bytes for newlines. UTF-16/UTF-32 are detected (see
-/// [`detect`]) but are intentionally rejected by the document layer for now —
-/// their newline units are not single bytes. (Roadmap.)
+/// UTF-8/Shift_JIS/EUC-JP/ASCII use single-byte LF terminators. UTF-16LE/BE
+/// use aligned 16-bit LF code units and are indexed by the document layer with
+/// a wide-newline scanner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Encoding {
@@ -57,6 +56,9 @@ impl Encoding {
     /// Decode a single line's bytes to a `String`, replacing malformed sequences.
     /// Operates on small slices (one line), so allocation here is negligible.
     pub fn decode_line(self, bytes: &[u8]) -> String {
+        if matches!(self, Encoding::Utf16Le | Encoding::Utf16Be) {
+            return decode_utf16_line(bytes, self == Encoding::Utf16Le);
+        }
         let (cow, _had_errors) = self.rs().decode_without_bom_handling(bytes);
         cow.into_owned()
     }
@@ -64,6 +66,9 @@ impl Encoding {
     /// Encode a query string into this encoding's bytes for raw-byte searching.
     /// Returns `None` if the query is unmappable (e.g. CJK into ASCII).
     pub fn encode_query(self, q: &str) -> Option<Vec<u8>> {
+        if matches!(self, Encoding::Utf16Le | Encoding::Utf16Be) {
+            return Some(encode_utf16_text(q, self == Encoding::Utf16Le));
+        }
         let (cow, _enc, had_unmappable) = self.rs().encode(q);
         if had_unmappable {
             None
@@ -97,6 +102,39 @@ impl Encoding {
             _ => return None,
         })
     }
+
+    pub fn bom(self) -> &'static [u8] {
+        match self {
+            Encoding::Utf8 => &[0xEF, 0xBB, 0xBF],
+            Encoding::Utf16Le => &[0xFF, 0xFE],
+            Encoding::Utf16Be => &[0xFE, 0xFF],
+            Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => &[],
+        }
+    }
+}
+
+fn decode_utf16_line(bytes: &[u8], le: bool) -> String {
+    let mut units = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        units.push(if le {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        });
+    }
+    String::from_utf16_lossy(&units)
+}
+
+fn encode_utf16_text(text: &str, le: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() * 2);
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&if le {
+            unit.to_le_bytes()
+        } else {
+            unit.to_be_bytes()
+        });
+    }
+    out
 }
 
 /// Length in bytes of a leading byte-order mark, if present.
@@ -212,6 +250,13 @@ impl Eol {
 
 /// Detect the dominant line ending from a bounded prefix of `content`.
 pub fn detect_eol(content: &[u8]) -> Eol {
+    detect_eol_for(content, Encoding::Utf8)
+}
+
+pub fn detect_eol_for(content: &[u8], enc: Encoding) -> Eol {
+    if matches!(enc, Encoding::Utf16Le | Encoding::Utf16Be) {
+        return detect_utf16_eol(content, enc == Encoding::Utf16Le);
+    }
     const SNIFF: usize = 64 * 1024;
     let p = &content[..content.len().min(SNIFF)];
     let mut crlf = 0u32;
@@ -241,6 +286,55 @@ pub fn detect_eol(content: &[u8]) -> Eol {
     let lone_lf = lf;
     let styles = (crlf > 0) as u8 + (lone_lf > 0) as u8 + (cr > 0) as u8;
     match (styles, crlf, lone_lf, cr) {
+        (0, _, _, _) => Eol::None,
+        (1, c, _, _) if c > 0 => Eol::Crlf,
+        (1, _, l, _) if l > 0 => Eol::Lf,
+        (1, _, _, _) => Eol::Cr,
+        _ => Eol::Mixed,
+    }
+}
+
+fn detect_utf16_eol(content: &[u8], le: bool) -> Eol {
+    const SNIFF: usize = 64 * 1024;
+    let p = &content[..content.len().min(SNIFF)];
+    let mut crlf = 0u32;
+    let mut lf = 0u32;
+    let mut cr = 0u32;
+    let mut prev_cr = false;
+    for chunk in p.chunks_exact(2) {
+        let unit = if le {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        };
+        match unit {
+            0x000D => {
+                if prev_cr {
+                    cr += 1;
+                }
+                prev_cr = true;
+            }
+            0x000A => {
+                if prev_cr {
+                    crlf += 1;
+                    prev_cr = false;
+                } else {
+                    lf += 1;
+                }
+            }
+            _ => {
+                if prev_cr {
+                    cr += 1;
+                    prev_cr = false;
+                }
+            }
+        }
+    }
+    if prev_cr {
+        cr += 1;
+    }
+    let styles = (crlf > 0) as u8 + (lf > 0) as u8 + (cr > 0) as u8;
+    match (styles, crlf, lf, cr) {
         (0, _, _, _) => Eol::None,
         (1, c, _, _) if c > 0 => Eol::Crlf,
         (1, _, l, _) if l > 0 => Eol::Lf,

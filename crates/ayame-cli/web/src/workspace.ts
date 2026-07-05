@@ -12,10 +12,10 @@ import {
   pathDirName,
   setModalOpen,
 } from "./dom.js";
-import { RECENT_KEY, RECENT_MAX, TREE_KEY, state } from "./state.js";
+import { TREE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
-import { confirmCloseLastTab, requestEditorClose } from "./app.js";
+import { confirmCloseLastTab, openNewWindow, requestEditorClose } from "./app.js";
 import { maybeOfferWalRecovery, noteWalError, savingCount } from "./save.js";
 import { clearLineCache, focusEditor, render, scheduleRender, setCaret } from "./editor.js";
 import { fileMenuVisible, hideFileMenu, initMenuBar, updateStatusMeta } from "./menus.js";
@@ -23,6 +23,7 @@ import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { saveSettings } from "./settings.js";
+import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
@@ -192,20 +193,11 @@ export function browseRow(ent, isUp) {
 // without any server/state changes. Surfaced as a shortcut list in the opener.
 
 export function loadRecentFiles() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
-    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : [];
-  } catch {
-    return [];
-  }
+  return loadRecentFilesShared();
 }
 
 export function saveRecentFiles(list) {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
-  } catch {
-    // ignore private-mode quota errors; recents are best-effort
-  }
+  saveRecentFilesShared(list);
 }
 
 // Record a freshly opened file at the head of the list. Untitled scratch
@@ -213,7 +205,7 @@ export function saveRecentFiles(list) {
 export function pushRecentFile(path) {
   const p = (path || "").trim();
   if (!p || isUntitled(p)) return;
-  const list = [p, ...loadRecentFiles().filter((x) => x !== p)].slice(0, RECENT_MAX);
+  const list = [p, ...loadRecentFiles().filter((x) => x !== p)];
   saveRecentFiles(list);
 }
 
@@ -463,6 +455,7 @@ export function initDropZone() {
 // ---- tabs ------------------------------------------------------------------
 
 let refreshTabsSeq = 0;
+const TAB_DRAG_TYPE = "application/x-ayame-tab";
 
 export async function refreshTabs() {
   const seq = ++refreshTabsSeq;
@@ -488,6 +481,7 @@ export function renderTabs(list) {
     el.setAttribute("role", "tab");
     el.setAttribute("aria-selected", tab.active ? "true" : "false");
     el.tabIndex = 0;
+    el.draggable = true;
     const dot = document.createElement("span");
     dot.className = "tab-dot";
     const nm = document.createElement("span");
@@ -518,11 +512,94 @@ export function renderTabs(list) {
         closeTab(tab.id); // middle-click closes
       }
     });
+    el.addEventListener("dragstart", (e) => startTabDrag(e, tab));
+    el.addEventListener("dragend", (e) => finishTabDrag(e, tab));
     x.addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(tab.id);
     });
     c.append(el);
+  }
+}
+
+export function tabDragPayload(tab) {
+  return {
+    sourceWindowId: state.windowId,
+    id: tab.id,
+    path: tab.path,
+    name: tab.name,
+    dirty: !!tab.dirty,
+  };
+}
+
+export function startTabDrag(e, tab) {
+  if (!e.dataTransfer) return;
+  if (tab.dirty) {
+    e.preventDefault();
+    flashCount(t("tab.moveDirty"), "error");
+    return;
+  }
+  e.dataTransfer.effectAllowed = tab.dirty ? "none" : "move";
+  e.dataTransfer.setData(TAB_DRAG_TYPE, JSON.stringify(tabDragPayload(tab)));
+  e.dataTransfer.setData("text/plain", tab.path || tab.name || "");
+}
+
+export async function finishTabDrag(e, tab) {
+  if (tab.dirty || savingCount > 0) return;
+  const dropped = e.dataTransfer?.dropEffect === "move";
+  const outside =
+    e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight;
+  if (dropped) {
+    await closeMovedTab(tab.id);
+  } else if (outside) {
+    openNewWindow(tab.path);
+    await closeMovedTab(tab.id);
+  }
+}
+
+export function initTabDropTarget() {
+  const c = $("tabs");
+  c.addEventListener("dragover", (e) => {
+    const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
+    if (!raw) return;
+    const payload = parseTabDragPayload(raw);
+    if (!payload || payload.sourceWindowId === state.windowId || payload.dirty) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  });
+  c.addEventListener("drop", async (e) => {
+    const payload = parseTabDragPayload(e.dataTransfer?.getData(TAB_DRAG_TYPE));
+    if (!payload || payload.sourceWindowId === state.windowId) return;
+    e.preventDefault();
+    if (payload.dirty) {
+      flashCount(t("tab.moveDirty"), "error");
+      return;
+    }
+    await openPath(payload.path);
+  });
+}
+
+export function parseTabDragPayload(raw) {
+  try {
+    const payload = JSON.parse(raw || "{}");
+    if (!payload || typeof payload.path !== "string" || !payload.path.trim()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export async function closeMovedTab(id) {
+  try {
+    const stat = await apiPost<{ open: boolean }, TabIdRequest>("/api/tabs/close", { id });
+    if (!stat.open) {
+      requestEditorClose();
+    } else {
+      onDocumentOpened(stat);
+    }
+  } catch (e) {
+    flashCount(t("tab.closeError"));
+    console.error(e);
   }
 }
 
@@ -770,5 +847,6 @@ export function initWorkspace() {
     if (e.target === $("opener")) hideOpener();
   });
   $("new-tab").addEventListener("click", () => newUntitled());
+  initTabDropTarget();
   initDropZone();
 }

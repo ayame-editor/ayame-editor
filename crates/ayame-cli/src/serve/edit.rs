@@ -249,9 +249,6 @@ pub(super) async fn api_edit_save(
                 .ok_or_else(|| bad_request(format!("unknown encoding '{name}'")))?,
             None => cur.encoding,
         };
-        if enc.is_wide() {
-            return Err(bad_request(format!("{} での保存は未対応です", enc.label())));
-        }
         let eol = match req.eol.as_deref() {
             Some(name) => Eol::parse(name)
                 .ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?,
@@ -260,8 +257,8 @@ pub(super) async fn api_edit_save(
                 other => other,
             },
         };
-        // A UTF-8 BOM is only meaningful for UTF-8 output; default to the
-        // file's current BOM state so an unspecified request round-trips it.
+        // Default to the file's current BOM state so an unspecified request
+        // round-trips it for Unicode encodings.
         let with_bom = req.bom.unwrap_or(cur.bom_bytes > 0);
         let overwrite = req.overwrite || same_path(&target, &active_path);
         let target_for_save = target.clone();
@@ -549,12 +546,6 @@ pub(super) async fn api_reopen_encoding(
             }
         })
         .ok_or_else(|| bad_request(format!("unknown encoding '{}'", req.encoding)))?;
-    if enc.is_wide() {
-        return Err(bad_request(format!(
-            "{} での再読込は未対応です",
-            enc.label()
-        )));
-    }
     let _transitions = state.lock_transitions().await;
     let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;
     state.reload_with_encoding(path, enc).await?;

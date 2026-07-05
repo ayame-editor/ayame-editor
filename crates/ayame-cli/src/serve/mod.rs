@@ -40,7 +40,7 @@ pub(crate) mod typegen;
 pub(crate) mod workspace;
 
 use security::NetPolicy;
-use state::{AppState, SharedState, TabsResponse, TailStatus};
+use state::{AppState, SharedState, TabsResponse, TailStatus, UiState};
 
 /// Hard cap on lines returned in one viewport request, so a hostile/buggy
 /// client can never ask us to materialize the whole file.
@@ -142,6 +142,10 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/tabs", get(workspace::api_tabs))
         .route("/api/tabs/select", post(workspace::api_tabs_select))
         .route("/api/tabs/close", post(workspace::api_tabs_close))
+        .route("/api/ui_state", get(workspace::api_ui_state))
+        .route("/api/ui_state", post(workspace::api_ui_state_save))
+        .route("/api/session/save", post(workspace::api_session_save))
+        .route("/api/session/restore", post(workspace::api_session_restore))
         .route("/api/browse", get(workspace::api_browse))
         .route(
             "/api/upload",

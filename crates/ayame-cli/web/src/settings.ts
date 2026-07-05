@@ -13,6 +13,7 @@ import {
 import { availableLocales, localeLabel, normalizeLanguage, t } from "./i18n.js";
 import { api, type LinesResponse } from "./api.js";
 import { focusEditor, invalidateFontMetrics, scheduleRender } from "./editor.js";
+import { postNativeMessage } from "./app.js";
 import {
   applyLocale,
   hideKeymap,
@@ -316,7 +317,10 @@ export function updateSetting(key, value) {
   applySettings(state.settings);
   saveSettings(state.settings);
   if (key === "sidebarSide") updateSidebarSideButtons();
-  if (key === "language") applyLocale();
+  if (key === "language") {
+    applyLocale();
+    postNativeMessage(`ayame:language:${state.settings.language}`);
+  }
 }
 
 export function settingsVisible() {
@@ -532,6 +536,22 @@ export function initSettings() {
   });
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
+  $("set-show-whitespace").checked = !!state.settings.showWhitespace;
+  $("set-show-whitespace").addEventListener("change", () =>
+    updateSetting("showWhitespace", $("set-show-whitespace").checked),
+  );
+  $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
+  $("set-zenkaku-underline").addEventListener("change", () =>
+    updateSetting("zenkakuUnderline", $("set-zenkaku-underline").checked),
+  );
+  $("set-word-wrap").checked = !!state.settings.wordWrap;
+  $("set-word-wrap").addEventListener("change", () =>
+    updateSetting("wordWrap", $("set-word-wrap").checked),
+  );
+  $("set-restore-session").checked = state.settings.restoreSession !== false;
+  $("set-restore-session").addEventListener("change", () =>
+    updateSetting("restoreSession", $("set-restore-session").checked),
+  );
   $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
   $("set-confirm-last-tab-close").addEventListener("change", () =>
     updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked),

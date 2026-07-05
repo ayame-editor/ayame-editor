@@ -160,9 +160,9 @@ pub fn grep_dir(root: &Path, opts: &GrepOptions) -> Result<GrepResult> {
     Ok(result)
 }
 
-/// Grep a single file, returning up to `max_hits` matches. Errors (I/O, an
-/// unsupported wide encoding, a query not representable in the file's encoding)
-/// are surfaced to the caller, which skips the file.
+/// Grep a single file, returning up to `max_hits` matches. Errors (I/O or a
+/// query not representable in the file's encoding) are surfaced to the caller,
+/// which skips the file.
 fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<GrepHit>> {
     if max_hits == 0 {
         return Ok(Vec::new());
@@ -178,12 +178,12 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
         return Ok(Vec::new());
     }
     let (enc, base) = encoding::detect(buf, None);
-    if enc.is_wide() {
-        // UTF-16/32: the byte-oriented line index can't handle these yet.
-        return Ok(Vec::new());
-    }
     let base = base as u64;
-    let index = LineIndex::build(buf, base, DEFAULT_STRIDE);
+    let index = match enc {
+        Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, DEFAULT_STRIDE),
+        Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, DEFAULT_STRIDE),
+        _ => LineIndex::build(buf, base, DEFAULT_STRIDE),
+    };
     let sopts = SearchOptions {
         query: opts.query.clone(),
         regex: opts.regex,

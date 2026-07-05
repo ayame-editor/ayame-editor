@@ -11,6 +11,7 @@ import { flashCount } from "./search.js";
 import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { onDocumentOpened, refreshTabs, showSaveDialog, updateTreeActive } from "./workspace.js";
 import { saveSettings } from "./settings.js";
+import { saveSessionSnapshot } from "./persistence.js";
 import type {
   BrowseResponse,
   EditSaveRequest,
@@ -60,6 +61,11 @@ export function waitForSavingDone(): Promise<void> {
 
 export let pendingNativeClose = false;
 
+async function confirmNativeCloseOk() {
+  await saveSessionSnapshot();
+  postNativeMessage("ayame:close-ok");
+}
+
 window.__ayameNativeCloseRequested = () => {
   if (savingCount > 0) {
     pendingNativeClose = true;
@@ -68,7 +74,7 @@ window.__ayameNativeCloseRequested = () => {
     return;
   }
   if (!hasDirtyDocuments()) {
-    postNativeMessage("ayame:close-ok");
+    void confirmNativeCloseOk();
     return;
   }
   // Release the native close request first (it times out after a few
@@ -79,9 +85,13 @@ window.__ayameNativeCloseRequested = () => {
     okLabel: t("dialog.exit.withoutSaving"),
     danger: true,
   }).then((ok) => {
-    if (ok) postNativeMessage("ayame:close-ok");
+    if (ok) void confirmNativeCloseOk();
   });
 };
+
+window.addEventListener("pagehide", () => {
+  void saveSessionSnapshot();
+});
 
 export function retryPendingNativeClose() {
   if (pendingNativeClose && savingCount === 0) {
@@ -364,23 +374,31 @@ export function showConvert() {
   // Prefill the pickers with the file's current encoding / line ending. The
   // stat strings are the core enum's kebab-case (Utf8 → "utf8"); map them onto
   // the select's option values.
-  const encOpt = { utf8: "utf-8", "utf-8": "utf-8", "shift-jis": "shift-jis", "euc-jp": "euc-jp" };
+  const encOpt = {
+    utf8: "utf-8",
+    "utf-8": "utf-8",
+    "utf-16le": "utf-16le",
+    "utf-16be": "utf-16be",
+    "shift-jis": "shift-jis",
+    "euc-jp": "euc-jp",
+  };
   $("convert-enc").value = encOpt[state.stat.encoding] || "utf-8";
   const l = state.stat.eol;
   $("convert-eol").value = ["lf", "crlf", "cr"].includes(l) ? l : "lf";
   // Prefill 「BOMを付ける」 from the file's current BOM, then gray it out unless
-  // the chosen 文字コード is UTF-8 (a UTF-8 BOM is the only one we can write).
+  // the chosen 文字コード supports a Unicode BOM.
   $("convert-bom").checked = state.stat.bom_bytes > 0;
   syncConvertBom();
   setModalOpen($("convert-modal"), true);
   queueMicrotask(() => $("convert-enc").focus());
 }
 
-// The BOM option only applies to UTF-8 output; disable it otherwise.
+// The BOM option only applies to Unicode output; disable it otherwise.
 export function syncConvertBom() {
-  const isUtf8 = $("convert-enc").value === "utf-8";
-  $("convert-bom").disabled = !isUtf8;
-  $("convert-bom-row").classList.toggle("disabled", !isUtf8);
+  const encoding = $("convert-enc").value;
+  const supportsBom = ["utf-8", "utf-16le", "utf-16be"].includes(encoding);
+  $("convert-bom").disabled = !supportsBom;
+  $("convert-bom-row").classList.toggle("disabled", !supportsBom);
 }
 
 export function hideConvert() {
