@@ -37,8 +37,12 @@ hooks:
 nav:
   - Home: index.md
   - User Guide: USER_GUIDE.md
+  - CLI Reference: CLI_REFERENCE.md
+  - Architecture: ARCHITECTURE.md
   - Developer Guide: DEVELOPMENT.md
   - 日本語:
       - ホーム: ja/index.md
       - ユーザー向け: ja/USER_GUIDE.md
+      - CLI リファレンス: ja/CLI_REFERENCE.md
+      - アーキテクチャ: ja/ARCHITECTURE.md
       - 開発者向け: ja/DEVELOPMENT.md

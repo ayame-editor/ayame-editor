@@ -7,6 +7,12 @@ Ayame は Rust workspace です。
 - `ayame-core`: mmap / 疎インデックス / 検索 / 編集エンジン。
 - `ayame-cli`: CLI、ローカル Web エディタ、任意のネイティブウィンドウ。
 
+詳しい module map は [アーキテクチャ](ARCHITECTURE.md) を参照してください。短く言うと、
+`ayame-core` が `Document`、search、transforms、`EditSession`、WAL crash
+recovery を担当し、`ayame-cli/src/serve` が `ayame serve` と native window の
+両方で使う local `/api/*` router を公開し、`crates/ayame-cli/web/src` の
+TypeScript UI を Cargo が binary に埋め込みます。
+
 全 OS 共通の基本ループ:
 
 ```sh
@@ -40,9 +46,14 @@ cargo fmt --all --check
 cargo clippy --all-targets --locked --features ayame-cli/gui -- -D warnings
 cargo test --locked
 npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+cargo run --locked -p ayame-cli --features typegen -- typegen --check
 find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 | xargs -0 oxfmt --check
 oxlint --max-warnings 0 crates/ayame-cli/web/src
 ```
+
+`cargo xtask typegen --check` は type binding check を包んだものです。
+`cargo xtask release` は release preflight、任意の version bump、local artifact
+smoke test、tag 作成、GitHub Actions release への handoff を行います。
 
 ## Windows
 

@@ -1,0 +1,148 @@
+# CLI リファレンス
+
+*English: [../CLI_REFERENCE.md](../CLI_REFERENCE.md)*
+
+`ayame` はネイティブエディタの起動、ローカル Web エディタの起動、巨大テキスト
+ファイルの端末処理を行えます。各コマンドはストリーミングまたは bounded memory
+で動くようにしてあり、通常のエディタで開けないサイズのファイルも扱えます。
+
+## 使い方
+
+```sh
+ayame <COMMAND> [OPTIONS]
+```
+
+引数なしの場合、GUI build ではネイティブウィンドウを開きます。CLI build では
+ヘルプを表示します。
+
+## コマンド
+
+| コマンド | 目的 |
+| --- | --- |
+| `stat <FILE>` | サイズ、行数、文字コード、改行コード、インデックス情報を表示。 |
+| `head <FILE> [-n N]` | 先頭 N 行を表示。既定は 10。 |
+| `tail <FILE> [-n N]` | 末尾 N 行を表示。既定は 10。 |
+| `line <FILE> <N>` | 1-based の 1 行を表示。 |
+| `lines <FILE> <START> <COUNT>` | START から COUNT 行を表示。どちらも 1-based。 |
+| `search <FILE> <PATTERN>` | リテラル、正規表現、大文字小文字無視、単語単位、件数制限つき検索。 |
+| `diff <OLD> <NEW>` | 行単位または side-by-side の差分。 |
+| `sort <FILE>` | メモリ制限つき external merge sort。 |
+| `sortdiff <OLD> <NEW>` | 両ファイルをソートしてから差分。`sort-diff` も利用可。 |
+| `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
+| `case <FILE> <upper|lower>` | ASCII 大文字 / 小文字変換を新しいファイルへ書き出し。 |
+| `split <FILE> --lines N` | N 行ごとのパーツに分割。 |
+| `group <FILE> -k COL` | キー列で group-by し、count や数値集計を実行。 |
+| `top <FILE> -k COL -n N` | bounded memory でキー上位 N 行を保持。 |
+| `distinct <FILE> -k COL` | HyperLogLog で distinct 数を推定。 |
+| `gen <FILE> --lines N` | 合成テストデータを生成。 |
+| `serve [FILE]` | ローカル Web エディタを起動。 |
+| `gui [FILE]` | GUI feature の build でネイティブウィンドウを開く。 |
+| `cache [path|info|gc|clear]` | オンディスク index cache を確認 / 掃除。 |
+| `version` | バージョンを表示。 |
+
+## 共通オプション
+
+| オプション | 対象 | メモ |
+| --- | --- | --- |
+| `--encoding <ENC>` | ファイルを開くコマンド | `utf8`, `shift_jis`, `euc-jp`, `ascii` を指定。 |
+| `--stride <N>` | ファイルを開くコマンド | sparse index checkpoint の行間隔。既定は 4096。 |
+| `--no-cache` | ファイルを開くコマンド | persistent index cache を読み書きしない。 |
+| `--cache-dir <DIR>` | ファイルを開くコマンド | index cache directory を上書き。 |
+| `--json` | `stat`, `search` | machine-readable output。 |
+| `-V`, `--version` | global | バージョンを表示。 |
+| `-h`, `--help` | global | ヘルプを表示。 |
+
+## フィールド系オプション
+
+`sort`, `group`, `top`, `distinct` はキー列を指定できます。
+
+| オプション | メモ |
+| --- | --- |
+| `-k`, `--key <COL>` | 1-based のキー列。省略時は行全体。 |
+| `-t`, `--delim <C>` | 区切り文字。既定は comma。 |
+| `--csv` | RFC 4180 CSV parsing。quote 内 delimiter を扱えます。 |
+| `--quote <C>` | CSV quote character。既定は `"`. |
+| `--numeric` | `sort` / `top` のキーを数値として扱う。`sort` は `-n` も可。 |
+
+## 変換オプション
+
+| オプション | メモ |
+| --- | --- |
+| `--out <FILE>` | `sort`, `replace`, `case` の出力先。`replace` と `case` は必須。 |
+| `-i`, `--ignore-case` | 大文字小文字を無視して `replace`。 |
+| `-e`, `--regex` | `replace` pattern を正規表現として扱う。 |
+| `--jobs <N>` | 並列 replace worker 数。`0` は Rayon 既定値。 |
+| `--chunk-lines <N>` | 並列 replace の chunk 行数。既定は 4000000。 |
+
+出力コマンドは既存ファイルを上書きしません。別の出力先を指定するか、意図して
+対象ファイルを削除してから再実行してください。
+
+## split オプション
+
+| オプション | メモ |
+| --- | --- |
+| `--lines <N>` | 1 パーツあたりの行数。必須、1 以上。 |
+| `--out-dir <DIR>` | 出力ディレクトリ。既定は入力ファイルと同じディレクトリ。 |
+| `--name <NAME>` | パーツの base file name。既定は入力ファイル名。 |
+
+既定では `<stem>.partNNNN<.ext>` 形式で出力します。
+
+## search オプション
+
+| オプション | メモ |
+| --- | --- |
+| `-e`, `--regex` | pattern を正規表現として扱う。 |
+| `-i`, `--ignore-case` | 大文字小文字を無視。 |
+| `-w`, `--whole-word` | 単語単位で一致。 |
+| `--max <N>` | 表示件数を制限。 |
+| `--start-byte <N>` | worker/API resume 用の開始 byte offset。 |
+
+## serve オプション
+
+`ayame serve` は既定で `127.0.0.1:8777` に bind します。
+
+| オプション | メモ |
+| --- | --- |
+| `--host <ADDR>` | bind address。既定は `127.0.0.1`。 |
+| `--port <N>` | port。既定は `8777`。 |
+| `--allow-remote` | non-loopback host に必要。認証なしのファイルアクセスをネットワークへ公開します。 |
+
+## group / top / distinct
+
+| コマンド | オプション |
+| --- | --- |
+| `group` | `--value <COL>` で数値 `sum`, `min`, `max`, `avg`。`--out-groups <FILE>` で TSV 出力。 |
+| `top` | `-n <N>` で件数指定。`--min` で小さい順。`--out-order <FILE>` は row order を little-endian `u64` で保存。 |
+| `distinct` | 選択キー列の approximate distinct count を表示。 |
+
+## cache コマンド
+
+| コマンド | メモ |
+| --- | --- |
+| `cache path` | cache directory を表示。 |
+| `cache info` | cache size と entry summary を表示。 |
+| `cache gc` | 古い cache を削除。`--max-size`, `--max-age-days`, `--dry-run` に対応。 |
+| `cache clear` | cache entries を削除。 |
+
+## 例
+
+```sh
+ayame stat huge.csv
+ayame head huge.log -n 20
+ayame tail huge.log -n 200
+ayame line huge.log 500000
+ayame lines huge.log 500000 50
+ayame search huge.log 'ERROR' -i --max 50
+ayame diff old.csv new.csv --side-by-side --width 180
+ayame sort huge.csv -k 1 --csv --out sorted.csv
+ayame sortdiff old.csv new.csv -k 1 --summary
+ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
+ayame case huge.csv lower --out lower.csv
+ayame split huge.csv --lines 1000000
+ayame group huge.csv -k 3 --value 5
+ayame top huge.csv -k 2 -n 100 --numeric
+ayame distinct huge.csv -k 4
+ayame gen sample.csv --lines 100000
+ayame cache info
+ayame serve huge.csv --port 8777
+```

@@ -44,14 +44,45 @@ ayame serve path/to/file.log --port 8777
 
 その後 `http://127.0.0.1:8777/` を開きます。
 
-## よく使う CLI
+## スクリーンショット
+
+### メインウィンドウ
+
+![Ayame Editor main window](../assets/screenshot-main.png)
+
+### 設定とテーマ
+
+![Ayame Editor settings dialog](../assets/screenshot-settings.png)
+
+### ツール
+
+![Ayame Editor tools menu](../assets/screenshot-tools.png)
+
+### 2 ファイル差分
+
+![Ayame Editor two-file diff dialog](../assets/screenshot-diff.png)
+
+## CLI コマンド
 
 ```sh
 ayame stat huge.csv
+ayame head huge.log -n 20
+ayame tail huge.log -n 200
+ayame line huge.log 500000
+ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
+ayame diff old.csv new.csv --side-by-side
 ayame sort huge.csv --out sorted.csv
+ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log
+ayame case huge.csv lower --out lower.csv
 ayame split huge.csv --lines 1000000
+ayame group huge.csv -k 3 --value 5
+ayame top huge.csv -k 2 -n 100 --numeric
+ayame distinct huge.csv -k 4
+ayame gen sample.csv --lines 100000
+ayame cache info
+ayame serve huge.csv --port 8777
 ```
 
 この例は現在の `ayame --help` と一致しています。`sort --out <FILE>` は
@@ -60,7 +91,8 @@ ayame split huge.csv --lines 1000000
 入力ファイルと同じディレクトリに `<stem>.partNNNN<.ext>` 形式の分割ファイルを
 作ります。既存ファイルは上書きしないため、出力先がある場合は別名を指定してください。
 
-全コマンドとオプションは `ayame --help` で確認できます。
+全コマンドとオプションは [CLI リファレンス](CLI_REFERENCE.md) または
+`ayame --help` で確認できます。
 
 ## 主な機能
 
@@ -78,7 +110,9 @@ ayame split huge.csv --lines 1000000
 `Ctrl` は macOS では `Cmd` として入力できます。キー設定は
 `設定` -> `キー設定` から変更できます。
 
-| 操作 | ショートカット |
+### キー設定できる操作
+
+| 操作 | 既定ショートカット |
 | --- | --- |
 | 新規ファイル | `Ctrl+N` |
 | 新規ウィンドウ | `Ctrl+Shift+N` |
@@ -101,4 +135,29 @@ ayame split huge.csv --lines 1000000
 | 行を削除 | `Ctrl+Shift+K` |
 | コピー / 切り取り | `Ctrl+C`, `Ctrl+X` |
 | 検索オプション: 大文字小文字 / 単語 / 正規表現 | `Alt+C`, `Alt+W`, `Alt+R` |
+| 現在のファイルをソートして上書き | 未設定 |
+| 別ファイルとの差分 | 未設定 |
+| 現在のファイルを分割 | 未設定 |
+| フォルダ内検索 | 未設定 |
+| 選択範囲を大文字 / 小文字へ変換 | 未設定 |
+| 設定 | 未設定 |
+| キー設定 | 未設定 |
 | 検索バーやダイアログを閉じる | `Esc` |
+
+未設定の操作は `設定` -> `キー設定` に表示されます。よく使う場合は任意の
+ショートカットを割り当ててください。
+
+### メニュー / ステータス操作
+
+次の操作は現在の build では既定キーがありません。メニュー、ステータスバー、
+または記載があるものはコマンドパレット (`Ctrl+Shift+P`) から開きます。
+
+| 操作 | 開き方 |
+| --- | --- |
+| 末尾に追従 (`tail -f`) | `表示` -> `末尾に追従`、status tail button、または command palette |
+| 空白・改行を表示 | `表示` -> `空白・改行を表示` または command palette |
+| 全角空白を下線で表示 | `表示` -> `全角空白を下線で表示` または command palette |
+| 折り返し | `表示` -> `折り返し` または command palette |
+| 文字コード / 改行コードを変換して保存 | `ファイル` -> `文字コード / 改行コード...`、または status の文字コード / 改行コード segment |
+| 別の文字コードで開き直す | `文字コード / 改行コード...` を開き、encoding を選んで `Reopen` |
+| 選択箇所をファイルに保存 | 選択範囲の context menu |

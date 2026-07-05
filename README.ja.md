@@ -6,12 +6,14 @@
 
 macOS、Windows、Linux で動作します。
 
+![Ayame Editor main window](docs/assets/screenshot-main.png)
+
 ## 主な機能
 
 - 巨大ファイルを全体読み込みせずに表示・検索・編集できます。
 - UTF-8、Shift_JIS、EUC-JP、ASCII に対応します。
 - GUI では検索、置換、ソート、2 ファイル差分、フォルダ内検索、ファイル分割を実行できます。
-- CLI では `stat`、`search`、`sort`、`replace`、`split` などを使えます。
+- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`diff`、`sort`、`sortdiff`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache` などを使えます。
 - タブ、エクスプローラー、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
 - テーマ、フォント、折り返し、空白表示、キー設定を変更できます。
 
@@ -45,7 +47,8 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ## 詳細
 
-よく使う CLI、既定ショートカット、インストール、ビルド手順、Linux の実行時パッケージは
+ユーザー向けガイド、全 CLI リファレンス、アーキテクチャ、既定ショートカット、
+インストール、ビルド手順、Linux の実行時パッケージは
 [ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
 
 ## ライセンス

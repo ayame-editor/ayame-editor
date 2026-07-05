@@ -6,12 +6,14 @@ A fast desktop text editor for huge files.
 
 Runs on macOS, Windows, and Linux.
 
+![Ayame Editor main window](docs/assets/screenshot-main.png)
+
 ## Features
 
 - View, search, and edit huge files without loading the whole file into memory.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII.
 - Run search, replace, sort, two-file diff, folder grep, and file splitting from the GUI.
-- Use CLI commands such as `stat`, `search`, `sort`, `replace`, and `split`.
+- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `diff`, `sort`, `sortdiff`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, and `cache`.
 - Includes tabs, an explorer, rectangular selection, multi-cursor editing, and tail-follow mode.
 - Customizable themes, fonts, wrapping, whitespace display, and key bindings.
 
@@ -46,7 +48,8 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ## More
 
-Useful CLI commands, default shortcuts, install notes, build steps, and Linux runtime packages are in the
+The docs site includes the user guide, full CLI reference, architecture notes,
+default shortcuts, install notes, build steps, and Linux runtime packages:
 [docs site](https://hjosugi.github.io/ayame-editor/).
 
 ## License
