@@ -58,6 +58,36 @@ pub(crate) fn comparable_key(
     }
 }
 
+pub(crate) fn comparable_key_into(
+    raw: &[u8],
+    enc: Encoding,
+    col: Option<usize>,
+    spec: &FieldSpec,
+    numeric: bool,
+    field_scratch: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) {
+    out.clear();
+    let field = field_bytes(raw, col, spec, field_scratch);
+    if numeric {
+        let v = enc
+            .decode_line(field)
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| !v.is_nan())
+            .unwrap_or(f64::NEG_INFINITY);
+        out.extend_from_slice(&f64_order_key(v));
+    } else {
+        let decoded = enc.decode_line(field);
+        if decoded.is_ascii() {
+            out.extend_from_slice(decoded.as_bytes());
+        } else {
+            out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
+        }
+    }
+}
+
 pub(crate) fn decoded_text_key_into(
     raw: &[u8],
     enc: Encoding,

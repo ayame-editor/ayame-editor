@@ -139,13 +139,44 @@ export async function saveCopy() {
     const res = await apiPost("/api/edit/save", { ...target, switch_to_saved: true });
     await finishSaveAs(res);
   } catch (e) {
+    let finalError = e;
+    if (!target.overwrite && isExistsError(e)) {
+      const ok = await askConfirm(
+        t("dialog.overwrite.title"),
+        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
+        {
+          okLabel: t("dialog.overwrite.ok"),
+          danger: true,
+        },
+      );
+      if (ok) {
+        try {
+          const res = await apiPost("/api/edit/save", {
+            ...target,
+            overwrite: true,
+            switch_to_saved: true,
+          });
+          await finishSaveAs(res);
+          return;
+        } catch (retryError) {
+          finalError = retryError;
+        }
+      } else {
+        return;
+      }
+    }
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(e.message));
+    showMessage(t("error.saveError"), serverMessage(finalError.message));
   } finally {
     savingCount--;
     setSavingUI();
     retryPendingNativeClose();
   }
+}
+
+export function isExistsError(e) {
+  const msg = String(e?.message || e || "");
+  return /already exists|既に存在/.test(msg);
 }
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows

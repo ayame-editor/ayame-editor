@@ -734,7 +734,7 @@ mod tests {
         let mut buf = vec![b'x'; FIND_PREV_CHUNK - 2];
         let match_start = buf.len() as u64;
         buf.extend_from_slice(needle);
-        buf.extend_from_slice(&vec![b'y'; FIND_PREV_CHUNK]);
+        buf.extend_from_slice(&[b'y'; FIND_PREV_CHUNK]);
         let idx = LineIndex::build(&buf, 0, 4);
 
         let hit = find_prev(

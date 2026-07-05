@@ -58,7 +58,7 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["openFile", "menu.open", "Ctrl+O"],
   ["saveFile", "menu.save", "Ctrl+S"],
   ["saveAs", "menu.saveAs", "Ctrl+Shift+S"],
-  ["closeTab", "tab.close", "Ctrl+W"],
+  ["closeTab", "tab.close", ["Ctrl+W", "Alt+W"]],
   ["commandPalette", "menu.commandPalette", "Ctrl+Shift+P"],
   ["toggleSidebar", "keymap.toggleSidebar", "Ctrl+B"],
   ["find", "menu.find", "Ctrl+F"],
@@ -109,6 +109,7 @@ export const state = {
   word: false,
   matcher: null,
   regexError: false,
+  matcherWordFallback: false,
   activeLine: -1,
   lastMatch: null, // { byte, len }
   searchHits: null,

@@ -1,0 +1,13 @@
+{
+  "name": "ayame-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "27.3.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
+  }
+}

@@ -343,6 +343,7 @@ export async function openPath(path) {
   await settleEditQueue();
   const pristine = pristineUntitledTabId();
   openerMsg(t("dialog.open.opening"), true);
+  showLoading(t("dialog.open.loadingFile", { name: pathBaseName(p) || p }));
   try {
     const stat = await apiPost("/api/open", { path: p });
     onDocumentOpened(stat);
@@ -351,6 +352,8 @@ export async function openPath(path) {
   } catch (e) {
     reportOpenError(t("error.cannotOpen", { msg: serverMessage(e.message) }));
     return false;
+  } finally {
+    hideLoading();
   }
 }
 
@@ -371,6 +374,12 @@ export async function uploadFile(file) {
     reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e.message) }));
   } finally {
     hideLoading();
+  }
+}
+
+export async function uploadFiles(files) {
+  for (const file of Array.from(files || [])) {
+    if (file) await uploadFile(file);
   }
 }
 
@@ -446,16 +455,19 @@ export function initDropZone() {
     e.preventDefault();
     depth = 0;
     dz.classList.add("hidden");
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
+    uploadFiles(e.dataTransfer.files);
   });
 }
 
 // ---- tabs ------------------------------------------------------------------
 
+let refreshTabsSeq = 0;
+
 export async function refreshTabs() {
+  const seq = ++refreshTabsSeq;
   try {
     const r = await api("/api/tabs");
+    if (seq !== refreshTabsSeq) return;
     renderTabs(r.tabs);
   } catch {
     // non-fatal: the tab bar just won't update

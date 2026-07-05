@@ -566,11 +566,78 @@ impl EditSession {
         let total = self.total_lines(doc);
         let end = start.saturating_add(count).min(total);
         let mut out = Vec::with_capacity((end - start).min(4096) as usize);
-        for logical in start..end {
-            if let Some(line) = self.line(doc, logical) {
-                out.push(line);
+        let original_total = doc.line_count();
+        let mut logical_pos = 0u64;
+        let mut orig = 0u64;
+
+        for (&anchor, ev) in &self.events {
+            let anchor = anchor.min(original_total);
+            if anchor < orig {
+                continue;
+            }
+            let unchanged = anchor - orig;
+            push_original_view_lines(&mut out, doc, orig, logical_pos, unchanged, start, end);
+            logical_pos += unchanged;
+            orig = anchor;
+
+            for (index, text) in ev.inserts.iter().enumerate() {
+                if logical_pos >= start && logical_pos < end {
+                    out.push(EditLine {
+                        number: logical_pos,
+                        text: text.clone(),
+                        edited: true,
+                        inserted: true,
+                        original_line: None,
+                    });
+                }
+                logical_pos += 1;
+                if logical_pos >= end && index + 1 == ev.inserts.len() {
+                    return out;
+                }
+            }
+
+            if anchor < original_total {
+                if ev.deleted {
+                    orig += 1;
+                } else {
+                    if logical_pos >= start && logical_pos < end {
+                        if let Some(text) = &ev.replacement {
+                            out.push(EditLine {
+                                number: logical_pos,
+                                text: text.clone(),
+                                edited: true,
+                                inserted: false,
+                                original_line: Some(anchor),
+                            });
+                        } else {
+                            push_original_view_lines(
+                                &mut out,
+                                doc,
+                                anchor,
+                                logical_pos,
+                                1,
+                                start,
+                                end,
+                            );
+                        }
+                    }
+                    logical_pos += 1;
+                    orig += 1;
+                }
+            }
+            if logical_pos >= end {
+                return out;
             }
         }
+        push_original_view_lines(
+            &mut out,
+            doc,
+            orig,
+            logical_pos,
+            original_total.saturating_sub(orig),
+            start,
+            end,
+        );
         out
     }
 
@@ -1136,18 +1203,44 @@ impl EditSession {
         let term = eol.bytes();
         let total = self.total_lines(doc);
         let ends_nl = document_ends_with_newline(doc);
-        for logical in 0..total {
-            let text = self.line_text(doc, logical)?;
-            let bytes = enc.encode_text(&text).ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "line {} has characters that cannot be written as {}",
-                    logical + 1,
-                    enc.label()
-                ))
-            })?;
-            w.write_all(&bytes)?;
-            if logical + 1 < total || ends_nl {
-                w.write_all(term)?;
+        let original_total = doc.line_count();
+        {
+            let mut converted = ConvertedWriter {
+                enc,
+                terminator: term,
+                total,
+                ends_nl,
+                logical: 0,
+                w: &mut w,
+            };
+            let mut next_original = 0u64;
+            for (&anchor, ev) in self.events.range(..original_total) {
+                let anchor = anchor.min(original_total);
+                if anchor < next_original {
+                    continue;
+                }
+                converted.write_original_span(doc, next_original, anchor)?;
+                for text in &ev.inserts {
+                    converted.write_text(text)?;
+                }
+                if anchor < original_total {
+                    if ev.deleted {
+                        next_original = anchor + 1;
+                    } else {
+                        if let Some(text) = &ev.replacement {
+                            converted.write_text(text)?;
+                        } else {
+                            converted.write_original_span(doc, anchor, anchor + 1)?;
+                        }
+                        next_original = anchor + 1;
+                    }
+                }
+            }
+            converted.write_original_span(doc, next_original, original_total)?;
+            if let Some(ev) = self.events.get(&original_total) {
+                for text in &ev.inserts {
+                    converted.write_text(text)?;
+                }
             }
         }
         w.flush()?;
@@ -1488,6 +1581,94 @@ fn push_history(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
         stack.remove(0);
     }
     stack.push(entry);
+}
+
+fn push_original_view_lines(
+    out: &mut Vec<EditLine>,
+    doc: &Document,
+    orig_start: u64,
+    logical_start: u64,
+    count: u64,
+    view_start: u64,
+    view_end: u64,
+) {
+    let span_start = logical_start.max(view_start);
+    let span_end = logical_start.saturating_add(count).min(view_end);
+    if span_start >= span_end {
+        return;
+    }
+    let mut orig = orig_start + (span_start - logical_start);
+    let mut logical = span_start;
+    let mut remaining = span_end - span_start;
+    const BATCH: u64 = 8192;
+    while remaining > 0 {
+        let batch = doc.raw_line_ranges(orig, remaining.min(BATCH));
+        if batch.is_empty() {
+            break;
+        }
+        let advanced = batch.len() as u64;
+        for (line_no, raw) in batch {
+            out.push(EditLine {
+                number: logical,
+                text: doc.encoding().decode_line(raw),
+                edited: false,
+                inserted: false,
+                original_line: Some(line_no),
+            });
+            logical += 1;
+        }
+        orig += advanced;
+        remaining -= advanced;
+    }
+}
+
+struct ConvertedWriter<'a, W: Write> {
+    enc: crate::Encoding,
+    terminator: &'a [u8],
+    total: u64,
+    ends_nl: bool,
+    logical: u64,
+    w: &'a mut W,
+}
+
+impl<W: Write> ConvertedWriter<'_, W> {
+    fn write_original_span(&mut self, doc: &Document, start: u64, end: u64) -> Result<()> {
+        const BATCH: u64 = 8192;
+        let mut pos = start;
+        while pos < end {
+            let batch = doc.raw_line_ranges(pos, (end - pos).min(BATCH));
+            if batch.is_empty() {
+                return Err(Error::Unsupported(format!(
+                    "original lines {}..{} are out of range while converting",
+                    start + 1,
+                    end
+                )));
+            }
+            let advanced = batch.len() as u64;
+            for (_line_no, raw) in batch {
+                let text = doc.encoding().decode_line(raw);
+                self.write_text(&text)?;
+            }
+            pos += advanced;
+        }
+        Ok(())
+    }
+
+    fn write_text(&mut self, text: &str) -> Result<()> {
+        let line_no = self.logical + 1;
+        let bytes = self.enc.encode_text(text).ok_or_else(|| {
+            Error::Unsupported(format!(
+                "line {line_no} has characters that cannot be written as {}",
+                self.enc.label()
+            ))
+        })?;
+        self.w.write_all(&bytes)?;
+        self.logical += 1;
+        if self.logical < self.total || self.ends_nl {
+            self.w.write_all(self.terminator)?;
+        }
+        Ok(())
+    }
 }
 
 /// Copy original lines `[start, end)` (with their terminators) as one

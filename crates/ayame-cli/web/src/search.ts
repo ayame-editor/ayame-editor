@@ -55,6 +55,7 @@ export function setReplaceRow(open) {
 
 export function buildMatcher() {
   state.regexError = false;
+  state.matcherWordFallback = false;
   $("find").parentElement.classList.remove("error");
   if (!state.query) {
     state.matcher = null;
@@ -73,6 +74,7 @@ export function buildMatcher() {
   }
   try {
     state.matcher = new RegExp(src, flags); // fall back: highlight the superset
+    state.matcherWordFallback = !!state.word;
   } catch {
     state.regexError = true;
     state.matcher = null; // invalid regex while typing — just don't highlight
@@ -251,8 +253,8 @@ export async function updateCount() {
     updateFindCountLabel();
     scheduleRender();
   } catch {
-    $("find-count").textContent = t("find.regexError");
-    $("find").parentElement.classList.add("error");
+    $("find-count").textContent = t("find.searchError");
+    flashCount(t("find.searchError"), "error");
     scheduleRender();
   }
 }
@@ -292,6 +294,7 @@ export function flashCount(msg, kind = "") {
         () => {
           el.textContent = "";
           el.classList.remove("error");
+          if (state.findOpen) updateFindCountLabel();
         },
         isError ? 10000 : 6000,
       );
@@ -388,6 +391,10 @@ export function replaceReady() {
   }
   buildMatcher();
   if (state.regexError || !state.matcher) {
+    flashCount(t("find.regexError"), "error");
+    return false;
+  }
+  if (state.matcherWordFallback) {
     flashCount(t("find.regexError"), "error");
     return false;
   }

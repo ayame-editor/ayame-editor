@@ -683,14 +683,14 @@ export async function applyLineEdit(edits, caret, sel) {
 // 行を複製: duplicate the covered line block just below itself.
 export function duplicateLines() {
   if (!state.stat?.open || state.total === 0) return;
-  const { l0, l1 } = lineOpSpan();
-  if (l1 - l0 + 1 > MAX_COPY_LINES) {
-    flashCount(t("editor.duplicateCapped", { max: commas(MAX_COPY_LINES) }), "error");
-    return;
-  }
-  const caret = { ...state.caret }; // the copy lands below; the caret stays put
-  const sel = cloneSelection(state.sel && !state.sel.rect ? state.sel : null);
   enqueueEdit(async () => {
+    const { l0, l1 } = lineOpSpan();
+    if (l1 - l0 + 1 > MAX_COPY_LINES) {
+      flashCount(t("editor.duplicateCapped", { max: commas(MAX_COPY_LINES) }), "error");
+      return null;
+    }
+    const caret = { ...state.caret }; // the copy lands below; the caret stays put
+    const sel = cloneSelection(state.sel && !state.sel.rect ? state.sel : null);
     const texts = await lineTextsFor(l0, l1 - l0 + 1);
     const endCol = charLenOf(texts[texts.length - 1]);
     const edit = { l0: l1, c0: endCol, l1, c1: endCol, text: "\n" + texts.join("\n") };
@@ -701,18 +701,18 @@ export function duplicateLines() {
 // 行を上へ / 下へ移動: swap the covered block with its neighbouring line.
 export function moveLines(dir) {
   if (!state.stat?.open || state.total === 0) return;
-  const { l0, l1 } = lineOpSpan();
-  if (dir < 0 ? l0 === 0 : l1 >= state.total - 1) return; // already at the edge
-  if (l1 - l0 + 1 > MAX_COPY_LINES) {
-    flashCount(t("editor.moveCapped", { max: commas(MAX_COPY_LINES) }), "error");
-    return;
-  }
-  const caret = { line: state.caret.line + dir, col: state.caret.col };
-  const sel = shiftLineSelection(
-    cloneSelection(state.sel && !state.sel.rect ? state.sel : null),
-    dir,
-  );
   enqueueEdit(async () => {
+    const { l0, l1 } = lineOpSpan();
+    if (dir < 0 ? l0 === 0 : l1 >= state.total - 1) return null; // already at the edge
+    if (l1 - l0 + 1 > MAX_COPY_LINES) {
+      flashCount(t("editor.moveCapped", { max: commas(MAX_COPY_LINES) }), "error");
+      return null;
+    }
+    const caret = { line: state.caret.line + dir, col: state.caret.col };
+    const sel = shiftLineSelection(
+      cloneSelection(state.sel && !state.sel.rect ? state.sel : null),
+      dir,
+    );
     const block = await lineTextsFor(l0, l1 - l0 + 1);
     if (dir < 0) {
       // Up: line (l0-1) drops below the block.
@@ -742,8 +742,8 @@ export function moveLines(dir) {
 // 行を削除: drop the covered line block entirely.
 export function deleteLines() {
   if (!state.stat?.open || state.total === 0) return;
-  const { l0, l1 } = lineOpSpan();
   enqueueEdit(async () => {
+    const { l0, l1 } = lineOpSpan();
     let edit;
     let caret;
     if (l1 < state.total - 1) {

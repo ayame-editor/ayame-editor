@@ -2,6 +2,7 @@
 import { $ } from "./dom.js";
 import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
 import { api } from "./api.js";
+import { t } from "./i18n.js";
 import { hasSelection, renderSelection } from "./selection.js";
 import { updateStatusPos } from "./menus.js";
 import { anyModalOpen } from "./input.js";
@@ -74,14 +75,25 @@ export function ensureData(start, count) {
   const fstart = Math.max(0, start - PAD);
   const fcount = count + 2 * PAD;
   const token = ++state.loadToken;
-  api(`/api/lines?start=${fstart}&count=${fcount}`)
+  const url = `/api/lines?start=${fstart}&count=${fcount}`;
+  api(url)
+    .catch(async (firstError) => {
+      if (token !== state.loadToken) throw firstError;
+      return api(url);
+    })
     .then((res) => {
       if (token !== state.loadToken) return; // a newer request superseded us
       state.cache = { start: fstart, lines: res.lines };
       state.total = res.total;
       render();
     })
-    .catch((e) => console.error("lines fetch failed", e));
+    .catch((e) => {
+      if (token !== state.loadToken) return;
+      console.error("lines fetch failed", e);
+      import("./search.js")
+        .then((m) => m.flashCount(t("editor.reloadError"), "error"))
+        .catch(() => {});
+    });
 }
 
 export async function lineByte(line, col = null) {

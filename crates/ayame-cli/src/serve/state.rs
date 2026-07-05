@@ -135,7 +135,66 @@ impl Workspace {
     /// Returns aside files orphaned by the transition (an active tab whose
     /// document was gone cannot be parked); the caller deletes them outside
     /// the workspace lock.
-    fn install_new_tab(&mut self, doc: Shared, wal: WalSetup) -> Vec<PathBuf> {
+    fn focus_tab(
+        &mut self,
+        id: u64,
+        cache_root: Option<&Path>,
+    ) -> Result<(), (StatusCode, String)> {
+        if self.tabs.active == Some(id) {
+            return Ok(());
+        }
+        if !self.tabs.order.contains(&id) {
+            return Err(bad_request("no such tab"));
+        }
+        self.park_active();
+        self.tabs.active = Some(id);
+        match self.tabs.inactive.remove(&id) {
+            Some(t) => {
+                self.doc = Some(t.doc);
+                self.edits = t.edits;
+                self.aside_files = t.aside_files;
+                self.recoverable = t.recoverable;
+            }
+            None => {
+                self.doc = None;
+                self.edits = EditSession::default();
+                self.recoverable = None;
+            }
+        }
+        attach_live_wal(cache_root, self);
+        Ok(())
+    }
+
+    fn tab_with_path_literal(&self, path: &Path) -> Option<u64> {
+        self.tabs.order.iter().copied().find(|&id| {
+            let doc = if self.tabs.active == Some(id) {
+                self.doc.as_ref()
+            } else {
+                self.tabs.inactive.get(&id).map(|t| &t.doc)
+            };
+            doc.is_some_and(|doc| doc.path() == path)
+        })
+    }
+
+    fn wal_path_in_use(&self, cache_root: &Path, wal_path: &Path) -> bool {
+        let active = self
+            .doc
+            .as_ref()
+            .is_some_and(|doc| wal::wal_path_for(cache_root, doc.path()) == wal_path);
+        active
+            || self
+                .tabs
+                .inactive
+                .values()
+                .any(|tab| wal::wal_path_for(cache_root, tab.doc.path()) == wal_path)
+    }
+
+    fn install_new_tab(
+        &mut self,
+        doc: Shared,
+        wal: WalSetup,
+        cache_root: Option<&Path>,
+    ) -> Vec<PathBuf> {
         self.park_active();
         let orphaned = std::mem::take(&mut self.aside_files);
         let id = self.tabs.next_id;
@@ -147,6 +206,7 @@ impl Workspace {
         self.recoverable = None;
         match wal {
             WalSetup::Attach(w) => self.edits.set_wal(Some(*w)),
+            WalSetup::Create => attach_live_wal(cache_root, self),
             WalSetup::Recoverable(n) => self.recoverable = Some(n),
             WalSetup::Off => {}
         }
@@ -163,6 +223,9 @@ pub(super) enum WalSetup {
     /// A fresh writer for the document (any stale/invalid log was removed).
     /// Boxed so the enum stays small on the happy paths.
     Attach(Box<WalWriter>),
+    /// The log was inspected and is safe to replace, but the writer should be
+    /// created only when the document is installed as the live tab.
+    Create,
     /// The log holds unsaved edits from a previous process. Do NOT attach or
     /// touch it; report `recoverable` in stat and wait for
     /// `/api/edit/recover` to restore or discard.
@@ -174,6 +237,26 @@ pub(super) enum WalSetup {
 /// recoverable log is left untouched for the user's decision; otherwise a
 /// fresh writer is created. Blocking file I/O: call off the async runtime.
 pub(super) fn wal_setup_for_open(cache_root: Option<&Path>, doc: &Document) -> WalSetup {
+    match wal_prepare_for_open(cache_root, doc) {
+        WalSetup::Create => {}
+        other => return other,
+    }
+    let Some(root) = cache_root else {
+        return WalSetup::Off;
+    };
+    let Ok(header) = wal::Header::for_document(doc) else {
+        return WalSetup::Off;
+    };
+    let path = wal::wal_path_for(root, doc.path());
+    match WalWriter::create(&path, header) {
+        Ok(w) => WalSetup::Attach(Box::new(w)),
+        // Crash logging is best-effort: an unwritable cache dir must never
+        // block opening the file.
+        Err(_) => WalSetup::Off,
+    }
+}
+
+pub(super) fn wal_prepare_for_open(cache_root: Option<&Path>, doc: &Document) -> WalSetup {
     let Some(root) = cache_root else {
         return WalSetup::Off;
     };
@@ -194,12 +277,7 @@ pub(super) fn wal_setup_for_open(cache_root: Option<&Path>, doc: &Document) -> W
         }
         ayame_core::RecoveryInfo::Clean => {}
     }
-    match WalWriter::create(&path, header) {
-        Ok(w) => WalSetup::Attach(Box::new(w)),
-        // Crash logging is best-effort: an unwritable cache dir must never
-        // block opening the file.
-        Err(_) => WalSetup::Off,
-    }
+    WalSetup::Create
 }
 
 /// Attach a fresh crash-log writer to the session that just became live (tab
@@ -355,6 +433,7 @@ impl AppState {
         let mut recoverable = None;
         match wal_setup {
             WalSetup::Attach(w) => edits.set_wal(Some(*w)),
+            WalSetup::Create => {}
             WalSetup::Recoverable(n) => recoverable = Some(n),
             WalSetup::Off => {}
         }
@@ -454,36 +533,7 @@ impl AppState {
         let _transitions = self.transitions.lock().await;
         // Leaf lock, taken while no ws guard is held (see `find_snapshot`).
         self.invalidate_dirty_snapshot();
-        self.write(|ws| {
-            if ws.tabs.active == Some(id) {
-                return Ok(());
-            }
-            if !ws.tabs.order.contains(&id) {
-                return Err(bad_request("no such tab"));
-            }
-            ws.park_active();
-            ws.tabs.active = Some(id);
-            match ws.tabs.inactive.remove(&id) {
-                Some(t) => {
-                    ws.doc = Some(t.doc);
-                    ws.edits = t.edits;
-                    ws.aside_files = t.aside_files;
-                    ws.recoverable = t.recoverable;
-                }
-                None => {
-                    // The tab exists but its state is gone (e.g. a failed
-                    // in-place save left it unloaded). Show it as empty rather
-                    // than leaking the previous tab's document into it.
-                    ws.doc = None;
-                    ws.edits = EditSession::default();
-                    ws.recoverable = None;
-                }
-            }
-            // The unparked session is live now: re-attach its crash log (and
-            // snapshot pending edits so the log reflects reality).
-            attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
-            Ok(())
-        })
+        self.write(|ws| ws.focus_tab(id, self.open_opts.cache_dir.as_deref()))
     }
 
     /// Close a tab; if it was active, focus a neighbor (or empty the workspace).
@@ -516,6 +566,11 @@ impl AppState {
                 None => Vec::new(),
             };
             if ws.tabs.active != Some(id) {
+                if let (Some(root), Some(path)) = (cache_root.as_deref(), dead_wal.as_deref()) {
+                    if ws.wal_path_in_use(root, path) {
+                        dead_wal = None;
+                    }
+                }
                 return (asides, dead_wal); // closed a background tab; active state untouched
             }
             // The closed tab was active: its document goes away with it.
@@ -548,6 +603,11 @@ impl AppState {
             }
             // The neighbor is live now: re-attach its crash log.
             attach_live_wal(cache_root.as_deref(), ws);
+            if let (Some(root), Some(path)) = (cache_root.as_deref(), dead_wal.as_deref()) {
+                if ws.wal_path_in_use(root, path) {
+                    dead_wal = None;
+                }
+            }
             (asides, dead_wal)
         });
         // The closed tab's document handle is gone (or going): its aside
@@ -971,8 +1031,10 @@ impl AppState {
         let (doc, wal_setup) = tokio::task::spawn_blocking(move || {
             super::workspace::sweep_stale_asides(Path::new(&p));
             let doc = Document::open(&p, &opts)?;
-            // Detect crash leftovers BEFORE any fresh writer truncates them.
-            let wal_setup = wal_setup_for_open(opts.cache_dir.as_deref(), &doc);
+            // Detect crash leftovers before any fresh writer can truncate them.
+            // The writer itself is created only after the transition-lock
+            // duplicate recheck below.
+            let wal_setup = wal_prepare_for_open(opts.cache_dir.as_deref(), &doc);
             Ok::<_, ayame_core::Error>((doc, wal_setup))
         })
         .await
@@ -984,7 +1046,18 @@ impl AppState {
             ))
         })?;
         let _transitions = self.transitions.lock().await;
-        let orphaned = self.write(|ws| ws.install_new_tab(Arc::new(doc), wal_setup));
+        let target = doc.path().to_path_buf();
+        let orphaned = self.write(|ws| {
+            if let Some(id) = ws.tab_with_path_literal(&target) {
+                ws.focus_tab(id, self.open_opts.cache_dir.as_deref())?;
+                return Ok(Vec::new());
+            }
+            Ok(ws.install_new_tab(
+                Arc::new(doc),
+                wal_setup,
+                self.open_opts.cache_dir.as_deref(),
+            ))
+        })?;
         remove_aside_files(orphaned);
         self.invalidate_dirty_snapshot(); // a different tab is active now
         Ok(())
