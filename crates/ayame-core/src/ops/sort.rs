@@ -10,7 +10,7 @@ use crate::document::Document;
 use crate::fields::{comparable_key, FieldSpec};
 use crate::Result;
 
-use super::common::read_full;
+use super::common::{read_full, unique_spill_dir};
 
 /// How to sort.
 #[derive(Clone, Debug)]
@@ -62,7 +62,12 @@ pub struct SortResult {
 /// fan-in heap, writing the sorted line numbers. Peak memory is
 /// `O(budget + fan-in)`, not `O(number_of_runs)`.
 pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
-    fs::create_dir_all(&opts.spill_dir)?;
+    let spill_dir = unique_spill_dir(&opts.spill_dir)?;
+    let run_name = spill_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("run");
+    let ordering_path = opts.spill_dir.join(format!("{run_name}.ordering.bin"));
 
     // ---- phase 1: run generation ----------------------------------------
     let total = doc.line_count();
@@ -93,24 +98,26 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
             buffered_bytes += key.len() + 40; // key + Vec/tuple overhead estimate
             buffer.push((key, line_no));
             if buffered_bytes >= opts.budget_bytes {
-                spill_bytes += spill_run(&mut buffer, opts.reverse, &opts.spill_dir, &mut runs)?;
+                spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
                 buffered_bytes = 0;
             }
         }
         start += advanced;
     }
     if !buffer.is_empty() {
-        spill_bytes += spill_run(&mut buffer, opts.reverse, &opts.spill_dir, &mut runs)?;
+        spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
     }
 
     // ---- phase 2: k-way merge -------------------------------------------
-    let ordering_path = opts.spill_dir.join("ordering.bin");
-    let (merged, merge_spill_bytes) = merge_runs(&runs, opts.reverse, &ordering_path)?;
+    let ordering_tmp = spill_dir.join("ordering.bin");
+    let (merged, merge_spill_bytes) = merge_runs(&runs, opts.reverse, &ordering_tmp)?;
     spill_bytes += merge_spill_bytes;
     // Runs are consumed; delete them so only the ordering remains.
     for r in &runs {
         let _ = fs::remove_file(r);
     }
+    fs::rename(&ordering_tmp, &ordering_path)?;
+    let _ = fs::remove_dir(&spill_dir);
 
     Ok(SortResult {
         ordering_path,

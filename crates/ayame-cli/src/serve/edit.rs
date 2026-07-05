@@ -28,24 +28,33 @@ pub(super) async fn api_lines(
     Query(q): Query<LinesQuery>,
 ) -> Json<LinesResponse> {
     let count = q.count.min(MAX_VIEW);
-    // One read acquisition: the doc, its edit overlay and the returned lines
-    // are guaranteed mutually consistent, and nothing is cloned but the page.
-    state.read(|ws| {
+    // Take a short, consistent snapshot, then do potentially large line
+    // decoding off the async runtime worker thread.
+    let snapshot = state.read(|ws| {
         // An empty workspace has no lines; answer with an empty page rather
         // than an error so the viewport can render nothing gracefully.
-        let Some(doc) = ws.doc() else {
-            return Json(LinesResponse {
-                start: q.start,
-                total: 0,
-                lines: Vec::new(),
-            });
-        };
-        Json(LinesResponse {
+        ws.doc().map(|doc| (doc.clone(), ws.edits.clone()))
+    });
+    let Some((doc, edits)) = snapshot else {
+        return Json(LinesResponse {
             start: q.start,
-            total: ws.edits.total_lines(doc),
-            lines: ws.edits.lines(doc, q.start, count),
-        })
+            total: 0,
+            lines: Vec::new(),
+        });
+    };
+    let start = q.start;
+    let response = tokio::task::spawn_blocking(move || LinesResponse {
+        start,
+        total: edits.total_lines(&doc),
+        lines: edits.lines(&doc, start, count),
     })
+    .await
+    .unwrap_or_else(|_| LinesResponse {
+        start,
+        total: 0,
+        lines: Vec::new(),
+    });
+    Json(response)
 }
 
 /// Replace the span (l0,c0)..(l1,c1) with `text` (possibly multi-line) as one

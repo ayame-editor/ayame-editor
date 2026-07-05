@@ -149,7 +149,14 @@ pub fn search(
                 if check_boundary && !is_legacy_char_boundary(enc, buf, index, start + pos) {
                     continue;
                 }
-                if opts.whole_word && !is_whole_word_match(buf, start + pos, finder.needle().len())
+                if opts.whole_word
+                    && !is_whole_word_match_encoded(
+                        buf,
+                        index,
+                        enc,
+                        start + pos,
+                        finder.needle().len(),
+                    )
                 {
                     continue;
                 }
@@ -270,17 +277,19 @@ pub fn find_prev(
             let mut cursor = before_byte as usize;
             while cursor > base {
                 let accept_start = cursor.saturating_sub(FIND_PREV_CHUNK).max(base);
-                let scan_start = accept_start.saturating_sub(overlap).max(base);
-                let hay = &buf[scan_start..cursor];
+                let scan_end = cursor.saturating_add(overlap).min(before_byte as usize);
+                let hay = &buf[accept_start..scan_end];
                 for pos in memmem::rfind_iter(hay, needle) {
-                    let abs = scan_start + pos;
-                    if abs < accept_start {
-                        break;
+                    let abs = accept_start + pos;
+                    if abs >= cursor {
+                        continue;
                     }
                     if check_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
                         continue;
                     }
-                    if opts.whole_word && !is_whole_word_match(buf, abs, needle.len()) {
+                    if opts.whole_word
+                        && !is_whole_word_match_encoded(buf, index, enc, abs, needle.len())
+                    {
                         continue;
                     }
                     return Ok(Some(hit_at(buf, index, enc, abs, needle.len())));
@@ -341,6 +350,21 @@ fn hit_at(buf: &[u8], index: &LineIndex, enc: Encoding, abs: usize, mlen: usize)
 fn is_whole_word_match(buf: &[u8], start: usize, len: usize) -> bool {
     let before = start.checked_sub(1).and_then(|i| buf.get(i).copied());
     let after = buf.get(start.saturating_add(len)).copied();
+    !before.is_some_and(is_word_byte) && !after.is_some_and(is_word_byte)
+}
+
+fn is_whole_word_match_encoded(
+    buf: &[u8],
+    index: &LineIndex,
+    enc: Encoding,
+    start: usize,
+    len: usize,
+) -> bool {
+    if !is_legacy_multibyte(enc) {
+        return is_whole_word_match(buf, start, len);
+    }
+    let before = legacy_neighbor_byte(enc, buf, index, start, false);
+    let after = legacy_neighbor_byte(enc, buf, index, start.saturating_add(len), true);
     !before.is_some_and(is_word_byte) && !after.is_some_and(is_word_byte)
 }
 
@@ -409,6 +433,32 @@ fn is_legacy_char_boundary(enc: Encoding, buf: &[u8], index: &LineIndex, abs: us
         p += legacy_step(enc, buf, p);
     }
     p == abs
+}
+
+fn legacy_neighbor_byte(
+    enc: Encoding,
+    buf: &[u8],
+    index: &LineIndex,
+    abs: usize,
+    after: bool,
+) -> Option<u8> {
+    let line = index.line_of_byte(buf, abs as u64);
+    let (ls, le) = index.line_range(buf, line)?;
+    let mut p = ls as usize;
+    let mut previous = None;
+    let end = le as usize;
+    while p < abs && p < end {
+        previous = Some(p);
+        p += legacy_step(enc, buf, p);
+    }
+    if p != abs {
+        return None;
+    }
+    if after {
+        (p < end).then(|| buf[p])
+    } else {
+        previous.map(|i| buf[i])
+    }
 }
 
 /// Byte offset and length inside `raw` (one legacy-encoded line) of the span
@@ -679,6 +729,34 @@ mod tests {
     }
 
     #[test]
+    fn prev_literal_search_finds_match_crossing_chunk_boundary() {
+        let needle = b"ABCDE";
+        let mut buf = vec![b'x'; FIND_PREV_CHUNK - 2];
+        let match_start = buf.len() as u64;
+        buf.extend_from_slice(needle);
+        buf.extend_from_slice(&vec![b'y'; FIND_PREV_CHUNK]);
+        let idx = LineIndex::build(&buf, 0, 4);
+
+        let hit = find_prev(
+            &buf,
+            0,
+            &idx,
+            Encoding::Ascii,
+            &FindOptions {
+                query: "ABCDE".into(),
+                regex: false,
+                case_sensitive: true,
+                whole_word: false,
+                byte: buf.len() as u64,
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(hit.byte, match_start);
+    }
+
+    #[test]
     fn whole_word_filters_substrings() {
         let buf = b"error\nterror\nerror_code\nerror!\n".to_vec();
         let idx = LineIndex::build(&buf, 0, 16);
@@ -745,6 +823,33 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(prev.line, 1);
+    }
+
+    #[test]
+    fn shift_jis_whole_word_uses_character_not_trail_byte_boundary() {
+        // "ア" is 0x83 0x41 in Shift_JIS. The trail byte is ASCII 'A', but it
+        // must not make the following ASCII word look like it has a word-byte
+        // prefix.
+        let buf = sjis("アword\n");
+        let idx = LineIndex::build(&buf, 0, 16);
+        let len = buf.len() as u64;
+        let res = search(
+            &buf,
+            0,
+            len,
+            &idx,
+            Encoding::ShiftJis,
+            &SearchOptions {
+                query: "word".into(),
+                whole_word: true,
+                max_hits: 10,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(res.hits.len(), 1);
+        assert_eq!(res.hits[0].column, 1);
     }
 
     #[test]

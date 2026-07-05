@@ -219,9 +219,9 @@ pub(super) async fn api_upload(
     let name = sanitize_filename(q.name.as_deref().unwrap_or("dropped.txt"));
     let dir = uploads_dir();
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
-    let target = unique_upload_path(&dir, &name);
-
-    let mut file = tokio::fs::File::create(&target).await.map_err(internal)?;
+    let (target, mut file) = create_unique_upload_file(&dir, &name)
+        .await
+        .map_err(internal)?;
     let mut stream = request.into_body().into_data_stream();
     let mut written: u64 = 0;
     while let Some(chunk) = stream.next().await {
@@ -405,6 +405,49 @@ pub(super) fn unique_upload_path(dir: &Path, name: &str) -> PathBuf {
         }
     }
     base
+}
+
+async fn create_unique_upload_file(
+    dir: &Path,
+    name: &str,
+) -> std::io::Result<(PathBuf, tokio::fs::File)> {
+    let candidates = unique_upload_candidates(dir, name);
+    for target in candidates {
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .await
+        {
+            Ok(file) => return Ok((target, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    let fallback = dir.join(name);
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&fallback)
+        .await
+        .map(|file| (fallback, file))
+}
+
+fn unique_upload_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
+    let mut out = Vec::with_capacity(10_000);
+    out.push(dir.join(name));
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.to_string());
+    let ext = Path::new(name)
+        .extension()
+        .map(|s| format!(".{}", s.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 1..10_000 {
+        out.push(dir.join(format!("{stem}-{n}{ext}")));
+    }
+    out
 }
 
 #[cfg(test)]

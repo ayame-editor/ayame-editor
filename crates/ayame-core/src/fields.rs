@@ -49,24 +49,26 @@ pub(crate) fn comparable_key(
             .decode_line(field)
             .trim()
             .parse::<f64>()
-            .unwrap_or(f64::INFINITY);
+            .ok()
+            .filter(|v| !v.is_nan())
+            .unwrap_or(f64::NEG_INFINITY);
         f64_order_key(v).to_vec()
     } else {
         normalized_text_key(field, enc)
     }
 }
 
-/// Decode a field into UTF-8 bytes without normalization. Group-by uses this so
-/// existing decoded-key buckets stay behaviorally unchanged.
-pub(crate) fn decoded_text_key(
+pub(crate) fn decoded_text_key_into(
     raw: &[u8],
     enc: Encoding,
     col: Option<usize>,
     spec: &FieldSpec,
-    scratch: &mut Vec<u8>,
-) -> Vec<u8> {
-    let field = field_bytes(raw, col, spec, scratch);
-    enc.decode_line(field).into_bytes()
+    field_scratch: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) {
+    out.clear();
+    let field = field_bytes(raw, col, spec, field_scratch);
+    out.extend_from_slice(enc.decode_line(field).as_bytes());
 }
 
 fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {

@@ -80,10 +80,16 @@ fn sort_uses_bounded_fan_in_multi_pass_merge() {
         assert_eq!(l, &format!("{i:03},row{i}"));
     }
 
+    let ordering_name = res
+        .ordering_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let leftovers: Vec<_> = std::fs::read_dir(spill.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| name != "ordering.bin")
+        .filter(|name| name != &ordering_name)
         .collect();
     assert!(
         leftovers.is_empty(),
@@ -300,4 +306,35 @@ fn numeric_handles_negatives_and_floats() {
     let res = sort(&doc, &opts).unwrap();
     let lines = sorted_lines(&doc, &res);
     assert_eq!(lines, vec!["-100.25", "-2", "0", "3.5", "10"]);
+}
+
+#[test]
+fn numeric_sort_and_top_push_invalid_values_to_the_end_for_largest() {
+    let data = b"value\n10\nN/A\n3\nNaN\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let sort_opts = SortOptions {
+        key_column: None,
+        numeric: true,
+        reverse: true,
+        budget_bytes: 1 << 20,
+        spill_dir: spill.path().join("sort"),
+        ..Default::default()
+    };
+    let res = sort(&doc, &sort_opts).unwrap();
+    let lines = sorted_lines(&doc, &res);
+    assert_eq!(lines, vec!["10", "3", "value", "N/A", "NaN"]);
+
+    let top_opts = TopOptions {
+        key_column: None,
+        n: 2,
+        largest: true,
+        numeric: true,
+        fields: FieldSpec::default(),
+    };
+    let top: Vec<_> = top_n(&doc, &top_opts)
+        .into_iter()
+        .map(|line| doc.line(line).unwrap())
+        .collect();
+    assert_eq!(top, vec!["10", "3"]);
 }

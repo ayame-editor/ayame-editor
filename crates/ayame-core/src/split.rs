@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::fsync::fsync_parent;
 use crate::transform::temp_path;
 use crate::{Document, Error, Result};
 
@@ -125,6 +126,7 @@ fn write_part(doc: &Document, start: u64, end: u64, first: bool, target: &Path) 
         let _ = std::fs::remove_file(&tmp);
         return Err(Error::Io(e));
     }
+    fsync_parent(target);
     Ok(())
 }
 

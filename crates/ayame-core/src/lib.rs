@@ -37,6 +37,7 @@ pub mod document;
 pub mod edit;
 pub mod encoding;
 mod fields;
+mod fsync;
 pub mod grep;
 pub mod index;
 pub mod ops;

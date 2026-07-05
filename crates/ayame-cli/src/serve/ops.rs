@@ -903,7 +903,36 @@ fn requested_or_default(path: &Path, requested: Option<&str>, suffix: &str) -> P
 
 fn spawn_dir(kind: &str) -> PathBuf {
     let n = REQ_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
-    std::env::temp_dir().join(format!("ayame-srv-{kind}-{}-{}", std::process::id(), n))
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for attempt in 0..1000u32 {
+        let dir = std::env::temp_dir().join(format!(
+            "ayame-srv-{kind}-{}-{n}-{seed:x}-{attempt}",
+            std::process::id()
+        ));
+        match create_private_dir(&dir) {
+            Ok(()) => return dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => continue,
+        }
+    }
+    std::env::temp_dir().join(format!(
+        "ayame-srv-{kind}-{}-{n}-{seed:x}",
+        std::process::id()
+    ))
+}
+
+#[cfg(unix)]
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(path)
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(path)
 }
 
 /// A [`Command`] re-invoking this same binary — every op worker is an isolated

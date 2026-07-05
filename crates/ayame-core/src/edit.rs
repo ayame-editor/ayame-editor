@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::fsync::fsync_parent;
 use crate::wal::{LoggedOp, WalWriter};
 use crate::{Document, Error, Result};
 
@@ -1238,6 +1239,7 @@ impl EditSession {
         let mut w = BufWriter::new(file);
 
         w.write_all(doc.prefix_bytes())?;
+        let mut output = OutputState::default();
         let original_total = doc.line_count();
         // Walk only the (sparse) edited anchors. Every run of untouched
         // original lines between two anchors is one contiguous mmap byte
@@ -1246,10 +1248,10 @@ impl EditSession {
         // access, which cost O(lines × stride).
         let mut next_unwritten = 0u64;
         for (&anchor, ev) in self.events.range(..original_total) {
-            copy_original_span(&mut w, doc, next_unwritten, anchor)?;
+            copy_original_span(&mut w, doc, next_unwritten, anchor, &mut output)?;
             next_unwritten = anchor;
             for text in &ev.inserts {
-                write_edited_line(&mut w, doc, text, doc.default_terminator())?;
+                write_edited_line(&mut w, doc, text, doc.default_terminator(), &mut output)?;
             }
             if ev.deleted {
                 next_unwritten = anchor + 1;
@@ -1257,27 +1259,23 @@ impl EditSession {
             }
             if let Some(text) = &ev.replacement {
                 let term = doc.line_terminator(anchor).unwrap_or(b"");
-                write_edited_line(&mut w, doc, text, term)?;
+                write_edited_line(&mut w, doc, text, term, &mut output)?;
                 next_unwritten = anchor + 1;
             }
             // An event carrying only inserts leaves its anchor line untouched;
             // `next_unwritten` stays at `anchor` so the next contiguous copy
             // starts with that original line.
         }
-        copy_original_span(&mut w, doc, next_unwritten, original_total)?;
+        copy_original_span(&mut w, doc, next_unwritten, original_total, &mut output)?;
 
         if let Some(ev) = self.events.get(&original_total) {
-            if !ev.inserts.is_empty()
-                && original_total > 0
-                && doc
-                    .line_terminator(original_total - 1)
-                    .unwrap_or(b"")
-                    .is_empty()
-            {
-                w.write_all(doc.default_terminator())?;
+            if !ev.inserts.is_empty() && output.wrote_content && !output.ended_with_terminator {
+                let term = doc.default_terminator();
+                w.write_all(term)?;
+                output.mark_bytes(term);
             }
             for text in &ev.inserts {
-                write_edited_line(&mut w, doc, text, doc.default_terminator())?;
+                write_edited_line(&mut w, doc, text, doc.default_terminator(), &mut output)?;
             }
         }
 
@@ -1494,7 +1492,34 @@ fn push_history(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
 
 /// Copy original lines `[start, end)` (with their terminators) as one
 /// contiguous byte range out of the mmap.
-fn copy_original_span(mut w: impl Write, doc: &Document, start: u64, end: u64) -> Result<()> {
+#[derive(Default)]
+struct OutputState {
+    wrote_content: bool,
+    ended_with_terminator: bool,
+}
+
+impl OutputState {
+    fn mark_bytes(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.wrote_content = true;
+        self.ended_with_terminator = bytes.ends_with(b"\n") || bytes.ends_with(b"\r");
+    }
+
+    fn mark_line(&mut self, terminator: &[u8]) {
+        self.wrote_content = true;
+        self.ended_with_terminator = !terminator.is_empty();
+    }
+}
+
+fn copy_original_span(
+    mut w: impl Write,
+    doc: &Document,
+    start: u64,
+    end: u64,
+    output: &mut OutputState,
+) -> Result<()> {
     if start >= end {
         return Ok(());
     }
@@ -1506,6 +1531,7 @@ fn copy_original_span(mut w: impl Write, doc: &Document, start: u64, end: u64) -
         ))
     })?;
     w.write_all(bytes)?;
+    output.mark_bytes(bytes);
     Ok(())
 }
 
@@ -1514,6 +1540,7 @@ fn write_edited_line(
     doc: &Document,
     text: &str,
     terminator: &[u8],
+    output: &mut OutputState,
 ) -> Result<()> {
     let bytes = doc.encoding().encode_text(text).ok_or_else(|| {
         Error::Unsupported(format!(
@@ -1523,6 +1550,7 @@ fn write_edited_line(
     })?;
     w.write_all(&bytes)?;
     w.write_all(terminator)?;
+    output.mark_line(terminator);
     Ok(())
 }
 
@@ -1531,13 +1559,22 @@ fn write_edited_line(
 /// The temp file is cleaned up on any failure.
 fn commit_temp_file(tmp: &Path, target: &Path, overwrite: bool) -> Result<()> {
     match std::fs::rename(tmp, target) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            fsync_parent(target);
+            Ok(())
+        }
         Err(_) if overwrite && target.exists() => {
             std::fs::remove_file(target)?;
-            std::fs::rename(tmp, target).map_err(|e| {
-                let _ = std::fs::remove_file(tmp);
-                Error::Io(e)
-            })
+            match std::fs::rename(tmp, target) {
+                Ok(()) => {
+                    fsync_parent(target);
+                    Ok(())
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(tmp);
+                    Err(Error::Io(e))
+                }
+            }
         }
         Err(e) => {
             let _ = std::fs::remove_file(tmp);
@@ -1700,6 +1737,34 @@ mod tests {
         edits.insert_line_before(&doc, 3, "d".into()).unwrap();
         edits.save_to_path(&doc, &out).unwrap();
         assert_eq!(std::fs::read(&out).unwrap(), b"a\r\nB\r\nc\r\nd\r\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn save_stream_does_not_add_blank_line_after_deleted_final_line() {
+        let (f, doc) = doc_from(b"a\nb");
+        let out = f.path().with_extension("delete-final");
+        let mut edits = EditSession::default();
+        edits.delete_line(&doc, 1).unwrap();
+        edits
+            .insert_line_before(&doc, edits.total_lines(&doc), "x".into())
+            .unwrap();
+        edits.save_to_path(&doc, &out).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"a\nx\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn save_stream_does_not_prefix_newline_when_every_original_line_is_deleted() {
+        let (f, doc) = doc_from(b"b");
+        let out = f.path().with_extension("delete-only");
+        let mut edits = EditSession::default();
+        edits.delete_line(&doc, 0).unwrap();
+        edits
+            .insert_line_before(&doc, edits.total_lines(&doc), "x".into())
+            .unwrap();
+        edits.save_to_path(&doc, &out).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"x\n");
         let _ = std::fs::remove_file(out);
     }
 

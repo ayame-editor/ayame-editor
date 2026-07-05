@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 
 use crate::document::Document;
-use crate::fields::{decoded_text_key, field_bytes, FieldSpec};
+use crate::fields::{decoded_text_key_into, field_bytes, FieldSpec};
 use crate::Result;
 
-use super::common::read_full;
+use super::common::{read_full, unique_spill_dir};
 
 // ======================= group-by (hash aggregation) =========================
 
@@ -117,7 +117,7 @@ pub fn group(
     mut emit: impl FnMut(&GroupRow),
 ) -> Result<GroupStats> {
     use std::collections::HashMap;
-    fs::create_dir_all(&opts.spill_dir)?;
+    let spill_dir = unique_spill_dir(&opts.spill_dir)?;
     let enc = doc.encoding();
     let total = doc.line_count();
 
@@ -128,7 +128,8 @@ pub fn group(
 
     const BATCH: u64 = 8192;
     let mut start = 0u64;
-    let mut scratch = Vec::new();
+    let mut field_scratch = Vec::new();
+    let mut key_scratch = Vec::new();
     while start < total {
         let batch = doc.raw_line_ranges(start, BATCH);
         if batch.is_empty() {
@@ -136,20 +137,27 @@ pub fn group(
         }
         let advanced = batch.len() as u64;
         for (_ln, raw) in batch {
-            let key = decoded_text_key(raw, enc, opts.key_column, &opts.fields, &mut scratch);
+            decoded_text_key_into(
+                raw,
+                enc,
+                opts.key_column,
+                &opts.fields,
+                &mut field_scratch,
+                &mut key_scratch,
+            );
             let value = opts.value_column.and_then(|c| {
-                let f = field_bytes(raw, Some(c), &opts.fields, &mut scratch);
+                let f = field_bytes(raw, Some(c), &opts.fields, &mut field_scratch);
                 enc.decode_line(f).trim().parse::<f64>().ok()
             });
-            match map.get_mut(&key) {
+            match map.get_mut(key_scratch.as_slice()) {
                 Some(acc) => acc.add(value),
                 None => {
-                    map_bytes += key.len() + std::mem::size_of::<Acc>() + 48;
+                    map_bytes += key_scratch.len() + std::mem::size_of::<Acc>() + 48;
                     let mut acc = Acc::new();
                     acc.add(value);
-                    map.insert(key, acc);
+                    map.insert(key_scratch.clone(), acc);
                     if map_bytes >= opts.budget_bytes {
-                        spill_bytes += spill_group(&mut map, &opts.spill_dir, &mut runs)?;
+                        spill_bytes += spill_group(&mut map, &spill_dir, &mut runs)?;
                         map_bytes = 0;
                     }
                 }
@@ -169,13 +177,14 @@ pub fn group(
         }
     } else {
         if !map.is_empty() {
-            spill_bytes += spill_group(&mut map, &opts.spill_dir, &mut runs)?;
+            spill_bytes += spill_group(&mut map, &spill_dir, &mut runs)?;
         }
         groups = merge_groups(&runs, &mut emit)?;
         for r in &runs {
             let _ = fs::remove_file(r);
         }
     }
+    let _ = fs::remove_dir(&spill_dir);
 
     Ok(GroupStats {
         groups,

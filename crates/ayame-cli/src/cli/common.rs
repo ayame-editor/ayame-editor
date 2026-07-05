@@ -38,14 +38,44 @@ pub(crate) fn temp_sibling_with_label(path: &Path, label: &str) -> PathBuf {
         .map(|n| n.to_string_lossy())
         .unwrap_or_else(|| label.into());
     let mut tmp = path.to_path_buf();
-    tmp.set_file_name(format!(".{name}.{label}.{}.tmp", std::process::id()));
+    tmp.set_file_name(format!(
+        ".{name}.{label}.{}-{}.tmp",
+        std::process::id(),
+        unique_suffix()
+    ));
     tmp
 }
 
 pub(crate) fn temp_work_dir(kind: &str) -> PathBuf {
-    let nanos = SystemTime::now()
+    let seed = unique_suffix();
+    for attempt in 0..1000u32 {
+        let dir = std::env::temp_dir().join(format!(
+            "ayame-{kind}-{}-{seed:x}-{attempt}",
+            std::process::id()
+        ));
+        match create_private_dir(&dir) {
+            Ok(()) => return dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => continue,
+        }
+    }
+    std::env::temp_dir().join(format!("ayame-{kind}-{}-{seed:x}", std::process::id()))
+}
+
+fn unique_suffix() -> u128 {
+    SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("ayame-{kind}-{}-{nanos}", std::process::id()))
+        .unwrap_or(0)
+}
+
+#[cfg(unix)]
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(path)
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(path)
 }

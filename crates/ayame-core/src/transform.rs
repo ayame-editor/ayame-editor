@@ -12,6 +12,7 @@ use memchr::memmem;
 use rayon::prelude::*;
 use serde::Serialize;
 
+use crate::fsync::fsync_parent;
 use crate::{Document, Encoding, Error, Result};
 
 const BATCH: u64 = 8192;
@@ -191,6 +192,7 @@ pub fn replace_to_path_parallel(
         out.get_ref().sync_all()?;
         drop(out);
         std::fs::rename(&tmp, target)?;
+        fsync_parent(target);
         let bytes = std::fs::metadata(target)?.len();
         Ok(TransformResult {
             path: target.to_path_buf(),
@@ -245,6 +247,7 @@ where
     drop(w);
     match std::fs::rename(&tmp, target) {
         Ok(()) => {
+            fsync_parent(target);
             let bytes = std::fs::metadata(target)?.len();
             Ok(TransformResult {
                 path: target.to_path_buf(),
@@ -273,6 +276,7 @@ fn write_empty_transform(doc: &Document, target: &Path) -> Result<TransformResul
     w.get_ref().sync_all()?;
     drop(w);
     std::fs::rename(&tmp, target)?;
+    fsync_parent(target);
     let bytes = std::fs::metadata(target)?.len();
     Ok(TransformResult {
         path: target.to_path_buf(),

@@ -294,6 +294,10 @@ impl Document {
     pub fn line_col_byte(&self, i: u64, col: u64) -> Option<u64> {
         let buf = self.buf();
         let (s, e) = self.index.line_range(buf, i)?;
+        if matches!(self.encoding, Encoding::ShiftJis | Encoding::EucJp) {
+            let off = legacy_col_offset(self.encoding, &buf[s as usize..e as usize], col)?;
+            return Some(s + off as u64);
+        }
         let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
         let prefix: String = text.chars().take(col as usize).collect();
         let encoded = self.encoding.encode_query(&prefix)?;
@@ -433,6 +437,43 @@ impl Document {
             byte: before_byte,
         };
         search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)
+    }
+}
+
+fn legacy_col_offset(enc: Encoding, raw: &[u8], col: u64) -> Option<usize> {
+    let mut offset = 0usize;
+    for _ in 0..col {
+        if offset >= raw.len() {
+            return None;
+        }
+        offset += legacy_step(enc, raw, offset);
+    }
+    Some(offset.min(raw.len()))
+}
+
+fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
+    let b = raw[i];
+    match enc {
+        Encoding::ShiftJis => {
+            if matches!(b, 0x81..=0x9F | 0xE0..=0xFC)
+                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC))
+            {
+                2
+            } else {
+                1
+            }
+        }
+        Encoding::EucJp => match b {
+            0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
+            0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))
+                && matches!(raw.get(i + 2).copied(), Some(0xA1..=0xFE)) =>
+            {
+                3
+            }
+            0xA1..=0xFE if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE)) => 2,
+            _ => 1,
+        },
+        _ => 1,
     }
 }
 
@@ -597,6 +638,22 @@ mod tests {
         assert_eq!(doc.line_count(), 0);
         assert!(doc.line(0).is_none());
         assert!(doc.lines(0, 10).is_empty());
+    }
+
+    #[test]
+    fn legacy_line_col_byte_walks_raw_bytes_after_malformed_byte() {
+        let f = write_temp(&[0x82, b'\n']);
+        let doc = Document::open(
+            f.path(),
+            &OpenOptions {
+                encoding: Some(Encoding::ShiftJis),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(doc.line_col_byte(0, 0), Some(0));
+        assert_eq!(doc.line_col_byte(0, 1), Some(1));
     }
 
     #[test]
