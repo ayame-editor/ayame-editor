@@ -273,7 +273,7 @@ pub(super) async fn api_upload(
 // ---- per-process scratch directories ------------------------------------------
 
 fn upload_limit_label() -> String {
-    if MAX_UPLOAD_BYTES >= (1 << 30) && MAX_UPLOAD_BYTES % (1 << 30) == 0 {
+    if MAX_UPLOAD_BYTES >= (1 << 30) && MAX_UPLOAD_BYTES.is_multiple_of(1 << 30) {
         format!("{} GiB", MAX_UPLOAD_BYTES >> 30)
     } else {
         format!("{} bytes", MAX_UPLOAD_BYTES)
@@ -296,7 +296,7 @@ fn scratch_dir_result(
             }
             Ok(path.clone())
         }
-        Err(msg) => Err(std::io::Error::new(std::io::ErrorKind::Other, msg.clone())),
+        Err(msg) => Err(std::io::Error::other(msg.clone())),
     }
 }
 

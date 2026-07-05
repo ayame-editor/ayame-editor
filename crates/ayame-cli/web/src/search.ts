@@ -426,9 +426,7 @@ export async function replaceCurrent() {
     return;
   }
   try {
-    const res = await api<FindResponse>(
-      `/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`,
-    );
+    const res = await api<FindResponse>(`/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`);
     const h = res.hit;
     if (!h || h.byte !== state.lastMatch.byte) {
       await findStep("next");

@@ -1,4 +1,4 @@
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,9 +12,8 @@ pub(crate) fn unique_component() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let state = std::collections::hash_map::RandomState::new();
-    let mut hasher = state.build_hasher();
-    (std::process::id(), seq, nanos).hash(&mut hasher);
-    format!("{:016x}-{:x}", hasher.finish(), seq)
+    let hash = state.hash_one((std::process::id(), seq, nanos));
+    format!("{hash:016x}-{seq:x}")
 }
 
 pub(crate) fn temp_sibling_with_label(path: &Path, label: &str) -> PathBuf {

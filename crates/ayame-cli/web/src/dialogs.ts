@@ -198,7 +198,9 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
   return runModal(
     modal,
     () =>
-      queueMicrotask(() => body.querySelector<HTMLInputElement | HTMLSelectElement>("input, select")?.focus()),
+      queueMicrotask(() =>
+        body.querySelector<HTMLInputElement | HTMLSelectElement>("input, select")?.focus(),
+      ),
     (finish, on) => {
       const collect = () =>
         Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));

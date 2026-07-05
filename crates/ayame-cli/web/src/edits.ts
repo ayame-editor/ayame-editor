@@ -257,10 +257,9 @@ export async function applyRect(l0, l1, c0, c1, text) {
 export async function applyBatch(edits, cursors, editOf) {
   const ctx = editContext();
   const gen = state.editGen;
-  const res = await apiPost<BatchEditResponse, { edits: unknown[] }>(
-    "/api/edit/replace_batch",
-    { edits },
-  );
+  const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
+    edits,
+  });
   if (!sameEditContext(ctx)) return;
   state.total = res.stats.total_lines;
   if (state.editGen === gen) {
