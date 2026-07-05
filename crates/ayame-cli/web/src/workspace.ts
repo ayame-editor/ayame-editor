@@ -305,7 +305,11 @@ export async function commitOpener() {
     if (target) finishSaveDialog(target);
     return;
   }
-  openPath($("opener-input").value);
+  // Like save mode: a typed relative name means "in the folder being
+  // browsed", not relative to wherever the server process was launched.
+  const raw = $("opener-input").value.trim();
+  if (!raw) return;
+  openPath(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
 }
 
 // A pristine untitled buffer (never typed in, never saved) is replaced when a
@@ -521,13 +525,15 @@ export async function selectTab(id) {
 
 export async function closeTab(id) {
   await settleEditQueue();
+  // A save in flight is a hard barrier for BOTH branches: closing the tab
+  // server-side while its save is still writing races the commit.
+  if (savingCount > 0) {
+    flashCount(t("editor.savingWait"));
+    return;
+  }
   const tab = state.tabs.find((x) => x.id === id);
   const isLast = (state.tabs || []).length <= 1;
   if (isLast) {
-    if (savingCount > 0) {
-      flashCount(t("editor.savingWait"));
-      return;
-    }
     if (!(await confirmCloseLastTab(tab))) return;
     if (requestEditorClose()) return;
   } else if (tab && tab.dirty) {

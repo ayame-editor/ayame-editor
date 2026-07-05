@@ -10,6 +10,7 @@ import {
   focusEditor,
   lineChars,
   lineLen,
+  moveCaret,
   rowsVisible,
   scheduleRender,
   setCaret,
@@ -293,15 +294,33 @@ export async function saveSelectionToFile() {
   }
 }
 
-export function selectAll() {
+export async function selectAll() {
   if (state.total === 0) return;
   const last = state.total - 1;
+  // lineLen() guesses 0 for lines outside the cache window; a guessed head of
+  // (last, 0) would make "select all → delete/type" silently spare the last
+  // line's text. Resolve the real end-of-document column first, and select
+  // nothing rather than almost-everything if it cannot be resolved.
+  const len = (await lineLensFor([last])).get(last);
+  if (len == null) return;
   state.sel = {
     anchor: { line: 0, col: 0 },
-    head: { line: last, col: lineLen(last) },
+    head: { line: last, col: len },
   };
-  setCaret(last, lineLen(last));
+  setCaret(last, len, len);
   focusEditor();
+  scheduleRender();
+}
+
+// Ctrl+End: the caret target is the end of the (usually uncached) last line —
+// resolve its real length like selectAll does, never lineLen()'s guessed 0.
+export async function caretToDocEnd(extend) {
+  if (state.total === 0) return;
+  const last = state.total - 1;
+  const len = (await lineLensFor([last])).get(last);
+  if (len == null) return;
+  moveCaret(last, len, extend, len);
+  state.goalCol = state.caret.col;
 }
 
 export function rangeLineCount(r) {

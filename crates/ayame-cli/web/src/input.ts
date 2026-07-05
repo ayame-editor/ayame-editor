@@ -32,6 +32,7 @@ import {
   clearExtraCursors,
   copySelection,
   cutSelection,
+  caretToDocEnd,
   selectAll,
 } from "./selection.js";
 import {
@@ -603,10 +604,11 @@ export function onEditKey(e) {
     case "End":
       take();
       if (mod) {
-        const last = state.total - 1;
-        moveCaret(last, lineLen(last), shift);
-      } else moveCaret(c.line, lineLen(c.line), shift);
-      state.goalCol = state.caret.col;
+        caretToDocEnd(shift); // async: resolves the uncached last line's length
+      } else {
+        moveCaret(c.line, lineLen(c.line), shift);
+        state.goalCol = state.caret.col;
+      }
       return;
     case "PageUp":
       take();

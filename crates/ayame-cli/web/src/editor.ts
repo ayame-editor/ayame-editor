@@ -458,9 +458,11 @@ export function clearLineCache() {
 
 // Move the caret without touching the selection model wholesale (callers set
 // state.sel themselves). Keeps the active-line highlight on the caret line.
-export function setCaret(line, col) {
+// `knownLen` bypasses the lineLen() clamp for a column the caller resolved
+// from the server — lineLen() guesses 0 outside the cache window.
+export function setCaret(line, col, knownLen = null) {
   line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
-  col = Math.max(0, Math.min(col, lineLen(line)));
+  col = Math.max(0, Math.min(col, knownLen ?? lineLen(line)));
   state.caret = { line, col };
   state.activeLine = line;
   state.extraCursors = []; // any explicit caret placement collapses multi-cursor
@@ -468,9 +470,10 @@ export function setCaret(line, col) {
 }
 
 // Caret motion for the keyboard: `extend` grows the selection from its anchor.
-export function moveCaret(line, col, extend) {
+// `knownLen` as in setCaret: a server-resolved length for an uncached line.
+export function moveCaret(line, col, extend, knownLen = null) {
   line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
-  col = Math.max(0, Math.min(col, lineLen(line)));
+  col = Math.max(0, Math.min(col, knownLen ?? lineLen(line)));
   if (extend) {
     const anchor = state.sel ? state.sel.anchor : { ...state.caret };
     state.sel = { anchor, head: { line, col } };
