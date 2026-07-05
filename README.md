@@ -52,6 +52,3 @@ Useful CLI commands, default shortcuts, install notes, build steps, and Linux ru
 ## License
 
 0BSD. You can use, copy, modify, and distribute this project for almost any purpose.
-
-
-MIT

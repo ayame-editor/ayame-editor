@@ -50,4 +50,4 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 
 ## ライセンス
 
-MIT
+0BSD。ほぼすべての目的で、このプロジェクトを使用、コピー、変更、配布できます。

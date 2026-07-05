@@ -6,8 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
-
-license = "0BSD"
 [dependencies]
 anyhow = { workspace = true }
 sha2 = "0.10"

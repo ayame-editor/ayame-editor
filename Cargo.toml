@@ -5,7 +5,7 @@ members = ["crates/ayame-core", "crates/ayame-cli", "xtask"]
 [workspace.package]
 version = "0.5.3"
 edition = "2021"
-license = "MIT"
+license = "0BSD"
 repository = "https://github.com/hjosugi/ayame-editor"
 
 # One lint policy for every crate (each opts in with `[lints] workspace = true`).
