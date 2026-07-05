@@ -116,8 +116,10 @@ EXAMPLES:
     ayame stat huge.csv
     ayame gen huge.csv --lines 100000000
     ayame search huge.log 'ERROR' -i --max 50
+    ayame sort huge.csv --out sorted.csv
     ayame replace huge.log ERROR WARN --out fixed.log
     ayame case huge.csv lower --out lower.csv
+    ayame split huge.csv --lines 1000000
     ayame sortdiff old.csv new.csv -k 1 --summary
     ayame serve huge.csv --port 8777
 ";

@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "ayame-cli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "ayame-core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "chardetng",
  "csv-core",
@@ -3973,7 +3973,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "sha2",

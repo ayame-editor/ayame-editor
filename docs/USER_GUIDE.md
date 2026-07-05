@@ -54,4 +54,51 @@ ayame replace huge.log ERROR WARN --out fixed.log
 ayame split huge.csv --lines 1000000
 ```
 
-Use `ayame --help` for the full command list.
+These examples match the current `ayame --help` output. `sort --out <FILE>`
+writes sorted text to a file; without `--out`, `sort` writes to stdout.
+`replace` and `case` require `--out <FILE>`. `split` writes parts next to the
+input by default, using `<stem>.partNNNN<.ext>` names. Output commands refuse to
+overwrite existing files, so choose a new path when the target already exists.
+
+Use `ayame --help` for the full command and option list.
+
+## Main Features
+
+- Opens huge files without loading the whole file into memory.
+- Supports UTF-8, Shift_JIS, EUC-JP, and ASCII. If text is garbled, reopen with an explicit encoding.
+- Supports literal search, regex search, whole-word search, and case-insensitive search.
+- Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
+- Runs sort, replace, two-file diff, folder grep, split, and ASCII upper/lower conversion from the GUI.
+- Includes tabs, an explorer, recent files, and tail-follow mode for appended logs.
+- Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
+- Keeps a crash-recovery log for unsaved edits.
+
+## Default Shortcuts
+
+`Ctrl` can be entered as `Cmd` on macOS. Shortcuts can be changed from
+`Settings` -> `Key Bindings`.
+
+| Action | Shortcut |
+| --- | --- |
+| New file | `Ctrl+N` |
+| New window | `Ctrl+Shift+N` |
+| Open | `Ctrl+O` |
+| Save | `Ctrl+S` |
+| Save as | `Ctrl+Shift+S` |
+| Close tab | `Ctrl+W`, `Alt+W` |
+| Command palette | `Ctrl+Shift+P` |
+| Toggle explorer | `Ctrl+B` |
+| Find | `Ctrl+F` |
+| Replace | `Ctrl+H` |
+| Next / previous match | `F3`, `Shift+F3` |
+| Go to line | `Ctrl+G` |
+| Undo / redo | `Ctrl+Z`, `Ctrl+Y` or `Ctrl+Shift+Z` |
+| Select all | `Ctrl+A` |
+| Select next occurrence | `Ctrl+D` |
+| Add cursor above / below | `Ctrl+Alt+↑`, `Ctrl+Alt+↓` |
+| Duplicate line | `Ctrl+Shift+D` |
+| Move line up / down | `Alt+↑`, `Alt+↓` |
+| Delete line | `Ctrl+Shift+K` |
+| Copy / cut | `Ctrl+C`, `Ctrl+X` |
+| Search options: case / word / regex | `Alt+C`, `Alt+W`, `Alt+R` |
+| Close the find bar or a dialog | `Esc` |
