@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::fsync::fsync_parent;
+use crate::fsync::{fsync_parent, replace_with_staged};
 use crate::wal::{LoggedOp, WalWriter};
 use crate::{Document, Error, Result};
 
@@ -1768,27 +1768,23 @@ fn write_edited_line(
     Ok(())
 }
 
-/// Rename the fully-written temp file onto `target`. When `overwrite` is set and
-/// the plain rename fails because `target` exists (Windows), remove and retry.
+/// Rename the fully-written temp file onto `target`. When `overwrite` is set
+/// and the plain rename fails because `target` exists (Windows), preserve the
+/// existing file under an aside name while promoting the temp file.
 /// The temp file is cleaned up on any failure.
 fn commit_temp_file(tmp: &Path, target: &Path, overwrite: bool) -> Result<()> {
+    if overwrite {
+        if let Err(e) = replace_with_staged(tmp, target) {
+            let _ = std::fs::remove_file(tmp);
+            return Err(Error::Io(e));
+        }
+        return Ok(());
+    }
+
     match std::fs::rename(tmp, target) {
         Ok(()) => {
             fsync_parent(target);
             Ok(())
-        }
-        Err(_) if overwrite && target.exists() => {
-            std::fs::remove_file(target)?;
-            match std::fs::rename(tmp, target) {
-                Ok(()) => {
-                    fsync_parent(target);
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = std::fs::remove_file(tmp);
-                    Err(Error::Io(e))
-                }
-            }
         }
         Err(e) => {
             let _ = std::fs::remove_file(tmp);

@@ -455,16 +455,19 @@ pub(super) fn replace_existing_file(stage: &Path, target: &Path) -> std::io::Res
     match std::fs::rename(stage, target) {
         Ok(()) => {}
         Err(first) if target.exists() => {
-            std::fs::remove_file(target).map_err(|e| keep_stage_error(e, stage))?;
-            std::fs::rename(stage, target).map_err(|second| {
-                keep_stage_error(
+            let aside = workspace::aside_path(target);
+            std::fs::rename(target, &aside).map_err(|e| keep_stage_error(e, stage))?;
+            if let Err(second) = std::fs::rename(stage, target) {
+                let _ = std::fs::rename(&aside, target);
+                return Err(keep_stage_error(
                     std::io::Error::new(
                         second.kind(),
                         format!("replace failed after initial rename error: {first}; {second}"),
                     ),
                     stage,
-                )
-            })?;
+                ));
+            }
+            let _ = std::fs::remove_file(&aside);
         }
         Err(e) => return Err(keep_stage_error(e, stage)),
     }

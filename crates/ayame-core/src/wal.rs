@@ -61,6 +61,7 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 
 use crate::edit::{BatchEdit, EditSession, OverlaySnapshot, RebaseSource, HISTORY_LIMIT};
+use crate::fsync::fsync_parent;
 use crate::{Document, Error, Result};
 
 /// Format version. Bumped on any incompatible change; a log with a different
@@ -555,9 +556,7 @@ fn install_staged(tmp: &Path, path: &Path) -> Result<()> {
     // The target is authoritative now; a leftover aside copy (from an
     // interrupted earlier fallback) must not shadow future crash windows.
     let _ = std::fs::remove_file(aside_path(path));
-    if let Some(parent) = path.parent() {
-        fsync_dir(parent);
-    }
+    fsync_parent(path);
     Ok(())
 }
 
@@ -589,19 +588,6 @@ fn rename_via_aside(tmp: &Path, path: &Path) -> std::io::Result<()> {
     let _ = std::fs::remove_file(&aside);
     Ok(())
 }
-
-/// fsync the directory so a completed rename survives power loss.
-/// Best-effort: errors are ignored, and Windows has no directory handles to
-/// sync (its rename metadata semantics differ anyway).
-#[cfg(unix)]
-fn fsync_dir(dir: &Path) {
-    if let Ok(d) = File::open(dir) {
-        let _ = d.sync_all();
-    }
-}
-
-#[cfg(not(unix))]
-fn fsync_dir(_dir: &Path) {}
 
 /// Open the log at `path` for reading, falling back to its rename-aside copy
 /// when the target is missing. `Ok(None)` means neither exists.
