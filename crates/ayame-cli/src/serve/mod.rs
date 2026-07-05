@@ -15,7 +15,7 @@
 //! `--allow-remote` is given; every request passes the Host/Origin checks in
 //! [`security`] (DNS-rebinding and CSRF protection).
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -213,9 +213,14 @@ async fn serve(
 ) -> Result<()> {
     spawn_wal_policy(&state);
     let app = router(state.clone(), policy);
-    let addr: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .context("invalid host/port")?;
+    // Resolve rather than parse: the loopback policy blesses the NAME
+    // "localhost", so binding must accept it too (SocketAddr::from_str takes
+    // only IP literals). Bare IPv6 literals like `::1` also come out right.
+    let addr: SocketAddr = (host.as_str(), port)
+        .to_socket_addrs()
+        .with_context(|| format!("invalid host/port '{host}:{port}'"))?
+        .next()
+        .with_context(|| format!("host '{host}' resolved to no addresses"))?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;

@@ -861,6 +861,29 @@ impl AppState {
     /// fresh, clean edit session, and drop the old document's aside files.
     /// Caller must hold the transitions lock.
     pub(super) async fn reload_reverted(&self, path: PathBuf) -> Result<(), (StatusCode, String)> {
+        self.reload_clean(path, None).await
+    }
+
+    /// Like [`AppState::reload_reverted`], but commits only if the workspace
+    /// still matches `snap` (same document identity, same edit revision) —
+    /// re-checked INSIDE the write that installs the reloaded document, so an
+    /// edit that lands while the reload is reopening the file is never
+    /// clobbered. Save-then-reload commits (変換して保存, save-as switch) must
+    /// use this: they clear the overlay, and the transitions lock alone does
+    /// not exclude edit requests. Caller must hold the transitions lock.
+    pub(super) async fn reload_reverted_if_unchanged(
+        &self,
+        path: PathBuf,
+        snap: &EditSnapshot,
+    ) -> Result<(), (StatusCode, String)> {
+        self.reload_clean(path, Some(snap)).await
+    }
+
+    async fn reload_clean(
+        &self,
+        path: PathBuf,
+        snap: Option<&EditSnapshot>,
+    ) -> Result<(), (StatusCode, String)> {
         let opts = self.open_opts.clone();
         let p = path.clone();
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
@@ -873,13 +896,23 @@ impl AppState {
                 ))
             })?;
         let asides = self.write(|ws| {
+            if let Some(snap) = snap {
+                let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
+                if !same_doc || ws.edits.revision() != snap.revision {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        "the document changed while saving — nothing was overwritten; save again"
+                            .to_string(),
+                    ));
+                }
+            }
             ws.doc = Some(Arc::new(doc));
             ws.edits = EditSession::default();
             // Reset: a clean session over the file as it now exists on disk
             // gets a fresh, empty log for the new base identity.
             attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
-            std::mem::take(&mut ws.aside_files)
-        });
+            Ok(std::mem::take(&mut ws.aside_files))
+        })?;
         remove_aside_files(asides);
         self.invalidate_dirty_snapshot(); // the doc identity changed
         Ok(())

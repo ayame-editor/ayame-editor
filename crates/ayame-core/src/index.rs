@@ -389,6 +389,10 @@ impl LineIndex {
 
     /// Global line number containing byte offset `b` (clamped into content).
     pub fn line_of_byte(&self, buf: &[u8], b: u64) -> u64 {
+        // No lines (empty or BOM-only file) means no checkpoints to index into.
+        if self.checkpoints.is_empty() {
+            return 0;
+        }
         let b = b.clamp(self.base, self.len);
         let k = self
             .checkpoints
@@ -450,9 +454,11 @@ impl LineIndex {
         let len = rd(32);
         let line_count = rd(40);
         let n = rd(48) as usize;
-        if b.len() != 56 + n * 16 + 8 {
-            return None;
-        }
+        // Checked: `n` comes from the cache file, and FNV is not tamper-proof —
+        // a huge count must read as malformed, not overflow into a bogus size.
+        n.checked_mul(16)
+            .and_then(|x| x.checked_add(56 + 8))
+            .filter(|&x| x == b.len())?;
         let mut checkpoints = Vec::with_capacity(n);
         let mut o = 56;
         for _ in 0..n {

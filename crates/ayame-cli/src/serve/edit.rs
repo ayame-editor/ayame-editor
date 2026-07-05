@@ -269,14 +269,7 @@ pub(super) async fn api_edit_save(
         // Refresh the active tab from the converted file. Skipped (switched =
         // false) if edits landed while the rewrite was streaming, so no newer
         // edit is dropped — the client then falls back to a normal open.
-        let _transitions = state.lock_transitions().await;
-        let switched = state.confirm_overwrite(&snap).is_ok()
-            && state.reload_reverted(res.path.clone()).await.is_ok();
-        // The switch attached a fresh log to the converted file; the old
-        // path's log now describes saved-elsewhere edits — drop it.
-        if switched && !same_path(&res.path, &active_path) {
-            discard_wal_for(&state, &active_path).await;
-        }
+        let switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
         return Ok(Json(EditSaveResponse::from_result(res, switched)));
     }
 
@@ -300,19 +293,7 @@ pub(super) async fn api_edit_save(
         .map_err(bad_request)?;
         let mut switched = false;
         if req.switch_to_saved {
-            // Make the saved file the active tab's document (fresh, clean
-            // session — the saved bytes ARE the view). Skipped when the
-            // workspace moved on while the save was streaming; the client
-            // then falls back to opening the file normally.
-            let _transitions = state.lock_transitions().await;
-            if state.confirm_overwrite(&snap).is_ok() {
-                switched = state.reload_reverted(res.path.clone()).await.is_ok();
-            }
-            // The tab now logs against the saved file; the old path's crash
-            // log describes edits that were just saved — drop it.
-            if switched && !same_path(&res.path, &active_path) {
-                discard_wal_for(&state, &active_path).await;
-            }
+            switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
         }
         return Ok(Json(EditSaveResponse::from_result(res, switched)));
     }
@@ -397,6 +378,32 @@ fn swap_in_staged_file(
         return Err(keep_stage_error(e, stage));
     }
     Ok(aside_used)
+}
+
+/// Make `saved` the active tab's document (fresh, clean session — the saved
+/// bytes ARE the view). Skipped (returns false) when the workspace moved on
+/// while the save was streaming — the revision is re-checked inside the
+/// installing write, so an edit racing the reload is never clobbered; the
+/// client then falls back to opening the file normally. On a real switch the
+/// old path's crash log describes edits that were just saved — drop it.
+async fn switch_active_to_saved(
+    state: &SharedState,
+    snap: &super::state::EditSnapshot,
+    saved: &Path,
+    active_path: &Path,
+) -> bool {
+    let _transitions = state.lock_transitions().await;
+    if state.confirm_overwrite(snap).is_err() {
+        return false; // cheap pre-check: skip the reopen on a sure conflict
+    }
+    let switched = state
+        .reload_reverted_if_unchanged(saved.to_path_buf(), snap)
+        .await
+        .is_ok();
+    if switched && !same_path(saved, active_path) {
+        discard_wal_for(state, active_path).await;
+    }
+    switched
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -801,6 +808,46 @@ mod tests {
                 .read(|ws| pinned_selection_batch(ws, &pin, 0, 2))
                 .is_none(),
             "a swapped document must abort the export even when revision and total coincide"
+        );
+
+        let _ = std::fs::remove_file(&fa);
+        let _ = std::fs::remove_file(&fb);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn switch_to_saved_rejects_an_edit_that_raced_the_reload() {
+        let fa = scratch_file("switch-race-a.txt", b"a\nb\n");
+        let fb = scratch_file("switch-race-b.txt", b"x\ny\n");
+        let doc = Document::open(&fa, &OpenOptions::default()).unwrap();
+        let state: SharedState = Arc::new(AppState::new(Some(doc), OpenOptions::default()));
+
+        let mut snap = state.edit_snapshot().unwrap();
+        let _ = snap.take_edits(); // as api_edit_save does before streaming
+
+        // An edit lands between the snapshot and the reload commit (the
+        // save's streaming window) — the edit endpoints never take the
+        // transitions lock, so only the revision re-check inside the
+        // installing write can catch this.
+        state.write(|ws| {
+            let doc = ws.doc().unwrap().clone();
+            ws.edits
+                .replace_range(&doc, 0, 0, 0, 0, "typed during save")
+                .unwrap();
+        });
+
+        {
+            let _transitions = state.lock_transitions().await;
+            let res = state.reload_reverted_if_unchanged(fb.clone(), &snap).await;
+            assert_eq!(
+                res.err().map(|(code, _)| code),
+                Some(StatusCode::CONFLICT),
+                "a racing edit must reject the clean-session reload with 409"
+            );
+        }
+        // The racing edit survived — the session was not clobbered.
+        assert!(
+            state.read(|ws| ws.edits.has_edits()),
+            "the racing edit must still be pending after the rejected switch"
         );
 
         let _ = std::fs::remove_file(&fa);

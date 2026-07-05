@@ -4,6 +4,7 @@
 //! bytes, and streamed through a large `BufWriter` so producing tens of
 //! gigabytes stays I/O-bound rather than allocation-bound.
 
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
@@ -70,17 +71,17 @@ pub fn cmd_gen(args: &[String]) -> Result<()> {
     for i in 0..lines {
         line.clear();
         // col0: id
-        line.push_str(&i.to_string());
+        let _ = write!(line, "{i}");
         // col1: pseudo timestamp
         let r = lcg(&mut state);
-        line.push(',');
-        line.push_str(&format!(
-            "2026-06-30T{:02}:{:02}:{:02}.{:03}",
+        let _ = write!(
+            line,
+            ",2026-06-30T{:02}:{:02}:{:02}.{:03}",
             (i / 3600) % 24,
             (i / 60) % 60,
             i % 60,
             r % 1000
-        ));
+        );
         // col2: a word (Japanese for CJK encodings, to exercise the codec)
         line.push(',');
         if japanese {
@@ -93,8 +94,7 @@ pub fn cmd_gen(args: &[String]) -> Result<()> {
         line.push_str(STATUS[(lcg(&mut state) as usize) % STATUS.len()]);
         // col4..: numeric values
         for _ in 4..cols.max(5) {
-            line.push(',');
-            line.push_str(&(lcg(&mut state) % 1_000_000).to_string());
+            let _ = write!(line, ",{}", lcg(&mut state) % 1_000_000);
         }
         line.push('\n');
 
