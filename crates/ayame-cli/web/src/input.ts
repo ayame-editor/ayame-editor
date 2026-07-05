@@ -23,12 +23,7 @@ import {
   scheduleRender,
   setFirst,
 } from "./editor.js";
-import {
-  addCursorAbove,
-  addCursorBelow,
-  clearExtraCursors,
-  caretToDocEnd,
-} from "./selection.js";
+import { addCursorAbove, addCursorBelow, clearExtraCursors, caretToDocEnd } from "./selection.js";
 import {
   commandPaletteVisible,
   ctxMenuVisible,
@@ -76,10 +71,7 @@ import {
   updateCount,
 } from "./search.js";
 import { confirmVisible, formVisible, promptVisible } from "./dialogs.js";
-import {
-  hideOpener,
-  openerVisible,
-} from "./workspace.js";
+import { hideOpener, openerVisible } from "./workspace.js";
 import {
   applyKeymapFromBuffer,
   applyThemeFromBuffer,

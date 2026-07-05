@@ -17,8 +17,8 @@ function runModal(
   focus: () => void,
   setup: (
     finish: (value: any) => void,
-    on: (target: EventTarget, event: string, listener: EventListener) => void
-  ) => void
+    on: (target: EventTarget, event: string, listener: EventListener) => void,
+  ) => void,
 ): Promise<any> {
   return new Promise((resolve) => {
     const listeners: Listener[] = [];
@@ -59,28 +59,32 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
   okBtn.classList.toggle("primary", !opts.danger);
   cancelBtn.textContent = opts.cancelLabel || t("common.cancel");
   cancelBtn.classList.toggle("hidden", !!opts.alert);
-  return runModal(modal, () => queueMicrotask(() => okBtn.focus()), (finish, on) => {
-    const onOk = () => finish(true);
-    const onCancel = () => finish(false);
-    const onKey = (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        finish(true);
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        finish(false);
-      }
-    };
-    const onBackdrop = (ev) => {
-      if (ev.target === modal) finish(false);
-    };
-    on(okBtn, "click", onOk);
-    on(cancelBtn, "click", onCancel);
-    on($("confirm-close"), "click", onCancel);
-    on(modal, "mousedown", onBackdrop);
-    on(modal, "keydown", onKey);
-  });
+  return runModal(
+    modal,
+    () => queueMicrotask(() => okBtn.focus()),
+    (finish, on) => {
+      const onOk = () => finish(true);
+      const onCancel = () => finish(false);
+      const onKey = (ev) => {
+        ev.stopPropagation();
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          finish(true);
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          finish(false);
+        }
+      };
+      const onBackdrop = (ev) => {
+        if (ev.target === modal) finish(false);
+      };
+      on(okBtn, "click", onOk);
+      on(cancelBtn, "click", onCancel);
+      on($("confirm-close"), "click", onCancel);
+      on(modal, "mousedown", onBackdrop);
+      on(modal, "keydown", onKey);
+    },
+  );
 }
 
 // OK-only variant for error details and notices (replaces window.alert).
@@ -124,7 +128,7 @@ export function askPrompt(title, label, value = ""): Promise<any> {
       on($("prompt-cancel"), "click", onCancel);
       on($("prompt-close"), "click", onCancel);
       on(modal, "mousedown", backdropCancel(modal, finish));
-    }
+    },
   );
 }
 
@@ -190,27 +194,31 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
     }
     body.append(row);
   }
-  return runModal(modal, () => queueMicrotask(() => body.querySelector("input, select")?.focus()), (finish, on) => {
-    const collect = () =>
-      Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
-    const onOk = () => finish(collect());
-    const onCancel = () => finish(null);
-    const onKey = (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Enter" && ev.target.tagName !== "SELECT") {
-        ev.preventDefault();
-        finish(collect());
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        finish(null);
-      }
-    };
-    on($("form-ok"), "click", onOk);
-    on($("form-cancel"), "click", onCancel);
-    on($("form-close"), "click", onCancel);
-    on(modal, "mousedown", backdropCancel(modal, finish));
-    on(modal, "keydown", onKey);
-  });
+  return runModal(
+    modal,
+    () => queueMicrotask(() => body.querySelector("input, select")?.focus()),
+    (finish, on) => {
+      const collect = () =>
+        Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
+      const onOk = () => finish(collect());
+      const onCancel = () => finish(null);
+      const onKey = (ev) => {
+        ev.stopPropagation();
+        if (ev.key === "Enter" && ev.target.tagName !== "SELECT") {
+          ev.preventDefault();
+          finish(collect());
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          finish(null);
+        }
+      };
+      on($("form-ok"), "click", onOk);
+      on($("form-cancel"), "click", onCancel);
+      on($("form-close"), "click", onCancel);
+      on(modal, "mousedown", backdropCancel(modal, finish));
+      on(modal, "keydown", onKey);
+    },
+  );
 }
 
 // ---- loading overlay ------------------------------------------------------

@@ -103,7 +103,8 @@ export async function reloadActiveDocument({
   clearLineCache();
   await refreshStat();
   await reloadViewport();
-  if (keepCaret) setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+  if (keepCaret)
+    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
   render();
   if (refreshTabList) refreshTabs();
   if (refreshTree) updateTreeActive();

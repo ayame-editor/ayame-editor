@@ -599,7 +599,10 @@ export function toggleOpt(key, id) {
   if (state.query) updateCount();
 }
 
-export const ACTIONS: Record<string, { run: () => any; globalShortcut?: boolean; editorOnly?: boolean }> = {
+export const ACTIONS: Record<
+  string,
+  { run: () => any; globalShortcut?: boolean; editorOnly?: boolean }
+> = {
   commandPalette: { run: showCommandPalette, globalShortcut: true },
   undo: { run: undoEdit, globalShortcut: true, editorOnly: true },
   redo: { run: redoEdit, globalShortcut: true, editorOnly: true },
