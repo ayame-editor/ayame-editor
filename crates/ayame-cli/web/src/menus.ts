@@ -86,6 +86,12 @@ export function showAppMenu(id) {
       ws.classList.toggle("checked", on);
       ws.setAttribute("aria-checked", String(on));
     }
+    const syntax = $("menu-toggle-syntax");
+    if (syntax) {
+      const on = state.settings.syntaxHighlight !== false;
+      syntax.classList.toggle("checked", on);
+      syntax.setAttribute("aria-checked", String(on));
+    }
     const zu = $("menu-toggle-zsp-underline");
     if (zu) {
       const zon = !!state.settings.zenkakuUnderline;
@@ -624,6 +630,9 @@ export const ACTIONS: Record<
   toggleSidebar: { run: () => setSidebar(!sidebarOpen()), globalShortcut: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
+  },
+  toggleSyntaxHighlight: {
+    run: () => updateSetting("syntaxHighlight", state.settings.syntaxHighlight === false),
   },
   toggleZenkakuUnderline: {
     run: () => updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline),

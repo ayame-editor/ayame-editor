@@ -4,6 +4,7 @@ import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
 import { api, type LineByteResponse, type LinesResponse } from "./api.js";
 import { t } from "./i18n.js";
 import { hasSelection, renderSelection } from "./selection.js";
+import { highlightSpans } from "./syntax.js";
 import { updateStatusPos } from "./menus.js";
 import { anyModalOpen } from "./input.js";
 
@@ -139,6 +140,8 @@ export function fillRow(row, line, rec, gutterWidth) {
     tx.textContent = "⋯";
   } else if (state.matcher) {
     appendHighlighted(tx, rec.text);
+  } else if (state.settings.syntaxHighlight !== false && appendSyntaxHighlighted(tx, rec.text)) {
+    // rendered by appendSyntaxHighlighted
   } else if (state.settings.showWhitespace) {
     appendText(tx, rec.text, true);
   } else {
@@ -325,6 +328,23 @@ export function appendHighlighted(container, text) {
   if (last < text.length) {
     appendText(container, text.slice(last), true);
   }
+}
+
+export function appendSyntaxHighlighted(container, text) {
+  const spans = highlightSpans(text, state.stat?.path || "");
+  if (!spans) return false;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    if (span.kind === "plain") {
+      appendText(container, span.text, i === spans.length - 1);
+      continue;
+    }
+    const el = document.createElement("span");
+    el.className = `syn syn-${span.kind}`;
+    appendText(el, span.text, i === spans.length - 1);
+    container.appendChild(el);
+  }
+  return true;
 }
 
 export function render() {

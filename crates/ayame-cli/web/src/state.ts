@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS = {
   confirmLastTabClose: true,
   restoreSession: true,
   showWhitespace: false,
+  syntaxHighlight: true,
   zenkakuUnderline: false,
   wordWrap: false,
   bgMode: "watercolor",

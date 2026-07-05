@@ -12,6 +12,8 @@ All notable changes to Ayame Editor are tracked here.
   against the original match set instead of stopping after the first chunk.
 - Expanded Settings visibility controls and macOS native menus, including
   dynamic language refresh for the native menu bar.
+- Added lightweight visible-row syntax highlighting for common code, JSON,
+  Markdown, YAML, SQL, shell, and log files, with a View/Settings toggle.
 - Added safe tab drag support for native-window workflows: clean tabs can move
   to another Ayame tabbar or drag out into a new window, while dirty tabs are
   kept in place to avoid losing unsaved edits.

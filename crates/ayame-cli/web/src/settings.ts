@@ -540,6 +540,10 @@ export function initSettings() {
   $("set-show-whitespace").addEventListener("change", () =>
     updateSetting("showWhitespace", $("set-show-whitespace").checked),
   );
+  $("set-syntax-highlight").checked = state.settings.syntaxHighlight !== false;
+  $("set-syntax-highlight").addEventListener("change", () =>
+    updateSetting("syntaxHighlight", $("set-syntax-highlight").checked),
+  );
   $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
   $("set-zenkaku-underline").addEventListener("change", () =>
     updateSetting("zenkakuUnderline", $("set-zenkaku-underline").checked),

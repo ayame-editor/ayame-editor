@@ -940,6 +940,61 @@ html[data-sidebar-side="right"] #sidebar {
 .row.eof { cursor: default; }
 .row.eof .tx { color: var(--fg-faint); font-family: var(--ui); font-style: italic; }
 
+/* Lightweight syntax colors. Applied only to pooled visible rows, so the
+   highlighter stays compatible with multi-GB files and virtual scrolling. */
+.syn { color: inherit; }
+.syn-comment {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+.syn-keyword,
+.syn-heading {
+  color: color-mix(in srgb, var(--accent-bright) 84%, var(--fg));
+  font-weight: 650;
+}
+.syn-string {
+  color: color-mix(in srgb, #21885f 76%, var(--fg));
+}
+.syn-number {
+  color: color-mix(in srgb, #2f7fbf 78%, var(--fg));
+}
+.syn-literal {
+  color: color-mix(in srgb, #9a57b0 78%, var(--fg));
+  font-weight: 560;
+}
+.syn-function {
+  color: color-mix(in srgb, #a67319 78%, var(--fg));
+}
+.syn-key {
+  color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+.syn-op {
+  color: var(--fg-dim);
+}
+.syn-link {
+  color: color-mix(in srgb, #287fb8 84%, var(--fg));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.syn-level-trace,
+.syn-level-debug {
+  color: var(--fg-dim);
+  font-weight: 650;
+}
+.syn-level-info {
+  color: color-mix(in srgb, #287fb8 84%, var(--fg));
+  font-weight: 700;
+}
+.syn-level-warn {
+  color: color-mix(in srgb, var(--gold) 88%, var(--fg));
+  font-weight: 700;
+}
+.syn-level-error {
+  color: color-mix(in srgb, var(--danger) 88%, var(--fg));
+  font-weight: 700;
+}
+
 /* ---- 折り返し (word wrap) --------------------------------------------------
    A conservative, CSS-only wrap toggle (state.settings.wordWrap → #content.wrap
    in applySettings). Rows switch to pre-wrap and are allowed to grow past one
