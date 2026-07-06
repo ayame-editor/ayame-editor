@@ -52,6 +52,11 @@ The docs site includes the user guide, full CLI reference, architecture notes,
 default shortcuts, install notes, build steps, and Linux runtime packages:
 [docs site](https://hjosugi.github.io/ayame-editor/).
 
+For files where a single wrong byte is unacceptable, see the
+[data integrity guarantees](docs/DATA_INTEGRITY.md) — the correctness promises
+(byte-exact save, crash recovery, encoding round-trips) and the tests that
+verify each one.
+
 ## License
 
 0BSD. You can use, copy, modify, and distribute this project for almost any purpose.

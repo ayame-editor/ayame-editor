@@ -20,6 +20,9 @@ csv-core = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+# SHA-256 for the data-integrity checksum harness (tests/common). Already in the
+# workspace lockfile via xtask, so this pins no new crates.
+sha2 = "0.10"
 
 [lints]
 workspace = true
