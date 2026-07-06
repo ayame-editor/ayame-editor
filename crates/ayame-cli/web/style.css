@@ -1090,11 +1090,6 @@ html[data-sidebar-side="right"] #sidebar {
   opacity: 0.6;
   pointer-events: none;
 }
-.convert-note {
-  margin: 4px 2px 2px;
-  font-size: 12px;
-  color: var(--fg-dim);
-}
 /* BOM row hint; dims with the row when the target encoding is not UTF-8. */
 .set-hint { flex: 1; color: var(--fg-dim); font-size: 12px; }
 #convert-bom-row.disabled { opacity: 0.5; }
@@ -1476,7 +1471,7 @@ html.saving .caret.extra { visibility: hidden; }
 
 /* ---- settings --------------------------------------------------------- */
 
-.settings-panel { width: min(420px, 92vw); }
+.settings-panel { width: min(680px, 94vw); }
 /* the memo rows pushed the panel past 80vh on short windows: scroll, don't clip */
 .settings-body { padding: 8px 14px 14px; overflow-y: auto; scrollbar-width: thin; }
 .set-row {
@@ -1601,7 +1596,7 @@ button { border-radius: var(--radius); }
     radial-gradient(125% 120% at 0% 100%, #000 44%, rgba(0,0,0,.72) 62%, transparent 84%);
 }
 
-.settings-panel { width: min(440px, 94vw); }
+.settings-panel { width: min(680px, 94vw); }
 #apply-theme.hidden,
 #apply-keymap.hidden { display: none; }
 

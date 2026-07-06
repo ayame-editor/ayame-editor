@@ -73,6 +73,11 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
         } else if (ev.key === "Escape") {
           ev.preventDefault();
           finish(false);
+        } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+          // Move focus between the Cancel / OK buttons, like a native dialog.
+          if (opts.alert) return; // OK-only: nothing to move between
+          ev.preventDefault();
+          (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
         }
       };
       const onBackdrop = (ev) => {
