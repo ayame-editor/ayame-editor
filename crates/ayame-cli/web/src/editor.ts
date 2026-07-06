@@ -1,5 +1,5 @@
 // Ayame Editor — editor module. Type-stripped to JS at build time (build.rs, oxc).
-import { $ } from "./dom.js";
+import { $, commas } from "./dom.js";
 import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
 import { api, type LineByteResponse, type LinesResponse } from "./api.js";
 import { t } from "./i18n.js";
@@ -126,12 +126,19 @@ export function ensurePool(count) {
   }
 }
 
-export function fillRow(row, line, rec, gutterWidth) {
+// The line number as shown in the gutter: grouped with commas by default
+// (17,586,323) so long numbers stay readable, unless the setting is off.
+// Right-alignment and width come from CSS (`.ln`), not string padding.
+export function formatLineNo(n) {
+  return state.settings.lineNumberCommas === false ? String(n) : commas(n);
+}
+
+export function fillRow(row, line, rec) {
   const ln = row.firstChild;
   const tx = row.lastChild;
   row.className = "row";
   row.dataset.line = String(line);
-  ln.textContent = String(line + 1).padStart(gutterWidth, " ");
+  ln.textContent = formatLineNo(line + 1);
   tx.textContent = "";
   tx.classList.remove("pending");
   row.classList.toggle("inserted", !!rec?.inserted);
@@ -382,7 +389,11 @@ export function render() {
   ensurePool(count);
   ensureData(state.first, count);
 
-  const gutterWidth = Math.max(4, String(state.total).length);
+  // Size the gutter to the widest visible line number (commas included). Every
+  // `.ln` reads this via `min-width: var(--gutter-ch)`, so normal rows and the
+  // empty [EOF] gutter share one width and the numbers right-align.
+  const gutterCh = Math.max(7, formatLineNo(state.total).length);
+  $("content").style.setProperty("--gutter-ch", `${gutterCh}ch`);
   for (let r = 0; r < pool.length; r++) {
     const row = pool[r];
     const line = state.first + r;
@@ -394,7 +405,7 @@ export function render() {
     if (line === state.total) {
       fillEofRow(row); // one marker row just past the last line
     } else {
-      fillRow(row, line, cachedLine(line), gutterWidth);
+      fillRow(row, line, cachedLine(line));
     }
   }
   buildRuler();

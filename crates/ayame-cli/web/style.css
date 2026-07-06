@@ -1020,7 +1020,10 @@ html[data-sidebar-side="right"] #sidebar {
   position: sticky;
   left: 0;
   display: inline-block;
-  min-width: 7ch;
+  /* Width is driven from the widest line number (commas included) via a CSS
+     variable set in render(), so every gutter — including the empty [EOF]
+     row — reserves the same width and the numbers right-align cleanly. */
+  min-width: var(--gutter-ch, 7ch);
   /* The whole gutter→text gap lives inside the padding (border box), so
      getBoundingClientRect().width in gutterPixels() measures the true text
      origin — a margin here would be excluded and shift the caret 8px left. */

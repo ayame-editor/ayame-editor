@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS = {
   sidebar: false,
   sidebarSide: "left",
   ruler: true,
+  lineNumberCommas: true,
   confirmLastTabClose: true,
   restoreSession: true,
   showWhitespace: false,

@@ -7,7 +7,7 @@ vi.mock("../src/selection.js", () => ({
 vi.mock("../src/menus.js", () => ({ updateStatusPos: vi.fn() }));
 vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
 
-import { ensureData } from "../src/editor.js";
+import { ensureData, formatLineNo } from "../src/editor.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -20,6 +20,27 @@ function jsonResponse(body: unknown): Response {
 async function flushPromises() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+describe("line-number formatting (#49)", () => {
+  it("groups line numbers with commas by default", () => {
+    state.settings.lineNumberCommas = true;
+    expect(formatLineNo(1)).toBe("1");
+    expect(formatLineNo(1000)).toBe("1,000");
+    expect(formatLineNo(17_586_323)).toBe("17,586,323");
+  });
+
+  it("shows plain digits when the setting is off", () => {
+    state.settings.lineNumberCommas = false;
+    expect(formatLineNo(17_586_323)).toBe("17586323");
+    state.settings.lineNumberCommas = true;
+  });
+
+  it("treats an unset flag as commas-on (the default)", () => {
+    delete state.settings.lineNumberCommas;
+    expect(formatLineNo(1000)).toBe("1,000");
+    state.settings.lineNumberCommas = true;
+  });
+});
 
 describe("editor load generation", () => {
   beforeEach(() => {
