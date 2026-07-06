@@ -152,10 +152,10 @@ pub fn bom_len(buf: &[u8]) -> (usize, Option<Encoding>) {
 
 /// Detect `(encoding, bom_byte_length)` for a buffer.
 ///
-/// A BOM is authoritative. Otherwise we sniff a bounded prefix: pure-ASCII is
-/// reported as ASCII; valid UTF-8 wins; failing that we let `chardetng` choose
-/// between the Japanese legacy candidates. An explicit `override_enc` short-
-/// circuits everything except BOM length.
+/// A BOM is authoritative. Otherwise we sniff a bounded prefix: valid UTF-8
+/// (which includes pure ASCII) wins and is reported as UTF-8; failing that we
+/// let `chardetng` choose between the Japanese legacy candidates. An explicit
+/// `override_enc` short-circuits everything except BOM length.
 pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
     let (bom, bom_enc) = bom_len(buf);
 
@@ -172,9 +172,9 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
     if prefix.is_empty() {
         return (Encoding::Utf8, 0);
     }
-    if prefix.is_ascii() {
-        return (Encoding::Ascii, 0);
-    }
+    // Pure ASCII is a subset of UTF-8; report it as UTF-8 (the default users
+    // expect) rather than a distinct "ASCII" label. The two are byte-identical
+    // for ASCII content, so nothing about saving changes.
     if std::str::from_utf8(prefix).is_ok() {
         return (Encoding::Utf8, 0);
     }
@@ -349,7 +349,8 @@ mod tests {
 
     #[test]
     fn detects_ascii_and_utf8() {
-        assert_eq!(detect(b"hello world\n", None), (Encoding::Ascii, 0));
+        // Pure ASCII is reported as UTF-8 (a superset), not a distinct label.
+        assert_eq!(detect(b"hello world\n", None), (Encoding::Utf8, 0));
         let (e, b) = detect("日本語のテキスト\n".as_bytes(), None);
         assert_eq!((e, b), (Encoding::Utf8, 0));
     }
