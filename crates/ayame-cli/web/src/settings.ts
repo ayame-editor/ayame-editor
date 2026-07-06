@@ -536,6 +536,10 @@ export function initSettings() {
   });
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
+  $("set-line-commas").checked = state.settings.lineNumberCommas !== false;
+  $("set-line-commas").addEventListener("change", () =>
+    updateSetting("lineNumberCommas", $("set-line-commas").checked),
+  );
   $("set-show-whitespace").checked = !!state.settings.showWhitespace;
   $("set-show-whitespace").addEventListener("change", () =>
     updateSetting("showWhitespace", $("set-show-whitespace").checked),
