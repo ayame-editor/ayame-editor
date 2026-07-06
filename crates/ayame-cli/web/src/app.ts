@@ -115,9 +115,7 @@ window.__ayameOpenDialogDone = (paths) => {
   const resolve = nativeOpenResolve;
   nativeOpenResolve = null;
   if (!resolve) return;
-  const list = Array.isArray(paths)
-    ? paths.filter((p) => typeof p === "string" && p.trim())
-    : [];
+  const list = Array.isArray(paths) ? paths.filter((p) => typeof p === "string" && p.trim()) : [];
   resolve(list);
 };
 

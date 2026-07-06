@@ -517,11 +517,7 @@ export async function replaceAll() {
     await flush();
     state.lastMatch = null;
     await updateCount();
-    flashCount(
-      replaced
-        ? t("find.replacedCount", { n: commas(replaced) })
-        : t("find.noMatch"),
-    );
+    flashCount(replaced ? t("find.replacedCount", { n: commas(replaced) }) : t("find.noMatch"));
   } catch (e) {
     flashCount(t("find.replaceError"), "error");
     console.error(e);
