@@ -73,10 +73,13 @@ import {
 import { confirmVisible, formVisible, promptVisible } from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
 import {
+  adjustZoom,
   applyKeymapFromBuffer,
   applyThemeFromBuffer,
   hideSettings,
   settingsVisible,
+  setZoom,
+  ZOOM_STEP,
 } from "./settings.js";
 
 export function anyModalOpen() {
@@ -131,6 +134,12 @@ export function initEvents() {
   vp.addEventListener(
     "wheel",
     (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd + wheel zooms instead of scrolling.
+        e.preventDefault();
+        adjustZoom(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+        return;
+      }
       e.preventDefault();
       let dy = e.deltaY;
       if (e.deltaMode === 1) dy *= LINE_HEIGHT;
@@ -210,6 +219,7 @@ export function initEvents() {
   });
   $("st-enc").addEventListener("click", showConvert);
   $("st-eol").addEventListener("click", showConvert);
+  $("st-zoom").addEventListener("click", () => setZoom(100));
   $("st-tail").addEventListener("click", () => setFollowTail(!state.followTail));
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
@@ -326,6 +336,25 @@ export function onEditKey(e) {
     e.preventDefault();
     e.stopPropagation();
   };
+  // Zoom: Ctrl/Cmd with +/-/0. Checked before the switch so nothing else claims
+  // them (and the browser/webview page zoom is suppressed).
+  if (mod && !e.altKey) {
+    if (e.key === "+" || e.key === "=") {
+      take();
+      adjustZoom(ZOOM_STEP);
+      return;
+    }
+    if (e.key === "-" || e.key === "_") {
+      take();
+      adjustZoom(-ZOOM_STEP);
+      return;
+    }
+    if (e.key === "0") {
+      take();
+      setZoom(100);
+      return;
+    }
+  }
   // Multi-cursor: add a caret above/below (default Ctrl+Alt+ArrowUp/Down).
   // Checked before the switch so the plain-arrow cases never swallow them.
   if (matchesShortcut(e, "addCursorAbove")) {
