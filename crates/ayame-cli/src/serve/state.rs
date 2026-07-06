@@ -509,7 +509,7 @@ impl AppState {
     pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, (StatusCode, String)> {
         ui.recent_files = clean_path_list(ui.recent_files, 24);
         ui.search_history = clean_string_list(ui.search_history, 50);
-        ui.session.paths = clean_path_list(ui.session.paths, 64);
+        ui.session.paths = clean_path_list(ui.session.paths, SESSION_MAX_PATHS);
         if let Some(active) = ui.session.active_path.take() {
             ui.session.active_path = clean_one_string(active);
         }
@@ -529,8 +529,18 @@ impl AppState {
     pub(super) fn save_session_snapshot(&self) -> Result<UiState, (StatusCode, String)> {
         let mut ui = self.load_ui_state();
         let tabs = self.tabs_response().tabs;
-        ui.session.paths = tabs.iter().map(|t| t.path.clone()).collect();
-        ui.session.active_path = tabs.iter().find(|t| t.active).map(|t| t.path.clone());
+        // Scratch/untitled buffers can't be reopened next launch, so keep them
+        // out of the snapshot (they would only consume slots and fail to open).
+        ui.session.paths = tabs
+            .iter()
+            .map(|t| t.path.clone())
+            .filter(|p| !is_scratch_path(p))
+            .collect();
+        ui.session.active_path = tabs
+            .iter()
+            .find(|t| t.active)
+            .map(|t| t.path.clone())
+            .filter(|p| !is_scratch_path(p));
         self.save_ui_state(ui)
     }
 
@@ -539,7 +549,7 @@ impl AppState {
         if session.paths.is_empty() {
             return Ok(());
         }
-        let paths = clean_path_list(session.paths, 64);
+        let paths = clean_path_list(session.paths, SESSION_MAX_PATHS);
         for path in &paths {
             if let Err(e) = self.open_path(path.clone()).await {
                 eprintln!("ayame: session restore skipped '{}': {}", path, e.1);
@@ -1469,7 +1479,7 @@ fn tab_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string());
     // Current scratch dirs are "ayame-srv-untitled-…"; restored sessions may
     // still carry the pre-rename "ayame-untitled-<pid>" form.
-    if path.contains("ayame-srv-untitled-") || path.contains("ayame-untitled-") {
+    if is_scratch_path(path) {
         return if basename == "untitled.txt" {
             "untitled".to_string()
         } else {
@@ -1477,6 +1487,17 @@ fn tab_name(path: &str) -> String {
         };
     }
     basename
+}
+
+/// How many open files a saved session may carry. Comfortably above any
+/// realistic tab count so restoring ~100 tabs never silently drops the tail.
+const SESSION_MAX_PATHS: usize = 512;
+
+/// A scratch/untitled buffer's path. Its temp directory is deleted when the
+/// process exits, so it can never be restored — such paths are kept out of the
+/// session snapshot rather than wasting a slot and failing to reopen.
+fn is_scratch_path(path: &str) -> bool {
+    path.contains("ayame-srv-untitled-") || path.contains("ayame-untitled-")
 }
 
 fn clean_path_list(list: Vec<String>, max: usize) -> Vec<String> {
@@ -1603,6 +1624,25 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn scratch_paths_are_recognized() {
+        assert!(is_scratch_path(
+            "/tmp/ayame-srv-untitled-abc-0-0/untitled.txt"
+        ));
+        assert!(is_scratch_path("/tmp/ayame-untitled-1234/untitled.txt"));
+        assert!(!is_scratch_path("/home/user/notes.txt"));
+        assert!(!is_scratch_path("C:\\logs\\app.txt"));
+    }
+
+    #[test]
+    fn a_hundred_session_paths_survive_the_cap() {
+        // Regression for #52: a ~100-tab session must not be truncated to 64.
+        let paths: Vec<String> = (0..100).map(|i| format!("/files/f{i}.txt")).collect();
+        let cleaned = clean_path_list(paths.clone(), SESSION_MAX_PATHS);
+        assert_eq!(cleaned.len(), 100);
+        assert_eq!(cleaned, paths);
     }
 
     fn wal_opts(cache: &Path) -> OpenOptions {
