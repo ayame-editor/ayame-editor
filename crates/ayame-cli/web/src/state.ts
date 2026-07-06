@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   theme: "iris-light",
   font: "mono",
   fontSize: 13,
+  zoom: 100,
   sidebar: false,
   sidebarSide: "left",
   ruler: true,

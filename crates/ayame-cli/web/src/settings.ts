@@ -295,11 +295,20 @@ export function applySettings(s) {
   if (typeof s.illus === "number") root.style.setProperty("--illus", String(s.illus));
   // ---- font / size ----
   root.style.setProperty("--mono", FONT_STACKS[s.font] || FONT_STACKS.mono);
-  const fs = Math.max(11, Math.min(22, Number(s.fontSize) || 13));
+  const base = Math.max(11, Math.min(22, Number(s.fontSize) || 13));
+  const zoom = clampZoom(s.zoom);
+  // Zoom scales the chosen font size (and line spacing with it), so the caret
+  // and ruler — measured from real glyphs — follow automatically.
+  const fs = Math.max(6, Math.min(48, Math.round((base * zoom) / 100)));
   root.style.setProperty("--font-size", `${fs}px`);
-  const lh = fs + 6;
+  const lh = Math.max(fs + 2, Math.round(((base + 6) * zoom) / 100));
   root.style.setProperty("--line-height", `${lh}px`);
   setLineHeight(lh); // keep virtualization math in sync with the CSS
+  const zoomEl = document.getElementById("st-zoom");
+  if (zoomEl) {
+    zoomEl.textContent = `${zoom}%`;
+    zoomEl.classList.toggle("dim", zoom === 100);
+  }
   invalidateFontMetrics(); // font metrics changed → remeasure + rebuild the ruler
   // ---- long-line wrapping (折り返し) ----
   // Purely a CSS switch on #content: rows go white-space:pre-wrap and grow past
@@ -321,6 +330,24 @@ export function updateSetting(key, value) {
     applyLocale();
     postNativeMessage(`ayame:language:${state.settings.language}`);
   }
+}
+
+export const ZOOM_STEP = 10;
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 300;
+
+export function clampZoom(v) {
+  const n = Math.round(Number(v) || 100);
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, n));
+}
+
+// Set the display zoom (percent); persisted and applied like any setting.
+export function setZoom(pct) {
+  updateSetting("zoom", clampZoom(pct));
+}
+
+export function adjustZoom(delta) {
+  setZoom((Number(state.settings.zoom) || 100) + delta);
 }
 
 export function settingsVisible() {

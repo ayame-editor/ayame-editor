@@ -138,6 +138,7 @@ export const MESSAGES = {
     "status.indexDetail":
       "{lines} 行 / {bytes} / 索引 {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "文字コードを変換して保存",
+    "status.zoomTitle": "表示倍率（クリックで100%に戻す）",
     "status.eolTitle": "改行コードを変換して保存",
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
@@ -493,6 +494,7 @@ export const MESSAGES = {
     "status.indexDetail":
       "{lines} lines / {bytes} / {checkpoints} index checkpoints ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "Convert Encoding and Save",
+    "status.zoomTitle": "Zoom level (click to reset to 100%)",
     "status.eolTitle": "Convert Line Endings and Save",
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
