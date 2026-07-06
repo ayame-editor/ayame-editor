@@ -121,7 +121,15 @@ export async function findStep(dir) {
       : await lineByte(Math.min(state.total, state.first + rowsVisible()));
   }
   try {
-    const res = await api<FindResponse>(`/api/find?dir=${dir}&from=${from}&${qs()}`);
+    let res = await api<FindResponse>(`/api/find?dir=${dir}&from=${from}&${qs()}`);
+    let wrapped = false;
+    if (!res.hit) {
+      // Wrap around: search again from the opposite end so "next" past the last
+      // match rolls to the first, and "prev" past the first rolls to the last.
+      const wrapFrom = dir === "next" ? 0 : await lineByte(state.total);
+      res = await api<FindResponse>(`/api/find?dir=${dir}&from=${wrapFrom}&${qs()}`);
+      wrapped = true;
+    }
     if (!res.hit) {
       flashCount(t("find.noMatch"));
       return;
@@ -131,6 +139,7 @@ export async function findStep(dir) {
     state.sel = null;
     setCaret(h.line, 0);
     revealLine(h.line);
+    if (wrapped) flashCount(dir === "next" ? t("find.wrapTop") : t("find.wrapBottom"));
     updateCount();
   } catch (e) {
     flashCount(t("common.error"));
