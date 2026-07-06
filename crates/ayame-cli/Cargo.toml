@@ -14,7 +14,7 @@ path = "src/main.rs"
 # no webview dependency. The native desktop window is opt-in so CLI releases
 # stay small and dependency-free.
 default = []
-gui = ["dep:wry", "dep:tao", "dep:muda"]
+gui = ["dep:wry", "dep:tao", "dep:muda", "dep:rfd"]
 # Dev-only: `ayame typegen` emits web/types/api.d.ts from the serve API types
 # via the owner's typeship facade (never enabled in shipped builds).
 typegen = ["dep:ts-rs", "dep:typeship", "dep:typeship-ts-rs"]
@@ -36,6 +36,9 @@ futures-util = { version = "0.3", default-features = false }
 # WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.
 wry = { version = "0.52", optional = true }
 tao = { version = "0.34", optional = true }
+# OS-native open/save dialogs for the gui build (IFileDialog / NSSavePanel /
+# GTK). The web serve build keeps its in-page picker instead.
+rfd = { version = "0.15", optional = true }
 
 # Native menu bar, macOS only: WKWebView swallows Cmd+C/V/X/A unless real
 # NSMenu items carry those key equivalents. Windows/Linux use the in-page
