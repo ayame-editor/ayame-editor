@@ -22,6 +22,7 @@ SHA-256 checksum utility for legible failures.
 | 4 | Encoding round-trips are byte-exact, and an unrepresentable character aborts instead of writing a lossy file. | The encoder reports unmappable characters; untouched lines are never re-encoded. | `tests/encoding_roundtrip.rs` |
 | 5 | Crash recovery restores edits up to the last committed transaction, and no crash corrupts the original file. | A write-ahead log (WAL) records each committed edit; a torn trailing record is ignored, corruption is refused. | `tests/crash_recovery.rs` |
 | 6 | Parallel transforms are byte-identical to sequential ones (sort / replace / case / split), across chunk boundaries, mixed EOL, and a missing final newline. | The parallel path fans out over line chunks but preserves per-line terminators and order. | `tests/transform_equivalence.rs` |
+| 7 | Correctness holds at the ten-billion-line design target: the sparse-index arithmetic stays exact and bounded, and arbitrary-position resolution / tail edits stay byte-exact. | Index checkpoint/memory math is unit-tested at 1e10 lines; the resolve/edit/save pipeline runs on a real million-line file with a tiny stride. Front-end line numbers stay exact below 2^53. | `tests/extreme_scale.rs`, `web/test/scale.test.ts` |
 
 ## Atomic save
 
@@ -67,9 +68,12 @@ Honesty about the edges is part of the guarantee:
 - **The `ASCII` label is lenient.** Text tagged `ASCII` is encoded as UTF-8
   rather than rejected, because ASCII is a UTF-8 subset. Byte-level abort on
   unrepresentable characters applies to the narrow codecs (Shift_JIS, EUC-JP).
-- **Scale.** These tests assert correctness on small, boundary-focused inputs.
-  Correctness at extreme scale (billions of lines, hundreds of GB) is tracked
-  separately.
+- **Scale.** Extreme scale is verified in two halves (see guarantee 7): the
+  ten-billion-line **index arithmetic** is unit-tested directly, and the
+  resolve/edit/save **pipeline** is exercised on a real million-line file with a
+  tiny stride. A full ten-billion-line file (~100 GB) is never materialized in
+  CI, so that end-to-end case rests on the arithmetic plus the pipeline test,
+  not on a physical fixture.
 
 ## Running the checks
 
