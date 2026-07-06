@@ -589,6 +589,14 @@ export function startTabDrag(e, tab) {
   e.dataTransfer.setData("text/plain", tab.path || tab.name || "");
 }
 
+// A tab can be torn out into its own window only when it is a clean, on-disk
+// file. Each window is a separate process (by design, for crash isolation), so
+// a dirty or fileless/untitled buffer has nothing another process could reopen
+// and must stay put rather than be dropped on the floor.
+export function canDragOutToNewWindow(tab) {
+  return !!tab && !tab.dirty && !!tab.path && !isUntitled(tab.path);
+}
+
 export async function finishTabDrag(e, tab) {
   if (tab.dirty || savingCount > 0) return;
   const dropped = e.dataTransfer?.dropEffect === "move";
@@ -600,6 +608,9 @@ export async function finishTabDrag(e, tab) {
   if (dropped) {
     await closeMovedTab(tab.id);
   } else if (outside) {
+    // Dragging outside the window tears the tab out into its own window
+    // (a fresh process for that file); keep fileless/untitled buffers here.
+    if (!canDragOutToNewWindow(tab)) return;
     openNewWindow(tab.path);
     await closeMovedTab(tab.id);
   }
