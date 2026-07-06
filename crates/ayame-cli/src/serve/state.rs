@@ -1467,7 +1467,9 @@ fn tab_name(path: &str) -> String {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
-    if path.contains("ayame-untitled-") {
+    // Current scratch dirs are "ayame-srv-untitled-…"; restored sessions may
+    // still carry the pre-rename "ayame-untitled-<pid>" form.
+    if path.contains("ayame-srv-untitled-") || path.contains("ayame-untitled-") {
         return if basename == "untitled.txt" {
             "untitled".to_string()
         } else {

@@ -130,12 +130,21 @@ pub(super) struct BrowseResponse {
     entries: Vec<BrowseEntry>,
 }
 
+/// The virtual "PC" level of the picker: not a real directory, but the token
+/// the client sends (and receives as `parent` at a drive root) to list the
+/// machine's drives on Windows. "::" cannot collide with a real path on any
+/// supported OS.
+pub(super) const DRIVES_DIR: &str = "::";
+
 /// List a directory on the server so the browser can navigate to a file and
 /// open it — a minimal, server-side file picker for the workspace.
 pub(super) async fn api_browse(
     State(state): State<SharedState>,
     Query(q): Query<BrowseQuery>,
 ) -> Result<Json<BrowseResponse>, (StatusCode, String)> {
+    if q.dir.as_deref().map(str::trim) == Some(DRIVES_DIR) {
+        return drives_response().map(Json);
+    }
     let requested = q
         .dir
         .as_deref()
@@ -180,12 +189,52 @@ pub(super) async fn api_browse(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    let parent = dir.parent().map(display_path);
+    let parent = browse_parent(&dir);
     Ok(Json(BrowseResponse {
         dir: display_path(&dir),
         parent,
         entries,
     }))
+}
+
+/// The ".." target for a directory. On Windows a drive root (`C:\`) has no
+/// `Path::parent()`, which used to dead-end navigation there — other drives
+/// were unreachable. The virtual drive list steps in as every root's parent.
+fn browse_parent(dir: &Path) -> Option<String> {
+    match dir.parent() {
+        Some(p) if !p.as_os_str().is_empty() => Some(display_path(p)),
+        _ if cfg!(windows) => Some(DRIVES_DIR.to_string()),
+        _ => None,
+    }
+}
+
+/// The virtual "PC" listing: every ready drive as a directory entry. Windows
+/// only — elsewhere the filesystem has a single root and this level is never
+/// offered as a parent (requesting it by hand is a 400, not a panic).
+fn drives_response() -> Result<BrowseResponse, (StatusCode, String)> {
+    if !cfg!(windows) {
+        return Err(bad_request("drive list is only available on Windows"));
+    }
+    let mut entries = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let letter = letter as char;
+        let root = format!("{letter}:\\");
+        // metadata() answers quickly for absent letters; a ready drive is one
+        // whose root can be stat'd. Unready removable drives are skipped.
+        if std::fs::metadata(&root).is_ok() {
+            entries.push(BrowseEntry {
+                name: format!("{letter}:"),
+                path: root,
+                is_dir: true,
+                size: 0,
+            });
+        }
+    }
+    Ok(BrowseResponse {
+        dir: DRIVES_DIR.to_string(),
+        parent: None,
+        entries,
+    })
 }
 
 /// The UI-facing form of a filesystem path: EVERY path serialized to a client
@@ -215,12 +264,41 @@ pub(crate) fn strip_verbatim(path: &str) -> String {
 fn default_browse_dir(state: &AppState) -> PathBuf {
     if let Some(doc) = state.doc_opt() {
         if let Some(parent) = doc.path().parent() {
-            if !parent.as_os_str().is_empty() {
+            // A doc living in one of this process's private scratch dirs
+            // (untitled buffer, upload, sort result) must never make %TEMP%
+            // the default browse/save location.
+            if !parent.as_os_str().is_empty() && !is_scratch_path(&parent.to_string_lossy()) {
                 return parent.to_path_buf();
             }
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    exe_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+/// The running executable's directory — the classic portable-app default for
+/// the first save/browse suggestion (前回の保存先 takes over once one exists).
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+/// True when `path` points into one of this process's private scratch
+/// directories. Matched by the directory-name marker (not by prefix
+/// comparison) so canonicalization differences — e.g. a `\\?\`-prefixed doc
+/// path on Windows — cannot defeat the check. The bare "ayame-untitled-"
+/// form predates the srv- rename and may survive in restored sessions.
+pub(super) fn is_scratch_path(path: &str) -> bool {
+    [
+        "ayame-srv-untitled-",
+        "ayame-srv-uploads-",
+        "ayame-srv-sorted-",
+        "ayame-untitled-",
+    ]
+    .iter()
+    .any(|marker| path.contains(marker))
 }
 
 #[derive(Deserialize)]
@@ -555,6 +633,32 @@ mod tests {
             utc_date_time(UNIX_EPOCH + Duration::from_secs(1_704_067_205)),
             (2024, 1, 1, 0, 0, 5)
         );
+    }
+
+    #[test]
+    fn scratch_paths_are_recognized_in_both_dir_name_generations() {
+        assert!(is_scratch_path(
+            r"C:\Users\x\AppData\Local\Temp\ayame-srv-untitled-55c647d-0-0\untitled.txt"
+        ));
+        assert!(is_scratch_path("/tmp/ayame-untitled-1234/untitled.txt"));
+        assert!(is_scratch_path("/tmp/ayame-srv-uploads-abc-0/dropped.txt"));
+        assert!(!is_scratch_path(r"E:\note\untitled.txt"));
+    }
+
+    #[test]
+    fn browse_parent_walks_up_and_offers_drives_at_a_root() {
+        assert_eq!(
+            browse_parent(Path::new("/tmp/sub")).as_deref(),
+            Some("/tmp")
+        );
+        // A filesystem root has no Path::parent(); only Windows swaps in the
+        // virtual drive list instead of dead-ending.
+        let at_root = browse_parent(Path::new("/"));
+        if cfg!(windows) {
+            assert_eq!(at_root.as_deref(), Some(DRIVES_DIR));
+        } else {
+            assert_eq!(at_root, None);
+        }
     }
 
     #[test]
