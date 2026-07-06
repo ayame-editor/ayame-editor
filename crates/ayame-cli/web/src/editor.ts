@@ -206,30 +206,58 @@ export function lineLen(line) {
   return lineChars(line).length;
 }
 
+// Probe that replicates a row's horizontal geometry: a gutter-width
+// inline-block spacer followed by the text. CSS resolves TAB stops relative
+// to the ROW's content edge — which includes the line-number gutter — so a
+// bare-text measurement puts every stop past a tab off by the gutter width
+// (the caret drifts from where characters actually land, e.g. in TSV files).
+// Measuring behind the same spacer makes both geometries identical; the
+// returned width IS the x coordinate in #content space.
+export let _rowProbe = null;
+
+export let _rowProbeSpacer = null;
+
+export let _rowProbeText = null;
+
+export function measureRowPrefix(str) {
+  if (!_rowProbe) {
+    _rowProbe = document.createElement("span");
+    _rowProbe.style.cssText =
+      "position:absolute;visibility:hidden;white-space:pre;top:-9999px;left:0;pointer-events:none;";
+    _rowProbeSpacer = document.createElement("span");
+    _rowProbeSpacer.style.cssText = "display:inline-block;height:1px;";
+    _rowProbeText = document.createTextNode("");
+    _rowProbe.append(_rowProbeSpacer, _rowProbeText);
+    $("content").appendChild(_rowProbe);
+  }
+  _rowProbeSpacer.style.width = `${gutterPixels()}px`;
+  _rowProbeText.data = str;
+  return _rowProbe.getBoundingClientRect().width;
+}
+
 // Pixel x (in #content coordinates, gutter included) of column `col` on `line`.
 export function caretX(line, col) {
   const cs = lineChars(line);
   const head = cs.slice(0, Math.max(0, Math.min(col, cs.length))).join("");
-  return gutterPixels() + measureTextWidth(head);
+  return measureRowPrefix(head);
 }
 
 // Inverse of caretX: nearest column boundary to pixel x (content coordinates).
 export function colFromX(line, x) {
   const cs = lineChars(line);
-  const local = x - gutterPixels();
-  if (local <= 0) return 0;
-  const full = measureTextWidth(cs.join(""));
-  if (local >= full) return cs.length;
+  if (x <= gutterPixels()) return 0;
+  const full = measureRowPrefix(cs.join(""));
+  if (x >= full) return cs.length;
   let lo = 0,
     hi = cs.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (measureTextWidth(cs.slice(0, mid).join("")) < local) lo = mid + 1;
+    if (measureRowPrefix(cs.slice(0, mid).join("")) < x) lo = mid + 1;
     else hi = mid;
   }
-  const wLo = measureTextWidth(cs.slice(0, lo).join(""));
-  const wPrev = lo > 0 ? measureTextWidth(cs.slice(0, lo - 1).join("")) : 0;
-  return local - wPrev < wLo - local ? lo - 1 : lo;
+  const wLo = measureRowPrefix(cs.slice(0, lo).join(""));
+  const wPrev = lo > 0 ? measureRowPrefix(cs.slice(0, lo - 1).join("")) : gutterPixels();
+  return x - wPrev < wLo - x ? lo - 1 : lo;
 }
 
 // ---- selection (multi-line, coordinate-based) ------------------------------
