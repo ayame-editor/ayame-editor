@@ -577,16 +577,34 @@ html[data-sidebar-side="right"] #sidebar {
 }
 
 .sb-root {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 10px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg-dim);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
   border-bottom: 1px solid var(--border);
   position: relative;
   z-index: 1;
+}
+.sb-nav {
+  flex: 0 0 auto;
+  min-width: 34px;
+  justify-content: center;
+  padding: 0 8px;
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.sb-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sb-nav-flip {
+  transform: scaleX(-1);
 }
 .sb-actions {
   display: flex;

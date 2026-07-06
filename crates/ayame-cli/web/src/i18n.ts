@@ -93,6 +93,8 @@ export const MESSAGES = {
     "tree.close": "エクスプローラーを閉じる",
     "tree.actions": "エクスプローラー操作",
     "tree.up": "上の階層へ",
+    "tree.back": "戻る",
+    "tree.forward": "進む",
     // -- find / replace bar --
     "find.group": "検索と置換",
     "find.showReplace": "置換を表示",
@@ -451,6 +453,8 @@ export const MESSAGES = {
     "tree.close": "Close Explorer",
     "tree.actions": "Explorer Actions",
     "tree.up": "Up One Level",
+    "tree.back": "Back",
+    "tree.forward": "Forward",
     "find.group": "Find and Replace",
     "find.showReplace": "Show Replace",
     "find.matchCase": "Match Case",
