@@ -245,10 +245,6 @@ export const MESSAGES = {
     "dialog.convert.eol": "改行コード",
     "dialog.convert.eolCr": "CR (旧 Mac)",
     "dialog.convert.bom": "BOMを付ける（UTF-8 / UTF-16）",
-    "dialog.convert.noteReopen":
-      "「開き直す」= 選んだ文字コードで読み直し（保存しません／未保存の編集は破棄）。文字化け時の復帰用。",
-    "dialog.convert.noteConvert":
-      "「変換して保存」= 選んだ文字コード・改行コードで上書き保存（表せない文字があると中止）。",
     "dialog.convert.reopen": "開き直す",
     "dialog.convert.go": "変換して保存",
     "dialog.convert.savedAs": "{enc} / {eol} で保存しました",
@@ -593,10 +589,6 @@ export const MESSAGES = {
     "dialog.convert.eol": "Line Endings",
     "dialog.convert.eolCr": "CR (classic Mac)",
     "dialog.convert.bom": "Add BOM (UTF-8 / UTF-16)",
-    "dialog.convert.noteReopen":
-      '"Reopen" reloads with the selected encoding without saving and discards unsaved edits. Use it to recover mojibake.',
-    "dialog.convert.noteConvert":
-      '"Convert and Save" overwrites with the selected encoding and line endings, stopping if any character cannot be represented.',
     "dialog.convert.reopen": "Reopen",
     "dialog.convert.go": "Convert and Save",
     "dialog.convert.savedAs": "Saved as {enc} / {eol}",
