@@ -70,6 +70,57 @@ export function openNewWindow(path = "") {
   window.open(location.href, "_blank");
 }
 
+// ---- native OS file dialogs (desktop build) ---------------------------------
+//
+// The GUI shell owns the real dialogs (rfd): the page sends an IPC request and
+// the Rust side answers through window.__ayame*DialogDone. One dialog can be
+// in flight at a time — the OS dialog is modal, so a second request can only
+// come from a stale code path; it cancels the first cleanly instead of
+// leaving its promise dangling.
+
+let nativeSaveResolve = null;
+
+let nativeOpenResolve = null;
+
+// Ask the OS save dialog for a target path. Resolves with the chosen absolute
+// path, or null when the user cancels. The OS dialog handles the overwrite
+// confirmation itself.
+export function nativeSaveDialog(dir, name): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (nativeSaveResolve) nativeSaveResolve(null);
+    nativeSaveResolve = resolve;
+    postNativeMessage(
+      `ayame:pick-save:${JSON.stringify({ dir: String(dir || ""), name: String(name || "") })}`,
+    );
+  });
+}
+
+// Ask the OS open dialog for one or more files. Resolves with an array of
+// absolute paths (empty when the user cancels).
+export function nativeOpenDialog(dir = ""): Promise<string[]> {
+  return new Promise((resolve) => {
+    if (nativeOpenResolve) nativeOpenResolve([]);
+    nativeOpenResolve = resolve;
+    postNativeMessage(`ayame:pick-open:${JSON.stringify({ dir: String(dir || "") })}`);
+  });
+}
+
+window.__ayameSaveDialogDone = (path) => {
+  const resolve = nativeSaveResolve;
+  nativeSaveResolve = null;
+  if (resolve) resolve(typeof path === "string" && path.trim() ? path : null);
+};
+
+window.__ayameOpenDialogDone = (paths) => {
+  const resolve = nativeOpenResolve;
+  nativeOpenResolve = null;
+  if (!resolve) return;
+  const list = Array.isArray(paths)
+    ? paths.filter((p) => typeof p === "string" && p.trim())
+    : [];
+  resolve(list);
+};
+
 export async function confirmCloseLastTab(tab) {
   if (tab?.dirty) {
     return askConfirm(t("dialog.exit.title"), t("dialog.exit.unsavedNamed", { name: tab.name }), {

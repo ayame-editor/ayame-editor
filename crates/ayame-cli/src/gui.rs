@@ -142,6 +142,12 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             msg => {
                 if let Some(path) = msg.strip_prefix("ayame:new-window:") {
                     let _ = ipc_proxy.send_event(GuiEvent::NewWindowPath(path.to_string()));
+                } else if let Some(payload) = msg.strip_prefix("ayame:pick-save:") {
+                    let req = serde_json::from_str(payload).unwrap_or_default();
+                    let _ = ipc_proxy.send_event(GuiEvent::PickSave(req));
+                } else if let Some(payload) = msg.strip_prefix("ayame:pick-open:") {
+                    let req = serde_json::from_str(payload).unwrap_or_default();
+                    let _ = ipc_proxy.send_event(GuiEvent::PickOpen(req));
                 } else if let Some(lang) = msg.strip_prefix("ayame:language:") {
                     #[cfg(target_os = "macos")]
                     let _ = ipc_proxy.send_event(GuiEvent::Language(lang.to_string()));
@@ -303,6 +309,30 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             Event::UserEvent(GuiEvent::NewWindowPath(path)) => {
                 spawn_new_window_with_path(&path);
             }
+            // The OS dialogs run modally on this (the UI) thread — required on
+            // macOS, standard on Windows; the dialog pumps its own events.
+            Event::UserEvent(GuiEvent::PickSave(req)) => {
+                let picked = file_dialog(&req.dir)
+                    .set_file_name(req.name.trim())
+                    .save_file();
+                let result = picked.as_deref().map(crate::serve::workspace::display_path);
+                let json = serde_json::to_string(&result).unwrap_or_else(|_| "null".into());
+                let _ = webview.evaluate_script(&format!(
+                    "window.__ayameSaveDialogDone && window.__ayameSaveDialogDone({json});"
+                ));
+            }
+            Event::UserEvent(GuiEvent::PickOpen(req)) => {
+                let picked: Vec<String> = file_dialog(&req.dir)
+                    .pick_files()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|p| crate::serve::workspace::display_path(p))
+                    .collect();
+                let json = serde_json::to_string(&picked).unwrap_or_else(|_| "[]".into());
+                let _ = webview.evaluate_script(&format!(
+                    "window.__ayameOpenDialogDone && window.__ayameOpenDialogDone({json});"
+                ));
+            }
             #[cfg(target_os = "macos")]
             Event::UserEvent(GuiEvent::Language(lang)) => {
                 macos_menu = setup_macos_menu(&proxy, Some(UiLocale::from_setting(&lang)));
@@ -322,12 +352,44 @@ enum GuiEvent {
     /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
     NewWindow,
     NewWindowPath(String),
+    /// The page asked for the OS save dialog (名前を付けて保存).
+    PickSave(PickSaveRequest),
+    /// The page asked for the OS open dialog (ファイルを開く).
+    PickOpen(PickOpenRequest),
     #[cfg(target_os = "macos")]
     Language(String),
     /// A native menu item was activated; carries the muda item id, which is
     /// the frozen action name understood by `window.__ayameMenu` in the page.
     #[cfg(target_os = "macos")]
     Menu(String),
+}
+
+/// What the page suggests for the OS save dialog: a starting folder and a
+/// pre-filled file name. Both optional — the dialog falls back to the OS's
+/// own last-used location.
+#[derive(Debug, Default, Deserialize)]
+struct PickSaveRequest {
+    #[serde(default)]
+    dir: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PickOpenRequest {
+    #[serde(default)]
+    dir: String,
+}
+
+/// Base OS file dialog, starting in `dir` when the page suggested one that
+/// actually exists (otherwise the OS picks — typically the last-used folder).
+fn file_dialog(dir: &str) -> rfd::FileDialog {
+    let mut dlg = rfd::FileDialog::new();
+    let dir = dir.trim();
+    if !dir.is_empty() && Path::new(dir).is_dir() {
+        dlg = dlg.set_directory(dir);
+    }
+    dlg
 }
 
 /// Open a new editor window: spawn a fresh, detached `<current-exe> gui`
@@ -566,8 +628,6 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
                 label("次の一致を選択", "Select Next Occurrence"),
                 key(cmd, Code::KeyD),
             ),
-            &item("caseUpper", label("大文字に変換", "Uppercase"), None),
-            &item("caseLower", label("小文字に変換", "Lowercase"), None),
             &PredefinedMenuItem::separator(),
             &item(
                 "addCursorAbove",
@@ -622,6 +682,18 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
             &item("diffFile", label("2ファイル差分", "Diff Files"), None),
             &item("splitFile", label("ファイルを分割", "Split File"), None),
             &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
+            &PredefinedMenuItem::separator(),
+            &item("caseUpper", label("大文字に変換", "Uppercase"), None),
+            &item("caseLower", label("小文字に変換", "Lowercase"), None),
+            &item("caseCamel", label("camelCase に変換", "camelCase"), None),
+            &item("casePascal", label("PascalCase に変換", "PascalCase"), None),
+            &item("caseSnake", label("snake_case に変換", "snake_case"), None),
+            &item("caseKebab", label("kebab-case に変換", "kebab-case"), None),
+            &item(
+                "caseConstant",
+                label("CONSTANT_CASE に変換", "CONSTANT_CASE"),
+                None,
+            ),
         ],
     )
     .ok()?;

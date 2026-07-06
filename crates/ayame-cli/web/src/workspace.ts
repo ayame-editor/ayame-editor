@@ -15,7 +15,14 @@ import {
 import { TREE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
-import { confirmCloseLastTab, openNewWindow, requestEditorClose } from "./app.js";
+import {
+  confirmCloseLastTab,
+  isNativeApp,
+  nativeOpenDialog,
+  nativeSaveDialog,
+  openNewWindow,
+  requestEditorClose,
+} from "./app.js";
 import { maybeOfferWalRecovery, noteWalError, savingCount } from "./save.js";
 import { clearLineCache, focusEditor, render, scheduleRender, setCaret } from "./editor.js";
 import { fileMenuVisible, hideFileMenu, initMenuBar, updateStatusMeta } from "./menus.js";
@@ -41,7 +48,28 @@ export function showOpener() {
   queueMicrotask(() => inp.focus());
 }
 
+// ファイルを開く: the desktop build calls the OS's own open dialog; the
+// browser build falls back to the in-app picker (a web page cannot hand the
+// server a real local path any other way).
+export async function openFileDialog() {
+  if (!isNativeApp()) {
+    showOpener();
+    return;
+  }
+  const current = state.stat?.path || "";
+  const dir = !isUntitled(current) ? pathDirName(current) || "" : "";
+  const paths = await nativeOpenDialog(dir);
+  for (const p of paths) await openPath(p);
+}
+
 export function showSaveDialog(title, suggestedPath): Promise<any> {
+  if (isNativeApp()) {
+    // OS dialog: it confirms overwrites itself, so a returned path is final.
+    return nativeSaveDialog(
+      pathDirName(suggestedPath) || "",
+      pathBaseName(suggestedPath) || "untitled.txt",
+    ).then((path) => (path ? { path, overwrite: true } : null));
+  }
   return new Promise((resolve) => {
     configureOpener("save", title);
     state.openerResolve = resolve;
@@ -128,12 +156,24 @@ export function renderBrowse(res) {
   list.scrollTop = 0;
 }
 
+// The server's virtual drive-list level ("PC" in Windows Explorer terms);
+// must match DRIVES_DIR in serve/workspace.rs.
+export const DRIVES_DIR = "::";
+
 export function renderCwdCrumbs(path) {
   const cwd = $("opener-cwd");
   const clean = String(path || "").replace(/^\\\\\?\\/, "");
   cwd.textContent = "";
   cwd.title = clean;
-  for (const [i, crumb] of pathCrumbs(clean).entries()) {
+  let crumbs = pathCrumbs(clean);
+  if (clean === DRIVES_DIR) {
+    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+  } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
+    // Windows: a "PC" root crumb in front of the drive, so other drives are
+    // one click away (the drive list is also the ".." of every drive root).
+    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+  }
+  for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) {
       const sep = document.createElement("span");
       sep.className = "cwd-sep";
@@ -272,6 +312,11 @@ export async function saveDialogTarget() {
   const raw = $("opener-input").value.trim();
   if (!raw) {
     openerMsg(t("dialog.open.enterFileName"));
+    return null;
+  }
+  if (!isAbsolutePath(raw) && state.openerDir === DRIVES_DIR) {
+    // The drive list is not a directory; a bare file name has nowhere to go.
+    openerMsg(t("dialog.open.pickFolderFirst"));
     return null;
   }
   const path = isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw);
@@ -829,7 +874,7 @@ export function initWorkspace() {
   });
   $("open-file").addEventListener("click", () => {
     hideFileMenu();
-    showOpener();
+    openFileDialog();
   });
   $("opener-close").addEventListener("click", hideOpener);
   $("opener-open").addEventListener("click", commitOpener);

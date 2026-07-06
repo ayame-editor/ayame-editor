@@ -17,5 +17,9 @@ declare global {
     __ayameMenu?: (action: string) => void;
     /** Native launch-with-file: path to open once the UI is ready. */
     __ayamePendingOpen?: string;
+    /** Native → page: result of the OS save dialog (path or null). */
+    __ayameSaveDialogDone?: (path: unknown) => void;
+    /** Native → page: result of the OS open dialog (paths or null). */
+    __ayameOpenDialogDone?: (paths: unknown) => void;
   }
 }
