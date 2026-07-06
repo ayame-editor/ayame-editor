@@ -39,10 +39,12 @@ nav:
   - User Guide: USER_GUIDE.md
   - CLI Reference: CLI_REFERENCE.md
   - Architecture: ARCHITECTURE.md
+  - Data Integrity: DATA_INTEGRITY.md
   - Developer Guide: DEVELOPMENT.md
   - 日本語:
       - ホーム: ja/index.md
       - ユーザー向け: ja/USER_GUIDE.md
       - CLI リファレンス: ja/CLI_REFERENCE.md
       - アーキテクチャ: ja/ARCHITECTURE.md
+      - データ完全性: ja/DATA_INTEGRITY.md
       - 開発者向け: ja/DEVELOPMENT.md

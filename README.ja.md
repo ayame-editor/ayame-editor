@@ -51,6 +51,10 @@ curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/i
 インストール、ビルド手順、Linux の実行時パッケージは
 [ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
 
+1 バイトの誤りも許されない用途向けに、[データ完全性の保証](docs/ja/DATA_INTEGRITY.md)
+（バイト正確な保存・クラッシュ復元・エンコーディング往復などの正確性の約束と、
+それを検証するテスト）をまとめています。
+
 ## ライセンス
 
 0BSD。ほぼすべての目的で、このプロジェクトを使用、コピー、変更、配布できます。
