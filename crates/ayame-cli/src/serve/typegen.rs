@@ -24,8 +24,8 @@ use super::edit::{
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
 use super::ops::{
-    ArtifactResponse, CaseSaveRequest, GrepRequest, ReplaceSaveRequest, SortSaveRequest,
-    SplitSaveRequest,
+    ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest, ReplaceSaveRequest,
+    SortSaveRequest, SplitSaveRequest,
 };
 use super::state::{SessionState, TabInfo, TabsResponse, UiState};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest};
@@ -57,6 +57,7 @@ fn bridge() -> Bridge {
         .decl(&decl::<CaseSaveRequest>())
         .decl(&decl::<SplitSaveRequest>())
         .decl(&decl::<GrepRequest>())
+        .decl(&decl::<GrepSaveRequest>())
         .decl(&decl::<SessionState>())
         .decl(&decl::<UiState>())
         .decl(&decl::<TabInfo>())

@@ -7,15 +7,23 @@ import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.j
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
 import { reloadViewport, settleEditQueue } from "./edits.js";
-import { flashCount } from "./search.js";
+import { flashCount, lastGrep } from "./search.js";
 import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
-import { onDocumentOpened, refreshTabs, showSaveDialog, updateTreeActive } from "./workspace.js";
+import {
+  onDocumentOpened,
+  openPath,
+  refreshTabs,
+  showSaveDialog,
+  updateTreeActive,
+} from "./workspace.js";
 import { saveSettings } from "./settings.js";
 import { saveSessionSnapshot } from "./persistence.js";
 import type {
+  ArtifactResponse,
   BrowseResponse,
   EditSaveRequest,
   EditSaveResponse,
+  GrepSaveRequest,
   OpenRequest,
   RecoverRequest,
   ReopenRequest,
@@ -591,20 +599,133 @@ export async function splitFile() {
   }
 }
 
+// grep して保存: extract only the lines matching a pattern (the search bar's
+// exact regex/case/word semantics) from the current document — unsaved edits
+// included — into a file picked with the save dialog. The extraction streams
+// through an isolated worker, so multi-GB files complete in bounded memory.
+export async function grepToFile() {
+  if (!state.stat?.open) return;
+  const f = await askForm(
+    t("menu.grepSave"),
+    [
+      {
+        id: "query",
+        type: "text",
+        label: t("dialog.grep.query"),
+        value: lastGrep.query || state.query || "",
+        placeholder: t("dialog.grep.queryPlaceholder"),
+      },
+      { id: "ci", type: "check", label: t("dialog.grep.ignoreCase"), value: lastGrep.ci },
+      { id: "word", type: "check", label: t("find.wholeWord"), value: lastGrep.word },
+      { id: "regex", type: "check", label: t("find.regex"), value: lastGrep.regex },
+      { id: "_hint", type: "hint", label: t("dialog.grepSave.hint") },
+    ],
+    t("dialog.grepSave.go"),
+  );
+  if (!f) return;
+  const query = String(f.query || "");
+  if (!query.trim()) return;
+  // Shared memory with フォルダ内検索 so both dialogs recall the same options.
+  Object.assign(lastGrep, { query, ci: !!f.ci, word: !!f.word, regex: !!f.regex });
+  const target = await showSaveDialog(t("menu.grepSave"), suggestedGrepPath());
+  if (!target) return;
+  await runGrepSave(query, { ci: !!f.ci, word: !!f.word, regex: !!f.regex }, target);
+}
+
+// "app.log" → sibling "app.grep.log"; untitled buffers suggest grep.txt in
+// 前回の保存先 (the same folder save-as would suggest).
+function suggestedGrepPath() {
+  const p = state.stat?.path || "";
+  if (!p || isUntitled(p)) {
+    return joinPath((state.settings.lastSaveDir || "").trim(), "grep.txt");
+  }
+  const shown = displayPath(p);
+  const dir = pathDirName(shown);
+  const base = shown.split(/[\\/]/).pop() || "grep.txt";
+  const dot = base.lastIndexOf(".");
+  const name = dot > 0 ? `${base.slice(0, dot)}.grep${base.slice(dot)}` : `${base}.grep.txt`;
+  return joinPath(dir, name);
+}
+
+async function runGrepSave(query, opts, target) {
+  showLoading(t("dialog.grepSave.running"));
+  let res;
+  try {
+    res = await apiPost<ArtifactResponse, GrepSaveRequest>("/api/grep/save", {
+      path: target.path,
+      query,
+      regex: opts.regex,
+      ci: opts.ci,
+      word: opts.word,
+      overwrite: !!target.overwrite,
+      jobs: null,
+      chunk_lines: null,
+    });
+  } catch (e) {
+    hideLoading();
+    // The in-app picker doesn't confirm overwrites itself (the OS dialog
+    // does): same conflict-confirm-retry flow as save-as.
+    if (!target.overwrite && isExistsError(e)) {
+      const ok = await askConfirm(
+        t("dialog.overwrite.title"),
+        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
+        { okLabel: t("dialog.overwrite.ok"), danger: true },
+      );
+      if (ok) await runGrepSave(query, opts, { ...target, overwrite: true });
+      return;
+    }
+    flashCount(t("dialog.grepSave.error"), "error");
+    showMessage(t("dialog.grepSave.error"), serverMessage(e.message));
+    return;
+  }
+  hideLoading();
+  flashCount(t("file.saved", { path: displayPath(res.path) }));
+  // Open the extracted lines so the result is immediately inspectable.
+  await openPath(res.path);
+}
+
 // ---- crash recovery (server-side WAL) ---------------------------------------
 
 // Guard: one recoverable document produces one dialog, even if open/select
 // events race while the modal is up.
 export let walPromptBusy = false;
 
+// Paths whose next recoverable log is a deliberate window-to-window tab
+// handoff (issue #35), not a crash: replay it silently instead of showing
+// the crash-recovery prompt. One-shot per path.
+const walHandoffPaths = new Set();
+
+export function expectWalHandoff(path) {
+  if (typeof path === "string" && path.trim()) walHandoffPaths.add(displayPath(path));
+}
+
 // The server found a crash log with unsaved edits for the just-opened
 // document (stat.recoverable). Nothing is applied automatically: offer the
 // choice — 復元 replays the log into the live session, 破棄 deletes it.
+// Exception: a path registered via expectWalHandoff is an adopted tab whose
+// edits the user deliberately moved here — those replay without asking.
 export async function maybeOfferWalRecovery(stat) {
   const n = stat?.recoverable;
   if (!n || walPromptBusy) return;
+  const handoff = walHandoffPaths.delete(displayPath(stat?.path || ""));
   walPromptBusy = true;
   try {
+    if (handoff) {
+      try {
+        await apiPost<unknown, RecoverRequest>("/api/edit/recover", { discard: false });
+      } catch {
+        // The source window may still be releasing the log (its detach lands
+        // milliseconds after our drop); one short retry covers that.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        await apiPost<unknown, RecoverRequest>("/api/edit/recover", { discard: false });
+      }
+      clearLineCache();
+      await refreshStat();
+      await reloadViewport();
+      render();
+      flashCount(t("tab.handoffDone"));
+      return;
+    }
     const restore = await askConfirm(t("recover.title"), t("recover.found", { n: commas(n) }), {
       okLabel: t("recover.restore"),
       cancelLabel: t("recover.discard"),

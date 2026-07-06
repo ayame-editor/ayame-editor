@@ -4,6 +4,23 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added "grep して保存" (Tools menu, `/api/grep/save`, `ayame grep-lines`):
+  extract only the lines matching a pattern — with the search bar's exact
+  regex / case / whole-word semantics, unsaved edits included — into a file
+  picked with the save dialog. Streams through an isolated worker with the
+  same `--jobs` / `--chunk-lines` parallelism as replace, so multi-GB files
+  complete in bounded memory. (#38)
+- Added dirty-tab handoff between native windows: dragging an unsaved tab to
+  another Ayame window (or out into a new one) now moves the unsaved edits
+  with it. The source window detaches the tab keeping its fsynced crash log
+  (`/api/tabs/detach`), and the adopting window replays that log silently —
+  no crash prompt, no data loss. Untitled buffers still stay put. (#35)
+- Added per-column graduations to the column ruler: a short tick every
+  column and a taller one every 5, sakura-editor style, drawn with repeating
+  CSS gradients so no DOM node exists per column. (#43)
+- Fixed the window/taskbar icon looking vertically stretched: the flower
+  mark is widened to a near-square silhouette (like the favicon) and reads
+  bolder at 16x16 titlebar size; its aspect ratio is now unit-tested. (#51)
 - Fixed new/untitled buffers silently saving into the temp scratch folder:
   the scratch-directory rename broke untitled detection, so 保存 overwrote
   `%TEMP%\ayame-srv-untitled-…\untitled.txt` without a dialog. Untitled

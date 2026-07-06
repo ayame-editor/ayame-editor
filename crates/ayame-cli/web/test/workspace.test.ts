@@ -11,6 +11,7 @@ vi.mock("../src/editor.js", () => ({
   setCaret: vi.fn(),
 }));
 vi.mock("../src/save.js", () => ({
+  expectWalHandoff: vi.fn(),
   maybeOfferWalRecovery: vi.fn(),
   noteWalError: vi.fn(),
   savingCount: 0,
@@ -37,7 +38,8 @@ vi.mock("../src/app.js", () => ({
   requestEditorClose: vi.fn(),
 }));
 
-import { canDragOutToNewWindow } from "../src/workspace.js";
+import { isNativeApp } from "../src/app.js";
+import { canDragOutToNewWindow, canHandoffDirtyTab } from "../src/workspace.js";
 
 describe("tab drag-out to a new window (#35)", () => {
   it("allows a clean, saved on-disk file to spawn its own window", () => {
@@ -45,8 +47,21 @@ describe("tab drag-out to a new window (#35)", () => {
     expect(canDragOutToNewWindow({ path: "C:\\logs\\app.txt", dirty: false })).toBe(true);
   });
 
-  it("refuses a dirty tab (unsaved edits can't be handed to another process)", () => {
-    expect(canDragOutToNewWindow({ path: "/home/u/app.log", dirty: true })).toBe(false);
+  it("allows a dirty on-disk tab in the native build (WAL handoff)", () => {
+    expect(canHandoffDirtyTab({ path: "/home/u/app.log", dirty: true })).toBe(true);
+    expect(canDragOutToNewWindow({ path: "/home/u/app.log", dirty: true })).toBe(true);
+  });
+
+  it("refuses a dirty tab in the browser build (no per-window tab ownership)", () => {
+    vi.mocked(isNativeApp).mockReturnValue(false);
+    try {
+      expect(canHandoffDirtyTab({ path: "/home/u/app.log", dirty: true })).toBe(false);
+      expect(canDragOutToNewWindow({ path: "/home/u/app.log", dirty: true })).toBe(false);
+      // Clean tabs still tear out in the browser build.
+      expect(canDragOutToNewWindow({ path: "/home/u/app.log", dirty: false })).toBe(true);
+    } finally {
+      vi.mocked(isNativeApp).mockReturnValue(true);
+    }
   });
 
   it("refuses a fileless tab (no path to reopen)", () => {
@@ -54,11 +69,17 @@ describe("tab drag-out to a new window (#35)", () => {
     expect(canDragOutToNewWindow({ dirty: false })).toBe(false);
   });
 
-  it("refuses an untitled scratch buffer", () => {
+  it("refuses an untitled scratch buffer, dirty or clean (no stable cross-process key)", () => {
     expect(
       canDragOutToNewWindow({
         path: "/tmp/ayame-srv-untitled-abc123-0-0/untitled.txt",
         dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      canHandoffDirtyTab({
+        path: "/tmp/ayame-srv-untitled-abc123-0-0/untitled.txt",
+        dirty: true,
       }),
     ).toBe(false);
   });

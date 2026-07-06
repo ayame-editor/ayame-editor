@@ -34,6 +34,7 @@ export type ReplaceSaveRequest = JsonWire<Wire.ReplaceSaveRequest>;
 export type CaseSaveRequest = JsonWire<Wire.CaseSaveRequest>;
 export type SplitSaveRequest = JsonWire<Wire.SplitSaveRequest>;
 export type GrepRequest = JsonWire<Wire.GrepRequest>;
+export type GrepSaveRequest = JsonWire<Wire.GrepSaveRequest>;
 export type SessionState = JsonWire<Wire.SessionState>;
 export type UiState = JsonWire<Wire.UiState>;
 export type TabInfo = JsonWire<Wire.TabInfo>;

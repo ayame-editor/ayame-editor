@@ -90,6 +90,84 @@ pub struct TransformResult {
     pub replacements: u64,
 }
 
+/// What and how to extract with [`grep_lines_to_path`]. The matching fields
+/// mirror [`crate::search::SearchOptions`], so the extracted lines are exactly
+/// the ones the search bar reports for the same query.
+#[derive(Clone, Debug)]
+pub struct GrepLinesOptions {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    /// Replace an existing output file instead of failing with `Conflict`
+    /// (set when an OS save dialog already confirmed the overwrite).
+    pub overwrite: bool,
+}
+
+/// Extract every line matching `opts` into a new file ("grep して保存"): one
+/// streaming pass over the mmap, so multi-GB files complete in bounded
+/// memory. Matched lines are copied verbatim, original terminator included;
+/// `changed_lines` reports how many lines matched.
+pub fn grep_lines_to_path(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &GrepLinesOptions,
+) -> Result<TransformResult> {
+    let target = target.as_ref();
+    if !opts.overwrite {
+        ensure_new_target(target)?;
+    }
+    let (plan, whole_word) = grep_plan(doc, opts)?;
+    stream_to_new_file(doc, target, |raw, term, w| {
+        write_grep_line(doc, &plan, whole_word, raw, term, w)
+    })
+}
+
+/// Parallel variant of [`grep_lines_to_path`]: matching is line-local, so
+/// independent line-range chunks filter on worker threads and concatenate in
+/// order, exactly like replace/case.
+pub fn grep_lines_to_path_parallel(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &GrepLinesOptions,
+    parallel: &ParallelReplaceOptions,
+) -> Result<TransformResult> {
+    let target = target.as_ref();
+    if !opts.overwrite {
+        ensure_new_target(target)?;
+    }
+    let (plan, whole_word) = grep_plan(doc, opts)?;
+    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
+        write_grep_line(doc, &plan, whole_word, raw, term, w)
+    })
+}
+
+fn grep_plan(doc: &Document, opts: &GrepLinesOptions) -> Result<(MatchPlan, bool)> {
+    if opts.query.is_empty() {
+        return Err(Error::InvalidInput("grep pattern must not be empty".into()));
+    }
+    let plan =
+        MatchPlan::for_replace(doc.encoding(), &opts.query, opts.regex, opts.case_sensitive)?;
+    Ok((plan, opts.whole_word))
+}
+
+fn write_grep_line(
+    doc: &Document,
+    plan: &MatchPlan,
+    whole_word: bool,
+    raw: &[u8],
+    term: &[u8],
+    w: &mut impl Write,
+) -> Result<(bool, u64)> {
+    if crate::search::line_has_match(plan, doc.encoding(), raw, whole_word) {
+        w.write_all(raw)?;
+        w.write_all(term)?;
+        Ok((true, 0))
+    } else {
+        Ok((false, 0))
+    }
+}
+
 pub fn case_to_path(
     doc: &Document,
     target: impl AsRef<Path>,
@@ -117,8 +195,10 @@ pub fn case_to_path_parallel(
     let target = target.as_ref();
     ensure_new_target(target)?;
     let mode = opts.mode;
-    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, w| {
-        write_cased_line(doc, mode, raw, w)
+    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
+        let res = write_cased_line(doc, mode, raw, w)?;
+        w.write_all(term)?;
+        Ok(res)
     })
 }
 
@@ -174,15 +254,19 @@ pub fn replace_to_path_parallel(
         ));
     }
     let plan = ReplacePlan::new(doc, opts)?;
-    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, w| {
-        write_replaced_line(doc, &plan, raw, w)
+    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
+        let res = write_replaced_line(doc, &plan, raw, w)?;
+        w.write_all(term)?;
+        Ok(res)
     })
 }
 
 /// The shared chunked-parallel driver: split the document into line-range
 /// chunks, run `line_fn` over each chunk into its own temp part file (Rayon
 /// workers), then concatenate the parts in order. Only valid for line-local
-/// transforms — `line_fn` must not carry state across lines.
+/// transforms — `line_fn` must not carry state across lines. `line_fn` owns
+/// the line terminator (its third argument), so filters like grep-to-file can
+/// drop a line entirely instead of leaving a blank one behind.
 fn stream_chunks_parallel<F>(
     doc: &Document,
     target: &Path,
@@ -190,7 +274,7 @@ fn stream_chunks_parallel<F>(
     line_fn: &F,
 ) -> Result<TransformResult>
 where
-    F: Fn(&Document, &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+    F: Fn(&Document, &[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
 {
     let total = doc.line_count();
     if total == 0 {
@@ -263,7 +347,7 @@ where
         out.flush()?;
         out.get_ref().sync_all()?;
         drop(out);
-        std::fs::rename(&tmp, target)?;
+        rename_over(&tmp, target)?;
         fsync_parent(target);
         let bytes = std::fs::metadata(target)?.len();
         Ok(TransformResult {
@@ -317,7 +401,7 @@ where
     w.flush()?;
     w.get_ref().sync_all()?;
     drop(w);
-    match std::fs::rename(&tmp, target) {
+    match rename_over(&tmp, target) {
         Ok(()) => {
             fsync_parent(target);
             let bytes = std::fs::metadata(target)?.len();
@@ -347,7 +431,7 @@ fn write_empty_transform(doc: &Document, target: &Path) -> Result<TransformResul
     w.flush()?;
     w.get_ref().sync_all()?;
     drop(w);
-    std::fs::rename(&tmp, target)?;
+    rename_over(&tmp, target)?;
     fsync_parent(target);
     let bytes = std::fs::metadata(target)?.len();
     Ok(TransformResult {
@@ -357,6 +441,32 @@ fn write_empty_transform(doc: &Document, target: &Path) -> Result<TransformResul
         changed_lines: 0,
         replacements: 0,
     })
+}
+
+/// `rename` that also replaces an existing `target` on platforms where a
+/// plain rename cannot (Windows): move the old file aside, move the new one
+/// in, then drop the old copy. Overwrite *intent* is still gated by
+/// [`ensure_new_target`] in each transform's entry point — by the time this
+/// runs, replacing whatever sits at `target` is deliberate.
+fn rename_over(tmp: &Path, target: &Path) -> std::io::Result<()> {
+    match std::fs::rename(tmp, target) {
+        Ok(()) => Ok(()),
+        Err(_first) if target.exists() => {
+            let aside = temp_path(target);
+            std::fs::rename(target, &aside)?;
+            match std::fs::rename(tmp, target) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&aside);
+                    Ok(())
+                }
+                Err(second) => {
+                    let _ = std::fs::rename(&aside, target);
+                    Err(second)
+                }
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 struct ReplaceChunk {
@@ -422,7 +532,7 @@ impl ReplacePlan {
 
 fn process_chunk<F>(doc: &Document, line_fn: &F, chunk: &ReplaceChunk) -> Result<ReplaceChunkResult>
 where
-    F: Fn(&Document, &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+    F: Fn(&Document, &[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
 {
     let file = OpenOptions::new()
         .write(true)
@@ -440,8 +550,7 @@ where
         }
         let advanced = batch.len() as u64;
         for (_line, raw, term) in batch {
-            let (changed, count) = line_fn(doc, raw, &mut w)?;
-            w.write_all(term)?;
+            let (changed, count) = line_fn(doc, raw, term, &mut w)?;
             if changed {
                 changed_lines += 1;
             }
@@ -953,6 +1062,129 @@ mod tests {
             std::fs::read(&out).unwrap(),
             [0xFF, 0xFE, 0x61, 0x30, 0x41, 0x00, 0x0A, 0x00]
         );
+        let _ = std::fs::remove_file(out);
+    }
+
+    fn grep_opts(query: &str) -> GrepLinesOptions {
+        GrepLinesOptions {
+            query: query.into(),
+            regex: false,
+            case_sensitive: true,
+            whole_word: false,
+            overwrite: false,
+        }
+    }
+
+    #[test]
+    fn grep_lines_extracts_matching_lines_verbatim() {
+        let (f, doc) = doc_from(b"alpha needle\r\nbeta\nneedle end");
+        let out = f.path().with_extension("grep");
+        let res = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap();
+        assert_eq!(res.changed_lines, 2);
+        assert_eq!(res.lines, 3);
+        // Terminators (and their absence on the last line) survive verbatim,
+        // and non-matching lines leave no blank line behind.
+        assert_eq!(std::fs::read(&out).unwrap(), b"alpha needle\r\nneedle end");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn grep_lines_regex_case_and_word_match_search_semantics() {
+        let (f, doc) = doc_from(b"Warn: boot\nwarning up\nnote\nwarn\n");
+        let out = f.path().with_extension("grep-ci");
+        let res = grep_lines_to_path(
+            &doc,
+            &out,
+            &GrepLinesOptions {
+                query: "WARN".into(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: true,
+                overwrite: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 2);
+        assert_eq!(std::fs::read(&out).unwrap(), b"Warn: boot\nwarn\n");
+        let _ = std::fs::remove_file(&out);
+
+        let out = f.path().with_extension("grep-re");
+        let res = grep_lines_to_path(
+            &doc,
+            &out,
+            &GrepLinesOptions {
+                query: r"^w\w+g".into(),
+                regex: true,
+                case_sensitive: true,
+                whole_word: false,
+                overwrite: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"warning up\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn parallel_grep_matches_streaming_grep() {
+        let (f, doc) = doc_from(b"needle a\nskip\nneedle b\nskip\nneedle c");
+        let seq = f.path().with_extension("grep-seq");
+        let par = f.path().with_extension("grep-par");
+        grep_lines_to_path(&doc, &seq, &grep_opts("needle")).unwrap();
+        let res = grep_lines_to_path_parallel(
+            &doc,
+            &par,
+            &grep_opts("needle"),
+            &ParallelReplaceOptions {
+                jobs: 2,
+                chunk_lines: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 3);
+        assert_eq!(
+            std::fs::read(&par).unwrap(),
+            std::fs::read(&seq).unwrap(),
+            "parallel grep output must be byte-identical to streaming grep"
+        );
+        let _ = std::fs::remove_file(seq);
+        let _ = std::fs::remove_file(par);
+    }
+
+    #[test]
+    fn grep_lines_shift_jis_skips_trail_byte_matches() {
+        let opts = AyameOpenOptions {
+            encoding: Some(Encoding::ShiftJis),
+            ..AyameOpenOptions::default()
+        };
+        let mut f = NamedTempFile::new().unwrap();
+        // "ソ" is 0x83 0x5C in Shift_JIS: a literal backslash query must not
+        // match its trail byte, but must match the real '\' on line 2.
+        f.write_all(b"\x83\x5c line\nreal \\ here\n").unwrap();
+        let doc = Document::open(f.path(), &opts).unwrap();
+        let out = f.path().with_extension("grep-sjis");
+        let res = grep_lines_to_path(&doc, &out, &grep_opts("\\")).unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"real \\ here\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn grep_lines_overwrite_replaces_existing_target() {
+        let (f, doc) = doc_from(b"needle\nskip\n");
+        let out = f.path().with_extension("grep-ow");
+        std::fs::write(&out, b"old contents").unwrap();
+        // Without overwrite: conflict, the old file is untouched.
+        let err = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap_err();
+        assert!(matches!(err, Error::Conflict(_)), "got {err:?}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"old contents");
+        // With overwrite: the picked file is replaced.
+        let mut ow = grep_opts("needle");
+        ow.overwrite = true;
+        let res = grep_lines_to_path(&doc, &out, &ow).unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"needle\n");
         let _ = std::fs::remove_file(out);
     }
 

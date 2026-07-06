@@ -142,6 +142,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/tabs", get(workspace::api_tabs))
         .route("/api/tabs/select", post(workspace::api_tabs_select))
         .route("/api/tabs/close", post(workspace::api_tabs_close))
+        .route("/api/tabs/detach", post(workspace::api_tabs_detach))
         .route("/api/ui_state", get(workspace::api_ui_state))
         .route("/api/ui_state", post(workspace::api_ui_state_save))
         .route("/api/session/save", post(workspace::api_session_save))
@@ -177,6 +178,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/sort/save", post(ops::api_sort_save))
         .route("/api/replace/save", post(ops::api_replace_save))
         .route("/api/case/save", post(ops::api_case_save))
+        .route("/api/grep/save", post(ops::api_grep_save))
         .route("/api/split/save", post(ops::api_split_save))
         .route("/api/search", get(ops::api_search))
         .route("/api/grep", post(ops::api_grep))
@@ -1415,6 +1417,114 @@ mod tests {
         // The Path-typed form is the same choke point.
         assert_eq!(display_path(Path::new(r"\\?\C:\Users\x")), r"C:\Users\x");
         assert_eq!(display_path(Path::new("/tmp/f.txt")), "/tmp/f.txt");
+    }
+
+    /// Issue #35 dirty-tab handoff: `/api/tabs/detach` removes the tab but
+    /// KEEPS its crash log, so a second process (the adopting window) replays
+    /// the unsaved edits through the ordinary recover path. `/api/tabs/close`
+    /// would have deleted that log as a deliberate discard.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tabs_detach_keeps_the_wal_for_a_dirty_handoff() {
+        let f = scratch_file("wal-handoff.txt", b"alpha\nbeta\n");
+        let cache = scratch_cache("handoff");
+
+        // Window A: one committed edit — never saved — then detach the tab.
+        let addr = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":5,"text":"ALPHA"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (status, tabs) = send(addr, get("/api/tabs", &host)).await;
+        assert_eq!(status, 200);
+        let tabs: serde_json::Value = serde_json::from_str(&tabs).unwrap();
+        let id = tabs["tabs"][0]["id"].as_u64().unwrap();
+        let (status, stat) = send(
+            addr,
+            post_json(
+                "/api/tabs/detach",
+                &host,
+                Some(&origin),
+                &format!(r#"{{"id":{id}}}"#),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "detach: {stat}");
+        assert!(stat.contains("\"open\":false"), "stat: {stat}");
+        let wal_path = ayame_core::wal::wal_path_for(&cache, &f);
+        assert!(
+            wal_path.exists(),
+            "detach must keep the crash log for the adopting window"
+        );
+
+        // Window B: same file, same cache — the log is offered and replays.
+        let addr2 = start_server_with_opts(&f, wal_opts(&cache)).await;
+        let host2 = format!("127.0.0.1:{}", addr2.port());
+        let origin2 = format!("http://{host2}");
+        let (status, stat) = send(addr2, get("/api/stat", &host2)).await;
+        assert_eq!(status, 200);
+        assert!(stat.contains("\"recoverable\":1"), "stat: {stat}");
+        let (status, body) = send(
+            addr2,
+            post_json("/api/edit/recover", &host2, Some(&origin2), "{}"),
+        )
+        .await;
+        assert_eq!(status, 200, "recover: {body}");
+        assert!(body.contains("\"dirty\":true"), "body: {body}");
+        let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
+        assert!(lines.contains("ALPHA"), "adopted view: {lines}");
+
+        let _ = std::fs::remove_dir_all(&cache);
+        let _ = std::fs::remove_file(&f);
+    }
+
+    /// Without a crash log to carry the edits (no cache dir), detaching a
+    /// dirty tab is refused with 409 and the tab stays put — moving it would
+    /// silently drop the unsaved edits.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tabs_detach_refuses_a_dirty_tab_without_a_crash_log() {
+        let f = scratch_file("handoff-nocache.txt", b"alpha\nbeta\n");
+        let addr = start_server(&f).await; // OpenOptions::default(): no cache dir
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":5,"text":"ALPHA"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, tabs) = send(addr, get("/api/tabs", &host)).await;
+        let tabs: serde_json::Value = serde_json::from_str(&tabs).unwrap();
+        let id = tabs["tabs"][0]["id"].as_u64().unwrap();
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/tabs/detach",
+                &host,
+                Some(&origin),
+                &format!(r#"{{"id":{id}}}"#),
+            ),
+        )
+        .await;
+        assert_eq!(status, 409, "body: {body}");
+        // The tab survived the refusal, edits intact.
+        let (_, stat) = send(addr, get("/api/stat", &host)).await;
+        assert!(stat.contains("\"open\":true"), "stat: {stat}");
+        assert!(stat.contains("\"dirty\":true"), "stat: {stat}");
+        let _ = std::fs::remove_file(&f);
     }
 
     /// Response-level guard: an error string that carries a path reaches the

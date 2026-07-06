@@ -17,6 +17,9 @@ declare global {
     __ayameMenu?: (action: string) => void;
     /** Native launch-with-file: path to open once the UI is ready. */
     __ayamePendingOpen?: string;
+    /** Set alongside __ayamePendingOpen by a dirty-tab handoff (issue #35):
+     *  replay the path's detached crash log without the crash prompt. */
+    __ayamePendingRecover?: boolean;
     /** Native → page: result of the OS save dialog (path or null). */
     __ayameSaveDialogDone?: (path: unknown) => void;
     /** Native → page: result of the OS open dialog (paths or null). */

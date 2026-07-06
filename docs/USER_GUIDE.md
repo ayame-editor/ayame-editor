@@ -100,8 +100,8 @@ option list.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII. If text is garbled, reopen with an explicit encoding.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
 - Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
-- Runs sort, replace, two-file diff, folder grep, split, and ASCII upper/lower conversion from the GUI.
-- Includes tabs, an explorer, recent files, and tail-follow mode for appended logs.
+- Runs sort, replace, two-file diff, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
+- Includes tabs, an explorer, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.
 
@@ -139,6 +139,7 @@ option list.
 | Diff with another file | Unassigned |
 | Split current file | Unassigned |
 | Grep a folder | Unassigned |
+| Grep to file (save matching lines) | Unassigned |
 | Transform selection to uppercase / lowercase | Unassigned |
 | Settings | Unassigned |
 | Key bindings | Unassigned |

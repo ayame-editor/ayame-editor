@@ -415,6 +415,77 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// True if one line's raw bytes contain at least one match under `plan` —
+/// the same acceptance rules [`search`] applies (legacy boundary validation,
+/// whole-word, zero-width skipping), restricted to a single line. Lets the
+/// grep-to-file transform extract exactly the lines the search bar would
+/// report, without building a whole-buffer index.
+pub(crate) fn line_has_match(
+    plan: &MatchPlan,
+    enc: Encoding,
+    raw: &[u8],
+    whole_word: bool,
+) -> bool {
+    match plan {
+        MatchPlan::Literal {
+            finder,
+            validate_legacy_boundary,
+        } => {
+            for pos in finder.find_iter(raw) {
+                if *validate_legacy_boundary && !is_legacy_char_boundary_in_line(enc, raw, pos) {
+                    continue;
+                }
+                if whole_word
+                    && !is_whole_word_match_encoded_in_line(enc, raw, pos, finder.needle().len())
+                {
+                    continue;
+                }
+                return true;
+            }
+            false
+        }
+        MatchPlan::Regex { bytes, .. } => bytes.find_iter(raw).any(|m| {
+            m.end() > m.start()
+                && (!whole_word || is_whole_word_match(raw, m.start(), m.end() - m.start()))
+        }),
+        MatchPlan::DecodeLine(re) => {
+            let text = enc.decode_line(raw);
+            re.find_iter(&text).any(|m| {
+                m.end() > m.start()
+                    && (!whole_word || is_whole_word_text(&text, m.start(), m.end()))
+            })
+        }
+    }
+}
+
+/// Line-local mirror of [`is_whole_word_match_encoded`]: neighbor bytes are
+/// resolved by walking the legacy lead/trail structure from the line start
+/// (always a character boundary) instead of through a whole-buffer index.
+fn is_whole_word_match_encoded_in_line(
+    enc: Encoding,
+    raw: &[u8],
+    start: usize,
+    len: usize,
+) -> bool {
+    if !is_legacy_multibyte(enc) {
+        return is_whole_word_match(raw, start, len);
+    }
+    let mut p = 0usize;
+    let mut prev: Option<usize> = None;
+    while p < start && p < raw.len() {
+        prev = Some(p);
+        p += legacy_step(enc, raw, p);
+    }
+    let before = (p == start).then(|| prev.map(|i| raw[i])).flatten();
+    let end = start.saturating_add(len);
+    let mut q = start;
+    while q < end && q < raw.len() {
+        q += legacy_step(enc, raw, q);
+    }
+    let after = (q == end).then(|| raw.get(end).copied()).flatten();
+    !before.is_some_and(is_word_byte) && !after.is_some_and(is_word_byte)
+}
+
 /// Whole-word check on decoded text (mirrors [`is_word_byte`]'s definition).
 #[inline]
 fn is_whole_word_text(text: &str, start: usize, end: usize) -> bool {

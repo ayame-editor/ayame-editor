@@ -30,6 +30,7 @@ ayame <COMMAND> [OPTIONS]
 | `sortdiff <OLD> <NEW>` | 両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
 | `case <FILE> <upper|lower>` | ASCII 大文字 / 小文字変換を新しいファイルへ書き出し。 |
+| `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
 | `split <FILE> --lines N` | N 行ごとのパーツに分割。 |
 | `group <FILE> -k COL` | キー列で group-by し、count や数値集計を実行。 |
 | `top <FILE> -k COL -n N` | bounded memory でキー上位 N 行を保持。 |
@@ -68,14 +69,17 @@ ayame <COMMAND> [OPTIONS]
 
 | オプション | メモ |
 | --- | --- |
-| `--out <FILE>` | `sort`, `replace`, `case` の出力先。`replace` と `case` は必須。 |
-| `-i`, `--ignore-case` | 大文字小文字を無視して `replace`。 |
-| `-e`, `--regex` | `replace` pattern を正規表現として扱う。 |
-| `--jobs <N>` | 並列 replace worker 数。`0` は Rayon 既定値。 |
-| `--chunk-lines <N>` | 並列 replace の chunk 行数。既定は 4000000。 |
+| `--out <FILE>` | `sort`, `replace`, `case`, `grep-lines` の出力先。`replace` / `case` / `grep-lines` は必須。 |
+| `-i`, `--ignore-case` | 大文字小文字を無視して `replace` / `grep-lines`。 |
+| `-e`, `--regex` | `replace` / `grep-lines` の pattern を正規表現として扱う。 |
+| `-w`, `--whole-word` | `grep-lines` を単語単位で一致させる。 |
+| `--overwrite` | `grep-lines --out` に既存ファイルの上書きを許可する。 |
+| `--jobs <N>` | `replace` / `case` / `grep-lines` の並列 worker 数。`0` は Rayon 既定値。 |
+| `--chunk-lines <N>` | 並列 chunk の行数。既定は 4000000。 |
 
-出力コマンドは既存ファイルを上書きしません。別の出力先を指定するか、意図して
-対象ファイルを削除してから再実行してください。
+出力コマンドは既存ファイルを上書きしません (`grep-lines` は `--overwrite` で
+明示的に許可できます)。別の出力先を指定するか、意図して対象ファイルを削除して
+から再実行してください。
 
 ## split オプション
 
@@ -138,6 +142,7 @@ ayame sort huge.csv -k 1 --csv --out sorted.csv
 ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
+ayame grep-lines huge.log 'ERROR' -i --out errors.log
 ayame split huge.csv --lines 1000000
 ayame group huge.csv -k 3 --value 5
 ayame top huge.csv -k 2 -n 100 --numeric

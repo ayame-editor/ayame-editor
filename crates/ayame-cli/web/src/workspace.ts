@@ -23,7 +23,7 @@ import {
   openNewWindow,
   requestEditorClose,
 } from "./app.js";
-import { maybeOfferWalRecovery, noteWalError, savingCount } from "./save.js";
+import { expectWalHandoff, maybeOfferWalRecovery, noteWalError, savingCount } from "./save.js";
 import { clearLineCache, focusEditor, render, scheduleRender, setCaret } from "./editor.js";
 import { fileMenuVisible, hideFileMenu, initMenuBar, updateStatusMeta } from "./menus.js";
 import { setFollowTail, settleEditQueue } from "./edits.js";
@@ -579,26 +579,39 @@ export function tabDragPayload(tab) {
 
 export function startTabDrag(e, tab) {
   if (!e.dataTransfer) return;
-  if (tab.dirty) {
+  if (tab.dirty && !canHandoffDirtyTab(tab)) {
     e.preventDefault();
     flashCount(t("tab.moveDirty"), "error");
     return;
   }
-  e.dataTransfer.effectAllowed = tab.dirty ? "none" : "move";
+  e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData(TAB_DRAG_TYPE, JSON.stringify(tabDragPayload(tab)));
   e.dataTransfer.setData("text/plain", tab.path || tab.name || "");
 }
 
-// A tab can be torn out into its own window only when it is a clean, on-disk
-// file. Each window is a separate process (by design, for crash isolation), so
-// a dirty or fileless/untitled buffer has nothing another process could reopen
-// and must stay put rather than be dropped on the floor.
+// A dirty tab can move between windows only in the native build (each window
+// is its own process/server) and only for a real on-disk file: the handoff
+// rides the crash log — /api/tabs/detach keeps + fsyncs it, the adopting
+// window replays it — and that log is keyed by the file's canonical path.
+// Untitled buffers live in pid-scoped scratch dirs, so they have no stable
+// cross-process key and must stay put. Browser windows on one shared server
+// have no per-window tab ownership, so the old refusal stands there too.
+export function canHandoffDirtyTab(tab) {
+  return isNativeApp() && !!tab?.path && !isUntitled(tab.path);
+}
+
+// A tab can be torn out into its own window when it is an on-disk file; a
+// dirty one additionally needs the handoff path above. Fileless/untitled
+// buffers have nothing another process could reopen and must stay put rather
+// than be dropped on the floor.
 export function canDragOutToNewWindow(tab) {
-  return !!tab && !tab.dirty && !!tab.path && !isUntitled(tab.path);
+  if (!tab || !tab.path || isUntitled(tab.path)) return false;
+  return !tab.dirty || canHandoffDirtyTab(tab);
 }
 
 export async function finishTabDrag(e, tab) {
-  if (tab.dirty || savingCount > 0) return;
+  if (savingCount > 0) return;
+  if (tab.dirty && !canHandoffDirtyTab(tab)) return;
   const dropped = e.dataTransfer?.dropEffect === "move";
   const outside =
     e.clientX < 0 ||
@@ -606,23 +619,47 @@ export async function finishTabDrag(e, tab) {
     e.clientX > window.innerWidth ||
     e.clientY > window.innerHeight;
   if (dropped) {
-    await closeMovedTab(tab.id);
+    // Another Ayame window accepted the drop and (re)opens the path itself.
+    // A dirty tab detaches — its crash log carries the unsaved edits to the
+    // adopting window — while a clean one closes outright.
+    if (tab.dirty) await detachMovedTab(tab.id);
+    else await closeMovedTab(tab.id);
   } else if (outside) {
     // Dragging outside the window tears the tab out into its own window
     // (a fresh process for that file); keep fileless/untitled buffers here.
     if (!canDragOutToNewWindow(tab)) return;
-    openNewWindow(tab.path);
-    await closeMovedTab(tab.id);
+    if (tab.dirty) {
+      // Handoff order matters: detach FIRST (makes the log durable and
+      // releases it), then spawn the adopting window, and only then finish
+      // any close of this one — the spawn IPC must reach the native side
+      // while this process is still alive.
+      let stat;
+      try {
+        stat = await apiPost<{ open: boolean }, TabIdRequest>("/api/tabs/detach", { id: tab.id });
+      } catch (err) {
+        flashCount(t("tab.handoffError"), "error");
+        console.error(err);
+        return;
+      }
+      openNewWindow(tab.path, true);
+      if (!stat.open) requestEditorClose();
+      else onDocumentOpened(stat);
+    } else {
+      openNewWindow(tab.path);
+      await closeMovedTab(tab.id);
+    }
   }
 }
 
 export function initTabDropTarget() {
   const c = $("tabs");
+  const acceptsDirty = (payload) => isNativeApp() && !!payload.path && !isUntitled(payload.path);
   c.addEventListener("dragover", (e) => {
     const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
     if (!raw) return;
     const payload = parseTabDragPayload(raw);
-    if (!payload || payload.sourceWindowId === state.windowId || payload.dirty) return;
+    if (!payload || payload.sourceWindowId === state.windowId) return;
+    if (payload.dirty && !acceptsDirty(payload)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   });
@@ -631,11 +668,37 @@ export function initTabDropTarget() {
     if (!payload || payload.sourceWindowId === state.windowId) return;
     e.preventDefault();
     if (payload.dirty) {
-      flashCount(t("tab.moveDirty"), "error");
+      if (!acceptsDirty(payload)) {
+        flashCount(t("tab.moveDirty"), "error");
+        return;
+      }
+      // Adopt a dirty tab: the source detaches on its dragend (right after
+      // this event fires), leaving its fsynced crash log behind. Give that a
+      // moment, then open the path — the registered handoff makes the
+      // recoverable log replay without the crash prompt.
+      expectWalHandoff(payload.path);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await openPath(payload.path);
       return;
     }
     await openPath(payload.path);
   });
+}
+
+// Like closeMovedTab, but through /api/tabs/detach: the tab's crash log is
+// kept (and fsynced) so the adopting window can replay the unsaved edits.
+export async function detachMovedTab(id) {
+  try {
+    const stat = await apiPost<{ open: boolean }, TabIdRequest>("/api/tabs/detach", { id });
+    if (!stat.open) {
+      requestEditorClose();
+    } else {
+      onDocumentOpened(stat);
+    }
+  } catch (e) {
+    flashCount(t("tab.handoffError"), "error");
+    console.error(e);
+  }
 }
 
 export function parseTabDragPayload(raw) {

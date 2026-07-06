@@ -3,7 +3,7 @@ import { $, commas, displayName, displayShortcut, humanBytes, setModalOpen } fro
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { applyStaticI18n, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
-import { saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
+import { grepToFile, saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
 import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
 import {
   addCursorAbove,
@@ -644,6 +644,7 @@ export const ACTIONS: Record<
   diffFile: { run: diffFile, globalShortcut: true },
   splitFile: { run: splitFile, globalShortcut: true },
   grepFolder: { run: grepFolder, globalShortcut: true },
+  grepSave: { run: grepToFile, globalShortcut: true },
   caseUpper: { run: () => transformSelection("upper"), globalShortcut: true, editorOnly: true },
   caseLower: { run: () => transformSelection("lower"), globalShortcut: true, editorOnly: true },
   caseCamel: { run: () => transformSelection("camel"), globalShortcut: true, editorOnly: true },
@@ -695,6 +696,7 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "diffFile",
   "splitFile",
   "grepFolder",
+  "grepSave",
   "settings",
   "keymap",
   "selectAll",

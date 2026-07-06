@@ -724,6 +724,96 @@ impl AppState {
         }
     }
 
+    /// Detach a tab for a window-to-window handoff (issue #35): remove it
+    /// exactly like [`AppState::close_tab`], but KEEP its crash log on disk —
+    /// fsynced before returning — so the adopting window can replay the
+    /// unsaved edits through the normal `/api/edit/recover` path. Refused
+    /// with 409 when the tab holds unsaved edits but has no crash log to
+    /// carry them (`--no-cache`, or logging degraded): moving it would
+    /// silently drop the edits, which is exactly what this endpoint exists to
+    /// prevent.
+    pub(super) async fn detach_tab(&self, id: u64) -> Result<(), (StatusCode, String)> {
+        let _transitions = self.transitions.lock().await;
+        self.invalidate_dirty_snapshot();
+        let cache_root = self.open_opts.cache_dir.clone();
+        let (asides, sync_file) = self.write(|ws| {
+            let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
+                return Err((StatusCode::NOT_FOUND, "no such tab".to_string()));
+            };
+            // Clone the log's file handle before the session (and with it the
+            // live writer) is dropped; a cloned handle syncs the same file.
+            let (dirty, sync_file, recoverable) = if ws.tabs.active == Some(id) {
+                let dirty = ws.doc.as_ref().is_some_and(|d| ws.edits.stats(d).dirty);
+                (
+                    dirty,
+                    ws.edits.wal_sync_file().ok().flatten(),
+                    ws.recoverable,
+                )
+            } else {
+                match ws.tabs.inactive.get(&id) {
+                    Some(t) => (
+                        t.edits.stats(&t.doc).dirty,
+                        t.edits.wal_sync_file().ok().flatten(),
+                        t.recoverable,
+                    ),
+                    None => (false, None, None),
+                }
+            };
+            if dirty && sync_file.is_none() && recoverable.is_none() {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "unsaved edits have no crash log to hand off".to_string(),
+                ));
+            }
+            ws.tabs.order.remove(idx);
+            let mut asides = match ws.tabs.inactive.remove(&id) {
+                Some(t) => t.aside_files, // dropping `t` releases its writer handle
+                None => Vec::new(),
+            };
+            if ws.tabs.active == Some(id) {
+                asides.append(&mut ws.aside_files);
+                // Same neighbor-focus dance as close_tab; replacing `edits`
+                // drops the detached session's writer so the log file is free
+                // for the adopting process.
+                let next = ws
+                    .tabs
+                    .order
+                    .get(idx)
+                    .or_else(|| ws.tabs.order.last())
+                    .copied();
+                ws.tabs.active = next;
+                match next.and_then(|nid| ws.tabs.inactive.remove(&nid)) {
+                    Some(t) => {
+                        ws.doc = Some(t.doc);
+                        ws.edits = t.edits;
+                        ws.aside_files = t.aside_files;
+                        ws.recoverable = t.recoverable;
+                    }
+                    None => {
+                        ws.doc = None;
+                        ws.edits = EditSession::default();
+                        ws.recoverable = None;
+                    }
+                }
+                attach_live_wal(cache_root.as_deref(), ws);
+            }
+            Ok((asides, sync_file))
+        })?;
+        // The handoff contract: the log is durable before the caller spawns
+        // (or signals) the adopting window. Surfaced on failure — proceeding
+        // could hand off a log a power loss would tear.
+        if let Some(f) = sync_file {
+            f.sync_data().map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("crash log sync failed: {e}"),
+                )
+            })?;
+        }
+        remove_aside_files(asides);
+        Ok(())
+    }
+
     /// Snapshot every open tab for the tab bar.
     pub(super) fn tabs_response(&self) -> TabsResponse {
         self.read(|ws| {

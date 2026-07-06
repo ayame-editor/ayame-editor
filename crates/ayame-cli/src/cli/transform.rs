@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use ayame_core::{
-    CaseMode, CaseOptions, ParallelReplaceOptions, ReplaceOptions, SplitOptions,
+    CaseMode, CaseOptions, GrepLinesOptions, ParallelReplaceOptions, ReplaceOptions, SplitOptions,
     DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 
@@ -89,6 +89,65 @@ pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
     eprintln!(
         "{} changed line(s), {} -> {}",
         commas(res.changed_lines),
+        human_bytes(res.bytes),
+        res.path.display()
+    );
+    Ok(())
+}
+
+/// `ayame grep-lines <FILE> <PATTERN> --out FILE` — extract every line
+/// matching PATTERN into a new file, with the search bar's exact matching
+/// semantics (`-e` regex, `-i` ignore-case, `-w` whole-word). This is the
+/// worker behind the GUI's "grep して保存" (issue #38); `--overwrite` is
+/// passed when an OS save dialog already confirmed replacing the target.
+pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
+    maybe_crash();
+    let (doc, pos, opts, flags) = open_doc(
+        args,
+        &["--out", "--jobs", "--chunk-lines"],
+        &[
+            "-e",
+            "--regex",
+            "-i",
+            "--ignore-case",
+            "-w",
+            "--whole-word",
+            "--overwrite",
+        ],
+    )?;
+    let query = pos.get(1).context("expected PATTERN")?.clone();
+    let out = first_opt(&opts, &["--out"]).context("grep-lines requires --out <FILE>")?;
+    let grep_opts = GrepLinesOptions {
+        query,
+        regex: has_flag(&flags, &["-e", "--regex"]),
+        case_sensitive: !has_flag(&flags, &["-i", "--ignore-case"]),
+        whole_word: has_flag(&flags, &["-w", "--whole-word"]),
+        overwrite: has_flag(&flags, &["--overwrite"]),
+    };
+    let jobs = first_opt(&opts, &["--jobs"])
+        .map(|s| s.parse::<usize>().context("--jobs must be a number"))
+        .transpose()?;
+    let chunk_lines = first_opt(&opts, &["--chunk-lines"])
+        .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
+        .transpose()?
+        .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
+        ayame_core::grep_lines_to_path_parallel(
+            &doc,
+            out,
+            &grep_opts,
+            &ParallelReplaceOptions {
+                jobs: jobs.unwrap_or(0),
+                chunk_lines,
+            },
+        )?
+    } else {
+        ayame_core::grep_lines_to_path(&doc, out, &grep_opts)?
+    };
+    eprintln!(
+        "{} matching line(s) of {}, {} -> {}",
+        commas(res.changed_lines),
+        commas(res.lines),
         human_bytes(res.bytes),
         res.path.display()
     );

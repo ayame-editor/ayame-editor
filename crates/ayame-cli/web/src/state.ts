@@ -89,6 +89,7 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["diffFile", "menu.diff", ""],
   ["splitFile", "menu.split", ""],
   ["grepFolder", "menu.grep", ""],
+  ["grepSave", "menu.grepSave", ""],
   ["caseUpper", "menu.caseUpper", ""],
   ["caseLower", "menu.caseLower", ""],
   ["caseCamel", "menu.caseCamel", ""],

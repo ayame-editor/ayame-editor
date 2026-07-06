@@ -50,6 +50,22 @@ export function buildRuler() {
       t.textContent = String(c);
       inner.append(t);
     }
+    // Sakura-style fine graduations: a short tick every column and a taller
+    // one every 5, painted as two repeating gradients (periods in fractional
+    // px of one character cell) so no DOM node exists per column. The
+    // numbered full-height lines every 10 stay the .rtick spans above. The
+    // background needs a real box to paint into, hence the explicit width —
+    // sized to the labeled range.
+    const tick = (period, color) =>
+      `repeating-linear-gradient(to right, ${color} 0 1px, transparent 1px ${period.toFixed(3)}px)`;
+    inner.style.width = `${gutterPx + 500 * cw}px`;
+    inner.style.backgroundImage =
+      tick(5 * cw, "var(--border)") +
+      ", " +
+      tick(cw, "color-mix(in srgb, var(--border) 55%, transparent)");
+    inner.style.backgroundSize = "auto 9px, auto 5px";
+    inner.style.backgroundPosition = `${gutterPx}px bottom, ${gutterPx}px bottom`;
+    inner.style.backgroundRepeat = "no-repeat";
   }
   inner.style.transform = `translateX(${-$("content").scrollLeft}px)`;
 }

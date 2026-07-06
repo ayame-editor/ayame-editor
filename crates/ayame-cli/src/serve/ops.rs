@@ -457,6 +457,92 @@ pub(super) async fn api_case_save(
     res.map(Json)
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct GrepSaveRequest {
+    /// Output file; null/absent = a `.grep` suffixed sibling default.
+    #[serde(default)]
+    path: Option<String>,
+    query: String,
+    #[serde(default)]
+    regex: bool,
+    #[serde(default)]
+    ci: bool,
+    #[serde(default)]
+    word: bool,
+    /// Replace an existing output file (the OS save dialog already asked).
+    #[serde(default)]
+    overwrite: bool,
+    #[serde(default)]
+    jobs: Option<usize>,
+    #[serde(default)]
+    chunk_lines: Option<u64>,
+}
+
+/// `POST /api/grep/save` — "grep して保存" (issue #38): extract every line of
+/// the active document (unsaved edits included) matching the query into a new
+/// file. The flags carry the search bar's exact semantics (`regex`, `ci`,
+/// `word`), and the streaming worker keeps memory bounded on multi-GB files.
+pub(super) async fn api_grep_save(
+    State(state): State<SharedState>,
+    Json(req): Json<GrepSaveRequest>,
+) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+    if req.query.is_empty() {
+        return Err(bad_request("query is empty"));
+    }
+    let wd = dirty_aware_input(&state, "grep-save").await?;
+    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "grep");
+    // Checked here (same message as save-as) because the worker's stderr is
+    // discarded: its own Conflict would surface as an opaque 502, and the web
+    // overwrite-confirm flow keys off this text.
+    if !req.overwrite && target.exists() {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("{} は既に存在します", workspace::display_path(&target)),
+        ));
+    }
+    let mut cmd = grep_save_command(&wd.doc, wd.input.path(), &target, &req)?;
+    let res = run_artifact_worker("grep", &mut cmd, &target, wd.total_lines).await;
+    drop(wd);
+    res.map(Json)
+}
+
+/// Build the `ayame grep-lines` worker invocation for [`api_grep_save`].
+fn grep_save_command(
+    doc: &Document,
+    input: &Path,
+    out: &Path,
+    req: &GrepSaveRequest,
+) -> Result<Command, (StatusCode, String)> {
+    let mut cmd = worker_command()?;
+    cmd.arg("grep-lines").arg(input);
+    append_worker_encoding(&mut cmd, doc);
+    cmd.arg(&req.query).arg("--out").arg(out);
+    if req.regex {
+        cmd.arg("--regex");
+    }
+    if req.ci {
+        cmd.arg("--ignore-case");
+    }
+    if req.word {
+        cmd.arg("--whole-word");
+    }
+    if req.overwrite {
+        cmd.arg("--overwrite");
+    }
+    // Same chunked-parallel plumbing as replace: line extraction is
+    // line-local, so huge files scale with cores in the worker.
+    cmd.arg("--jobs")
+        .arg(req.jobs.unwrap_or(0).to_string())
+        .arg("--chunk-lines")
+        .arg(
+            req.chunk_lines
+                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
+                .to_string(),
+        );
+    Ok(cmd)
+}
+
 // ---- split --------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -1134,6 +1220,39 @@ mod tests {
             !materialized.exists(),
             "materialized scratch file must be removed on drop"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn grep_save_command_carries_search_flags_and_parallel_defaults() {
+        let path = scratch_file("grep-src.log", b"a\nb\n");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let req = GrepSaveRequest {
+            path: None,
+            query: "ERROR".into(),
+            regex: true,
+            ci: true,
+            word: true,
+            overwrite: true,
+            jobs: None,
+            chunk_lines: None,
+        };
+        let out = path.with_extension("grep");
+
+        let cmd = grep_save_command(&doc, &path, &out, &req).unwrap();
+
+        let args = command_args(&cmd);
+        assert_eq!(args[0], "grep-lines");
+        for flag in ["--regex", "--ignore-case", "--whole-word", "--overwrite"] {
+            assert!(args.iter().any(|a| a == flag), "missing {flag} in {args:?}");
+        }
+        assert_has_arg_pair(&cmd, "--jobs", "0");
+        assert_has_arg_pair(
+            &cmd,
+            "--chunk-lines",
+            &DEFAULT_PARALLEL_REPLACE_CHUNK_LINES.to_string(),
+        );
+        assert_has_arg_pair(&cmd, "--out", &out.to_string_lossy());
         let _ = std::fs::remove_file(&path);
     }
 

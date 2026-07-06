@@ -13,6 +13,9 @@ mod diff;
 mod gen;
 #[cfg(feature = "gui")]
 mod gui;
+// Compiled (and unit-tested) in every build, but only the gui build draws it.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+mod icon;
 mod serve;
 mod temp_paths;
 

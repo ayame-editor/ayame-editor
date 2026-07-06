@@ -83,6 +83,19 @@ pub(super) async fn api_tabs_close(
     Json(stat_response(&state))
 }
 
+/// `POST /api/tabs/detach` — remove a tab while KEEPING its crash log
+/// (fsynced), so another window can adopt its unsaved edits by opening the
+/// same path and replaying the log (issue #35 dirty-tab handoff). Contrast
+/// with `/api/tabs/close`, which treats closing as a deliberate discard and
+/// deletes the log.
+pub(super) async fn api_tabs_detach(
+    State(state): State<SharedState>,
+    Json(req): Json<TabIdRequest>,
+) -> Result<Json<StatResponse>, (StatusCode, String)> {
+    state.detach_tab(req.id).await?;
+    Ok(Json(stat_response(&state)))
+}
+
 pub(super) async fn api_ui_state(State(state): State<SharedState>) -> Json<UiState> {
     Json(state.load_ui_state())
 }

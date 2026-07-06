@@ -90,6 +90,16 @@ dir: string | null,
  */
 glob: string | null, regex: boolean, ci: boolean, word: boolean, max: number, };
 
+export type GrepSaveRequest = {
+/**
+ * Output file; null/absent = a `.grep` suffixed sibling default.
+ */
+path: string | null, query: string, regex: boolean, ci: boolean, word: boolean,
+/**
+ * Replace an existing output file (the OS save dialog already asked).
+ */
+overwrite: boolean, jobs: number | null, chunk_lines: bigint | null, };
+
 export type SessionState = { paths: Array<string>, active_path: string | null, };
 
 export type UiState = { recent_files: Array<string>, search_history: Array<string>, session: SessionState, };

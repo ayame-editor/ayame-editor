@@ -10,8 +10,9 @@ mod common;
 
 use ayame_core::ops::sort;
 use ayame_core::{
-    case_to_path, case_to_path_parallel, replace_to_path, replace_to_path_parallel, split_by_lines,
-    CaseMode, CaseOptions, OrderingReader, ParallelReplaceOptions, ReplaceOptions, SortOptions,
+    case_to_path, case_to_path_parallel, grep_lines_to_path, grep_lines_to_path_parallel,
+    replace_to_path, replace_to_path_parallel, split_by_lines, CaseMode, CaseOptions,
+    GrepLinesOptions, OrderingReader, ParallelReplaceOptions, ReplaceOptions, SortOptions,
     SplitOptions,
 };
 use common::{assert_bytes_eq, open_doc, read, scratch};
@@ -123,6 +124,65 @@ fn parallel_case_is_byte_identical_to_sequential() {
                     &got,
                     &seq,
                     &format!("case {label} mode={mode:?} jobs={jobs} chunk={chunk_lines}"),
+                );
+            }
+        }
+    }
+}
+
+fn grep_bytes(
+    input: &[u8],
+    opts: &GrepLinesOptions,
+    par: Option<ParallelReplaceOptions>,
+) -> Vec<u8> {
+    let (_f, doc) = open_doc(input);
+    let dir = scratch();
+    let out = dir.path().join("grep.out");
+    match par {
+        None => {
+            grep_lines_to_path(&doc, &out, opts).unwrap();
+        }
+        Some(p) => {
+            grep_lines_to_path_parallel(&doc, &out, opts, &p).unwrap();
+        }
+    }
+    read(&out)
+}
+
+#[test]
+fn parallel_grep_is_byte_identical_to_sequential() {
+    let optsets = [
+        GrepLinesOptions {
+            query: "a".to_string(),
+            regex: false,
+            case_sensitive: true,
+            whole_word: false,
+            overwrite: false,
+        },
+        GrepLinesOptions {
+            query: r"\d".to_string(),
+            regex: true,
+            case_sensitive: false,
+            whole_word: false,
+            overwrite: false,
+        },
+    ];
+    for (input, label) in INPUTS {
+        for opts in &optsets {
+            let seq = grep_bytes(input, opts, None);
+            for &(jobs, chunk_lines) in PAR_VARIANTS {
+                let got = grep_bytes(
+                    input,
+                    opts,
+                    Some(ParallelReplaceOptions { jobs, chunk_lines }),
+                );
+                assert_bytes_eq(
+                    &got,
+                    &seq,
+                    &format!(
+                        "grep {label} regex={} jobs={jobs} chunk={chunk_lines}",
+                        opts.regex
+                    ),
                 );
             }
         }

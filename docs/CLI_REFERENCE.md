@@ -30,6 +30,7 @@ print help.
 | `sortdiff <OLD> <NEW>` | Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
 | `case <FILE> <upper|lower>` | Streaming ASCII case conversion to a new output file. |
+| `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |
 | `split <FILE> --lines N` | Split a file into N-line parts. |
 | `group <FILE> -k COL` | Group by a key column and count or aggregate values. |
 | `top <FILE> -k COL -n N` | Keep the top N rows by key with bounded memory. |
@@ -68,14 +69,17 @@ print help.
 
 | Option | Notes |
 | --- | --- |
-| `--out <FILE>` | Output file for `sort`, `replace`, and `case`. Required for `replace` and `case`. |
-| `-i`, `--ignore-case` | Case-insensitive `replace`. |
-| `-e`, `--regex` | Regex `replace` pattern. |
-| `--jobs <N>` | Parallel replace workers. `0` uses the Rayon default. |
-| `--chunk-lines <N>` | Lines per parallel replace chunk. Default: 4000000. |
+| `--out <FILE>` | Output file for `sort`, `replace`, `case`, and `grep-lines`. Required for `replace`, `case`, and `grep-lines`. |
+| `-i`, `--ignore-case` | Case-insensitive `replace` / `grep-lines`. |
+| `-e`, `--regex` | Regex `replace` / `grep-lines` pattern. |
+| `-w`, `--whole-word` | Whole-word `grep-lines` matches. |
+| `--overwrite` | Let `grep-lines --out` replace an existing file. |
+| `--jobs <N>` | Parallel workers for `replace`, `case`, and `grep-lines`. `0` uses the Rayon default. |
+| `--chunk-lines <N>` | Lines per parallel chunk. Default: 4000000. |
 
-Output commands refuse to overwrite existing files. Choose a new output path or
-remove the target intentionally before rerunning.
+Output commands refuse to overwrite existing files (for `grep-lines`,
+`--overwrite` opts in). Choose a new output path or remove the target
+intentionally before rerunning.
 
 ## Split Options
 
@@ -138,6 +142,7 @@ ayame sort huge.csv -k 1 --csv --out sorted.csv
 ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
+ayame grep-lines huge.log 'ERROR' -i --out errors.log
 ayame split huge.csv --lines 1000000
 ayame group huge.csv -k 3 --value 5
 ayame top huge.csv -k 2 -n 100 --numeric

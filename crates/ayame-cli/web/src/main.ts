@@ -12,7 +12,7 @@ import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { apiPost } from "./api.js";
 import { postNativeMessage } from "./app.js";
-import { maybeOfferWalRecovery, refreshStat } from "./save.js";
+import { expectWalHandoff, maybeOfferWalRecovery, refreshStat } from "./save.js";
 import { focusEditor, initScrollbar, render } from "./editor.js";
 import { initSelection } from "./selection.js";
 import { initCommandPalette, initContextMenu, updateStatusMeta } from "./menus.js";
@@ -78,6 +78,9 @@ export async function boot() {
     showLoading(t("dialog.open.openingName", { name: displayName(pending) }));
     postNativeMessage("ayame:ready");
     try {
+      // A window spawned by a dirty-tab handoff (issue #35): the detached
+      // tab's crash log replays silently instead of prompting.
+      if (window.__ayamePendingRecover) expectWalHandoff(pending);
       onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: pending }));
     } catch (e) {
       flashCount(t("error.cannotOpen", { msg: pending }), "error");

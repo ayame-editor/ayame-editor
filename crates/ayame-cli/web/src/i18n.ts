@@ -74,6 +74,9 @@ export const MESSAGES = {
     "menu.grep": "フォルダ内検索",
     "menu.grepTitle":
       "フォルダ内のファイルを再帰的に検索します (ファイル名フィルタ・正規表現に対応)",
+    "menu.grepSave": "grep して保存",
+    "menu.grepSaveTitle":
+      "現在のファイルから一致した行だけを別ファイルに書き出します (正規表現・大小文字・単語単位に対応)",
     // -- toolbar --
     "toolbar.applyTheme": "テーマ適用",
     "toolbar.applyThemeTitle": "このJSONをテーマとして適用",
@@ -89,6 +92,8 @@ export const MESSAGES = {
     "tab.switchError": "タブ切替エラー",
     "tab.closeError": "タブを閉じられません",
     "tab.moveDirty": "未保存のタブは保存してから移動してください",
+    "tab.handoffDone": "未保存の編集を引き継ぎました",
+    "tab.handoffError": "タブの引き継ぎに失敗しました (タブは元のウィンドウに残っています)",
     // -- explorer sidebar --
     "tree.close": "エクスプローラーを閉じる",
     "tree.actions": "エクスプローラー操作",
@@ -335,6 +340,12 @@ export const MESSAGES = {
     "dialog.grep.summary": "{hits} 件 / {files} ファイル",
     "dialog.grep.summaryTruncated": "（上限 {max} 件で打ち切り）",
     "dialog.grep.summaryFiles": " / 走査ファイル数の上限に達しました",
+    // -- grep to file --
+    "dialog.grepSave.hint":
+      "一致した行だけを新しいファイルへ書き出します (未保存の編集も反映)。数 GB のファイルもストリーミングで完走します。",
+    "dialog.grepSave.go": "保存先を選択",
+    "dialog.grepSave.running": "一致行を書き出し中…",
+    "dialog.grepSave.error": "grep して保存に失敗しました",
     // -- save-selection dialog --
     "dialog.saveSel.title": "選択箇所をファイルに保存",
     "dialog.saveSel.path": "保存先パス",
@@ -437,6 +448,9 @@ export const MESSAGES = {
     "menu.grep": "Search Folder",
     "menu.grepTitle":
       "Search files in a folder recursively, with file-name filters and regular expressions.",
+    "menu.grepSave": "Grep to File",
+    "menu.grepSaveTitle":
+      "Write only the lines matching a pattern to a separate file (regex, case, whole-word supported).",
     "toolbar.applyTheme": "Apply Theme",
     "toolbar.applyThemeTitle": "Apply this JSON as a theme",
     "toolbar.applyKeymap": "Apply Key Bindings",
@@ -450,6 +464,8 @@ export const MESSAGES = {
     "tab.switchError": "Tab switch error",
     "tab.closeError": "Could not close the tab.",
     "tab.moveDirty": "Save the tab before moving it to another window.",
+    "tab.handoffDone": "Unsaved edits carried over.",
+    "tab.handoffError": "Tab handoff failed (the tab stays in its original window).",
     "tree.close": "Close Explorer",
     "tree.actions": "Explorer Actions",
     "tree.up": "Up One Level",
@@ -679,6 +695,11 @@ export const MESSAGES = {
     "dialog.grep.summary": "{hits} matches / {files} files",
     "dialog.grep.summaryTruncated": " (stopped at the {max} match limit)",
     "dialog.grep.summaryFiles": " / reached the scanned-file limit",
+    "dialog.grepSave.hint":
+      "Writes only the matching lines to a new file (unsaved edits included). Streams, so multi-GB files complete.",
+    "dialog.grepSave.go": "Choose Destination",
+    "dialog.grepSave.running": "Extracting matching lines...",
+    "dialog.grepSave.error": "Grep to File Error",
     "dialog.saveSel.title": "Save Selection to File",
     "dialog.saveSel.path": "Save Path",
     "dialog.saveSel.hint":

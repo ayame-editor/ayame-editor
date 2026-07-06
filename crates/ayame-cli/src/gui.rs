@@ -19,15 +19,19 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebContext, WebViewBuilder};
 
-use crate::parse_checked;
+use crate::{has_flag, parse_checked};
 
 pub fn cmd_gui(args: &[String]) -> Result<()> {
     // Same file-opening options as `serve`; the window opens empty if no FILE.
+    // `--recover` is internal: a window spawned by a dirty-tab handoff (issue
+    // #35) passes it so the page replays the detached tab's crash log without
+    // the crash-recovery prompt.
     let (pos, opts, flags) = parse_checked(
         args,
         &["--encoding", "--stride", "--cache-dir"],
-        &["--no-cache"],
+        &["--no-cache", "--recover"],
     )?;
+    let recover_pending = has_flag(&flags, &["--recover"]);
     let title = initial_window_title(&pos);
 
     // A plain FILE argument is opened asynchronously from the page (via
@@ -86,8 +90,13 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             let abs = std::fs::canonicalize(p)
                 .map(|x| crate::serve::workspace::display_path(&x))
                 .unwrap_or_else(|_| p.clone());
+            let recover_js = if recover_pending {
+                "window.__ayamePendingRecover = true;"
+            } else {
+                ""
+            };
             format!(
-                "window.__ayamePendingOpen = {};",
+                "window.__ayamePendingOpen = {};{recover_js}",
                 serde_json::to_string(&abs).unwrap_or_else(|_| "\"\"".into())
             )
         }
@@ -140,7 +149,11 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 let _ = ipc_proxy.send_event(GuiEvent::NewWindow);
             }
             msg => {
-                if let Some(path) = msg.strip_prefix("ayame:new-window:") {
+                if let Some(path) = msg.strip_prefix("ayame:new-window-recover:") {
+                    // Dirty-tab handoff: the page already detached the tab
+                    // (crash log kept + fsynced); the new window replays it.
+                    let _ = ipc_proxy.send_event(GuiEvent::NewWindowPathRecover(path.to_string()));
+                } else if let Some(path) = msg.strip_prefix("ayame:new-window:") {
                     let _ = ipc_proxy.send_event(GuiEvent::NewWindowPath(path.to_string()));
                 } else if let Some(payload) = msg.strip_prefix("ayame:pick-save:") {
                     let req = serde_json::from_str(payload).unwrap_or_default();
@@ -307,7 +320,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 spawn_new_window();
             }
             Event::UserEvent(GuiEvent::NewWindowPath(path)) => {
-                spawn_new_window_with_path(&path);
+                spawn_new_window_with_path(&path, false);
+            }
+            Event::UserEvent(GuiEvent::NewWindowPathRecover(path)) => {
+                spawn_new_window_with_path(&path, true);
             }
             // The OS dialogs run modally on this (the UI) thread — required on
             // macOS, standard on Windows; the dialog pumps its own events.
@@ -352,6 +368,9 @@ enum GuiEvent {
     /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
     NewWindow,
     NewWindowPath(String),
+    /// A dirty-tab handoff: open `path` in a fresh window and auto-replay its
+    /// detached crash log (issue #35).
+    NewWindowPathRecover(String),
     /// The page asked for the OS save dialog (名前を付けて保存).
     PickSave(PickSaveRequest),
     /// The page asked for the OS open dialog (ファイルを開く).
@@ -407,7 +426,7 @@ fn spawn_new_window() {
     }
 }
 
-fn spawn_new_window_with_path(path: &str) {
+fn spawn_new_window_with_path(path: &str, recover: bool) {
     let clean: String = path
         .chars()
         .filter(|c| !c.is_control())
@@ -419,11 +438,12 @@ fn spawn_new_window_with_path(path: &str) {
     }
     match std::env::current_exe() {
         Ok(exe) => {
-            if let Err(e) = std::process::Command::new(exe)
-                .arg("gui")
-                .arg(clean)
-                .spawn()
-            {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("gui").arg(clean);
+            if recover {
+                cmd.arg("--recover");
+            }
+            if let Err(e) = cmd.spawn() {
                 eprintln!("ayame: opening a new window failed: {e}");
             }
         }
@@ -682,6 +702,7 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
             &item("diffFile", label("2ファイル差分", "Diff Files"), None),
             &item("splitFile", label("ファイルを分割", "Split File"), None),
             &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
+            &item("grepSave", label("grep して保存", "Grep to File"), None),
             &PredefinedMenuItem::separator(),
             &item("caseUpper", label("大文字に変換", "Uppercase"), None),
             &item("caseLower", label("小文字に変換", "Lowercase"), None),
@@ -843,67 +864,11 @@ fn save_window_state(window: &Window, previous: Option<&WindowState>) {
     }
 }
 
-/// One petal ellipse: (cx, cy, rx, ry, rotation radians, r, g, b).
-type Petal = (f32, f32, f32, f32, f32, u8, u8, u8);
-
-/// The window/taskbar icon mirrors `web/favicon.svg`: the purple Ayame Editor
-/// flower mark on a transparent background. It is drawn to RGBA so the native
-/// GUI stays dependency-free.
+/// The window/taskbar icon: the Ayame flower mark painted by `crate::icon`
+/// (kept there, GUI-free, so its near-square aspect ratio stays unit-tested —
+/// the shape itself regressed once into a vertically-stretched titlebar icon,
+/// issue #51).
 fn app_icon() -> Option<Icon> {
-    const N: u32 = 64;
-    let mut px = vec![0u8; (N * N * 4) as usize];
-
-    // Ordered back-to-front.
-    let petals: [Petal; 6] = [
-        (32.0, 18.0, 6.0, 13.2, 0.0, 0xA9, 0x92, 0xE0),
-        (23.0, 27.0, 5.8, 13.0, -0.58, 0x9B, 0x82, 0xD8),
-        (41.0, 27.0, 5.8, 13.0, 0.58, 0x79, 0x5F, 0xC3),
-        (24.0, 43.0, 6.2, 13.5, 0.47, 0x8E, 0x73, 0xCF),
-        (40.0, 43.0, 6.2, 13.5, -0.47, 0x6F, 0x56, 0xB8),
-        (32.0, 38.0, 6.4, 11.8, 0.0, 0x67, 0x4F, 0xAF),
-    ];
-
-    let in_ellipse = |x: f32, y: f32, cx: f32, cy: f32, rx: f32, ry: f32, rot: f32| {
-        let (sin, cos) = rot.sin_cos();
-        let dx0 = x - cx;
-        let dy0 = y - cy;
-        let dx = (dx0 * cos + dy0 * sin) / rx;
-        let dy = (-dx0 * sin + dy0 * cos) / ry;
-        dx * dx + dy * dy <= 1.0
-    };
-
-    for y in 0..N {
-        for x in 0..N {
-            let mut dst = [0.0f32; 4];
-            for &(cx, cy, rx, ry, rot, r, g, b) in &petals {
-                let mut hits = 0.0;
-                for sy in 0..4 {
-                    for sx in 0..4 {
-                        let fx = x as f32 + (sx as f32 + 0.5) / 4.0;
-                        let fy = y as f32 + (sy as f32 + 0.5) / 4.0;
-                        if in_ellipse(fx, fy, cx, cy, rx, ry, rot) {
-                            hits += 1.0;
-                        }
-                    }
-                }
-                let src_a = hits / 16.0;
-                if src_a <= 0.0 {
-                    continue;
-                }
-                let src = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
-                let out_a = src_a + dst[3] * (1.0 - src_a);
-                for c in 0..3 {
-                    dst[c] = (src[c] * src_a + dst[c] * dst[3] * (1.0 - src_a)) / out_a;
-                }
-                dst[3] = out_a;
-            }
-
-            let i = ((y * N + x) * 4) as usize;
-            px[i] = (dst[0] * 255.0).round() as u8;
-            px[i + 1] = (dst[1] * 255.0).round() as u8;
-            px[i + 2] = (dst[2] * 255.0).round() as u8;
-            px[i + 3] = (dst[3] * 255.0).round() as u8;
-        }
-    }
-    Icon::from_rgba(px, N, N).ok()
+    let n = crate::icon::ICON_SIZE;
+    Icon::from_rgba(crate::icon::app_icon_rgba(), n, n).ok()
 }

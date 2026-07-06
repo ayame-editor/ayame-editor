@@ -44,6 +44,8 @@ COMMANDS:
     sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
     replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
     case   <FILE> <upper|lower>   Streaming ASCII case conversion (--out FILE)
+    grep-lines <FILE> <PATTERN>   Extract matching lines to a new file (--out FILE;
+                                  -e regex, -i ignore-case, -w whole-word)
     split  <FILE> --lines N       Split into N-line parts (<stem>.partNNNN<.ext>)
     group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
     top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
@@ -72,10 +74,12 @@ FIELD OPTIONS (sort/group/top/distinct):
     --numeric          Treat the key as a number (sort/top; sort also accepts -n)
 
 TRANSFORM OPTIONS:
-    --out <FILE>       Output file for sort/replace/case
-    -i, --ignore-case  Case-insensitive replace
-    -e, --regex        Regex replace pattern
-    --jobs <N>         Parallel replace workers (replace only; 0 = Rayon default)
+    --out <FILE>       Output file for sort/replace/case/grep-lines
+    -i, --ignore-case  Case-insensitive replace/grep-lines
+    -e, --regex        Regex replace/grep-lines pattern
+    -w, --whole-word   Whole-word grep-lines matches
+    --overwrite        Allow grep-lines --out to replace an existing file
+    --jobs <N>         Parallel replace workers (replace/case/grep-lines; 0 = Rayon default)
     --chunk-lines <N>  Lines per parallel replace chunk (default 4000000)
 
 SPLIT OPTIONS:
@@ -119,6 +123,7 @@ EXAMPLES:
     ayame sort huge.csv --out sorted.csv
     ayame replace huge.log ERROR WARN --out fixed.log
     ayame case huge.csv lower --out lower.csv
+    ayame grep-lines huge.log 'ERROR' -i --out errors.log
     ayame split huge.csv --lines 1000000
     ayame sortdiff old.csv new.csv -k 1 --summary
     ayame serve huge.csv --port 8777
@@ -138,6 +143,7 @@ const COMMANDS: &[&str] = &[
     "sort-diff",
     "replace",
     "case",
+    "grep-lines",
     "split",
     "group",
     "top",
@@ -198,6 +204,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
         "sortdiff" | "sort-diff" => diff::cmd_sortdiff(rest),
         "replace" => transform::cmd_replace(rest),
         "case" => transform::cmd_case(rest),
+        "grep-lines" => transform::cmd_grep_lines(rest),
         "split" => transform::cmd_split(rest),
         "group" => aggregate::cmd_group(rest),
         "top" => aggregate::cmd_top(rest),

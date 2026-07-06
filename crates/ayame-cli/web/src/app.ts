@@ -61,10 +61,13 @@ export function requestEditorClose() {
 
 // 新規ウィンドウ: native builds ask the Rust side to spawn a fresh window
 // process (contract: the "ayame:new-window" IPC message); the plain browser
-// build just opens the app URL in a new tab/window.
-export function openNewWindow(path = "") {
+// build just opens the app URL in a new tab/window. `recover` marks a
+// dirty-tab handoff: the new window auto-replays the detached crash log
+// (contract: "ayame:new-window-recover", issue #35).
+export function openNewWindow(path = "", recover = false) {
   if (isNativeApp()) {
-    postNativeMessage(path ? `ayame:new-window:${path}` : "ayame:new-window");
+    const msg = !path ? "ayame:new-window" : `ayame:new-window${recover ? "-recover" : ""}:${path}`;
+    postNativeMessage(msg);
     return;
   }
   window.open(location.href, "_blank");
