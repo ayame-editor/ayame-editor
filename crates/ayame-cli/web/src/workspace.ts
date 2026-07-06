@@ -724,13 +724,60 @@ export function setSidebar(open) {
 }
 
 // Load `dir` (or the server default when null) as the tree root.
-export async function treeSetRoot(dir) {
+// Explorer navigation history: two stacks bracketing the current root, so the
+// back/forward buttons retrace the folders the user has visited.
+const treeBack: string[] = [];
+const treeFwd: string[] = [];
+let treeCurrent: string | null = null;
+
+function updateTreeNav() {
+  ($("sb-back") as HTMLButtonElement).disabled = treeBack.length === 0;
+  ($("sb-forward") as HTMLButtonElement).disabled = treeFwd.length === 0;
+}
+
+// Render the current root as clickable path segments in the sidebar header,
+// each jumping straight to that folder (mirrors the open dialog's breadcrumbs).
+export function renderTreeCrumbs(path) {
+  const host = $("sb-root");
+  const clean = String(path || "").replace(/^\\\\\?\\/, "");
+  host.textContent = "";
+  host.title = clean;
+  let crumbs = pathCrumbs(clean);
+  if (clean === DRIVES_DIR) {
+    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+  } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
+    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+  }
+  for (const [i, crumb] of crumbs.entries()) {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "cwd-sep";
+      sep.setAttribute("aria-hidden", "true");
+      sep.append(iconSvg("i-chevron-right"));
+      host.append(sep);
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cwd-crumb";
+    btn.textContent = crumb.label;
+    btn.title = crumb.path;
+    btn.addEventListener("click", () => treeSetRoot(crumb.path));
+    host.append(btn);
+  }
+}
+
+export async function treeSetRoot(dir, record = true) {
   try {
     const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
     const res = await api<BrowseResponse>(`/api/browse${q}`);
     state.treeParent = res.parent;
-    $("sb-root").textContent = displayPath(res.dir);
-    $("sb-root").title = displayPath(res.dir);
+    if (record && treeCurrent && treeCurrent !== res.dir) {
+      treeBack.push(treeCurrent);
+      treeFwd.length = 0;
+    }
+    treeCurrent = res.dir;
+    renderTreeCrumbs(res.dir);
+    updateTreeNav();
     try {
       localStorage.setItem(TREE_KEY, res.dir);
     } catch {
@@ -747,6 +794,18 @@ export async function treeSetRoot(dir) {
       $("tree").textContent = "";
     }
   }
+}
+
+export function treeGoBack() {
+  if (!treeBack.length) return;
+  if (treeCurrent) treeFwd.push(treeCurrent);
+  treeSetRoot(treeBack.pop() as string, false);
+}
+
+export function treeGoForward() {
+  if (!treeFwd.length) return;
+  if (treeCurrent) treeBack.push(treeCurrent);
+  treeSetRoot(treeFwd.pop() as string, false);
 }
 
 export function renderTreeEntries(entries, depth) {
@@ -844,6 +903,8 @@ export function updateTreeActive() {
 export function initTree() {
   $("toggle-sidebar").addEventListener("click", () => setSidebar(!sidebarOpen()));
   $("sb-close").addEventListener("click", () => setSidebar(false));
+  $("sb-back").addEventListener("click", treeGoBack);
+  $("sb-forward").addEventListener("click", treeGoForward);
   $("sb-up").addEventListener("click", () => {
     if (state.treeParent) treeSetRoot(state.treeParent);
   });
