@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { displayPath, isAbsolutePath, joinPath, pathCrumbs } from "../src/dom.js";
+import { displayPath, isAbsolutePath, isUntitled, joinPath, pathCrumbs } from "../src/dom.js";
 
 describe("path helpers", () => {
   it("normalizes Windows verbatim paths for display", () => {
@@ -23,5 +23,15 @@ describe("path helpers", () => {
 
   it("builds clickable crumbs for Windows drives", () => {
     expect(pathCrumbs("C:\\Users\\me").map((c) => c.label)).toEqual(["C:", "Users", "me"]);
+  });
+
+  it("recognizes untitled scratch buffers in both dir-name generations", () => {
+    // Current server scratch dirs ("srv-untitled") and the pre-rename form.
+    expect(
+      isUntitled("C:\\Users\\x\\AppData\\Local\\Temp\\ayame-srv-untitled-55c647d-0-0\\untitled.txt"),
+    ).toBe(true);
+    expect(isUntitled("/tmp/ayame-untitled-1234/untitled.txt")).toBe(true);
+    expect(isUntitled("E:\\note\\untitled.txt")).toBe(false);
+    expect(isUntitled("")).toBe(false);
   });
 });

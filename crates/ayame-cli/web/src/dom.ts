@@ -76,8 +76,11 @@ export function iconSvg(id, cls = "ay-icon") {
   return svg;
 }
 
+// The server parks untitled buffers in a private scratch directory named
+// "ayame-srv-untitled-…" (older sessions used "ayame-untitled-<pid>"); the
+// marker in the path is the client's only way to tell scratch from real files.
 export function isUntitled(path) {
-  return !!path && path.includes("ayame-untitled-");
+  return !!path && /ayame-(?:srv-)?untitled-/.test(String(path));
 }
 
 export function untitledName(path) {
