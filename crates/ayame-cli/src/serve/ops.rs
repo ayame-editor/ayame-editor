@@ -420,6 +420,10 @@ pub(super) struct CaseSaveRequest {
     #[serde(default)]
     path: Option<String>,
     mode: String,
+    #[serde(default)]
+    jobs: Option<usize>,
+    #[serde(default)]
+    chunk_lines: Option<u64>,
 }
 
 pub(super) async fn api_case_save(
@@ -427,8 +431,10 @@ pub(super) async fn api_case_save(
     Json(req): Json<CaseSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
     let mode = req.mode.trim().to_ascii_lowercase();
-    if !matches!(mode.as_str(), "upper" | "lower") {
-        return Err(bad_request("mode must be upper or lower"));
+    if ayame_core::CaseMode::parse(&mode).is_none() {
+        return Err(bad_request(
+            "mode must be one of upper|lower|camel|pascal|snake|kebab|constant",
+        ));
     }
     let wd = dirty_aware_input(&state, "case-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
@@ -436,6 +442,16 @@ pub(super) async fn api_case_save(
     cmd.arg("case").arg(wd.input.path());
     append_worker_encoding(&mut cmd, &wd.doc);
     cmd.arg(mode).arg("--out").arg(&target);
+    // Same chunked-parallel plumbing as replace: case conversion is
+    // line-local, so huge files scale with cores in the worker.
+    cmd.arg("--jobs")
+        .arg(req.jobs.unwrap_or(0).to_string())
+        .arg("--chunk-lines")
+        .arg(
+            req.chunk_lines
+                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
+                .to_string(),
+        );
     let res = run_artifact_worker("case", &mut cmd, &target, wd.total_lines).await;
     drop(wd);
     res.map(Json)

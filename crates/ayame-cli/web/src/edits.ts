@@ -545,11 +545,46 @@ export async function redoEdit() {
   });
 }
 
-// 選択メニュー「大文字に変換 / 小文字に変換」: transform the selection in the
-// editor as one undoable edit — nothing is written to disk until 保存.
+// ツールメニュー「大文字に変換 / snake_case に変換 …」: split an identifier
+// run into words (on _ / - and camelCase boundaries; acronyms stay together)
+// and re-join in the requested style. Only ASCII identifier runs are touched —
+// 日本語 text, spacing, and punctuation pass through unchanged. Mirrors
+// push_converted_run in ayame-core/src/transform.rs.
+export function applyCaseMode(text, mode) {
+  const s = String(text);
+  if (mode === "upper") return s.toUpperCase();
+  if (mode === "lower") return s.toLowerCase();
+  return s.replace(/[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*/g, (run) => {
+    const words = run
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((w) => w.toLowerCase());
+    if (!words.length) return run;
+    const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+    switch (mode) {
+      case "camel":
+        return words[0] + words.slice(1).map(cap).join("");
+      case "pascal":
+        return words.map(cap).join("");
+      case "snake":
+        return words.join("_");
+      case "kebab":
+        return words.join("-");
+      case "constant":
+        return words.map((w) => w.toUpperCase()).join("_");
+      default:
+        return run;
+    }
+  });
+}
+
+// ツールメニューのケース変換: transform the selection in the editor as one
+// undoable edit — nothing is written to disk until 保存.
 export async function transformSelection(mode) {
   if (!state.stat?.open) return;
-  const fn = mode === "upper" ? (s) => s.toUpperCase() : (s) => s.toLowerCase();
+  const fn = (s) => applyCaseMode(s, mode);
   if (!hasTextSelection()) {
     flashCount(t("editor.selectRangeFirst"), "error");
     return;
