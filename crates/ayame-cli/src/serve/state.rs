@@ -534,13 +534,13 @@ impl AppState {
         ui.session.paths = tabs
             .iter()
             .map(|t| t.path.clone())
-            .filter(|p| !is_scratch_path(p))
+            .filter(|p| !super::workspace::is_scratch_path(p))
             .collect();
         ui.session.active_path = tabs
             .iter()
             .find(|t| t.active)
             .map(|t| t.path.clone())
-            .filter(|p| !is_scratch_path(p));
+            .filter(|p| !super::workspace::is_scratch_path(p));
         self.save_ui_state(ui)
     }
 
@@ -1569,7 +1569,7 @@ fn tab_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string());
     // Current scratch dirs are "ayame-srv-untitled-…"; restored sessions may
     // still carry the pre-rename "ayame-untitled-<pid>" form.
-    if is_scratch_path(path) {
+    if super::workspace::is_scratch_path(path) {
         return if basename == "untitled.txt" {
             "untitled".to_string()
         } else {
@@ -1582,13 +1582,6 @@ fn tab_name(path: &str) -> String {
 /// How many open files a saved session may carry. Comfortably above any
 /// realistic tab count so restoring ~100 tabs never silently drops the tail.
 const SESSION_MAX_PATHS: usize = 512;
-
-/// A scratch/untitled buffer's path. Its temp directory is deleted when the
-/// process exits, so it can never be restored — such paths are kept out of the
-/// session snapshot rather than wasting a slot and failing to reopen.
-fn is_scratch_path(path: &str) -> bool {
-    path.contains("ayame-srv-untitled-") || path.contains("ayame-untitled-")
-}
 
 fn clean_path_list(list: Vec<String>, max: usize) -> Vec<String> {
     let mut out = Vec::new();
@@ -1714,16 +1707,6 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(bytes).unwrap();
         path
-    }
-
-    #[test]
-    fn scratch_paths_are_recognized() {
-        assert!(is_scratch_path(
-            "/tmp/ayame-srv-untitled-abc-0-0/untitled.txt"
-        ));
-        assert!(is_scratch_path("/tmp/ayame-untitled-1234/untitled.txt"));
-        assert!(!is_scratch_path("/home/user/notes.txt"));
-        assert!(!is_scratch_path("C:\\logs\\app.txt"));
     }
 
     #[test]

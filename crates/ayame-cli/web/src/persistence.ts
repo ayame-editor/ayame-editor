@@ -116,3 +116,18 @@ export async function saveSessionSnapshot() {
     // close paths must never be blocked by persistence
   }
 }
+
+// Flush the session snapshot during page unload. A plain fetch (as issued by
+// saveSessionSnapshot) is aborted when the document is torn down, so the final
+// snapshot is frequently lost; sendBeacon is delivered by the browser after the
+// page is gone (issue #73). The server builds the snapshot from an empty body,
+// so no payload is needed. Returns true if the beacon was queued.
+export function beaconSessionSnapshot(): boolean {
+  if (state.settings.restoreSession === false) return false;
+  try {
+    const body = new Blob(["{}"], { type: "application/json" });
+    return navigator.sendBeacon("/api/session/save", body);
+  } catch {
+    return false;
+  }
+}

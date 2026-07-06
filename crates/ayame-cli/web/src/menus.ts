@@ -596,9 +596,25 @@ const promptGotoLine = () => {
   });
 };
 
+// The find-bar option buttons are lit when their *labelled* meaning is active.
+// `opt-case` is labelled "Match Case" but the underlying `state.ci` flag means
+// *ignore* case, so it must light up when ci is false (issue #70). The other
+// toggles light up on their own truthy value.
+function optButtonLit(key): boolean {
+  return key === "ci" ? !state.ci : !!state[key];
+}
+
+// Sync the lit state of the three find-bar option buttons to `state` without
+// toggling anything — used on init so "Match Case" reflects the default.
+export function refreshFindOptButtons() {
+  $("opt-case").classList.toggle("on", optButtonLit("ci"));
+  $("opt-word").classList.toggle("on", optButtonLit("word"));
+  $("opt-regex").classList.toggle("on", optButtonLit("regex"));
+}
+
 export function toggleOpt(key, id) {
   state[key] = !state[key];
-  $(id).classList.toggle("on", state[key]);
+  $(id).classList.toggle("on", optButtonLit(key));
   state.lastMatch = null;
   state.searchHits = null;
   state.searchTruncated = false;

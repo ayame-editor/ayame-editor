@@ -325,6 +325,8 @@ export const MESSAGES = {
       "{kind}  現在: {oldStart} ({oldLen} 行)  比較先: {newStart} ({newLen} 行)",
     "dialog.diff.unsavedIncluded": "未保存編集込み",
     "dialog.diff.hunkTruncated": "このhunkは先頭 {n} 行だけ表示しています",
+    "dialog.diff.summary": "{hunks} hunk / +{added}  -{deleted}  ~{modified}",
+    "dialog.diff.omitted": "{n} hunk 省略",
     // -- folder search (grep) --
     "dialog.grep.query": "検索語",
     "dialog.grep.queryPlaceholder": "検索する文字列 / 正規表現",
@@ -681,6 +683,8 @@ export const MESSAGES = {
       "{kind}  Current: {oldStart} ({oldLen} lines)  Compare To: {newStart} ({newLen} lines)",
     "dialog.diff.unsavedIncluded": "includes unsaved edits",
     "dialog.diff.hunkTruncated": "This hunk shows only the first {n} lines.",
+    "dialog.diff.summary": "{hunks} hunk / +{added}  -{deleted}  ~{modified}",
+    "dialog.diff.omitted": "{n} hunk omitted",
     "dialog.grep.query": "Search Term",
     "dialog.grep.queryPlaceholder": "String or regular expression to search for",
     "dialog.grep.dir": "Target Folder",
