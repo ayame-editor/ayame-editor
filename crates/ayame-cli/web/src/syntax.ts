@@ -298,7 +298,7 @@ export function highlightSpans(text: string, path = ""): SyntaxSpan[] | null {
 function inferLanguage(text: string): Language | null {
   if (/^\s*(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\b/u.test(text)) return "log";
   if (/^\s*\d{4}-\d\d-\d\d[T\s]\d\d:\d\d:\d\d/u.test(text)) return "log";
-  if (/^\s*[{\[]\s*$/u.test(text) || /^\s*"[^"]+"\s*:/u.test(text)) return "json";
+  if (/^\s*[{[]\s*$/u.test(text) || /^\s*"[^"]+"\s*:/u.test(text)) return "json";
   return null;
 }
 
@@ -321,7 +321,7 @@ function codeSpans(text: string, lang: Language): SyntaxSpan[] {
       continue;
     }
     const ch = text[i];
-    if (ch === "\"" || ch === "'" || (ch === "`" && lang === "javascript")) {
+    if (ch === '"' || ch === "'" || (ch === "`" && lang === "javascript")) {
       const j = quotedEnd(text, i, ch);
       push(out, "string", text.slice(i, j));
       i = j;
@@ -337,13 +337,14 @@ function codeSpans(text: string, lang: Language): SyntaxSpan[] {
     if (ident) {
       const word = ident[0];
       const lower = word.toLowerCase();
-      const kind = keywords.has(word) || keywords.has(lower)
-        ? "keyword"
-        : COMMON_LITERALS.has(word)
-          ? "literal"
-          : nextNonSpace(text, i + word.length) === "("
-            ? "function"
-            : "plain";
+      const kind =
+        keywords.has(word) || keywords.has(lower)
+          ? "keyword"
+          : COMMON_LITERALS.has(word)
+            ? "literal"
+            : nextNonSpace(text, i + word.length) === "("
+              ? "function"
+              : "plain";
       push(out, kind, word);
       i += word.length;
       continue;
@@ -374,8 +375,8 @@ function jsonSpans(text: string): SyntaxSpan[] {
       i = j;
       continue;
     }
-    if (text[i] === "\"") {
-      const j = quotedEnd(text, i, "\"");
+    if (text[i] === '"') {
+      const j = quotedEnd(text, i, '"');
       push(out, nextNonSpace(text, j) === ":" ? "key" : "string", text.slice(i, j));
       i = j;
       continue;
@@ -392,7 +393,7 @@ function jsonSpans(text: string): SyntaxSpan[] {
       i += num[0].length;
       continue;
     }
-    if (/^[{}\[\],:]+$/u.test(text[i])) push(out, "op", text[i]);
+    if (/^[{}[\],:]+$/u.test(text[i])) push(out, "op", text[i]);
     else push(out, "plain", text[i]);
     i++;
   }
@@ -433,7 +434,7 @@ function appendScalar(out: SyntaxSpan[], text: string) {
       i += num[0].length;
       continue;
     }
-    if (text[i] === "\"" || text[i] === "'") {
+    if (text[i] === '"' || text[i] === "'") {
       const j = quotedEnd(text, i, text[i]);
       push(out, "string", text.slice(i, j));
       i = j;
@@ -485,7 +486,9 @@ function inlineMarkdown(out: SyntaxSpan[], text: string) {
 
 function logSpans(text: string): SyntaxSpan[] {
   const out: SyntaxSpan[] = [];
-  const ts = text.match(/^(\s*(?:\d{4}-\d\d-\d\d[T\s]\d\d:\d\d:\d\d(?:[.,]\d+)?Z?|\[\d{4}-\d\d-\d\d[^\]]*\]))/u);
+  const ts = text.match(
+    /^(\s*(?:\d{4}-\d\d-\d\d[T\s]\d\d:\d\d:\d\d(?:[.,]\d+)?Z?|\[\d{4}-\d\d-\d\d[^\]]*\]))/u,
+  );
   let offset = 0;
   if (ts) {
     push(out, "number", ts[1]);

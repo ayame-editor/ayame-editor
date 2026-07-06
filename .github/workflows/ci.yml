@@ -22,27 +22,20 @@ jobs:
           rustup component add rustfmt clippy
       - name: Format
         run: cargo fmt --all --check
+      # All frontend tooling (tsc, vitest, oxfmt, oxlint) is pinned in
+      # web/package-lock.json and installed once here, so CI, the release gate,
+      # and local dev run byte-identical versions. No ad-hoc binary downloads or
+      # floating `npx` versions that drift and turn CI red without a code change.
+      - name: Install frontend deps
+        run: npm ci --prefix crates/ayame-cli/web
       - name: Frontend type check
-        run: npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+        run: npm run typecheck --prefix crates/ayame-cli/web
       - name: Frontend unit tests
-        run: |
-          npm ci --prefix crates/ayame-cli/web
-          npm test --prefix crates/ayame-cli/web
-      # oxc toolchain (Rust-native single binaries, no Node toolchain needed).
-      # Version-pinned so formatting is reproducible; bump deliberately.
+        run: npm test --prefix crates/ayame-cli/web
       - name: Frontend format + lint (oxfmt / oxlint)
         run: |
-          set -euo pipefail
-          OXC_TAG="apps_v1.72.0"
-          for tool in oxfmt oxlint; do
-            curl -sL -o "/tmp/$tool.tar.gz" \
-              "https://github.com/oxc-project/oxc/releases/download/${OXC_TAG}/${tool}-x86_64-unknown-linux-gnu.tar.gz"
-            tar -xzf "/tmp/$tool.tar.gz" -C /tmp
-            chmod +x "/tmp/${tool}-x86_64-unknown-linux-gnu"
-          done
-          find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 \
-            | xargs -0 /tmp/oxfmt-x86_64-unknown-linux-gnu --check
-          /tmp/oxlint-x86_64-unknown-linux-gnu --max-warnings 0 crates/ayame-cli/web/src
+          npm run fmt:check --prefix crates/ayame-cli/web
+          npm run lint --prefix crates/ayame-cli/web
       # Rust <-> TypeScript type sharing (typeship): the committed api.d.ts
       # must match what the serve types generate.
       - name: Type bindings drift check

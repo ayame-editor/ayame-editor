@@ -68,7 +68,7 @@ in_place: boolean, key: number | null, numeric: boolean, reverse: boolean, delim
 
 export type ReplaceSaveRequest = { path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
 
-export type CaseSaveRequest = { path: string | null, mode: string, };
+export type CaseSaveRequest = { path: string | null, mode: string, jobs: number | null, chunk_lines: bigint | null, };
 
 export type SplitSaveRequest = {
 /**

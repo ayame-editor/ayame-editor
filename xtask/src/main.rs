@@ -5,9 +5,11 @@
 //!   cargo xtask release [--bump patch|minor|major|X.Y.Z] [--yes] [--dry-run] [--skip-gate]
 //!
 //! `release` implements the release flow end to end: gate (fmt / clippy / test /
-//! release builds) → local artifact + CLI smoke → confirm → tag → push → watch
-//! the GitHub Release workflow. Bash-only extras (crash-isolation-test.sh) run
-//! when a shell is available and are skipped otherwise.
+//! typegen drift / frontend tsc+vitest+oxfmt+oxlint / release builds) → local
+//! artifact + CLI smoke → confirm → tag → push → watch the GitHub Release
+//! workflow. The gate mirrors CI so a tagged release can't land on main with red
+//! CI. Node- and bash-only extras (frontend gates, crash-isolation-test.sh) run
+//! when their toolchain is available and are skipped otherwise.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -263,6 +265,39 @@ fn release(args: &[String]) -> Result<()> {
             ],
         )?;
         run("cargo", &["test", "--locked"])?;
+
+        // The web UI ships inside the binary, so its gates belong in the
+        // release gate too — not only in CI. Skipping them here is exactly why
+        // tagged releases used to land on main with red CI (stale api.d.ts,
+        // unformatted TypeScript). typegen is pure Rust and always runs; the
+        // npm-driven frontend gates run when a Node toolchain is present.
+        say("gate: type bindings drift");
+        run(
+            "cargo",
+            &[
+                "run",
+                "--locked",
+                "-p",
+                "ayame-cli",
+                "--features",
+                "typegen",
+                "--",
+                "typegen",
+                "--check",
+            ],
+        )?;
+        if command_exists("npm") {
+            say("gate: frontend (tsc / vitest / oxfmt / oxlint)");
+            let web = "crates/ayame-cli/web";
+            run("npm", &["ci", "--prefix", web])?;
+            run("npm", &["run", "typecheck", "--prefix", web])?;
+            run("npm", &["test", "--prefix", web])?;
+            run("npm", &["run", "fmt:check", "--prefix", web])?;
+            run("npm", &["run", "lint", "--prefix", web])?;
+        } else {
+            say("gate: frontend SKIPPED (npm not available) — CI still enforces it");
+        }
+
         say("gate: release builds");
         run("cargo", &["build", "--release", "--locked"])?;
         run(

@@ -593,7 +593,10 @@ export async function finishTabDrag(e, tab) {
   if (tab.dirty || savingCount > 0) return;
   const dropped = e.dataTransfer?.dropEffect === "move";
   const outside =
-    e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight;
+    e.clientX < 0 ||
+    e.clientY < 0 ||
+    e.clientX > window.innerWidth ||
+    e.clientY > window.innerHeight;
   if (dropped) {
     await closeMovedTab(tab.id);
   } else if (outside) {

@@ -74,7 +74,9 @@ export async function hydrateSharedUiState() {
 async function saveSharedUiState(next: UiState) {
   sharedUiState = normalizeUiState(next);
   try {
-    sharedUiState = normalizeUiState(await apiPost<UiState, UiState>("/api/ui_state", sharedUiState));
+    sharedUiState = normalizeUiState(
+      await apiPost<UiState, UiState>("/api/ui_state", sharedUiState),
+    );
   } catch {
     // local fallback remains available
   }
@@ -87,7 +89,7 @@ export function loadRecentFilesShared() {
 export function saveRecentFilesShared(list) {
   const recent = cleanList(list, RECENT_MAX);
   saveLocalList(RECENT_KEY, recent, RECENT_MAX);
-  const next = normalizeUiState({ ...(sharedUiState || {}), recent_files: recent });
+  const next = normalizeUiState({ ...sharedUiState, recent_files: recent });
   void saveSharedUiState(next);
 }
 
@@ -98,7 +100,7 @@ export function loadSearchHistoryShared() {
 export function saveSearchHistoryShared(list) {
   const history = cleanList(list, 50);
   saveLocalList(SEARCH_HISTORY_KEY, history, 50);
-  const next = normalizeUiState({ ...(sharedUiState || {}), search_history: history });
+  const next = normalizeUiState({ ...sharedUiState, search_history: history });
   void saveSharedUiState(next);
 }
 

@@ -17,19 +17,21 @@ For changes that touch the web editor, API types, release flow, or native GUI,
 also run the relevant CI gates:
 
 ```sh
-npx -y -p typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
+npm ci --prefix crates/ayame-cli/web            # once: install pinned tooling
+npm run typecheck --prefix crates/ayame-cli/web # tsc --noEmit
+npm test --prefix crates/ayame-cli/web          # vitest
+npm run fmt:check --prefix crates/ayame-cli/web # oxfmt (use `npm run fmt` to fix)
+npm run lint --prefix crates/ayame-cli/web      # oxlint
 cargo run --locked -p ayame-cli --features typegen -- typegen --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo clippy --all-targets --locked --features gui -- -D warnings
 ```
 
-The CI workflow downloads pinned `oxfmt` and `oxlint` binaries. If you have the
-same versions locally, run:
-
-```sh
-find crates/ayame-cli/web/src -name '*.ts' ! -name '*.d.ts' -print0 | xargs -0 oxfmt --check
-oxlint --max-warnings 0 crates/ayame-cli/web/src
-```
+`tsc`, `vitest`, `oxfmt`, and `oxlint` are pinned in
+`crates/ayame-cli/web/package.json`, so `npm ci` gives you the exact versions CI
+and `cargo xtask release` run — no separate binary downloads to keep in sync.
+`cargo xtask release` runs all of these gates before it tags, so a release can't
+land on `main` with red CI.
 
 ## Documentation
 
