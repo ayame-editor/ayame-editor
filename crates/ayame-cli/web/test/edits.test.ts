@@ -21,7 +21,13 @@ vi.mock("../src/search.js", () => ({
   flashCount: vi.fn(),
 }));
 
-import { applyRange, enqueueEdit, reloadViewport, settleEditQueue } from "../src/edits.js";
+import {
+  applyCaseMode,
+  applyRange,
+  enqueueEdit,
+  reloadViewport,
+  settleEditQueue,
+} from "../src/edits.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -107,5 +113,26 @@ describe("edit generation guards", () => {
 
     expect(state.loadToken).toBe(42);
     expect(state.cache.lines).toEqual([{ number: 0, text: "alpha" }]);
+  });
+});
+
+describe("applyCaseMode", () => {
+  it("keeps whole-string upper/lower semantics", () => {
+    expect(applyCaseMode("Hello World", "upper")).toBe("HELLO WORLD");
+    expect(applyCaseMode("Ｈｅｌｌｏ", "lower")).toBe("ｈｅｌｌｏ");
+  });
+
+  it("rewrites identifier runs per style, mirroring the core transform", () => {
+    expect(applyCaseMode("hello_world code", "camel")).toBe("helloWorld code");
+    expect(applyCaseMode("helloWorld", "snake")).toBe("hello_world");
+    expect(applyCaseMode("HTTPServer v2Beta", "snake")).toBe("http_server v2_beta");
+    expect(applyCaseMode("hello-world", "pascal")).toBe("HelloWorld");
+    expect(applyCaseMode("HelloWorld", "kebab")).toBe("hello-world");
+    expect(applyCaseMode("helloWorld", "constant")).toBe("HELLO_WORLD");
+  });
+
+  it("leaves non-ASCII text and doubled separators alone", () => {
+    expect(applyCaseMode("日本語 snake_case です", "camel")).toBe("日本語 snakeCase です");
+    expect(applyCaseMode("foo--bar", "pascal")).toBe("Foo--Bar");
   });
 });

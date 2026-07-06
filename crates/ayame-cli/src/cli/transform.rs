@@ -58,15 +58,34 @@ pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, _flags) = open_doc(args, &["--out"], &[])?;
-    let mode = match pos.get(1).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("upper" | "uppercase" | "up") => CaseMode::Upper,
-        Some("lower" | "lowercase" | "down") => CaseMode::Lower,
-        Some(other) => bail!("unknown case mode '{other}' (expected upper|lower)"),
-        None => bail!("expected case mode upper|lower"),
+    let (doc, pos, opts, _flags) = open_doc(args, &["--out", "--jobs", "--chunk-lines"], &[])?;
+    const MODES: &str = "upper|lower|camel|pascal|snake|kebab|constant";
+    let mode = match pos.get(1) {
+        Some(raw) => CaseMode::parse(raw)
+            .ok_or_else(|| anyhow::anyhow!("unknown case mode '{raw}' (expected {MODES})"))?,
+        None => bail!("expected case mode {MODES}"),
     };
     let out = first_opt(&opts, &["--out"]).context("case requires --out <FILE>")?;
-    let res = ayame_core::case_to_path(&doc, out, &CaseOptions { mode })?;
+    let jobs = first_opt(&opts, &["--jobs"])
+        .map(|s| s.parse::<usize>().context("--jobs must be a number"))
+        .transpose()?;
+    let chunk_lines = first_opt(&opts, &["--chunk-lines"])
+        .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
+        .transpose()?
+        .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
+        ayame_core::case_to_path_parallel(
+            &doc,
+            out,
+            &CaseOptions { mode },
+            &ParallelReplaceOptions {
+                jobs: jobs.unwrap_or(0),
+                chunk_lines,
+            },
+        )?
+    } else {
+        ayame_core::case_to_path(&doc, out, &CaseOptions { mode })?
+    };
     eprintln!(
         "{} changed line(s), {} -> {}",
         commas(res.changed_lines),

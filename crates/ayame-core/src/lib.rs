@@ -58,8 +58,9 @@ pub use ops::{
 pub use search::{SearchHit, SearchOptions, SearchResult};
 pub use split::{split_by_lines, SplitOptions, SplitResult, SPLIT_RESULT_MAX_FILES};
 pub use transform::{
-    case_to_path, replace_to_path, replace_to_path_parallel, CaseMode, CaseOptions,
-    ParallelReplaceOptions, ReplaceOptions, TransformResult, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
+    case_to_path, case_to_path_parallel, replace_to_path, replace_to_path_parallel, CaseMode,
+    CaseOptions, ParallelReplaceOptions, ReplaceOptions, TransformResult,
+    DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 pub use wal::{LoggedOp, RecoveryInfo, WalWriter};
 

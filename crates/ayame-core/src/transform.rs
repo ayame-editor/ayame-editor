@@ -19,10 +19,36 @@ use crate::{Document, Encoding, Error, Result};
 const BATCH: u64 = 8192;
 pub const DEFAULT_PARALLEL_REPLACE_CHUNK_LINES: u64 = 4_000_000;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaseMode {
     Upper,
     Lower,
+    Camel,
+    Pascal,
+    Snake,
+    Kebab,
+    /// SCREAMING_SNAKE_CASE.
+    Constant,
+}
+
+impl CaseMode {
+    /// Accepts the user-facing spellings of every mode ("snake_case",
+    /// "kebab-case", …); `None` for anything unrecognized so callers own the
+    /// error message.
+    pub fn parse(s: &str) -> Option<CaseMode> {
+        Some(match s.trim().to_ascii_lowercase().as_str() {
+            "upper" | "uppercase" | "up" => CaseMode::Upper,
+            "lower" | "lowercase" | "down" => CaseMode::Lower,
+            "camel" | "camelcase" => CaseMode::Camel,
+            "pascal" | "pascalcase" => CaseMode::Pascal,
+            "snake" | "snakecase" | "snake_case" => CaseMode::Snake,
+            "kebab" | "kebabcase" | "kebab-case" => CaseMode::Kebab,
+            "constant" | "constantcase" | "constant_case" | "upper_snake" | "screaming_snake" => {
+                CaseMode::Constant
+            }
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,17 +97,45 @@ pub fn case_to_path(
 ) -> Result<TransformResult> {
     let target = target.as_ref();
     ensure_new_target(target)?;
+    let mode = opts.mode;
     stream_to_new_file(doc, target, |raw, term, w| {
-        let mut out = Vec::with_capacity(raw.len());
-        let changed = ascii_case_transform(raw, doc.encoding(), opts.mode, &mut out);
-        if changed {
-            w.write_all(&out)?;
-        } else {
-            w.write_all(raw)?;
-        }
+        let (changed, count) = write_cased_line(doc, mode, raw, w)?;
         w.write_all(term)?;
-        Ok((changed, 0))
+        Ok((changed, count))
     })
+}
+
+/// Parallel variant of [`case_to_path`]: line-local like the streaming path,
+/// so independent line-range chunks convert on worker threads and concatenate
+/// in order — huge files scale with cores instead of a single writer.
+pub fn case_to_path_parallel(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &CaseOptions,
+    parallel: &ParallelReplaceOptions,
+) -> Result<TransformResult> {
+    let target = target.as_ref();
+    ensure_new_target(target)?;
+    let mode = opts.mode;
+    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, w| {
+        write_cased_line(doc, mode, raw, w)
+    })
+}
+
+fn write_cased_line(
+    doc: &Document,
+    mode: CaseMode,
+    raw: &[u8],
+    w: &mut impl Write,
+) -> Result<(bool, u64)> {
+    let mut out = Vec::with_capacity(raw.len());
+    let changed = case_transform(raw, doc.encoding(), mode, &mut out)?;
+    if changed {
+        w.write_all(&out)?;
+    } else {
+        w.write_all(raw)?;
+    }
+    Ok((changed, 0))
 }
 
 pub fn replace_to_path(
@@ -119,13 +173,30 @@ pub fn replace_to_path_parallel(
             "replace pattern must not be empty".into(),
         ));
     }
+    let plan = ReplacePlan::new(doc, opts)?;
+    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, w| {
+        write_replaced_line(doc, &plan, raw, w)
+    })
+}
 
+/// The shared chunked-parallel driver: split the document into line-range
+/// chunks, run `line_fn` over each chunk into its own temp part file (Rayon
+/// workers), then concatenate the parts in order. Only valid for line-local
+/// transforms — `line_fn` must not carry state across lines.
+fn stream_chunks_parallel<F>(
+    doc: &Document,
+    target: &Path,
+    parallel: &ParallelReplaceOptions,
+    line_fn: &F,
+) -> Result<TransformResult>
+where
+    F: Fn(&Document, &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+{
     let total = doc.line_count();
     if total == 0 {
         return write_empty_transform(doc, target);
     }
 
-    let plan = ReplacePlan::new(doc, opts)?;
     let chunk_lines = parallel.chunk_lines.max(1);
     let tmp = temp_path(target);
     let chunk_dir = sidecar_path(&tmp, "chunks");
@@ -151,20 +222,20 @@ pub fn replace_to_path_parallel(
     let chunk_result = match parallel.jobs {
         1 => chunks
             .iter()
-            .map(|chunk| process_replace_chunk(doc, &plan, chunk))
+            .map(|chunk| process_chunk(doc, line_fn, chunk))
             .collect::<Result<Vec<_>>>(),
         0 => chunks
             .par_iter()
-            .map(|chunk| process_replace_chunk(doc, &plan, chunk))
+            .map(|chunk| process_chunk(doc, line_fn, chunk))
             .collect::<Result<Vec<_>>>(),
         jobs => rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
             .build()
-            .map_err(|e| Error::InvalidInput(format!("invalid replace worker pool: {e}")))?
+            .map_err(|e| Error::InvalidInput(format!("invalid transform worker pool: {e}")))?
             .install(|| {
                 chunks
                     .par_iter()
-                    .map(|chunk| process_replace_chunk(doc, &plan, chunk))
+                    .map(|chunk| process_chunk(doc, line_fn, chunk))
                     .collect::<Result<Vec<_>>>()
             }),
     };
@@ -349,11 +420,10 @@ impl ReplacePlan {
     }
 }
 
-fn process_replace_chunk(
-    doc: &Document,
-    plan: &ReplacePlan,
-    chunk: &ReplaceChunk,
-) -> Result<ReplaceChunkResult> {
+fn process_chunk<F>(doc: &Document, line_fn: &F, chunk: &ReplaceChunk) -> Result<ReplaceChunkResult>
+where
+    F: Fn(&Document, &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+{
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -370,7 +440,7 @@ fn process_replace_chunk(
         }
         let advanced = batch.len() as u64;
         for (_line, raw, term) in batch {
-            let (changed, count) = write_replaced_line(doc, plan, raw, &mut w)?;
+            let (changed, count) = line_fn(doc, raw, &mut w)?;
             w.write_all(term)?;
             if changed {
                 changed_lines += 1;
@@ -469,46 +539,168 @@ fn write_raw_replaced(
     }
 }
 
-fn ascii_case_transform(raw: &[u8], enc: Encoding, mode: CaseMode, out: &mut Vec<u8>) -> bool {
-    match enc {
-        Encoding::ShiftJis => ascii_case_shift_jis(raw, mode, out),
-        _ => ascii_case_single_byte_safe(raw, mode, out),
+/// Case-convert one raw line. ASCII-compatible encodings (UTF-8, EUC-JP,
+/// ASCII) work directly on the bytes — multibyte sequences there never use
+/// bytes < 0x80. Shift_JIS additionally skips lead/trail pairs, whose trail
+/// byte CAN fall in the ASCII letter range. UTF-16 has no ASCII-transparent
+/// bytes at all (the low byte of any CJK unit may look like a letter), so it
+/// round-trips through decode → transform → encode.
+fn case_transform(raw: &[u8], enc: Encoding, mode: CaseMode, out: &mut Vec<u8>) -> Result<bool> {
+    if matches!(enc, Encoding::Utf16Le | Encoding::Utf16Be) {
+        let text = enc.decode_line(raw);
+        let mut transformed = Vec::with_capacity(text.len());
+        // The decoded text is UTF-8: multibyte bytes are all >= 0x80, so the
+        // byte-level transform below is exact on it (and only touches ASCII).
+        if !case_transform_bytes(text.as_bytes(), false, mode, &mut transformed) {
+            return Ok(false);
+        }
+        let transformed = String::from_utf8(transformed)
+            .map_err(|_| Error::InvalidInput("case transform produced invalid UTF-8".into()))?;
+        let bytes = enc.encode_text(&transformed).ok_or_else(|| {
+            Error::InvalidInput(format!(
+                "case transform result cannot be encoded as {}",
+                enc.label()
+            ))
+        })?;
+        out.extend_from_slice(&bytes);
+        return Ok(true);
     }
+    Ok(case_transform_bytes(
+        raw,
+        enc == Encoding::ShiftJis,
+        mode,
+        out,
+    ))
 }
 
-fn ascii_case_single_byte_safe(raw: &[u8], mode: CaseMode, out: &mut Vec<u8>) -> bool {
-    let mut changed = false;
-    for &b in raw {
-        let c = map_ascii_case(b, mode);
-        changed |= c != b;
-        out.push(c);
+fn case_transform_bytes(raw: &[u8], sjis: bool, mode: CaseMode, out: &mut Vec<u8>) -> bool {
+    if matches!(mode, CaseMode::Upper | CaseMode::Lower) {
+        let mut changed = false;
+        let mut i = 0usize;
+        while i < raw.len() {
+            let b = raw[i];
+            if sjis && is_shift_jis_lead(b) && i + 1 < raw.len() {
+                out.push(b);
+                out.push(raw[i + 1]);
+                i += 2;
+                continue;
+            }
+            let c = match mode {
+                CaseMode::Upper => b.to_ascii_uppercase(),
+                _ => b.to_ascii_lowercase(),
+            };
+            changed |= c != b;
+            out.push(c);
+            i += 1;
+        }
+        return changed;
     }
-    changed
-}
-
-fn ascii_case_shift_jis(raw: &[u8], mode: CaseMode, out: &mut Vec<u8>) -> bool {
-    let mut changed = false;
+    // Word modes: rewrite identifier-like ASCII runs, leave everything else
+    // (whitespace, punctuation, non-ASCII text) untouched.
     let mut i = 0usize;
     while i < raw.len() {
         let b = raw[i];
-        if is_shift_jis_lead(b) && i + 1 < raw.len() {
+        if sjis && is_shift_jis_lead(b) && i + 1 < raw.len() {
             out.push(b);
             out.push(raw[i + 1]);
             i += 2;
             continue;
         }
-        let c = map_ascii_case(b, mode);
-        changed |= c != b;
-        out.push(c);
+        if b.is_ascii_alphanumeric() {
+            let end = identifier_run_end(raw, i);
+            push_converted_run(&raw[i..end], mode, out);
+            i = end;
+            continue;
+        }
+        out.push(b);
         i += 1;
     }
-    changed
+    out.as_slice() != raw
 }
 
-fn map_ascii_case(b: u8, mode: CaseMode) -> u8 {
-    match mode {
-        CaseMode::Upper => b.to_ascii_uppercase(),
-        CaseMode::Lower => b.to_ascii_lowercase(),
+/// End of the identifier run starting at `start` (raw[start] is alnum): ASCII
+/// alphanumeric chunks joined by SINGLE `_` or `-` separators. A doubled
+/// separator (or one followed by a non-alnum byte) ends the run before it.
+fn identifier_run_end(raw: &[u8], start: usize) -> usize {
+    let mut j = start;
+    loop {
+        while j < raw.len() && raw[j].is_ascii_alphanumeric() {
+            j += 1;
+        }
+        if j + 1 < raw.len() && matches!(raw[j], b'_' | b'-') && raw[j + 1].is_ascii_alphanumeric()
+        {
+            j += 1;
+            continue;
+        }
+        return j;
+    }
+}
+
+/// Split an identifier run into words (on `_`/`-` and camelCase boundaries,
+/// keeping acronyms together: "HTTPServer" → HTTP + Server) and re-join them
+/// in the requested style.
+fn push_converted_run(run: &[u8], mode: CaseMode, out: &mut Vec<u8>) {
+    let mut words: Vec<&[u8]> = Vec::new();
+    let mut start: Option<usize> = None;
+    for (k, &c) in run.iter().enumerate() {
+        if matches!(c, b'_' | b'-') {
+            if let Some(s) = start.take() {
+                words.push(&run[s..k]);
+            }
+            continue;
+        }
+        match start {
+            None => start = Some(k),
+            Some(s) => {
+                let prev = run[k - 1];
+                let boundary = ((prev.is_ascii_lowercase() || prev.is_ascii_digit())
+                    && c.is_ascii_uppercase())
+                    || (prev.is_ascii_uppercase()
+                        && c.is_ascii_uppercase()
+                        && run.get(k + 1).is_some_and(|n| n.is_ascii_lowercase()));
+                if boundary {
+                    words.push(&run[s..k]);
+                    start = Some(k);
+                }
+            }
+        }
+    }
+    if let Some(s) = start {
+        words.push(&run[s..]);
+    }
+    if words.is_empty() {
+        out.extend_from_slice(run);
+        return;
+    }
+    let push_lower = |out: &mut Vec<u8>, w: &[u8]| {
+        out.extend(w.iter().map(u8::to_ascii_lowercase));
+    };
+    let push_capitalized = |out: &mut Vec<u8>, w: &[u8]| {
+        out.push(w[0].to_ascii_uppercase());
+        out.extend(w[1..].iter().map(u8::to_ascii_lowercase));
+    };
+    for (k, w) in words.iter().enumerate() {
+        match mode {
+            CaseMode::Camel => {
+                if k == 0 {
+                    push_lower(out, w);
+                } else {
+                    push_capitalized(out, w);
+                }
+            }
+            CaseMode::Pascal => push_capitalized(out, w),
+            CaseMode::Snake | CaseMode::Kebab | CaseMode::Constant => {
+                if k > 0 {
+                    out.push(if mode == CaseMode::Kebab { b'-' } else { b'_' });
+                }
+                if mode == CaseMode::Constant {
+                    out.extend(w.iter().map(u8::to_ascii_uppercase));
+                } else {
+                    push_lower(out, w);
+                }
+            }
+            CaseMode::Upper | CaseMode::Lower => unreachable!("handled by the byte fast path"),
+        }
     }
 }
 
@@ -661,6 +853,129 @@ mod tests {
         assert_eq!(res.replacements, 2);
         assert_eq!(std::fs::read(&out).unwrap(), b"aN\nbN\nccc\n");
         let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn word_case_modes_rewrite_identifier_runs() {
+        let convert = |text: &str, mode: CaseMode| {
+            let mut out = Vec::new();
+            case_transform_bytes(text.as_bytes(), false, mode, &mut out);
+            String::from_utf8(out).unwrap()
+        };
+        assert_eq!(
+            convert("hello_world code", CaseMode::Camel),
+            "helloWorld code"
+        );
+        assert_eq!(convert("helloWorld", CaseMode::Snake), "hello_world");
+        assert_eq!(
+            convert("HTTPServer v2Beta", CaseMode::Snake),
+            "http_server v2_beta"
+        );
+        assert_eq!(convert("hello-world", CaseMode::Pascal), "HelloWorld");
+        assert_eq!(convert("HelloWorld", CaseMode::Kebab), "hello-world");
+        assert_eq!(convert("helloWorld", CaseMode::Constant), "HELLO_WORLD");
+        // A doubled separator ends the run; each side converts on its own.
+        assert_eq!(convert("foo--bar", CaseMode::Pascal), "Foo--Bar");
+        // Non-ASCII text (and separators around it) is untouched.
+        assert_eq!(
+            convert("日本語 snake_case です", CaseMode::Camel),
+            "日本語 snakeCase です"
+        );
+    }
+
+    #[test]
+    fn word_case_mode_streams_whole_file() {
+        let (f, doc) = doc_from(b"user_name\nkeep me\nHTTPServer\n");
+        let out = f.path().with_extension("camel");
+        let res = case_to_path(
+            &doc,
+            &out,
+            &CaseOptions {
+                mode: CaseMode::Camel,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 2);
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            b"userName\nkeep me\nhttpServer\n"
+        );
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn parallel_case_matches_streaming_case() {
+        let (f, doc) = doc_from(b"foo_bar\nsecond_line\nthird one\n");
+        let out = f.path().with_extension("parallel-case");
+        let res = case_to_path_parallel(
+            &doc,
+            &out,
+            &CaseOptions {
+                mode: CaseMode::Pascal,
+            },
+            &ParallelReplaceOptions {
+                jobs: 2,
+                chunk_lines: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 3);
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            b"FooBar\nSecondLine\nThird One\n"
+        );
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn utf16_case_transform_leaves_cjk_units_alone() {
+        // UTF-16LE "ちa" — the low byte of ち (0x61 0x30) looks like ASCII 'a'.
+        // Uppercasing must convert only the real 'a', never the CJK unit.
+        let opts = AyameOpenOptions {
+            encoding: Some(Encoding::Utf16Le),
+            ..AyameOpenOptions::default()
+        };
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(&[0xFF, 0xFE, 0x61, 0x30, 0x61, 0x00, 0x0A, 0x00])
+            .unwrap();
+        let doc = Document::open(f.path(), &opts).unwrap();
+        let out = f.path().with_extension("utf16-upper");
+        let res = case_to_path(
+            &doc,
+            &out,
+            &CaseOptions {
+                mode: CaseMode::Upper,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            [0xFF, 0xFE, 0x61, 0x30, 0x41, 0x00, 0x0A, 0x00]
+        );
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn case_mode_parse_accepts_user_spellings() {
+        assert!(matches!(CaseMode::parse("UPPER"), Some(CaseMode::Upper)));
+        assert!(matches!(
+            CaseMode::parse("camelCase"),
+            Some(CaseMode::Camel)
+        ));
+        assert!(matches!(
+            CaseMode::parse("snake_case"),
+            Some(CaseMode::Snake)
+        ));
+        assert!(matches!(
+            CaseMode::parse("kebab-case"),
+            Some(CaseMode::Kebab)
+        ));
+        assert!(matches!(
+            CaseMode::parse("constant"),
+            Some(CaseMode::Constant)
+        ));
+        assert!(CaseMode::parse("bogus").is_none());
     }
 
     #[test]

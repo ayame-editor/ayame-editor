@@ -89,6 +89,11 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["grepFolder", "menu.grep", ""],
   ["caseUpper", "menu.caseUpper", ""],
   ["caseLower", "menu.caseLower", ""],
+  ["caseCamel", "menu.caseCamel", ""],
+  ["casePascal", "menu.casePascal", ""],
+  ["caseSnake", "menu.caseSnake", ""],
+  ["caseKebab", "menu.caseKebab", ""],
+  ["caseConstant", "menu.caseConstant", ""],
   ["settings", "menu.settings", ""],
   ["keymap", "keymap.title", ""],
 ];

@@ -4,6 +4,28 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Fixed new/untitled buffers silently saving into the temp scratch folder:
+  the scratch-directory rename broke untitled detection, so 保存 overwrote
+  `%TEMP%\ayame-srv-untitled-…\untitled.txt` without a dialog. Untitled
+  buffers (and 名前を付けて保存) always go through a save dialog again, even
+  when a previous save folder is remembered.
+- Changed the first-run save/browse suggestion to the executable's folder
+  instead of the temp scratch directory (前回の保存先 takes over once set).
+- Added OS-native open/save dialogs in the desktop (gui) build via rfd; the
+  browser build keeps the in-app picker.
+- Added Windows drive navigation to the in-app picker and file tree: a
+  virtual "PC" level lists all ready drives, reachable from every drive root.
+- Moved case conversion from the 選択 menu to the ツール menu and added
+  camelCase / PascalCase / snake_case / kebab-case / CONSTANT_CASE styles.
+  Whole-file conversion (`ayame case`, `/api/case/save`) accepts the new
+  styles too and can now run chunk-parallel like replace (`--jobs` /
+  `--chunk-lines`).
+- Fixed the caret and mouse hit-testing drifting away from the real insert
+  position on lines containing tabs (e.g. TSV files): tab stops resolve
+  relative to the row including the line-number gutter, and the measurement
+  probe now replicates that geometry.
+- Fixed whole-file upper/lower conversion corrupting non-ASCII characters in
+  UTF-16 files; UTF-16 lines now convert through decode → transform → encode.
 - Added session restore for open tabs, active tab persistence, and shared
   server-backed recent-file/search-history state across native windows.
 - Expanded UTF-16LE/UTF-16BE support for opening, reopening, converting, saving,
