@@ -34,6 +34,7 @@ import {
   hideKeymap,
   keymapVisible,
   matchesShortcut,
+  refreshFindOptButtons,
   runAction,
   shortcutActionFromEvent,
   toggleOpt,
@@ -190,6 +191,8 @@ export function initEvents() {
   $("opt-case").addEventListener("click", () => toggleOpt("ci", "opt-case"));
   $("opt-word").addEventListener("click", () => toggleOpt("word", "opt-word"));
   $("opt-regex").addEventListener("click", () => toggleOpt("regex", "opt-regex"));
+  // Reflect the initial search-option state (Match Case is lit when ci is off).
+  refreshFindOptButtons();
   $("save-file").addEventListener("click", () => {
     hideFileMenu();
     saveFile();

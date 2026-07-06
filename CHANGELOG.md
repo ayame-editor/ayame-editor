@@ -63,6 +63,24 @@ All notable changes to Ayame Editor are tracked here.
   screenshot refreshes.
 - Added documentation screenshots and expanded shortcut coverage for GUI actions
   that are configurable but unassigned by default.
+- Fixed a case-insensitive literal replace expanding `$` in the replacement as
+  capture-group syntax, so a literal `$10` silently became empty; non-regex
+  replaces now emit the replacement verbatim. (#67)
+- Fixed `diff --side-by-side` panicking on CJK / multibyte lines longer than the
+  column width (byte-index truncation split a character). (#69)
+- Fixed the default keymap giving Alt+W to both タブを閉じる and the whole-word
+  search toggle — Alt+W closed the tab and the toggle was unreachable; Alt+W is
+  now the search toggle only. (#70)
+- Fixed the "Match Case" find-bar button being inverted: it toggled the
+  ignore-case flag, so its lit state and label disagreed. It now lights up when
+  case is actually matched. (#70)
+- Fixed the final session snapshot being lost on page unload (a plain fetch was
+  aborted); it is now flushed with `sendBeacon`. (#73)
+- Fixed the two-file diff summary line ("N hunk / … hunk omitted") being
+  hardcoded English; it now uses the i18n tables. (#74)
+- Fixed uploaded / sort-result scratch tabs being written into the restorable
+  session and failing to reopen, by using the authoritative scratch-path
+  detection. (#75)
 
 Release artifacts are published from GitHub Actions and listed on the
 [releases page](https://github.com/hjosugi/ayame-editor/releases).

@@ -17,7 +17,7 @@ import {
   updateTreeActive,
 } from "./workspace.js";
 import { saveSettings } from "./settings.js";
-import { saveSessionSnapshot } from "./persistence.js";
+import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
 import type {
   ArtifactResponse,
   BrowseResponse,
@@ -98,7 +98,10 @@ window.__ayameNativeCloseRequested = () => {
 };
 
 window.addEventListener("pagehide", () => {
-  void saveSessionSnapshot();
+  // A plain fetch is aborted as the page unloads; use sendBeacon so the final
+  // snapshot survives (issue #73). Fall back to the async save only if the
+  // browser refuses the beacon.
+  if (!beaconSessionSnapshot()) void saveSessionSnapshot();
 });
 
 export function retryPendingNativeClose() {

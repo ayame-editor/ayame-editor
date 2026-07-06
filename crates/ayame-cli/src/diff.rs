@@ -450,17 +450,17 @@ fn print_side_by_side_hunk(
 }
 
 fn truncate_for_column(s: &str, width: usize) -> String {
-    let mut out = String::new();
-    for (count, ch) in s.chars().enumerate() {
-        if count >= width {
-            if width > 3 {
-                out.truncate(out.len().saturating_sub(3));
-                out.push_str("...");
-            }
-            return out;
-        }
-        out.push(ch);
+    // Count in characters, never in bytes: `String::truncate` at a byte index
+    // that splits a multibyte char panics (issue #69), which crashed
+    // `diff --side-by-side` on CJK lines longer than the column width.
+    if s.chars().count() <= width {
+        return s.to_string();
     }
+    if width <= 3 {
+        return s.chars().take(width).collect();
+    }
+    let mut out: String = s.chars().take(width - 3).collect();
+    out.push_str("...");
     out
 }
 
@@ -510,6 +510,19 @@ mod tests {
 
     fn hunk_tuple(h: &DiffHunk) -> (DiffKind, u64, u64, u64, u64) {
         (h.kind, h.old_start, h.old_len, h.new_start, h.new_len)
+    }
+
+    #[test]
+    fn truncate_for_column_never_splits_a_multibyte_char() {
+        // Issue #69: byte-index truncation used to panic on CJK lines.
+        let s = "aaaaaaaaaaaaaaaaaあbc";
+        let out = truncate_for_column(s, 20);
+        assert!(out.ends_with("..."));
+        assert!(out.chars().count() <= 20);
+        // Shorter than the width is returned unchanged.
+        assert_eq!(truncate_for_column("あいう", 10), "あいう");
+        // Tiny widths must not panic either.
+        assert_eq!(truncate_for_column("あいうえお", 2).chars().count(), 2);
     }
 
     #[test]

@@ -62,7 +62,9 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["openFile", "menu.open", "Ctrl+O"],
   ["saveFile", "menu.save", "Ctrl+S"],
   ["saveAs", "menu.saveAs", "Ctrl+Shift+S"],
-  ["closeTab", "tab.close", ["Ctrl+W", "Alt+W"]],
+  // Alt+W is the whole-word search toggle (see `searchWord`); keep it off the
+  // tab-close default so the find-bar shortcut is reachable (issue #70).
+  ["closeTab", "tab.close", "Ctrl+W"],
   ["commandPalette", "menu.commandPalette", "Ctrl+Shift+P"],
   ["toggleSidebar", "keymap.toggleSidebar", "Ctrl+B"],
   ["find", "menu.find", "Ctrl+F"],

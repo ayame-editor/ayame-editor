@@ -546,9 +546,14 @@ export function hideDiff() {
 
 export function showDiff(res) {
   $("diff-summary").textContent =
-    `${commas(res.hunk_count)} hunk / +${commas(res.added)}  -${commas(res.deleted)}  ~${commas(res.modified)}` +
+    t("dialog.diff.summary", {
+      hunks: commas(res.hunk_count),
+      added: commas(res.added),
+      deleted: commas(res.deleted),
+      modified: commas(res.modified),
+    }) +
     (res.current_dirty ? ` / ${t("dialog.diff.unsavedIncluded")}` : "") +
-    (res.omitted_hunks ? ` / ${commas(res.omitted_hunks)} hunk omitted` : "");
+    (res.omitted_hunks ? ` / ${t("dialog.diff.omitted", { n: commas(res.omitted_hunks) })}` : "");
   $("diff-old-path").textContent =
     (res.old_path ? displayPath(res.old_path) : t("dialog.diff.currentFile")) +
     (res.current_dirty ? " *" : "");

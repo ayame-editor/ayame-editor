@@ -494,6 +494,11 @@ enum ReplacePlan {
     Regex {
         re: regex::Regex,
         replacement: String,
+        // True only for genuine regex requests. Literal replaces that land on
+        // this plan (case-insensitive, or any match on a legacy/UTF-16 encoding)
+        // must NOT let `$`/`${...}` in the replacement expand as capture-group
+        // syntax — otherwise a literal "$10" silently becomes "" (issue #67).
+        expand: bool,
     },
 }
 
@@ -525,6 +530,7 @@ impl ReplacePlan {
             MatchPlan::Regex { text, .. } | MatchPlan::DecodeLine(text) => Ok(Self::Regex {
                 re: text,
                 replacement: opts.replacement.clone(),
+                expand: opts.regex,
             }),
         }
     }
@@ -589,14 +595,25 @@ fn write_replaced_line(
             replacement,
             w,
         ),
-        ReplacePlan::Regex { re, replacement } => {
+        ReplacePlan::Regex {
+            re,
+            replacement,
+            expand,
+        } => {
             let text = doc.encoding().decode_line(raw);
             let count = re.find_iter(&text).count() as u64;
             if count == 0 {
                 w.write_all(raw)?;
                 return Ok((false, 0));
             }
-            let replaced = re.replace_all(&text, replacement.as_str()).into_owned();
+            // For literal replaces (`expand == false`) wrap the replacement in
+            // `NoExpand` so `$`/`${...}` are emitted verbatim (issue #67).
+            let replaced = if *expand {
+                re.replace_all(&text, replacement.as_str()).into_owned()
+            } else {
+                re.replace_all(&text, regex::NoExpand(replacement.as_str()))
+                    .into_owned()
+            };
             let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
                 Error::InvalidInput(format!(
                     "replacement result cannot be encoded as {}",
@@ -911,6 +928,48 @@ mod tests {
         assert_eq!(res.changed_lines, 2);
         assert_eq!(res.replacements, 2);
         assert_eq!(std::fs::read(&out).unwrap(), b"aN\nbN\nccc\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn case_insensitive_literal_replace_keeps_dollar_verbatim() {
+        // Issue #67: a non-regex, case-insensitive replace must not treat `$`
+        // in the replacement as capture-group syntax.
+        let (f, doc) = doc_from(b"Item and item\n");
+        let out = f.path().with_extension("ci-dollar");
+        let res = replace_to_path(
+            &doc,
+            &out,
+            &ReplaceOptions {
+                find: "item".into(),
+                replacement: "$10 each".into(),
+                regex: false,
+                case_sensitive: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.replacements, 2);
+        assert_eq!(std::fs::read(&out).unwrap(), b"$10 each and $10 each\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn regex_replace_still_expands_capture_groups() {
+        let (f, doc) = doc_from(b"ab\n");
+        let out = f.path().with_extension("regex-expand");
+        let res = replace_to_path(
+            &doc,
+            &out,
+            &ReplaceOptions {
+                find: r"(a)(b)".into(),
+                replacement: "$2$1".into(),
+                regex: true,
+                case_sensitive: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.replacements, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"ba\n");
         let _ = std::fs::remove_file(out);
     }
 
