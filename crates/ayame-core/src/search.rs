@@ -517,7 +517,7 @@ pub(crate) fn is_legacy_multibyte(enc: Encoding) -> bool {
 /// an odd offset straddles two characters and must be rejected (issue #68).
 #[inline]
 fn utf16_hit_aligned(enc: Encoding, abs: usize) -> bool {
-    !enc.is_wide() || abs % 2 == 0
+    !enc.is_wide() || abs.is_multiple_of(2)
 }
 
 /// Byte offset and length inside a decoded line of the span starting at decoded
