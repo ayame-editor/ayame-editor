@@ -16,6 +16,7 @@ mod common;
 mod fields;
 mod formatting;
 mod inspect;
+mod progress;
 mod sort;
 mod transform;
 

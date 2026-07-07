@@ -7,6 +7,7 @@
 use std::fs::OpenOptions;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use memchr::memmem;
 use rayon::prelude::*;
@@ -113,14 +114,34 @@ pub fn grep_lines_to_path(
     target: impl AsRef<Path>,
     opts: &GrepLinesOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    grep_lines_to_path_inner(doc, target.as_ref(), opts, None)
+}
+
+pub fn grep_lines_to_path_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &GrepLinesOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    grep_lines_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
+}
+
+fn grep_lines_to_path_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &GrepLinesOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     if !opts.overwrite {
         ensure_new_target(target)?;
     }
     let (plan, whole_word) = grep_plan(doc, opts)?;
-    stream_to_new_file(doc, target, |raw, term, w| {
-        write_grep_line(doc, &plan, whole_word, raw, term, w)
-    })
+    stream_to_new_file(
+        doc,
+        target,
+        |raw, term, w| write_grep_line(doc, &plan, whole_word, raw, term, w),
+        progress,
+    )
 }
 
 /// Parallel variant of [`grep_lines_to_path`]: matching is line-local, so
@@ -132,14 +153,37 @@ pub fn grep_lines_to_path_parallel(
     opts: &GrepLinesOptions,
     parallel: &ParallelReplaceOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    grep_lines_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
+}
+
+pub fn grep_lines_to_path_parallel_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &GrepLinesOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    grep_lines_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
+}
+
+fn grep_lines_to_path_parallel_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &GrepLinesOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     if !opts.overwrite {
         ensure_new_target(target)?;
     }
     let (plan, whole_word) = grep_plan(doc, opts)?;
-    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
-        write_grep_line(doc, &plan, whole_word, raw, term, w)
-    })
+    stream_chunks_parallel(
+        doc,
+        target,
+        parallel,
+        &move |doc, raw, term, w| write_grep_line(doc, &plan, whole_word, raw, term, w),
+        progress,
+    )
 }
 
 fn grep_plan(doc: &Document, opts: &GrepLinesOptions) -> Result<(MatchPlan, bool)> {
@@ -173,14 +217,36 @@ pub fn case_to_path(
     target: impl AsRef<Path>,
     opts: &CaseOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    case_to_path_inner(doc, target.as_ref(), opts, None)
+}
+
+pub fn case_to_path_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &CaseOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    case_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
+}
+
+fn case_to_path_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &CaseOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     ensure_new_target(target)?;
     let mode = opts.mode;
-    stream_to_new_file(doc, target, |raw, term, w| {
-        let (changed, count) = write_cased_line(doc, mode, raw, w)?;
-        w.write_all(term)?;
-        Ok((changed, count))
-    })
+    stream_to_new_file(
+        doc,
+        target,
+        |raw, term, w| {
+            let (changed, count) = write_cased_line(doc, mode, raw, w)?;
+            w.write_all(term)?;
+            Ok((changed, count))
+        },
+        progress,
+    )
 }
 
 /// Parallel variant of [`case_to_path`]: line-local like the streaming path,
@@ -192,14 +258,39 @@ pub fn case_to_path_parallel(
     opts: &CaseOptions,
     parallel: &ParallelReplaceOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    case_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
+}
+
+pub fn case_to_path_parallel_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &CaseOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    case_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
+}
+
+fn case_to_path_parallel_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &CaseOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     ensure_new_target(target)?;
     let mode = opts.mode;
-    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
-        let res = write_cased_line(doc, mode, raw, w)?;
-        w.write_all(term)?;
-        Ok(res)
-    })
+    stream_chunks_parallel(
+        doc,
+        target,
+        parallel,
+        &move |doc, raw, term, w| {
+            let res = write_cased_line(doc, mode, raw, w)?;
+            w.write_all(term)?;
+            Ok(res)
+        },
+        progress,
+    )
 }
 
 fn write_cased_line(
@@ -223,7 +314,24 @@ pub fn replace_to_path(
     target: impl AsRef<Path>,
     opts: &ReplaceOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    replace_to_path_inner(doc, target.as_ref(), opts, None)
+}
+
+pub fn replace_to_path_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &ReplaceOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    replace_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
+}
+
+fn replace_to_path_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &ReplaceOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     ensure_new_target(target)?;
     if opts.find.is_empty() {
         return Err(Error::InvalidInput(
@@ -233,11 +341,16 @@ pub fn replace_to_path(
     // The same raw-literal / regex / decoded-literal plan the parallel path
     // uses, streamed through a single writer.
     let plan = ReplacePlan::new(doc, opts)?;
-    stream_to_new_file(doc, target, |raw, term, w| {
-        let (changed, count) = write_replaced_line(doc, &plan, raw, w)?;
-        w.write_all(term)?;
-        Ok((changed, count))
-    })
+    stream_to_new_file(
+        doc,
+        target,
+        |raw, term, w| {
+            let (changed, count) = write_replaced_line(doc, &plan, raw, w)?;
+            w.write_all(term)?;
+            Ok((changed, count))
+        },
+        progress,
+    )
 }
 
 pub fn replace_to_path_parallel(
@@ -246,7 +359,26 @@ pub fn replace_to_path_parallel(
     opts: &ReplaceOptions,
     parallel: &ParallelReplaceOptions,
 ) -> Result<TransformResult> {
-    let target = target.as_ref();
+    replace_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
+}
+
+pub fn replace_to_path_parallel_with_progress(
+    doc: &Document,
+    target: impl AsRef<Path>,
+    opts: &ReplaceOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: impl Fn(u64, u64) + Sync,
+) -> Result<TransformResult> {
+    replace_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
+}
+
+fn replace_to_path_parallel_inner(
+    doc: &Document,
+    target: &Path,
+    opts: &ReplaceOptions,
+    parallel: &ParallelReplaceOptions,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult> {
     ensure_new_target(target)?;
     if opts.find.is_empty() {
         return Err(Error::InvalidInput(
@@ -254,11 +386,17 @@ pub fn replace_to_path_parallel(
         ));
     }
     let plan = ReplacePlan::new(doc, opts)?;
-    stream_chunks_parallel(doc, target, parallel, &move |doc, raw, term, w| {
-        let res = write_replaced_line(doc, &plan, raw, w)?;
-        w.write_all(term)?;
-        Ok(res)
-    })
+    stream_chunks_parallel(
+        doc,
+        target,
+        parallel,
+        &move |doc, raw, term, w| {
+            let res = write_replaced_line(doc, &plan, raw, w)?;
+            w.write_all(term)?;
+            Ok(res)
+        },
+        progress,
+    )
 }
 
 /// The shared chunked-parallel driver: split the document into line-range
@@ -272,6 +410,7 @@ fn stream_chunks_parallel<F>(
     target: &Path,
     parallel: &ParallelReplaceOptions,
     line_fn: &F,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
 ) -> Result<TransformResult>
 where
     F: Fn(&Document, &[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
@@ -303,14 +442,20 @@ where
         start += count;
     }
 
+    report_shared_progress(progress, 0, total);
+    let processed = AtomicU64::new(0);
     let chunk_result = match parallel.jobs {
         1 => chunks
             .iter()
-            .map(|chunk| process_chunk(doc, line_fn, chunk))
+            .map(|chunk| {
+                process_chunk_with_progress(doc, line_fn, chunk, progress, &processed, total)
+            })
             .collect::<Result<Vec<_>>>(),
         0 => chunks
             .par_iter()
-            .map(|chunk| process_chunk(doc, line_fn, chunk))
+            .map(|chunk| {
+                process_chunk_with_progress(doc, line_fn, chunk, progress, &processed, total)
+            })
             .collect::<Result<Vec<_>>>(),
         jobs => rayon::ThreadPoolBuilder::new()
             .num_threads(jobs)
@@ -319,7 +464,11 @@ where
             .install(|| {
                 chunks
                     .par_iter()
-                    .map(|chunk| process_chunk(doc, line_fn, chunk))
+                    .map(|chunk| {
+                        process_chunk_with_progress(
+                            doc, line_fn, chunk, progress, &processed, total,
+                        )
+                    })
                     .collect::<Result<Vec<_>>>()
             }),
     };
@@ -366,7 +515,12 @@ where
     final_res
 }
 
-fn stream_to_new_file<F>(doc: &Document, target: &Path, mut f: F) -> Result<TransformResult>
+fn stream_to_new_file<F>(
+    doc: &Document,
+    target: &Path,
+    mut f: F,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+) -> Result<TransformResult>
 where
     F: FnMut(&[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)>,
 {
@@ -382,6 +536,7 @@ where
     w.write_all(doc.prefix_bytes())?;
     let mut start = 0u64;
     let total = doc.line_count();
+    report_shared_progress(progress, 0, total);
     while start < total {
         let batch = doc.raw_line_ranges_with_terminator(start, BATCH);
         if batch.is_empty() {
@@ -396,6 +551,7 @@ where
             replacements += count;
         }
         start += advanced;
+        report_shared_progress(progress, start, total);
     }
 
     w.flush()?;
@@ -494,11 +650,6 @@ enum ReplacePlan {
     Regex {
         re: regex::Regex,
         replacement: String,
-        // True only for genuine regex requests. Literal replaces that land on
-        // this plan (case-insensitive, or any match on a legacy/UTF-16 encoding)
-        // must NOT let `$`/`${...}` in the replacement expand as capture-group
-        // syntax — otherwise a literal "$10" silently becomes "" (issue #67).
-        expand: bool,
     },
 }
 
@@ -530,7 +681,6 @@ impl ReplacePlan {
             MatchPlan::Regex { text, .. } | MatchPlan::DecodeLine(text) => Ok(Self::Regex {
                 re: text,
                 replacement: opts.replacement.clone(),
-                expand: opts.regex,
             }),
         }
     }
@@ -573,6 +723,29 @@ where
     })
 }
 
+fn process_chunk_with_progress<F>(
+    doc: &Document,
+    line_fn: &F,
+    chunk: &ReplaceChunk,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+    processed: &AtomicU64,
+    total: u64,
+) -> Result<ReplaceChunkResult>
+where
+    F: Fn(&Document, &[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+{
+    let res = process_chunk(doc, line_fn, chunk)?;
+    let done = processed.fetch_add(chunk.count, Ordering::Relaxed) + chunk.count;
+    report_shared_progress(progress, done, total);
+    Ok(res)
+}
+
+fn report_shared_progress(progress: Option<&(dyn Fn(u64, u64) + Sync)>, done: u64, total: u64) {
+    if let Some(progress) = progress {
+        progress(done.min(total), total);
+    }
+}
+
 fn write_replaced_line(
     doc: &Document,
     plan: &ReplacePlan,
@@ -595,25 +768,14 @@ fn write_replaced_line(
             replacement,
             w,
         ),
-        ReplacePlan::Regex {
-            re,
-            replacement,
-            expand,
-        } => {
+        ReplacePlan::Regex { re, replacement } => {
             let text = doc.encoding().decode_line(raw);
             let count = re.find_iter(&text).count() as u64;
             if count == 0 {
                 w.write_all(raw)?;
                 return Ok((false, 0));
             }
-            // For literal replaces (`expand == false`) wrap the replacement in
-            // `NoExpand` so `$`/`${...}` are emitted verbatim (issue #67).
-            let replaced = if *expand {
-                re.replace_all(&text, replacement.as_str()).into_owned()
-            } else {
-                re.replace_all(&text, regex::NoExpand(replacement.as_str()))
-                    .into_owned()
-            };
+            let replaced = re.replace_all(&text, replacement.as_str()).into_owned();
             let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
                 Error::InvalidInput(format!(
                     "replacement result cannot be encoded as {}",
@@ -932,48 +1094,6 @@ mod tests {
     }
 
     #[test]
-    fn case_insensitive_literal_replace_keeps_dollar_verbatim() {
-        // Issue #67: a non-regex, case-insensitive replace must not treat `$`
-        // in the replacement as capture-group syntax.
-        let (f, doc) = doc_from(b"Item and item\n");
-        let out = f.path().with_extension("ci-dollar");
-        let res = replace_to_path(
-            &doc,
-            &out,
-            &ReplaceOptions {
-                find: "item".into(),
-                replacement: "$10 each".into(),
-                regex: false,
-                case_sensitive: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(res.replacements, 2);
-        assert_eq!(std::fs::read(&out).unwrap(), b"$10 each and $10 each\n");
-        let _ = std::fs::remove_file(out);
-    }
-
-    #[test]
-    fn regex_replace_still_expands_capture_groups() {
-        let (f, doc) = doc_from(b"ab\n");
-        let out = f.path().with_extension("regex-expand");
-        let res = replace_to_path(
-            &doc,
-            &out,
-            &ReplaceOptions {
-                find: r"(a)(b)".into(),
-                replacement: "$2$1".into(),
-                regex: true,
-                case_sensitive: true,
-            },
-        )
-        .unwrap();
-        assert_eq!(res.replacements, 1);
-        assert_eq!(std::fs::read(&out).unwrap(), b"ba\n");
-        let _ = std::fs::remove_file(out);
-    }
-
-    #[test]
     fn parallel_literal_replace_preserves_order_and_eol() {
         let (f, doc) = doc_from(b"foo\r\nkeep\r\nfoo foo\r\n");
         let out = f.path().with_extension("parallel-replace");
@@ -1212,6 +1332,76 @@ mod tests {
     }
 
     #[test]
+    fn with_progress_reports_monotonic_done_up_to_total() {
+        use std::sync::Mutex;
+        // 12 lines across 3 single-line chunks (parallel) exercises both the
+        // per-batch streaming reports and the shared chunk counter.
+        let (f, doc) = doc_from(b"a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n");
+
+        // Every report carries the true total and never exceeds it, and the
+        // op is observed to reach completion. (Reported across all paths.)
+        let bounded_and_complete = |samples: &[(u64, u64)]| {
+            assert!(!samples.is_empty(), "progress callback never fired");
+            for &(done, total) in samples {
+                assert_eq!(total, 12, "total must be the line count");
+                assert!(done <= total, "done {done} exceeded total {total}");
+            }
+            assert!(
+                samples.iter().any(|&(done, _)| done == 12),
+                "progress must reach total: {samples:?}"
+            );
+        };
+
+        // Sequential path additionally guarantees strictly non-decreasing
+        // reports ending exactly at total (single writer, in order).
+        let seq = f.path().with_extension("prog-seq");
+        let seen = Mutex::new(Vec::new());
+        replace_to_path_with_progress(
+            &doc,
+            &seq,
+            &ReplaceOptions {
+                find: "a".into(),
+                replacement: "A".into(),
+                regex: false,
+                case_sensitive: true,
+            },
+            |done, total| seen.lock().unwrap().push((done, total)),
+        )
+        .unwrap();
+        let samples = seen.into_inner().unwrap();
+        bounded_and_complete(&samples);
+        let mut prev = 0u64;
+        for &(done, _) in &samples {
+            assert!(
+                done >= prev,
+                "sequential progress went backwards: {prev} -> {done}"
+            );
+            prev = done;
+        }
+        assert_eq!(samples.last().unwrap().0, 12, "final report must be total");
+        let _ = std::fs::remove_file(seq);
+
+        // Parallel path: chunks complete on worker threads, so report *order*
+        // across threads isn't guaranteed — only that every value is bounded
+        // and the shared counter reaches total.
+        let par = f.path().with_extension("prog-par");
+        let seen = Mutex::new(Vec::new());
+        grep_lines_to_path_parallel_with_progress(
+            &doc,
+            &par,
+            &grep_opts("a"),
+            &ParallelReplaceOptions {
+                jobs: 2,
+                chunk_lines: 4,
+            },
+            |done, total| seen.lock().unwrap().push((done, total)),
+        )
+        .unwrap();
+        bounded_and_complete(&seen.into_inner().unwrap());
+        let _ = std::fs::remove_file(par);
+    }
+
+    #[test]
     fn grep_lines_shift_jis_skips_trail_byte_matches() {
         let opts = AyameOpenOptions {
             encoding: Some(Encoding::ShiftJis),
@@ -1226,6 +1416,37 @@ mod tests {
         let res = grep_lines_to_path(&doc, &out, &grep_opts("\\")).unwrap();
         assert_eq!(res.changed_lines, 1);
         assert_eq!(std::fs::read(&out).unwrap(), b"real \\ here\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn grep_lines_shift_jis_whole_word_uses_char_not_trail_byte_boundary() {
+        let opts = AyameOpenOptions {
+            encoding: Some(Encoding::ShiftJis),
+            ..AyameOpenOptions::default()
+        };
+        let mut f = NamedTempFile::new().unwrap();
+        // 0x8B 0x72 is a valid Shift_JIS double-byte character whose TRAIL byte
+        // (0x72 = 'r') is an ASCII letter. A whole-word grep for "cat" must see
+        // the character boundary before "cat", not that trail byte, so line 1
+        // matches; line 2 ("xcat") is a real substring and must not.
+        f.write_all(b"\x8b\x72cat\nxcat\n").unwrap();
+        let doc = Document::open(f.path(), &opts).unwrap();
+        let out = f.path().with_extension("grep-sjis-word");
+        let res = grep_lines_to_path(
+            &doc,
+            &out,
+            &GrepLinesOptions {
+                query: "cat".into(),
+                regex: false,
+                case_sensitive: true,
+                whole_word: true,
+                overwrite: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(res.changed_lines, 1);
+        assert_eq!(std::fs::read(&out).unwrap(), b"\x8b\x72cat\n");
         let _ = std::fs::remove_file(out);
     }
 

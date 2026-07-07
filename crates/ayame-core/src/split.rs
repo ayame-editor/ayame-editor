@@ -63,6 +63,29 @@ pub fn split_by_lines(
     lines_per_file: u64,
     opts: &SplitOptions,
 ) -> Result<SplitResult> {
+    split_by_lines_inner::<fn(u64, u64)>(doc, lines_per_file, opts, None)
+}
+
+/// Split with a coarse line-progress callback. The callback receives
+/// `(processed_lines, total_lines)` after each part is written.
+pub fn split_by_lines_with_progress(
+    doc: &Document,
+    lines_per_file: u64,
+    opts: &SplitOptions,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<SplitResult> {
+    split_by_lines_inner(doc, lines_per_file, opts, Some(&mut progress))
+}
+
+fn split_by_lines_inner<F>(
+    doc: &Document,
+    lines_per_file: u64,
+    opts: &SplitOptions,
+    mut progress: Option<&mut F>,
+) -> Result<SplitResult>
+where
+    F: FnMut(u64, u64),
+{
     if lines_per_file == 0 {
         return Err(Error::InvalidInput(
             "split requires at least 1 line per file".into(),
@@ -79,6 +102,7 @@ pub fn split_by_lines(
 
     let mut files = Vec::new();
     let mut created = 0u64; // fully written (renamed) parts, for cleanup
+    report_progress(&mut progress, 0, total);
     let res = (|| -> Result<()> {
         let mut start = 0u64;
         for part in 1..=count {
@@ -96,6 +120,7 @@ pub fn split_by_lines(
                 files.push(target);
             }
             start = end;
+            report_progress(&mut progress, start, total);
         }
         Ok(())
     })();
@@ -112,6 +137,15 @@ pub fn split_by_lines(
         count,
         total_lines: total,
     })
+}
+
+fn report_progress<F>(progress: &mut Option<&mut F>, done: u64, total: u64)
+where
+    F: FnMut(u64, u64),
+{
+    if let Some(cb) = progress.as_deref_mut() {
+        cb(done.min(total), total);
+    }
 }
 
 /// Write original lines `[start, end)` to `target` (tmp file + atomic rename).

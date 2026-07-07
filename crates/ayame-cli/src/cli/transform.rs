@@ -9,13 +9,14 @@ use ayame_core::{
 use super::args::{first_opt, has_flag, open_doc};
 use super::common::maybe_crash;
 use super::formatting::{commas, human_bytes};
+use super::progress::ProgressReporter;
 
 pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
     maybe_crash();
     let (doc, pos, opts, flags) = open_doc(
         args,
         &["--out", "--jobs", "--chunk-lines"],
-        &["-e", "--regex", "-i", "--ignore-case"],
+        &["-e", "--regex", "-i", "--ignore-case", "--progress"],
     )?;
     let find = pos.get(1).context("expected FIND pattern")?.clone();
     let replacement = pos.get(2).context("expected REPLACEMENT text")?.clone();
@@ -33,8 +34,9 @@ pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
         .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
         .transpose()?
         .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let progress = ProgressReporter::new("replace", &flags);
     let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
-        ayame_core::replace_to_path_parallel(
+        ayame_core::replace_to_path_parallel_with_progress(
             &doc,
             out,
             &replace_opts,
@@ -42,10 +44,14 @@ pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
                 jobs: jobs.unwrap_or(0),
                 chunk_lines,
             },
+            |done, total| progress.report(done, total),
         )?
     } else {
-        ayame_core::replace_to_path(&doc, out, &replace_opts)?
+        ayame_core::replace_to_path_with_progress(&doc, out, &replace_opts, |done, total| {
+            progress.report(done, total);
+        })?
     };
+    progress.finish();
     eprintln!(
         "{} replacement(s), {} changed line(s), {} -> {}",
         commas(res.replacements),
@@ -58,7 +64,8 @@ pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, _flags) = open_doc(args, &["--out", "--jobs", "--chunk-lines"], &[])?;
+    let (doc, pos, opts, flags) =
+        open_doc(args, &["--out", "--jobs", "--chunk-lines"], &["--progress"])?;
     const MODES: &str = "upper|lower|camel|pascal|snake|kebab|constant";
     let mode = match pos.get(1) {
         Some(raw) => CaseMode::parse(raw)
@@ -73,8 +80,9 @@ pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
         .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
         .transpose()?
         .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let progress = ProgressReporter::new("case", &flags);
     let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
-        ayame_core::case_to_path_parallel(
+        ayame_core::case_to_path_parallel_with_progress(
             &doc,
             out,
             &CaseOptions { mode },
@@ -82,10 +90,14 @@ pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
                 jobs: jobs.unwrap_or(0),
                 chunk_lines,
             },
+            |done, total| progress.report(done, total),
         )?
     } else {
-        ayame_core::case_to_path(&doc, out, &CaseOptions { mode })?
+        ayame_core::case_to_path_with_progress(&doc, out, &CaseOptions { mode }, |done, total| {
+            progress.report(done, total);
+        })?
     };
+    progress.finish();
     eprintln!(
         "{} changed line(s), {} -> {}",
         commas(res.changed_lines),
@@ -111,8 +123,10 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
             "-i",
             "--ignore-case",
             "-w",
+            "--word",
             "--whole-word",
             "--overwrite",
+            "--progress",
         ],
     )?;
     let query = pos.get(1).context("expected PATTERN")?.clone();
@@ -121,7 +135,7 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
         query,
         regex: has_flag(&flags, &["-e", "--regex"]),
         case_sensitive: !has_flag(&flags, &["-i", "--ignore-case"]),
-        whole_word: has_flag(&flags, &["-w", "--whole-word"]),
+        whole_word: has_flag(&flags, &["-w", "--word", "--whole-word"]),
         overwrite: has_flag(&flags, &["--overwrite"]),
     };
     let jobs = first_opt(&opts, &["--jobs"])
@@ -131,8 +145,9 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
         .map(|s| s.parse::<u64>().context("--chunk-lines must be a number"))
         .transpose()?
         .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES);
+    let progress = ProgressReporter::new("grep-lines", &flags);
     let res = if jobs.is_some() || first_opt(&opts, &["--chunk-lines"]).is_some() {
-        ayame_core::grep_lines_to_path_parallel(
+        ayame_core::grep_lines_to_path_parallel_with_progress(
             &doc,
             out,
             &grep_opts,
@@ -140,10 +155,14 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
                 jobs: jobs.unwrap_or(0),
                 chunk_lines,
             },
+            |done, total| progress.report(done, total),
         )?
     } else {
-        ayame_core::grep_lines_to_path(&doc, out, &grep_opts)?
+        ayame_core::grep_lines_to_path_with_progress(&doc, out, &grep_opts, |done, total| {
+            progress.report(done, total);
+        })?
     };
+    progress.finish();
     eprintln!(
         "{} matching line(s) of {}, {} -> {}",
         commas(res.changed_lines),
@@ -160,8 +179,11 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
 /// the original file; `--json` prints the result for that worker to parse.
 pub(crate) fn cmd_split(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) =
-        open_doc(args, &["--lines", "--out-dir", "--name"], &["--json"])?;
+    let (doc, _pos, opts, flags) = open_doc(
+        args,
+        &["--lines", "--out-dir", "--name"],
+        &["--json", "--progress"],
+    )?;
     let lines: u64 = first_opt(&opts, &["--lines"])
         .context("split requires --lines <N>")?
         .parse()
@@ -170,7 +192,11 @@ pub(crate) fn cmd_split(args: &[String]) -> Result<()> {
         dir: first_opt(&opts, &["--out-dir"]).map(PathBuf::from),
         file_name: first_opt(&opts, &["--name"]).map(str::to_string),
     };
-    let res = ayame_core::split_by_lines(&doc, lines, &split_opts)?;
+    let progress = ProgressReporter::new("split", &flags);
+    let res = ayame_core::split_by_lines_with_progress(&doc, lines, &split_opts, |done, total| {
+        progress.report(done, total);
+    })?;
+    progress.finish();
     if has_flag(&flags, &["--json"]) {
         println!("{}", serde_json::to_string(&res)?);
         return Ok(());
