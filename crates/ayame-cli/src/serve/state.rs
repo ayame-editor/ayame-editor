@@ -936,7 +936,19 @@ impl AppState {
         }
 
         let path = snap.doc.path().to_path_buf();
-        let opened = Document::open(&path, &self.open_opts);
+        // Follow growth without the index cache. The cache key is keyed on
+        // (len, mtime), which both change on every append, so a growing file is
+        // a guaranteed miss that rebuilds the index AND writes a fresh cache
+        // blob every poll — leaving an unbounded trail of dead blobs on disk for
+        // a busy multi-GB log. Skipping the cache here costs nothing on the read
+        // side (it was already a full rebuild) and stops the pollution (#76).
+        // (Reusing the immutable prefix via Document::refresh_tail would also
+        // avoid the rebuild, but that needs &mut on the Arc-shared document.)
+        let tail_opts = ayame_core::OpenOptions {
+            cache_dir: None,
+            ..self.open_opts.clone()
+        };
+        let opened = Document::open(&path, &tail_opts);
         let Ok(new_doc) = opened else {
             let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
             s.changed = true;

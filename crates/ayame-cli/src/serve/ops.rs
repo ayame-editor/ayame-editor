@@ -160,6 +160,13 @@ async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, Strin
     }
     let scratch_opts = ayame_core::OpenOptions {
         cache_dir: None,
+        // Force the live document's encoding. The snapshot bytes are written in
+        // that encoding, and a user who reopened the file with a corrected
+        // encoding (reload_with_encoding never updates state.open_opts) must not
+        // have auto-detection silently pick the wrong one again (issue #75):
+        // otherwise find/search on the dirty buffer runs under the wrong
+        // encoding and Japanese queries stop matching.
+        encoding: Some(doc.encoding()),
         ..state.open_options()
     };
     let doc_for_build = doc.clone();
@@ -886,6 +893,11 @@ pub(super) async fn api_diff(
                 // has no later use, so it can be moved rather than cloned.)
                 let scratch_opts = ayame_core::OpenOptions {
                     cache_dir: None,
+                    // Same as dirty_view: the materialized current buffer is in
+                    // the live doc's encoding, so force it rather than letting
+                    // auto-detection re-guess (and possibly re-misdetect) it
+                    // (issue #75). The comparison file `new` keeps auto-detect.
+                    encoding: Some(old.encoding()),
                     ..open_options
                 };
                 let current = Document::open(current, &scratch_opts)
