@@ -71,7 +71,7 @@ import {
   showSearchHistory,
   updateCount,
 } from "./search.js";
-import { confirmVisible, formVisible, promptVisible } from "./dialogs.js";
+import { confirmVisible, formVisible, loadingVisible, promptVisible } from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
 import {
   adjustZoom,
@@ -94,7 +94,8 @@ export function anyModalOpen() {
     diffVisible() ||
     grepVisible() ||
     openerVisible() ||
-    convertVisible()
+    convertVisible() ||
+    loadingVisible()
   );
 }
 
@@ -555,6 +556,12 @@ export function onCompEnd(e) {
   hi.classList.remove("composing");
   const data = e.data || "";
   hi.value = "";
+  // Don't commit composed text behind a modal or the busy overlay — a long
+  // Replace All must not have IME input spliced into its edit queue (#72).
+  if (anyModalOpen()) {
+    scheduleRender();
+    return;
+  }
   if (data) typeText(data);
   else scheduleRender();
 }

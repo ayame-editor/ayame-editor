@@ -240,3 +240,9 @@ export function showLoading(text) {
 export function hideLoading() {
   $("overlay").classList.add("hidden");
 }
+
+// True while the blocking loading overlay is up (open, sort, replace-all, …).
+// Counted as a modal so edits and shortcuts can't race a long operation (#72).
+export function loadingVisible() {
+  return !$("overlay").classList.contains("hidden");
+}
