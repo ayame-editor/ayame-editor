@@ -514,8 +514,11 @@ mod tests {
 
     #[test]
     fn truncate_for_column_never_splits_a_multibyte_char() {
-        // Issue #69: byte-index truncation used to panic on CJK lines.
-        let s = "aaaaaaaaaaaaaaaaaあbc";
+        // Issue #69: byte-index truncation used to panic on CJK lines. The
+        // line must exceed the column width for truncation to fire — a line
+        // exactly `width` chars long is returned unchanged (count <= width).
+        let s = "aaaaaaaaaaaaaaaaaあbcd";
+        assert!(s.chars().count() > 20);
         let out = truncate_for_column(s, 20);
         assert!(out.ends_with("..."));
         assert!(out.chars().count() <= 20);
