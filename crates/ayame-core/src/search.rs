@@ -517,7 +517,7 @@ pub(crate) fn is_legacy_multibyte(enc: Encoding) -> bool {
 /// an odd offset straddles two characters and must be rejected (issue #68).
 #[inline]
 fn utf16_hit_aligned(enc: Encoding, abs: usize) -> bool {
-    !enc.is_wide() || abs % 2 == 0
+    !enc.is_wide() || abs.is_multiple_of(2)
 }
 
 /// Byte offset and length inside a decoded line of the span starting at decoded
@@ -525,7 +525,11 @@ fn utf16_hit_aligned(enc: Encoding, abs: usize) -> bool {
 /// one or two 16-bit code units, i.e. 2 or 4 bytes (endianness does not change
 /// the byte count), so the raw span is the re-encoded UTF-16 length.
 fn utf16_char_span(text: &str, char_start: usize, char_len: usize) -> (usize, usize) {
-    let boff = text.chars().take(char_start).map(|c| c.len_utf16() * 2).sum();
+    let boff = text
+        .chars()
+        .take(char_start)
+        .map(|c| c.len_utf16() * 2)
+        .sum();
     let blen = text
         .chars()
         .skip(char_start)
