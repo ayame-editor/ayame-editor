@@ -4,6 +4,17 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Fixed Settings labels wrapping onto a second line in both Japanese and
+  English: the label column is now sized per locale to its longest label and
+  never wraps; on phone widths the label stacks above its control instead.
+- Added a custom-image background option: 背景 is now デフォルト / 単色 /
+  カスタム画像. A picked image persists in Settings (4MB cap) and covers the
+  desk over the theme paper, with a re-pick row showing the current file name.
+  The 単色 option drops its （全単色配慮） parenthetical.
+- Added a confirmation dialog before 既定に戻す resets all key bindings.
+- Fixed the last line and the `[EOF]` marker being clipped at the bottom of
+  the scroll range on large files: the fully-scrolled position now shows the
+  final row in full instead of hanging it past the viewport edge.
 - Added "grep して保存" (Tools menu, `/api/grep/save`, `ayame grep-lines`):
   extract only the lines matching a pattern — with the search bar's exact
   regex / case / whole-word semantics, unsaved edits included — into a file
