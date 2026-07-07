@@ -70,8 +70,19 @@ export function buildRuler() {
   inner.style.transform = `translateX(${-$("content").scrollLeft}px)`;
 }
 
+// Rows that fit the viewport in full. rowsVisible() rounds *up* so render()
+// also fills the partially clipped bottom row; clamping the scroll range with
+// that count left the last line (and the [EOF] marker) permanently cut off at
+// the bottom — "全部表示できてない" on huge files.
+export function rowsFullyVisible() {
+  const h = $("viewport").clientHeight - (state.settings && state.settings.ruler ? 18 : 0);
+  return Math.max(1, Math.floor(h / LINE_HEIGHT));
+}
+
 export function maxFirst() {
-  return Math.max(0, state.total - rowsVisible());
+  // state.total + 1: the [EOF] marker is the document's final row, so at the
+  // bottom of the range the last line and the marker are both shown whole.
+  return Math.max(0, state.total + 1 - rowsFullyVisible());
 }
 
 // ---- data ------------------------------------------------------------------
@@ -585,7 +596,9 @@ export function focusEditor() {
 // Bring the caret into view: scroll vertically (whole lines) and horizontally
 // (#content is the horizontal scroll container).
 export function revealCaret() {
-  const vis = rowsVisible();
+  // Clamp against the *fully* visible row count: landing the caret on the
+  // half-clipped bottom row would leave the line it is on unreadable.
+  const vis = rowsFullyVisible();
   if (state.caret.line < state.first) {
     state.first = Math.min(state.caret.line, maxFirst());
   } else if (state.caret.line >= state.first + vis) {
