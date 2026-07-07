@@ -323,8 +323,21 @@ export function deleteWordFwd() {
   });
 }
 
+// Timestamp of the last compositionend, for the WebKit IME quirk below.
+let compositionEndedAt = -1;
+
 export function onEditKey(e) {
   if (state.composing || e.isComposing) return; // IME owns the keyboard
+  // WebKit / WKWebView (Safari, the macOS native build) dispatch the keydown
+  // for the Enter that COMMITTED an IME composition *after* compositionend,
+  // with isComposing already false — so it slips past the guard above and
+  // inserts a stray newline after the confirmed kana-kanji text. Swallow that
+  // one Enter when it arrives right after a compositionend (issue #71).
+  if (e.key === "Enter" && compositionEndedAt >= 0 && e.timeStamp - compositionEndedAt < 200) {
+    compositionEndedAt = -1; // consume once; a later, deliberate Enter is kept
+    e.preventDefault();
+    return;
+  }
   if (anyModalOpen()) return; // a dialog is up; don't edit behind it
   if (savingCount > 0) {
     // Edits are blocked while a save is in flight; swallow the key so the
@@ -552,6 +565,7 @@ export function onCompUpdate() {
 
 export function onCompEnd(e) {
   state.composing = false;
+  compositionEndedAt = e.timeStamp; // arm the WebKit stray-Enter guard (#71)
   const hi = $("hidden-input");
   hi.classList.remove("composing");
   const data = e.data || "";

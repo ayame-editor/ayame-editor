@@ -91,7 +91,8 @@ vi.mock("../src/settings.js", () => ({
 }));
 
 import { focusEditor } from "../src/editor.js";
-import { onEditKey } from "../src/input.js";
+import { insertNewline } from "../src/edits.js";
+import { onCompEnd, onEditKey } from "../src/input.js";
 import { hideFind } from "../src/search.js";
 import { state } from "../src/state.js";
 
@@ -123,5 +124,51 @@ describe("editor Escape handling", () => {
     expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(hideFind).toHaveBeenCalledOnce();
     expect(focusEditor).toHaveBeenCalledOnce();
+  });
+});
+
+describe("IME confirm-Enter (WebKit) handling", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<textarea id="hidden-input"></textarea>';
+    state.composing = false;
+    state.findOpen = false;
+    state.sel = null;
+    state.extraCursors = [];
+    state.stat = { open: true };
+    state.caret = { line: 0, col: 0 };
+    vi.clearAllMocks();
+  });
+
+  const enterEvent = (timeStamp) => ({
+    key: "Enter",
+    isComposing: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    timeStamp,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  });
+
+  it("swallows the Enter that arrives right after compositionend", () => {
+    onCompEnd({ data: "あ", timeStamp: 1000 });
+    const enter = enterEvent(1050); // 50ms later — the WebKit artifact
+    onEditKey(enter);
+    expect(enter.preventDefault).toHaveBeenCalledOnce();
+    expect(insertNewline).not.toHaveBeenCalled();
+  });
+
+  it("keeps a deliberate Enter pressed well after the composition", () => {
+    onCompEnd({ data: "あ", timeStamp: 1000 });
+    onEditKey(enterEvent(2000)); // 1s later — a real newline
+    expect(insertNewline).toHaveBeenCalledOnce();
+  });
+
+  it("only swallows one Enter per composition", () => {
+    onCompEnd({ data: "あ", timeStamp: 1000 });
+    onEditKey(enterEvent(1010)); // consumed
+    onEditKey(enterEvent(1020)); // next Enter is a real newline
+    expect(insertNewline).toHaveBeenCalledOnce();
   });
 });

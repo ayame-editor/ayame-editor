@@ -63,7 +63,15 @@ export function enqueueEdit(fn) {
         await waitForSavingDone();
         if (!sameEditContext(ctx)) return null;
       }
-      return fn();
+      const result = await fn();
+      // Any edit shifts byte offsets, so a search anchor captured against the
+      // pre-edit layout is stale: F3 would resume from the wrong byte (skipping
+      // a shifted match or landing mid-character) and the count/ticks would lag.
+      // Drop them so the next search re-anchors from the caret (issue #74).
+      state.lastMatch = null;
+      state.searchHits = null;
+      state.searchTruncated = false;
+      return result;
     })
     .catch((e) => {
       flashCount(t("editor.editError"));
