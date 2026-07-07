@@ -63,7 +63,15 @@ export function enqueueEdit(fn) {
         await waitForSavingDone();
         if (!sameEditContext(ctx)) return null;
       }
-      return fn();
+      const result = await fn();
+      // Any edit shifts byte offsets, so a search anchor captured against the
+      // pre-edit layout is stale: F3 would resume from the wrong byte (skipping
+      // a shifted match or landing mid-character) and the count/ticks would lag.
+      // Drop them so the next search re-anchors from the caret (issue #74).
+      state.lastMatch = null;
+      state.searchHits = null;
+      state.searchTruncated = false;
+      return result;
     })
     .catch((e) => {
       flashCount(t("editor.editError"));
@@ -422,8 +430,54 @@ export function deleteSelectionEdit() {
   return applyRange(t.l0, t.c0, t.l1, t.c1, "");
 }
 
+// A zero-width rectangular selection (c0 === c1 across several lines) is the
+// normal way to start column editing, but it still reports as a selection
+// (l0 !== l1). Backspace/Delete must remove one char per covered line — before
+// the caret column for Backspace, after it for Delete — instead of issuing an
+// empty-range rect edit that deletes nothing and drops the selection (#74).
+async function deleteZeroWidthRect(rr, forward) {
+  const c = rr.c0;
+  const lines = [];
+  for (let l = rr.l0; l <= rr.l1; l++) lines.push(l);
+  const lens = await lineLensFor(lines);
+  const edits = [];
+  for (const l of lines) {
+    if (!lens.has(l)) continue;
+    const len = lens.get(l);
+    if (forward) {
+      if (c < len) edits.push({ l0: l, c0: c, l1: l, c1: c + 1, text: "" });
+    } else if (c > 0 && c <= len) {
+      edits.push({ l0: l, c0: c - 1, l1: l, c1: c, text: "" });
+    }
+  }
+  if (!edits.length) return null; // nothing to delete on any line — no request
+  const ctx = editContext();
+  await apiPost("/api/edit/replace_batch", { edits });
+  if (!sameEditContext(ctx)) return;
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (e) {
+    console.error("post-rect-delete refresh failed", e);
+    flashCount(t("editor.reloadError"));
+  }
+  if (!sameEditContext(ctx)) return;
+  // Keep the column caret alive at the new column so a held Backspace/Delete
+  // keeps acting on every line.
+  const newCol = forward ? c : Math.max(0, c - 1);
+  const l0 = Math.min(rr.l0, Math.max(0, state.total - 1));
+  const l1 = Math.min(rr.l1, Math.max(0, state.total - 1));
+  state.sel = { anchor: { line: l0, col: newCol }, head: { line: l1, col: newCol }, rect: true };
+  state.extraCursors = [];
+  setCaret(l1, newCol);
+  revealCaret();
+  render();
+}
+
 export function backspace() {
   enqueueEdit(async () => {
+    const rr = rectRange();
+    if (rr && rr.c0 === rr.c1) return deleteZeroWidthRect(rr, false);
     const del = deleteSelectionEdit();
     if (del) return del;
     if (state.extraCursors.length) {
@@ -462,6 +516,8 @@ export function backspace() {
 
 export function forwardDelete() {
   enqueueEdit(async () => {
+    const rr = rectRange();
+    if (rr && rr.c0 === rr.c1) return deleteZeroWidthRect(rr, true);
     const del = deleteSelectionEdit();
     if (del) return del;
     if (state.extraCursors.length) {

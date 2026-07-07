@@ -92,6 +92,24 @@ All notable changes to Ayame Editor are tracked here.
 - Fixed uploaded / sort-result scratch tabs being written into the restorable
   session and failing to reopen, by using the authoritative scratch-path
   detection. (#75)
+- Fixed search on UTF-16 files: literal matches at misaligned (odd) byte offsets
+  are rejected, and case-insensitive / regex queries decode each line first
+  instead of scanning interleaved-NUL bytes and matching nothing. (#68)
+- Fixed Backspace / Delete doing nothing on a zero-width rectangular (column)
+  selection; they now delete one character per covered line and keep the column
+  caret alive for repeats. (#74)
+- Fixed long operations (Replace All, sort, grep, diff) not blocking editor
+  input: the busy overlay now counts as a modal, so typing or IME input can no
+  longer be spliced into a running operation and invalidate it. (#72)
+- Fixed the Enter that confirms a Japanese (IME) conversion also inserting a
+  stray newline in the WebKit / WKWebView build (Safari and the macOS app): that
+  post-composition Enter is now swallowed. (#71)
+- Fixed F3 / Shift+F3 resuming from a stale byte anchor after an edit shifted the
+  text, which could skip a match or land mid-character; search anchors are now
+  dropped on every edit so the next step re-anchors from the caret. (#74)
+- Fixed opening a file wiping the server-stored search history / session when the
+  initial UI-state load had failed: a partial write now re-reads the current
+  state first and skips the write rather than overwriting it with empties. (#73)
 
 Release artifacts are published from GitHub Actions and listed on the
 [releases page](https://github.com/hjosugi/ayame-editor/releases).
