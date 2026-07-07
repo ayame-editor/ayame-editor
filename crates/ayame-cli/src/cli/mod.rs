@@ -103,6 +103,9 @@ GROUP OPTIONS:
                        Write group rows to a TSV artifact instead of stdout
     --out-order <FILE> Write top row numbers as u64 LE (top)
 
+DISTINCT OPTIONS:
+    -p, --precision <N>   HyperLogLog precision (4..=18, default 14)
+
 CACHE OPTIONS:
     --max-size <SIZE>     cache gc target size (default 5GiB)
     --max-age-days <N>    cache gc age limit (default 30)

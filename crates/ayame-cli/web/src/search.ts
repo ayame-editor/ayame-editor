@@ -34,6 +34,7 @@ import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
 import { openPath } from "./workspace.js";
+import { isNativeApp, nativeOpenDialog } from "./app.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
 
@@ -713,7 +714,15 @@ export function renderDiffView(res) {
 
 export async function diffFile() {
   const base = state.stat?.path || "";
-  const path = await askPrompt(t("menu.diff"), t("dialog.diff.promptPath"), base);
+  // Desktop build: pick the comparison file with the OS dialog instead of
+  // hand-typing an absolute path (issue #79). Browser build keeps the prompt.
+  let path;
+  if (isNativeApp()) {
+    const picked = await nativeOpenDialog(pathDirName(base) || "");
+    path = picked[0] || "";
+  } else {
+    path = await askPrompt(t("menu.diff"), t("dialog.diff.promptPath"), base);
+  }
   if (path == null || path.trim() === "") return;
   showLoading(t("dialog.diff.computing"));
   try {
