@@ -108,10 +108,11 @@ impl MatchPlan {
                 finder: Box::new(memmem::Finder::new(&needle).into_owned()),
                 validate_legacy_boundary: is_legacy_multibyte(enc),
             })
-        } else if is_legacy_multibyte(enc) {
+        } else if is_legacy_multibyte(enc) || enc.is_wide() {
             // A byte regex assumes a UTF-8 haystack, so applying it to raw
-            // Shift_JIS / EUC-JP bytes silently misses Japanese text. Decode
-            // line-by-line and match against the decoded text instead.
+            // Shift_JIS / EUC-JP / UTF-16 bytes silently misses the text (a
+            // case-insensitive "abc" never matches the interleaved-NUL UTF-16
+            // bytes). Decode line-by-line and match against the decoded text.
             // (Patterns spanning a line boundary will not match on this path.)
             let pat = if regex {
                 query.to_string()
@@ -184,6 +185,9 @@ pub fn search(
             validate_legacy_boundary,
         } => {
             for pos in finder.find_iter(hay) {
+                if !utf16_hit_aligned(enc, start + pos) {
+                    continue;
+                }
                 if validate_legacy_boundary
                     && !is_legacy_char_boundary(enc, buf, index, start + pos)
                 {
@@ -326,6 +330,9 @@ pub fn find_prev(
                     if abs >= cursor {
                         continue;
                     }
+                    if !utf16_hit_aligned(enc, abs) {
+                        continue;
+                    }
                     if validate_legacy_boundary && !is_legacy_char_boundary(enc, buf, index, abs) {
                         continue;
                     }
@@ -432,6 +439,9 @@ pub(crate) fn line_has_match(
             validate_legacy_boundary,
         } => {
             for pos in finder.find_iter(raw) {
+                if !utf16_hit_aligned(enc, pos) {
+                    continue;
+                }
                 if *validate_legacy_boundary && !is_legacy_char_boundary_in_line(enc, raw, pos) {
                     continue;
                 }
@@ -499,6 +509,46 @@ fn is_whole_word_text(text: &str, start: usize, end: usize) -> bool {
 #[inline]
 pub(crate) fn is_legacy_multibyte(enc: Encoding) -> bool {
     matches!(enc, Encoding::ShiftJis | Encoding::EucJp)
+}
+
+/// True when a raw literal hit at absolute offset `abs` starts on a UTF-16
+/// code-unit boundary. UTF-16 content begins either at 0 or just after a 2-byte
+/// BOM, so every code unit lands on an even absolute offset; a `memmem` hit at
+/// an odd offset straddles two characters and must be rejected (issue #68).
+#[inline]
+fn utf16_hit_aligned(enc: Encoding, abs: usize) -> bool {
+    !enc.is_wide() || abs % 2 == 0
+}
+
+/// Byte offset and length inside a decoded line of the span starting at decoded
+/// char `char_start` and running `char_len` chars, for UTF-16. Each scalar is
+/// one or two 16-bit code units, i.e. 2 or 4 bytes (endianness does not change
+/// the byte count), so the raw span is the re-encoded UTF-16 length.
+fn utf16_char_span(text: &str, char_start: usize, char_len: usize) -> (usize, usize) {
+    let boff = text.chars().take(char_start).map(|c| c.len_utf16() * 2).sum();
+    let blen = text
+        .chars()
+        .skip(char_start)
+        .take(char_len)
+        .map(|c| c.len_utf16() * 2)
+        .sum();
+    (boff, blen)
+}
+
+/// Dispatch the decoded char -> raw byte span mapping by encoding family:
+/// UTF-16 re-encodes code units, legacy encodings walk lead/trail bytes.
+fn decoded_char_span(
+    enc: Encoding,
+    raw: &[u8],
+    text: &str,
+    char_start: usize,
+    char_len: usize,
+) -> (usize, usize) {
+    if enc.is_wide() {
+        utf16_char_span(text, char_start, char_len)
+    } else {
+        legacy_char_span(enc, raw, char_start, char_len)
+    }
 }
 
 /// Bytes consumed by the character starting at `raw[i]` under a legacy
@@ -643,7 +693,7 @@ fn scan_decoded_lines<F>(
                 }
                 let cs = text[..m.start()].chars().count();
                 let cl = text[m.start()..m.end()].chars().count();
-                let (boff, blen) = legacy_char_span(enc, raw, cs, cl);
+                let (boff, blen) = decoded_char_span(enc, raw, &text, cs, cl);
                 if blen == 0 {
                     continue;
                 }
@@ -687,7 +737,7 @@ fn find_prev_decoded_line(
                 }
                 let cs = text[..m.start()].chars().count();
                 let cl = text[m.start()..m.end()].chars().count();
-                let (boff, blen) = legacy_char_span(enc, raw, cs, cl);
+                let (boff, blen) = decoded_char_span(enc, raw, &text, cs, cl);
                 if blen == 0 {
                     continue;
                 }
@@ -1112,5 +1162,65 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(prev.line, 0);
+    }
+
+    fn utf16le(s: &str) -> Vec<u8> {
+        s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn utf16_literal_search_rejects_misaligned_hits() {
+        // Issue #68: searching "A" ([41,00] LE) in "䅂　" (U+4142 U+3000 =
+        // bytes 42 41 00 30) used to report a false hit at odd offset 1.
+        let buf = utf16le("\u{4142}\u{3000}\n");
+        let idx = LineIndex::build_utf16_le(&buf, 0, 16);
+        let len = buf.len() as u64;
+        let opts = SearchOptions {
+            query: "A".into(),
+            max_hits: 100,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::Utf16Le, &opts).unwrap();
+        assert_eq!(res.hits.len(), 0, "misaligned UTF-16 hit must be rejected");
+
+        // A genuinely code-unit-aligned "A" is still found.
+        let buf2 = utf16le("A\u{3000}\n");
+        let idx2 = LineIndex::build_utf16_le(&buf2, 0, 16);
+        let res2 = search(&buf2, 0, buf2.len() as u64, &idx2, Encoding::Utf16Le, &opts).unwrap();
+        assert_eq!(res2.hits.len(), 1);
+        assert_eq!((res2.hits[0].line, res2.hits[0].column), (0, 0));
+    }
+
+    #[test]
+    fn utf16_case_insensitive_and_regex_match_via_decode() {
+        // Issue #68: a byte regex over interleaved-NUL UTF-16 bytes matched
+        // nothing; CI/regex now decode each line first.
+        let buf = utf16le("abc\nX12Y\n");
+        let idx = LineIndex::build_utf16_le(&buf, 0, 16);
+        let len = buf.len() as u64;
+
+        let ci = SearchOptions {
+            query: "ABC".into(),
+            case_sensitive: false,
+            max_hits: 100,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::Utf16Le, &ci).unwrap();
+        assert_eq!(res.hits.len(), 1);
+        let h = res.hits[0];
+        assert_eq!((h.line, h.column, h.byte, h.byte_len), (0, 0, 0, 6));
+
+        let rx = SearchOptions {
+            query: r"\d+".into(),
+            regex: true,
+            max_hits: 100,
+            ..Default::default()
+        };
+        let res = search(&buf, 0, len, &idx, Encoding::Utf16Le, &rx).unwrap();
+        assert_eq!(res.hits.len(), 1);
+        let h = res.hits[0];
+        // Line 1 "X12Y": "12" starts at char 1 -> byte 2 within the line,
+        // spans 2 chars -> 4 bytes.
+        assert_eq!((h.line, h.column, h.byte_len), (1, 1, 4));
     }
 }

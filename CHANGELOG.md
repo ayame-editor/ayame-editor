@@ -81,6 +81,15 @@ All notable changes to Ayame Editor are tracked here.
 - Fixed uploaded / sort-result scratch tabs being written into the restorable
   session and failing to reopen, by using the authoritative scratch-path
   detection. (#75)
+- Fixed search on UTF-16 files: literal matches at misaligned (odd) byte offsets
+  are rejected, and case-insensitive / regex queries decode each line first
+  instead of scanning interleaved-NUL bytes and matching nothing. (#68)
+- Fixed Backspace / Delete doing nothing on a zero-width rectangular (column)
+  selection; they now delete one character per covered line and keep the column
+  caret alive for repeats. (#74)
+- Fixed long operations (Replace All, sort, grep, diff) not blocking editor
+  input: the busy overlay now counts as a modal, so typing or IME input can no
+  longer be spliced into a running operation and invalidate it. (#72)
 
 Release artifacts are published from GitHub Actions and listed on the
 [releases page](https://github.com/hjosugi/ayame-editor/releases).
