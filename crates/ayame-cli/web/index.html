@@ -340,10 +340,18 @@
           <label class="set-row">
             <span class="set-label" data-i18n="settings.background">背景</span>
             <select id="set-bg">
-              <option value="watercolor" data-i18n="settings.bgWatercolor">水彩</option>
-              <option value="solid" data-i18n="settings.bgSolid">単色（全単色配慮）</option>
+              <option value="watercolor" data-i18n="settings.bgDefault">デフォルト</option>
+              <option value="solid" data-i18n="settings.bgSolid">単色</option>
+              <option value="image" data-i18n="settings.bgImage">カスタム画像</option>
             </select>
           </label>
+          <!-- Visible only in カスタム画像 mode: re-pick the wallpaper file. -->
+          <div class="set-row hidden" id="set-bg-image-row">
+            <span class="set-label" aria-hidden="true"></span>
+            <button type="button" id="set-bg-image-pick" class="cmd" data-i18n="settings.bgImagePick">画像を選択…</button>
+            <span id="set-bg-image-name"></span>
+            <input id="set-bg-image-file" type="file" accept="image/*" hidden />
+          </div>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.language">言語</span>
             <!-- Options are built by populateLanguageSelect() from the locales
