@@ -86,11 +86,28 @@ export function loadRecentFilesShared() {
   return sharedUiState?.recent_files || localList(RECENT_KEY, RECENT_MAX);
 }
 
+// The base object a partial UI-state write merges into. When boot hydration
+// failed `sharedUiState` is null; spreading null yields `{}`, which would send
+// empty search_history + session and wipe the server's stored copy (issue #73).
+// Re-read the current state first; if that also fails, return null so the caller
+// skips the server write and keeps only the local fallback.
+async function currentUiStateBase(): Promise<UiState | null> {
+  if (sharedUiState) return sharedUiState;
+  try {
+    sharedUiState = normalizeUiState(await api<UiState>("/api/ui_state"));
+    return sharedUiState;
+  } catch {
+    return null;
+  }
+}
+
 export function saveRecentFilesShared(list) {
   const recent = cleanList(list, RECENT_MAX);
   saveLocalList(RECENT_KEY, recent, RECENT_MAX);
-  const next = normalizeUiState({ ...sharedUiState, recent_files: recent });
-  void saveSharedUiState(next);
+  void currentUiStateBase().then((base) => {
+    if (!base) return; // can't read current state — don't clobber the server
+    void saveSharedUiState(normalizeUiState({ ...base, recent_files: recent }));
+  });
 }
 
 export function loadSearchHistoryShared() {
@@ -100,8 +117,10 @@ export function loadSearchHistoryShared() {
 export function saveSearchHistoryShared(list) {
   const history = cleanList(list, 50);
   saveLocalList(SEARCH_HISTORY_KEY, history, 50);
-  const next = normalizeUiState({ ...sharedUiState, search_history: history });
-  void saveSharedUiState(next);
+  void currentUiStateBase().then((base) => {
+    if (!base) return; // can't read current state — don't clobber the server
+    void saveSharedUiState(normalizeUiState({ ...base, search_history: history }));
+  });
 }
 
 export async function restoreSessionSnapshot(): Promise<{ open: boolean; [key: string]: unknown }> {
