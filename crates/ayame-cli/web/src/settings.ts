@@ -23,6 +23,7 @@ import {
   showKeymap,
   updateKeyHints,
 } from "./menus.js";
+import { askConfirm } from "./dialogs.js";
 import { settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { onDocumentOpened } from "./workspace.js";
@@ -34,6 +35,8 @@ export function loadSettings() {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
     merged.sidebarSide = merged.sidebarSide === "right" ? "right" : "left";
+    // image mode without a stored image (cleared / failed persist) → theme default
+    if (merged.bgMode === "image" && !merged.bgImage) merged.bgMode = "watercolor";
     merged.language = normalizeLanguage(merged.language);
     merged.keymap = sanitizeKeymap(merged.keymap);
     return merged;
@@ -45,8 +48,9 @@ export function loadSettings() {
 export function saveSettings(s) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    return true;
   } catch {
-    // ignore private-mode quota errors
+    return false; // private-mode / quota errors (e.g. a large bgImage)
   }
 }
 
@@ -291,6 +295,10 @@ export function applySettings(s) {
   if (s.bgMode === "solid") {
     const flat = getComputedStyle(root).getPropertyValue("--bg").trim() || "#FBF8F1";
     root.style.setProperty("--desk", flat);
+  } else if (s.bgMode === "image" && s.bgImage) {
+    // Custom wallpaper: cover the desk; the theme paper shows through any
+    // transparency and while the data: URL decodes.
+    root.style.setProperty("--desk", `url("${s.bgImage}") center / cover no-repeat, var(--bg)`);
   }
   if (typeof s.illus === "number") root.style.setProperty("--illus", String(s.illus));
   // ---- font / size ----
@@ -546,7 +554,52 @@ export function initSettings() {
     $("set-illus").value = String(pct);
     $("set-illus-val").textContent = pct + "%";
   });
-  $("set-bg").addEventListener("change", () => updateSetting("bgMode", $("set-bg").value));
+  // ---- background: デフォルト / 単色 / カスタム画像 ----
+  // The wallpaper persists as a data: URL inside settings; cap the source file
+  // so the JSON stays within typical localStorage quotas (~5MB).
+  const MAX_BG_IMAGE_BYTES = 4 * 1024 * 1024;
+  const syncBgImageRow = () => {
+    $("set-bg-image-row").classList.toggle("hidden", state.settings.bgMode !== "image");
+    $("set-bg-image-name").textContent = state.settings.bgImageName || "";
+  };
+  syncBgImageRow();
+  $("set-bg").addEventListener("change", () => {
+    const mode = $("set-bg").value;
+    if (mode === "image" && !state.settings.bgImage) {
+      // Nothing stored yet: ask for a file first; the mode flips once it loads
+      // (and stays put if the picker is cancelled).
+      $("set-bg").value = state.settings.bgMode || "watercolor";
+      $("set-bg-image-file").click();
+      return;
+    }
+    updateSetting("bgMode", mode);
+    syncBgImageRow();
+  });
+  $("set-bg-image-pick").addEventListener("click", () => $("set-bg-image-file").click());
+  $("set-bg-image-file").addEventListener("change", () => {
+    const file = $("set-bg-image-file").files?.[0];
+    $("set-bg-image-file").value = ""; // so re-picking the same file fires again
+    if (!file) return;
+    if (file.size > MAX_BG_IMAGE_BYTES) {
+      flashCount(t("settings.bgImageTooLarge"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.settings = {
+        ...state.settings,
+        bgMode: "image",
+        bgImage: String(reader.result),
+        bgImageName: file.name,
+      };
+      if (!saveSettings(state.settings)) flashCount(t("settings.bgImagePersistError"));
+      applySettings(state.settings);
+      $("set-bg").value = "image";
+      syncBgImageRow();
+    };
+    reader.onerror = () => flashCount(t("settings.bgImageError"));
+    reader.readAsDataURL(file);
+  });
   $("set-language").addEventListener("change", () =>
     updateSetting("language", $("set-language").value),
   );
@@ -605,7 +658,11 @@ export function initSettings() {
   $("keymap-open").addEventListener("click", showKeymap);
   $("keymap-close").addEventListener("click", hideKeymap);
   $("keymap-done").addEventListener("click", hideKeymap);
-  $("keymap-reset").addEventListener("click", resetKeymap);
+  $("keymap-reset").addEventListener("click", async () => {
+    if (await askConfirm(t("keymap.reset"), t("keymap.resetConfirm"), { danger: true })) {
+      resetKeymap();
+    }
+  });
   $("keymap-json-edit").addEventListener("click", openKeymapJsonDoc);
   $("keymap-modal").addEventListener("click", (e) => {
     if (e.target === $("keymap-modal")) hideKeymap();

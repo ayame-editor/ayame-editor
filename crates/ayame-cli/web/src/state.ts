@@ -44,7 +44,9 @@ export const DEFAULT_SETTINGS = {
   syntaxHighlight: true,
   zenkakuUnderline: false,
   wordWrap: false,
-  bgMode: "watercolor",
+  bgMode: "watercolor", // "watercolor" (theme default) | "solid" | "image"
+  bgImage: null, // data: URL of the custom wallpaper when bgMode === "image"
+  bgImageName: "", // its original file name, shown in the settings dialog
   illus: null,
   language: "auto",
   keymap: {},

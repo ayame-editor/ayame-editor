@@ -1499,7 +1499,10 @@ html.saving .caret.extra { visibility: hidden; }
   padding: 10px 0;
   font-size: 13px;
 }
-.set-label { flex: 0 0 92px; color: var(--fg-dim); }
+/* Sized so the longest label never wraps — ja 行番号をカンマ区切りで表示,
+   en "Show Whitespace and Line Endings" (the en column must be wider). */
+.set-label { flex: 0 0 var(--set-label-w, 184px); color: var(--fg-dim); white-space: nowrap; }
+:root:lang(en) { --set-label-w: 244px; }
 .set-row select {
   flex: 1;
   height: 30px;
@@ -1532,6 +1535,15 @@ html.saving .caret.extra { visibility: hidden; }
 .set-row.set-hint-row { padding-top: 0; margin-top: -8px; }
 .set-row.set-hint-row .set-hint { font-size: 11px; color: var(--fg-faint); }
 .set-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+#set-bg-image-row.hidden { display: none; }
+#set-bg-image-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
 .set-val { flex: 0 0 40px; text-align: right; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
 .seg-control {
   display: inline-flex;
@@ -2090,6 +2102,18 @@ button { border-radius: var(--radius); }
 }
 
 @media (max-width: 520px) {
+  /* Phone widths can't fit the fixed no-wrap label column next to a usable
+     control: stack the label above its control instead. */
+  .set-row {
+    flex-wrap: wrap;
+  }
+  .set-label {
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+  .set-label:empty {
+    display: none;
+  }
   button.cmd {
     min-width: 34px;
   }
