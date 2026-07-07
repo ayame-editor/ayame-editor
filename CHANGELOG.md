@@ -99,6 +99,13 @@ All notable changes to Ayame Editor are tracked here.
 - Fixed opening a file wiping the server-stored search history / session when the
   initial UI-state load had failed: a partial write now re-reads the current
   state first and skips the write rather than overwriting it with empties. (#73)
+- Fixed find / search / two-file diff on a buffer with unsaved edits re-running
+  encoding auto-detection instead of honoring an encoding the user had chosen
+  with "reopen with encoding", so Japanese queries could stop matching after an
+  edit; the dirty snapshot now opens under the live document's encoding. (#75)
+- Fixed tail-follow (`tail -f`) re-scanning the whole file and writing a fresh
+  index-cache blob on every poll of a growing file, leaving an unbounded trail of
+  dead cache blobs on disk; growth is now followed without the index cache. (#76)
 
 Release artifacts are published from GitHub Actions and listed on the
 [releases page](https://github.com/hjosugi/ayame-editor/releases).

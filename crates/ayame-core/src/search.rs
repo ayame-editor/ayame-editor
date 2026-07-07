@@ -525,7 +525,11 @@ fn utf16_hit_aligned(enc: Encoding, abs: usize) -> bool {
 /// one or two 16-bit code units, i.e. 2 or 4 bytes (endianness does not change
 /// the byte count), so the raw span is the re-encoded UTF-16 length.
 fn utf16_char_span(text: &str, char_start: usize, char_len: usize) -> (usize, usize) {
-    let boff = text.chars().take(char_start).map(|c| c.len_utf16() * 2).sum();
+    let boff = text
+        .chars()
+        .take(char_start)
+        .map(|c| c.len_utf16() * 2)
+        .sum();
     let blen = text
         .chars()
         .skip(char_start)
