@@ -9,6 +9,7 @@ use super::args::{first_opt, has_flag, open_doc};
 use super::common::{maybe_crash, rename_or_copy, temp_sibling_with_label};
 use super::fields::{field_spec, parse_budget, parse_key};
 use super::formatting::{commas, human_bytes};
+use super::progress::ProgressReporter;
 
 pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
     maybe_crash();
@@ -25,7 +26,7 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
             "--out",
             "--spill-dir",
         ],
-        &["--numeric", "-n", "--reverse", "-r", "--csv"],
+        &["--numeric", "-n", "--reverse", "-r", "--csv", "--progress"],
     )?;
     let key_column = parse_key(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
@@ -44,7 +45,11 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
         budget_bytes,
         spill_dir: spill_dir.clone(),
     };
-    let res = ayame_core::ops::sort(&doc, &sopts)?;
+    let progress = ProgressReporter::new("sort", &flags);
+    let res = ayame_core::ops::sort_with_progress(&doc, &sopts, |done, total| {
+        progress.report(done, total);
+    })?;
+    progress.finish();
     eprintln!(
         "sorted {} lines via {} run(s), {} spilled to disk",
         commas(res.line_count),

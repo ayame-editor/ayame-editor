@@ -520,6 +520,15 @@ export async function sortSave() {
         ],
       },
       {
+        id: "dest",
+        type: "select",
+        label: t("dialog.sort.dest"),
+        options: [
+          ["new", t("dialog.sort.destNew")],
+          ["in_place", t("dialog.sort.destInPlace")],
+        ],
+      },
+      {
         id: "_hint",
         type: "hint",
         label: t("dialog.sort.hint"),
@@ -534,21 +543,42 @@ export async function sortSave() {
     flashCount(t("dialog.sort.keyInvalid"), "error");
     return;
   }
+  // In-place sort atomically overwrites the file and drops undo history, so
+  // confirm it like every other destructive action (issue #77). "new file" is
+  // non-destructive and needs no confirmation.
+  const inPlace = f.dest === "in_place";
+  if (inPlace) {
+    const ok = await askConfirm(
+      t("dialog.sort.confirmTitle"),
+      t("dialog.sort.confirmMessage", { path: displayPath(state.stat?.path || "") }),
+      { okLabel: t("dialog.sort.confirmOk"), danger: true },
+    );
+    if (!ok) return;
+  }
   showLoading(t("dialog.sort.running"));
   try {
-    await apiPost<unknown, SortSaveRequest>("/api/sort/save", {
+    const res = await apiPost<{ path: string }, SortSaveRequest>("/api/sort/save", {
       path: null,
-      in_place: true,
+      in_place: inPlace,
       key,
       numeric: !!f.numeric,
       reverse: f.order === "desc",
       delim: key != null && f.delim ? f.delim : null,
     });
-    state.sel = null;
-    state.extraCursors = [];
-    setCaret(0, 0);
-    await reloadActiveDocument({ bumpGeneration: false, keepCaret: false, refreshTabList: false });
-    flashCount(t("dialog.sort.done"));
+    if (inPlace) {
+      state.sel = null;
+      state.extraCursors = [];
+      setCaret(0, 0);
+      await reloadActiveDocument({
+        bumpGeneration: false,
+        keepCaret: false,
+        refreshTabList: false,
+      });
+      flashCount(t("dialog.sort.done"));
+    } else {
+      await openPath(res.path);
+      flashCount(t("dialog.sort.newDone", { path: displayPath(res.path) }));
+    }
   } catch (e) {
     flashCount(t("dialog.sort.error"), "error");
     showMessage(t("dialog.sort.error"), serverMessage(e.message));

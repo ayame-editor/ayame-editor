@@ -735,6 +735,18 @@ export async function selectTab(id) {
   }
 }
 
+// Switch to the tab `delta` positions away from the active one, wrapping around
+// the ends (issue #79). Ctrl+PageDown/PageUp bind here; the mouse is no longer
+// the only way to change tabs.
+export function selectRelativeTab(delta) {
+  const tabs = state.tabs || [];
+  if (tabs.length < 2) return;
+  const active = tabs.findIndex((t) => t.active);
+  const from = active < 0 ? 0 : active;
+  const next = tabs[(from + delta + tabs.length) % tabs.length];
+  if (next && !next.active) selectTab(next.id);
+}
+
 export async function closeTab(id) {
   await settleEditQueue();
   // A save in flight is a hard barrier for BOTH branches: closing the tab

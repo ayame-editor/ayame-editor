@@ -62,6 +62,27 @@ pub struct SortResult {
 /// fan-in heap, writing the sorted line numbers. Peak memory is
 /// `O(budget + fan-in)`, not `O(number_of_runs)`.
 pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
+    sort_inner::<fn(u64, u64)>(doc, opts, None)
+}
+
+/// Sort with a coarse line-progress callback. The callback receives
+/// `(processed_lines, total_lines)` after each scan batch.
+pub fn sort_with_progress(
+    doc: &Document,
+    opts: &SortOptions,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<SortResult> {
+    sort_inner(doc, opts, Some(&mut progress))
+}
+
+fn sort_inner<F>(
+    doc: &Document,
+    opts: &SortOptions,
+    mut progress: Option<&mut F>,
+) -> Result<SortResult>
+where
+    F: FnMut(u64, u64),
+{
     let spill_dir = unique_spill_dir(&opts.spill_dir)?;
     let run_name = spill_dir
         .file_name()
@@ -80,6 +101,7 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
     const BATCH: u64 = 8192;
     let mut start = 0u64;
     let mut scratch = Vec::new();
+    report_progress(&mut progress, 0, total);
     while start < total {
         let batch = doc.raw_line_ranges(start, BATCH);
         if batch.is_empty() {
@@ -103,6 +125,7 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
             }
         }
         start += advanced;
+        report_progress(&mut progress, start, total);
     }
     if !buffer.is_empty() {
         spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
@@ -125,6 +148,15 @@ pub fn sort(doc: &Document, opts: &SortOptions) -> Result<SortResult> {
         runs: runs.len(),
         spill_bytes,
     })
+}
+
+fn report_progress<F>(progress: &mut Option<&mut F>, done: u64, total: u64)
+where
+    F: FnMut(u64, u64),
+{
+    if let Some(cb) = progress.as_deref_mut() {
+        cb(done.min(total), total);
+    }
 }
 
 /// Read a sorted ordering file as a stream of `u64` line numbers.

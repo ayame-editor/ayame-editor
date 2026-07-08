@@ -67,6 +67,9 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   // Alt+W is the whole-word search toggle (see `searchWord`); keep it off the
   // tab-close default so the find-bar shortcut is reachable (issue #70).
   ["closeTab", "tab.close", "Ctrl+W"],
+  // Ctrl+Tab is unreliable across WebViews, so page-based defaults (issue #79).
+  ["nextTab", "keymap.nextTab", "Ctrl+PageDown"],
+  ["prevTab", "keymap.prevTab", "Ctrl+PageUp"],
   ["commandPalette", "menu.commandPalette", "Ctrl+Shift+P"],
   ["toggleSidebar", "keymap.toggleSidebar", "Ctrl+B"],
   ["find", "menu.find", "Ctrl+F"],
