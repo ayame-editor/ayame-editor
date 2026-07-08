@@ -1190,6 +1190,34 @@ fn register_operation(
     Ok(Some(op))
 }
 
+/// Drops an operation out of the global map when the worker call returns, so
+/// finished ops don't accumulate for the life of the `serve` process — every
+/// operation carries a fresh random id, so without this the map would grow
+/// unbounded across a long session. A status poll that arrives after removal
+/// just 404s, which the client's best-effort poller ignores.
+struct OperationGuard(String);
+
+impl Drop for OperationGuard {
+    fn drop(&mut self) {
+        if let Some(map) = ARTIFACT_OPS.get() {
+            map.lock().unwrap().remove(&self.0);
+        }
+    }
+}
+
+/// Register `op_id` (if any) and return the tracking handle plus a guard that
+/// evicts it from the map when dropped. Callers bind the guard for the whole
+/// worker call: `let (op, _guard) = tracked_operation(...)?;`.
+fn tracked_operation(
+    op_id: Option<&str>,
+    kind: &str,
+    total_lines: u64,
+) -> Result<(Option<Arc<ArtifactOperation>>, Option<OperationGuard>), ApiError> {
+    let op = register_operation(op_id, kind, total_lines)?;
+    let guard = op.as_ref().map(|o| OperationGuard(o.id.clone()));
+    Ok((op, guard))
+}
+
 fn lookup_operation(id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
     operations()
         .lock()
@@ -1240,7 +1268,7 @@ async fn run_artifact_worker(
     lines: u64,
     op_id: Option<&str>,
 ) -> Result<ArtifactResponse, ApiError> {
-    let op = register_operation(op_id, kind, lines)?;
+    let (op, _op_guard) = tracked_operation(op_id, kind, lines)?;
     if op.is_some() {
         cmd.arg("--progress");
     }
@@ -1352,7 +1380,7 @@ async fn wait_worker_output_tracked(
     op_id: Option<&str>,
     total_lines: u64,
 ) -> Result<std::process::Output, ApiError> {
-    let op = register_operation(op_id, kind, total_lines)?;
+    let (op, _op_guard) = tracked_operation(op_id, kind, total_lines)?;
     if op.is_some() {
         cmd.arg("--progress");
     }
@@ -1647,6 +1675,24 @@ mod tests {
         );
         assert_eq!(parse_progress_line("sorted 42 lines"), None);
         assert_eq!(parse_progress_line("ayame-progress\tbad\t100"), None);
+    }
+
+    #[test]
+    fn tracked_operation_is_evicted_when_its_guard_drops() {
+        let id = format!("op-evict-test-{}", std::process::id());
+        {
+            let (op, _guard) = tracked_operation(Some(&id), "sort", 100).unwrap();
+            assert!(op.is_some(), "an op id must register a handle");
+            assert!(
+                operations().lock().unwrap().contains_key(&id),
+                "the op is tracked while the guard lives"
+            );
+        }
+        // Guard dropped at end of scope: the op must no longer leak in the map.
+        assert!(
+            !operations().lock().unwrap().contains_key(&id),
+            "the op must be evicted once the worker call returns"
+        );
     }
 
     #[test]

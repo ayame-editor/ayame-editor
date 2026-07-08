@@ -840,8 +840,13 @@ export function serverMessage(text) {
 // layer. Accepts either the thrown Error (with `.code`/`.message`) or a raw
 // string. Kept here so UI modules never embed the raw server string themselves.
 export function isExistsError(e) {
+  // `code === "exists"` is a positive signal, but NOT every existing-target
+  // conflict carries it: the main save endpoint surfaces core's "already
+  // exists" Conflict through the generic error path (code "bad_request"), so we
+  // must still fall back to the message text rather than short-circuit to false
+  // on any other code.
   const code = e && typeof e === "object" ? e.code : undefined;
-  if (code) return code === "exists";
+  if (code === "exists") return true;
   const msg = e && typeof e === "object" ? e.message : e;
   return /already exists|既に存在/i.test(String(msg ?? ""));
 }

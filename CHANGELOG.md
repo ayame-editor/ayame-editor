@@ -4,6 +4,15 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Fixed the "名前を付けて保存" overwrite confirmation not appearing when saving
+  onto an existing file by a typed path (browser build): structured API errors
+  (v0.5.15) attach a `code` to every response, and the exists-check was
+  short-circuiting on any code instead of falling back to the "already exists"
+  message — so the main save endpoint's conflict was misread as a hard error.
+- Fixed a slow memory leak in `ayame serve`: progress-tracked operations (sort,
+  split, grep-save, replace, case) registered a per-run entry that was never
+  removed, so a long session accumulated one handle per operation. Entries are
+  now evicted when the operation finishes.
 - Added a confirmation before in-place Sort and a non-destructive "sort into a
   new file" choice: the sort dialog now offers 新しいタブにソート結果を作成 /
   現在のファイルを上書き, and overwriting asks first because it reorders the file
