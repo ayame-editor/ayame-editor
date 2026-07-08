@@ -4,6 +4,30 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added a confirmation before in-place Sort and a non-destructive "sort into a
+  new file" choice: the sort dialog now offers 新しいタブにソート結果を作成 /
+  現在のファイルを上書き, and overwriting asks first because it reorders the file
+  on disk and clears undo history. (#77)
+- Added determinate progress and a Cancel button to long operations (sort,
+  split, grep-save): the busy overlay shows a progress bar fed by the worker's
+  line count via `/api/ops/status`, cancels the worker child through
+  `/api/ops/cancel`, and now blocks edits behind it — so a finished op can no
+  longer be thrown away by a racing edit (409). CLI workers gained a
+  `--progress` line-counter on stderr. (#78)
+- Added file/folder pickers for the two-file diff target and the folder-grep
+  root, replacing hand-typed absolute paths, and Ctrl+PageDown / Ctrl+PageUp
+  shortcuts (rebindable, in the command palette) to switch tabs. (#79)
+- CLI consistency pass: adopted grep-style exit codes (0 = match, 1 = `search`
+  found nothing, 2 = error), added `--json` to `group` / `top` / `distinct` /
+  `cache`, moved the `cache` info/gc/clear reports to stderr so stdout stays
+  pipeable, and regenerated the help text and `CLI_REFERENCE` to cover `case`'s
+  seven modes, `sort --reverse/--budget/--spill-dir`, and `split --json`. (#80)
+- Structured API errors: responses are now JSON `{code, message}` behind an
+  `ApiError` type that maps `ayame_core::Error::Conflict` to HTTP 409, so the
+  web client branches on a stable machine-readable code (e.g. `exists`) instead
+  of matching Japanese message text. Also deduped the two breadcrumb renderers
+  into `renderPathCrumbs` and added a round-trip test that pins the serve→worker
+  CLI argument contract. (#81)
 - Fixed Settings labels wrapping onto a second line in both Japanese and
   English: the label column is now sized per locale to its longest label and
   never wraps; on phone widths the label stacks above its control instead.

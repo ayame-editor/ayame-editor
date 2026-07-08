@@ -52,13 +52,17 @@ export type SelectionSaveRequest = { path: string, overwrite: boolean, rect: boo
 
 export type SelectionSaveResponse = { path: string, lines: bigint, bytes: bigint, };
 
+export type ArtifactOpStatus = { id: string, kind: string, processed_lines: bigint, total_lines: bigint, percent: number, done: boolean, canceled: boolean, message: string | null, };
+
+export type OperationCancelRequest = { id: string, };
+
 export type ArtifactResponse = {
 /**
  * UI-facing path (verbatim prefix stripped) — see [`workspace::display_path`].
  */
 path: string, bytes: bigint, lines: bigint, };
 
-export type SortSaveRequest = { path: string | null,
+export type SortSaveRequest = { op_id: string | null, path: string | null,
 /**
  * Sort the open file onto itself (the `path` field is ignored): the sort
  * output atomically replaces the file, the document reloads, and the
@@ -66,11 +70,11 @@ export type SortSaveRequest = { path: string | null,
  */
 in_place: boolean, key: number | null, numeric: boolean, reverse: boolean, delim: string | null, };
 
-export type ReplaceSaveRequest = { path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
+export type ReplaceSaveRequest = { op_id: string | null, path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
 
-export type CaseSaveRequest = { path: string | null, mode: string, jobs: number | null, chunk_lines: bigint | null, };
+export type CaseSaveRequest = { op_id: string | null, path: string | null, mode: string, jobs: number | null, chunk_lines: bigint | null, };
 
-export type SplitSaveRequest = {
+export type SplitSaveRequest = { op_id: string | null,
 /**
  * Lines per output part (must be >= 1).
  */
@@ -90,7 +94,7 @@ dir: string | null,
  */
 glob: string | null, regex: boolean, ci: boolean, word: boolean, max: number, };
 
-export type GrepSaveRequest = {
+export type GrepSaveRequest = { op_id: string | null,
 /**
  * Output file; null/absent = a `.grep` suffixed sibling default.
  */

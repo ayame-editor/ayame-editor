@@ -32,6 +32,7 @@ use crate::{first_opt, has_flag, open_opts, parse_checked};
 
 mod assets;
 mod edit;
+mod error;
 mod ops;
 mod security;
 mod state;
@@ -39,6 +40,7 @@ mod state;
 pub(crate) mod typegen;
 pub(crate) mod workspace;
 
+use error::ApiError;
 use security::NetPolicy;
 use state::{AppState, SharedState, TabsResponse, TailStatus, UiState};
 
@@ -175,6 +177,8 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/revert", post(edit::api_edit_revert))
         .route("/api/edit/recover", post(edit::api_edit_recover))
         .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
+        .route("/api/ops/status", get(ops::api_operation_status))
+        .route("/api/ops/cancel", post(ops::api_operation_cancel))
         .route("/api/sort/save", post(ops::api_sort_save))
         .route("/api/replace/save", post(ops::api_replace_save))
         .route("/api/case/save", post(ops::api_case_save))
@@ -408,12 +412,12 @@ async fn api_tail_poll(State(state): State<SharedState>) -> Json<TailStatus> {
     Json(status)
 }
 
-fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::BAD_REQUEST, e.to_string())
+fn bad_request(e: impl std::fmt::Display) -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, "bad_request", e.to_string())
 }
 
-fn internal(e: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+fn internal(e: impl std::fmt::Display) -> ApiError {
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
 }
 
 fn default_save_copy_path(path: &Path) -> PathBuf {
@@ -647,6 +651,51 @@ mod tests {
         assert!(body.contains("\"changed\":true"), "body: {body}");
 
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tail_poll_does_not_write_a_new_index_cache_per_append() {
+        fn idx_count(cache: &Path) -> usize {
+            std::fs::read_dir(cache.join("v1"))
+                .map(|it| {
+                    it.filter_map(Result::ok)
+                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "idx"))
+                        .count()
+                })
+                .unwrap_or(0)
+        }
+
+        let mut data = Vec::new();
+        while data.len() < 4 * 1024 * 1024 + 1024 {
+            data.extend_from_slice(b"line 0 payload payload payload payload\n");
+        }
+        let f = scratch_file("tail-cache.log", &data);
+        let cache = scratch_cache("tail-cache");
+        let addr = start_server_with_opts(
+            &f,
+            OpenOptions {
+                cache_dir: Some(cache.clone()),
+                ..OpenOptions::default()
+            },
+        )
+        .await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        assert_eq!(idx_count(&cache), 1);
+
+        {
+            let mut w = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+            w.write_all(b"line appended\n").unwrap();
+            w.flush().unwrap();
+        }
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"grew\":true"), "body: {body}");
+        assert_eq!(idx_count(&cache), 1);
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir_all(&cache);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1547,8 +1596,12 @@ mod tests {
         )
         .await;
         assert_eq!(status, 400, "body: {body}");
-        assert!(body.contains(r"C:\ayame-no-such-dir"), "body: {body}");
-        assert!(!body.contains(r"\\?\"), "body: {body}");
+        // The error body is JSON `{code, message}`, which escapes the path's
+        // backslashes — decode it before checking the displayed path.
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json error body");
+        let message = parsed["message"].as_str().unwrap_or(&body);
+        assert!(message.contains(r"C:\ayame-no-such-dir"), "body: {body}");
+        assert!(!message.contains(r"\\?\"), "body: {body}");
 
         let _ = std::fs::remove_file(&f);
     }

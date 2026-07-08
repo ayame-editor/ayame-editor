@@ -2039,6 +2039,9 @@ button { border-radius: var(--radius); }
 .form-row select:focus { border-color: var(--accent-bright); }
 .form-check { display: flex; align-items: center; gap: 8px; color: var(--fg); font-size: 13px; cursor: pointer; }
 .form-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+.form-path { display: flex; gap: 6px; align-items: center; }
+.form-path input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.form-path button { flex: 0 0 auto; white-space: nowrap; }
 .form-hint { color: var(--fg-faint); font-size: 11.5px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px 16px; }
 .form-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }

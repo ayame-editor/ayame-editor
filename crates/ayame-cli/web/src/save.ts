@@ -1,14 +1,27 @@
 // Ayame Editor — save module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath, isUntitled, joinPath, pathDirName, setModalOpen } from "./dom.js";
 import { DEFAULT_SETTINGS, state } from "./state.js";
-import { currentLocale, serverMessage, t, weekdayNames } from "./i18n.js";
+import {
+  currentLocale,
+  isExistsError as serverIsExistsError,
+  serverMessage,
+  t,
+  weekdayNames,
+} from "./i18n.js";
 import { api, apiPost } from "./api.js";
 import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
 import { reloadViewport, settleEditQueue } from "./edits.js";
 import { flashCount, lastGrep } from "./search.js";
-import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import {
+  askConfirm,
+  askForm,
+  hideLoading,
+  newOperationId,
+  showLoading,
+  showMessage,
+} from "./dialogs.js";
 import {
   onDocumentOpened,
   openPath,
@@ -236,8 +249,9 @@ export async function saveCopy() {
 }
 
 export function isExistsError(e) {
-  const msg = String(e?.message || e || "");
-  return /already exists|既に存在/.test(msg);
+  // Pass the whole error so the structured `code` is available (issue #81.2);
+  // serverIsExistsError falls back to the message text when there is no code.
+  return serverIsExistsError(e);
 }
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
@@ -520,12 +534,12 @@ export async function sortSave() {
         ],
       },
       {
-        id: "dest",
+        id: "mode",
         type: "select",
-        label: t("dialog.sort.dest"),
+        label: t("dialog.sort.destination"),
         options: [
-          ["new", t("dialog.sort.destNew")],
-          ["in_place", t("dialog.sort.destInPlace")],
+          ["new", t("dialog.sort.newFile")],
+          ["in_place", t("dialog.sort.currentFile")],
         ],
       },
       {
@@ -546,7 +560,7 @@ export async function sortSave() {
   // In-place sort atomically overwrites the file and drops undo history, so
   // confirm it like every other destructive action (issue #77). "new file" is
   // non-destructive and needs no confirmation.
-  const inPlace = f.dest === "in_place";
+  const inPlace = f.mode === "in_place";
   if (inPlace) {
     const ok = await askConfirm(
       t("dialog.sort.confirmTitle"),
@@ -555,9 +569,11 @@ export async function sortSave() {
     );
     if (!ok) return;
   }
-  showLoading(t("dialog.sort.running"));
+  const opId = newOperationId("sort");
+  showLoading(t("dialog.sort.running"), { opId, cancel: true });
   try {
-    const res = await apiPost<{ path: string }, SortSaveRequest>("/api/sort/save", {
+    const res = await apiPost<ArtifactResponse, SortSaveRequest>("/api/sort/save", {
+      op_id: opId,
       path: null,
       in_place: inPlace,
       key,
@@ -616,12 +632,13 @@ export async function splitFile() {
     flashCount(t("dialog.split.linesInvalid"), "error");
     return;
   }
-  showLoading(t("dialog.split.running"));
+  const opId = newOperationId("split");
+  showLoading(t("dialog.split.running"), { opId, cancel: true });
   try {
     const dir = String(f.dir || "").trim();
     const res = await apiPost<{ files: string[]; count: number }, SplitSaveRequest>(
       "/api/split/save",
-      { lines, dir: dir || null },
+      { op_id: opId, lines, dir: dir || null },
     );
     flashCount(t("dialog.split.done", { count: res.count, path: displayPath(res.files[0]) }));
   } catch (e) {
@@ -681,10 +698,12 @@ function suggestedGrepPath() {
 }
 
 async function runGrepSave(query, opts, target) {
-  showLoading(t("dialog.grepSave.running"));
+  const opId = newOperationId("grep");
+  showLoading(t("dialog.grepSave.running"), { opId, cancel: true });
   let res;
   try {
     res = await apiPost<ArtifactResponse, GrepSaveRequest>("/api/grep/save", {
+      op_id: opId,
       path: target.path,
       query,
       regex: opts.regex,
@@ -738,9 +757,15 @@ export function expectWalHandoff(path) {
 // Exception: a path registered via expectWalHandoff is an adopted tab whose
 // edits the user deliberately moved here — those replay without asking.
 export async function maybeOfferWalRecovery(stat) {
-  const n = stat?.recoverable;
-  if (!n || walPromptBusy) return;
+  if (walPromptBusy) return;
+  // Consume the one-shot handoff flag on this path's open, whether or not a
+  // log turned up: a handoff whose WAL vanished must not leave a stale flag
+  // that later silently skips a genuine crash-recovery prompt for the same
+  // path. In the real tear-out path the source fsyncs and detaches before the
+  // new window spawns, so `recoverable` is always present here.
   const handoff = walHandoffPaths.delete(displayPath(stat?.path || ""));
+  const n = stat?.recoverable;
+  if (!n) return;
   walPromptBusy = true;
   try {
     if (handoff) {

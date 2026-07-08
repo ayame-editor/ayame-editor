@@ -31,10 +31,14 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match cli::run(args) {
-        Ok(()) => ExitCode::SUCCESS,
+        // grep-style exit codes: `run` returns 0 on success and 1 when `search`
+        // ran cleanly but matched nothing. Any error (bad usage or a failure
+        // mid-run) exits 2, so a nonzero-but-not-1 code always means "something
+        // went wrong", never "no match".
+        Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("ayame: {e:#}");
-            ExitCode::FAILURE
+            ExitCode::from(2)
         }
     }
 }

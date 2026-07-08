@@ -459,7 +459,10 @@ fn smoke(bin: &Path) -> Result<()> {
         let f = dir.join("s.csv").display().to_string();
         run(&b, &["gen", &f, "--lines", "1000"])?;
         run(&b, &["stat", &f])?;
-        run(&b, &["search", &f, "row", "--max", "3"])?;
+        // `search` uses grep-style exit codes (issue #80): a no-match run exits
+        // 1, which `run` treats as failure. Search for a token `gen` always
+        // emits (the "warn" log level) so this exercises the found-match path.
+        run(&b, &["search", &f, "warn", "--max", "3"])?;
         let sorted = dir.join("sorted.csv");
         run(&b, &["sort", &f, "--out", &sorted.display().to_string()])?;
         if !sorted.exists() {

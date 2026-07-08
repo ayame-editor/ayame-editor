@@ -278,9 +278,9 @@ export async function saveSelectionToFile() {
     flashCount(t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }));
   } catch (e) {
     hideLoading();
-    // Server-boundary string match: the save endpoint reports an existing
-    // target as a Japanese message (no error codes yet).
-    if (isExistsError(e.message)) {
+    // Detect an existing-target conflict by its structured code (issue #81.2),
+    // falling back to the message text inside isExistsError.
+    if (isExistsError(e)) {
       const overwrite = await askConfirm(
         t("dialog.overwrite.title"),
         t("dialog.overwrite.ask", { name: displayPath(f.path.trim()) }),

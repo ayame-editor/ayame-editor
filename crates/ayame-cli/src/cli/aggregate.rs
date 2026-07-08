@@ -24,7 +24,7 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
             "--spill-dir",
             "--out-groups",
         ],
-        &["--csv"],
+        &["--csv", "--json"],
     )?;
     let key_column = parse_key(&opts)?;
     let value_column = match first_opt(&opts, &["--value"]) {
@@ -46,22 +46,40 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
     };
     let has_value = value_column.is_some();
 
+    let json = has_flag(&flags, &["--json"]);
     let out_groups = first_opt(&opts, &["--out-groups"]).map(PathBuf::from);
     let stats = if let Some(out_path) = out_groups.as_deref() {
         write_group_artifact(&doc, &gopts, has_value, out_path)?
+    } else if json {
+        // --json without an artifact still needs the run stats, but the group
+        // rows must not reach stdout — they would corrupt the JSON line — so
+        // drain them. Structured row data belongs in --out-groups.
+        ayame_core::ops::group(&doc, &gopts, |_row| {})?
     } else {
         let stdout = std::io::stdout();
         let mut w = BufWriter::new(stdout.lock());
         group_to_writer(&doc, &gopts, has_value, &mut w)?
     };
-    eprintln!(
-        "{} groups, {} run(s), {} spilled to disk",
-        commas(stats.groups),
-        commas(stats.runs as u64),
-        human_bytes(stats.spill_bytes),
-    );
-    if let Some(out_path) = out_groups {
-        eprintln!("groups -> {}", out_path.display());
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "groups": stats.groups,
+                "runs": stats.runs,
+                "spill_bytes": stats.spill_bytes,
+                "out_groups": out_groups.as_ref().map(|p| p.display().to_string()),
+            }))?
+        );
+    } else {
+        eprintln!(
+            "{} groups, {} run(s), {} spilled to disk",
+            commas(stats.groups),
+            commas(stats.runs as u64),
+            human_bytes(stats.spill_bytes),
+        );
+        if let Some(out_path) = out_groups.as_ref() {
+            eprintln!("groups -> {}", out_path.display());
+        }
     }
     if custom_spill.is_none() {
         let _ = std::fs::remove_dir_all(&spill_dir);
@@ -159,7 +177,14 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
             "--quote",
             "--out-order",
         ],
-        &["--numeric", "--min", "--smallest", "--asc", "--csv"],
+        &[
+            "--numeric",
+            "--min",
+            "--smallest",
+            "--asc",
+            "--csv",
+            "--json",
+        ],
     )?;
     let n: usize = first_opt(&opts, &["-n", "--top"])
         .unwrap_or("10")
@@ -181,6 +206,15 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
         }
         w.flush()?;
         eprintln!("top ordering -> {outp}");
+        return Ok(());
+    }
+    if has_flag(&flags, &["--json"]) {
+        // Top-N is bounded by `n`, so materializing the selected rows is cheap.
+        let rows: Vec<String> = lines.iter().filter_map(|&ln| doc.line(ln)).collect();
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({ "rows": rows }))?
+        );
         return Ok(());
     }
     let stdout = std::io::stdout();
@@ -206,7 +240,7 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
             "--precision",
             "-p",
         ],
-        &["--csv"],
+        &["--csv", "--json"],
     )?;
     let precision: u32 = first_opt(&opts, &["--precision", "-p"])
         .map(|s| s.parse::<u32>())
@@ -221,6 +255,18 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
             precision,
         },
     );
+    if has_flag(&flags, &["--json"]) {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "estimate": res.estimate,
+                "registers": res.registers,
+                "memory_bytes": res.memory_bytes,
+                "precision": precision,
+            }))?
+        );
+        return Ok(());
+    }
     println!("{}", res.estimate); // pipeable count on stdout
     let err_pct = 104.0 / (res.registers as f64).sqrt();
     eprintln!(

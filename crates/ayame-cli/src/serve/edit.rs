@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::temp_paths;
 
-use super::{bad_request, default_save_copy_path, internal, workspace, SharedState, MAX_VIEW};
+use super::{
+    bad_request, default_save_copy_path, internal, workspace, ApiError, SharedState, MAX_VIEW,
+};
 
 #[derive(Deserialize)]
 pub(super) struct LinesQuery {
@@ -82,7 +84,7 @@ pub(super) struct ReplaceRangeResponse {
 pub(super) async fn api_edit_replace_range(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceRangeRequest>,
-) -> Result<Json<ReplaceRangeResponse>, (StatusCode, String)> {
+) -> Result<Json<ReplaceRangeResponse>, ApiError> {
     state.write(|ws| {
         let (doc, edits) = ws.doc_and_edits_mut()?;
         let (caret_line, caret_col) = edits
@@ -121,7 +123,7 @@ pub(super) struct ReplaceBatchResponse {
 pub(super) async fn api_edit_replace_batch(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceBatchRequest>,
-) -> Result<Json<ReplaceBatchResponse>, (StatusCode, String)> {
+) -> Result<Json<ReplaceBatchResponse>, ApiError> {
     state.write(|ws| {
         let (doc, edits) = ws.doc_and_edits_mut()?;
         let carets = edits.replace_batch(doc, &req.edits).map_err(bad_request)?;
@@ -148,7 +150,7 @@ pub(super) struct ReplaceRectRequest {
 pub(super) async fn api_edit_replace_rect(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceRectRequest>,
-) -> Result<Json<ReplaceRangeResponse>, (StatusCode, String)> {
+) -> Result<Json<ReplaceRangeResponse>, ApiError> {
     state.write(|ws| {
         let (doc, edits) = ws.doc_and_edits_mut()?;
         let (caret_line, caret_col) = edits
@@ -214,7 +216,7 @@ impl EditSaveResponse {
 pub(super) async fn api_edit_save(
     State(state): State<SharedState>,
     Json(req): Json<EditSaveRequest>,
-) -> Result<Json<EditSaveResponse>, (StatusCode, String)> {
+) -> Result<Json<EditSaveResponse>, ApiError> {
     // Consistent snapshot (doc + edits + revision) under one lock acquisition.
     let mut snap = state.edit_snapshot()?;
     let active_path = snap.doc.path().to_path_buf();
@@ -491,7 +493,7 @@ pub(super) struct RecoverResponse {
 pub(super) async fn api_edit_recover(
     State(state): State<SharedState>,
     Json(req): Json<RecoverRequest>,
-) -> Result<Json<RecoverResponse>, (StatusCode, String)> {
+) -> Result<Json<RecoverResponse>, ApiError> {
     let (stats, replayed) = state.recover_wal(req.discard).await?;
     Ok(Json(RecoverResponse { stats, replayed }))
 }
@@ -514,7 +516,7 @@ async fn discard_wal_for(state: &SharedState, path: &Path) {
 /// empty overlay, empty history, clean saved marker.
 pub(super) async fn api_edit_revert(
     State(state): State<SharedState>,
-) -> Result<Json<EditStats>, (StatusCode, String)> {
+) -> Result<Json<EditStats>, ApiError> {
     let _transitions = state.lock_transitions().await;
     let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;
     state.reload_reverted(path).await?;
@@ -536,7 +538,7 @@ pub(super) struct ReopenRequest {
 pub(super) async fn api_reopen_encoding(
     State(state): State<SharedState>,
     Json(req): Json<ReopenRequest>,
-) -> Result<Json<EditStats>, (StatusCode, String)> {
+) -> Result<Json<EditStats>, ApiError> {
     let enc = Encoding::parse(&req.encoding)
         .map(|e| {
             if e == Encoding::Ascii {
@@ -557,7 +559,7 @@ pub(super) async fn api_reopen_encoding(
 
 pub(super) async fn api_edit_undo(
     State(state): State<SharedState>,
-) -> Result<Json<EditStats>, (StatusCode, String)> {
+) -> Result<Json<EditStats>, ApiError> {
     state.write(|ws| {
         let (doc, edits) = ws.doc_and_edits_mut()?;
         edits.undo();
@@ -567,7 +569,7 @@ pub(super) async fn api_edit_undo(
 
 pub(super) async fn api_edit_redo(
     State(state): State<SharedState>,
-) -> Result<Json<EditStats>, (StatusCode, String)> {
+) -> Result<Json<EditStats>, ApiError> {
     state.write(|ws| {
         let (doc, edits) = ws.doc_and_edits_mut()?;
         edits.redo();
@@ -608,7 +610,7 @@ const SELECTION_BATCH: u64 = 8192;
 pub(super) async fn api_selection_save(
     State(state): State<SharedState>,
     Json(req): Json<SelectionSaveRequest>,
-) -> Result<Json<SelectionSaveResponse>, (StatusCode, String)> {
+) -> Result<Json<SelectionSaveResponse>, ApiError> {
     if req.path.trim().is_empty() {
         return Err(bad_request("保存先パスが空です"));
     }
@@ -623,8 +625,9 @@ pub(super) async fn api_selection_save(
     }
     let target = PathBuf::from(req.path.trim());
     if target.exists() && !req.overwrite {
-        return Err((
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
+            "exists",
             format!("{} は既に存在します", workspace::display_path(&target)),
         ));
     }
@@ -676,7 +679,7 @@ fn write_selection_to_file(
     state: &SharedState,
     req: &SelectionSaveRequest,
     target: &Path,
-) -> Result<SelectionSaveResponse, (StatusCode, String)> {
+) -> Result<SelectionSaveResponse, ApiError> {
     use std::io::Write as _;
     // Pin the generation the selection coordinates refer to.
     let Some(pin) = state.read(pin_selection) else {
@@ -704,10 +707,11 @@ fn write_selection_to_file(
         let batch = state.read(|ws| pinned_selection_batch(ws, &pin, start, count));
         let Some(batch) = batch else {
             let _ = std::fs::remove_file(&stage);
-            return Err((
+            return Err(ApiError::new(
                 StatusCode::CONFLICT,
+                "conflict",
                 "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください"
-                    .into(),
+                    .to_string(),
             ));
         };
         for (i, line) in batch.iter().enumerate() {
@@ -832,7 +836,7 @@ mod tests {
             let _transitions = state.lock_transitions().await;
             let res = state.reload_reverted_if_unchanged(fb.clone(), &snap).await;
             assert_eq!(
-                res.err().map(|(code, _)| code),
+                res.err().map(|e| e.status()),
                 Some(StatusCode::CONFLICT),
                 "a racing edit must reject the clean-session reload with 409"
             );

@@ -93,7 +93,7 @@ pub(crate) fn cmd_lines(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
+pub(crate) fn cmd_search(args: &[String]) -> Result<u8> {
     maybe_crash();
     let (doc, pos, opts, flags) = open_doc(
         args,
@@ -131,12 +131,16 @@ pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
     })?;
     if has_flag(&flags, &["--json"]) {
         println!("{}", serde_json::to_string(&res)?);
-        return Ok(());
+        // `--json` callers (including the serve find worker, which treats any
+        // nonzero exit as a failure) read match status from the `hits` array —
+        // so the machine path always exits 0, never the grep no-match code.
+        return Ok(0);
     }
     for h in &res.hits {
         let text = doc.line(h.line).unwrap_or_default();
         println!("{}:{}: {}", h.line + 1, h.column + 1, text);
     }
+    let matched = !res.hits.is_empty();
     eprintln!(
         "{} match(es){}",
         commas(res.hits.len() as u64),
@@ -146,5 +150,6 @@ pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
             ""
         }
     );
-    Ok(())
+    // grep convention: a clean run that matched nothing exits 1.
+    Ok(if matched { 0 } else { 1 })
 }

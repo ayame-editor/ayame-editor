@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+use std::future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Context;
 use axum::extract::{Query, State};
@@ -9,18 +11,94 @@ use axum::http::StatusCode;
 use axum::Json;
 use ayame_core::{Document, EditSession, Line, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::sync::Notify;
+use tokio::time::Duration;
 
 use crate::diff::{diff_documents, DiffKind, DiffResult};
 use crate::temp_paths;
 
 use super::state::DirtySnapshotCache;
-use super::{bad_request, default_suffix_path, edit, internal, workspace, SharedState};
+use super::{bad_request, default_suffix_path, edit, internal, workspace, ApiError, SharedState};
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 const ARTIFACT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 static REQ_SEQ: AtomicU64 = AtomicU64::new(0);
+static ARTIFACT_OPS: OnceLock<Mutex<HashMap<String, Arc<ArtifactOperation>>>> = OnceLock::new();
+
+struct ArtifactOperation {
+    id: String,
+    kind: String,
+    processed_lines: AtomicU64,
+    total_lines: AtomicU64,
+    done: AtomicBool,
+    canceled: AtomicBool,
+    message: Mutex<Option<String>>,
+    notify_cancel: Notify,
+}
+
+impl ArtifactOperation {
+    fn new(id: String, kind: &str, total_lines: u64) -> ArtifactOperation {
+        ArtifactOperation {
+            id,
+            kind: kind.to_string(),
+            processed_lines: AtomicU64::new(0),
+            total_lines: AtomicU64::new(total_lines),
+            done: AtomicBool::new(false),
+            canceled: AtomicBool::new(false),
+            message: Mutex::new(None),
+            notify_cancel: Notify::new(),
+        }
+    }
+
+    fn status(&self) -> ArtifactOpStatus {
+        let processed = self.processed_lines.load(AtomicOrdering::Relaxed);
+        let total = self.total_lines.load(AtomicOrdering::Relaxed);
+        ArtifactOpStatus {
+            id: self.id.clone(),
+            kind: self.kind.clone(),
+            processed_lines: processed.min(total),
+            total_lines: total,
+            percent: if total == 0 {
+                100.0
+            } else {
+                (processed.min(total) as f64 / total as f64) * 100.0
+            },
+            done: self.done.load(AtomicOrdering::Relaxed),
+            canceled: self.canceled.load(AtomicOrdering::Relaxed),
+            message: self.message.lock().unwrap().clone(),
+        }
+    }
+
+    fn set_message(&self, message: impl Into<String>) {
+        *self.message.lock().unwrap() = Some(message.into());
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct ArtifactOpStatus {
+    id: String,
+    kind: String,
+    processed_lines: u64,
+    total_lines: u64,
+    percent: f64,
+    done: bool,
+    canceled: bool,
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct OperationQuery {
+    id: String,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct OperationCancelRequest {
+    id: String,
+}
 
 // ---- dirty-buffer materialization --------------------------------------------
 
@@ -84,10 +162,7 @@ struct WorkerDoc {
     total_lines: u64,
 }
 
-async fn dirty_aware_input(
-    state: &SharedState,
-    kind: &'static str,
-) -> Result<WorkerDoc, (StatusCode, String)> {
+async fn dirty_aware_input(state: &SharedState, kind: &'static str) -> Result<WorkerDoc, ApiError> {
     let (doc, dirty) = state.doc_and_dirty_edits()?;
     let total_lines = match &dirty {
         Some(edits) => edits.total_lines(&doc),
@@ -143,7 +218,7 @@ impl DirtyView {
 /// the old snapshot. Two racing builders at the same revision produce
 /// equivalent snapshots; the last store wins and the loser's temp is cleaned
 /// up when its guard drops.
-async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, String)> {
+async fn dirty_view(state: &SharedState) -> Result<DirtyView, ApiError> {
     let (doc, dirty) = state.doc_and_dirty_edits()?;
     let Some(edits) = dirty else {
         // Clean session: any cached snapshot is stale by definition (its
@@ -204,9 +279,28 @@ pub(super) struct ArtifactResponse {
     lines: u64,
 }
 
+pub(super) async fn api_operation_status(
+    Query(q): Query<OperationQuery>,
+) -> Result<Json<ArtifactOpStatus>, ApiError> {
+    let op = lookup_operation(&q.id)?;
+    Ok(Json(op.status()))
+}
+
+pub(super) async fn api_operation_cancel(
+    Json(req): Json<OperationCancelRequest>,
+) -> Result<Json<ArtifactOpStatus>, ApiError> {
+    let op = lookup_operation(&req.id)?;
+    op.canceled.store(true, AtomicOrdering::Relaxed);
+    op.set_message("canceled");
+    op.notify_cancel.notify_waiters();
+    Ok(Json(op.status()))
+}
+
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SortSaveRequest {
+    #[serde(default)]
+    op_id: Option<String>,
     #[serde(default)]
     path: Option<String>,
     /// Sort the open file onto itself (the `path` field is ignored): the sort
@@ -227,7 +321,7 @@ pub(super) struct SortSaveRequest {
 pub(super) async fn api_sort_save(
     State(state): State<SharedState>,
     Json(req): Json<SortSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     if req.in_place {
         return sort_save_in_place(state, req).await;
     }
@@ -240,7 +334,14 @@ pub(super) async fn api_sort_save(
     };
     let dir = spawn_dir("sort-save-spill").map_err(internal)?;
     let mut cmd = sort_command(&wd.doc, wd.input.path(), &target, &req, &dir)?;
-    let res = run_artifact_worker("sort", &mut cmd, &target, wd.total_lines).await;
+    let res = run_artifact_worker(
+        "sort",
+        &mut cmd,
+        &target,
+        wd.total_lines,
+        req.op_id.as_deref(),
+    )
+    .await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     drop(wd); // remove the materialized input, if any
     res.map(Json)
@@ -257,7 +358,7 @@ pub(super) async fn api_sort_save(
 async fn sort_save_in_place(
     state: SharedState,
     req: SortSaveRequest,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     // Consistent snapshot (doc + edits + revision) under one lock acquisition.
     let mut snap = state.edit_snapshot()?;
     let target = snap.doc.path().to_path_buf();
@@ -276,7 +377,8 @@ async fn sort_save_in_place(
     let stage = edit::overwrite_stage_path(&target);
     let dir = spawn_dir("sort-save-spill").map_err(internal)?;
     let mut cmd = sort_command(&snap.doc, input.path(), &stage, &req, &dir)?;
-    let res = run_artifact_worker("sort", &mut cmd, &stage, total_lines).await;
+    let res =
+        run_artifact_worker("sort", &mut cmd, &stage, total_lines, req.op_id.as_deref()).await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     drop(input); // remove the materialized input, if any
     if let Err(e) = res {
@@ -331,7 +433,7 @@ fn sort_command(
     out: &Path,
     req: &SortSaveRequest,
     spill_dir: &Path,
-) -> Result<Command, (StatusCode, String)> {
+) -> Result<Command, ApiError> {
     let mut cmd = worker_command()?;
     cmd.arg("sort").arg(input);
     append_worker_encoding(&mut cmd, doc);
@@ -376,6 +478,8 @@ fn default_sorted_temp_path(source: &Path) -> std::io::Result<PathBuf> {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct ReplaceSaveRequest {
     #[serde(default)]
+    op_id: Option<String>,
+    #[serde(default)]
     path: Option<String>,
     find: String,
     replacement: String,
@@ -392,7 +496,8 @@ pub(super) struct ReplaceSaveRequest {
 pub(super) async fn api_replace_save(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
+    let op_id = req.op_id.clone();
     let wd = dirty_aware_input(&state, "replace-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
     let mut cmd = worker_command()?;
@@ -416,7 +521,14 @@ pub(super) async fn api_replace_save(
                 .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
                 .to_string(),
         );
-    let res = run_artifact_worker("replace", &mut cmd, &target, wd.total_lines).await;
+    let res = run_artifact_worker(
+        "replace",
+        &mut cmd,
+        &target,
+        wd.total_lines,
+        op_id.as_deref(),
+    )
+    .await;
     drop(wd);
     res.map(Json)
 }
@@ -424,6 +536,8 @@ pub(super) async fn api_replace_save(
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct CaseSaveRequest {
+    #[serde(default)]
+    op_id: Option<String>,
     #[serde(default)]
     path: Option<String>,
     mode: String,
@@ -436,7 +550,7 @@ pub(super) struct CaseSaveRequest {
 pub(super) async fn api_case_save(
     State(state): State<SharedState>,
     Json(req): Json<CaseSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     let mode = req.mode.trim().to_ascii_lowercase();
     if ayame_core::CaseMode::parse(&mode).is_none() {
         return Err(bad_request(
@@ -459,7 +573,14 @@ pub(super) async fn api_case_save(
                 .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
                 .to_string(),
         );
-    let res = run_artifact_worker("case", &mut cmd, &target, wd.total_lines).await;
+    let res = run_artifact_worker(
+        "case",
+        &mut cmd,
+        &target,
+        wd.total_lines,
+        req.op_id.as_deref(),
+    )
+    .await;
     drop(wd);
     res.map(Json)
 }
@@ -467,6 +588,8 @@ pub(super) async fn api_case_save(
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct GrepSaveRequest {
+    #[serde(default)]
+    op_id: Option<String>,
     /// Output file; null/absent = a `.grep` suffixed sibling default.
     #[serde(default)]
     path: Option<String>,
@@ -493,7 +616,7 @@ pub(super) struct GrepSaveRequest {
 pub(super) async fn api_grep_save(
     State(state): State<SharedState>,
     Json(req): Json<GrepSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     if req.query.is_empty() {
         return Err(bad_request("query is empty"));
     }
@@ -503,13 +626,21 @@ pub(super) async fn api_grep_save(
     // discarded: its own Conflict would surface as an opaque 502, and the web
     // overwrite-confirm flow keys off this text.
     if !req.overwrite && target.exists() {
-        return Err((
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
+            "exists",
             format!("{} は既に存在します", workspace::display_path(&target)),
         ));
     }
     let mut cmd = grep_save_command(&wd.doc, wd.input.path(), &target, &req)?;
-    let res = run_artifact_worker("grep", &mut cmd, &target, wd.total_lines).await;
+    let res = run_artifact_worker(
+        "grep",
+        &mut cmd,
+        &target,
+        wd.total_lines,
+        req.op_id.as_deref(),
+    )
+    .await;
     drop(wd);
     res.map(Json)
 }
@@ -520,7 +651,7 @@ fn grep_save_command(
     input: &Path,
     out: &Path,
     req: &GrepSaveRequest,
-) -> Result<Command, (StatusCode, String)> {
+) -> Result<Command, ApiError> {
     let mut cmd = worker_command()?;
     cmd.arg("grep-lines").arg(input);
     append_worker_encoding(&mut cmd, doc);
@@ -555,6 +686,8 @@ fn grep_save_command(
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SplitSaveRequest {
+    #[serde(default)]
+    op_id: Option<String>,
     /// Lines per output part (must be >= 1).
     lines: u64,
     /// Output directory; null/absent = the source file's directory.
@@ -571,7 +704,7 @@ pub(super) struct SplitSaveRequest {
 pub(super) async fn api_split_save(
     State(state): State<SharedState>,
     Json(req): Json<SplitSaveRequest>,
-) -> Result<Json<ayame_core::SplitResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::SplitResult>, ApiError> {
     if req.lines == 0 {
         return Err(bad_request("lines must be at least 1"));
     }
@@ -606,7 +739,14 @@ pub(super) async fn api_split_save(
         cmd.arg("--no-cache");
     }
 
-    let out = wait_worker_output("split", &mut cmd, ARTIFACT_TIMEOUT).await;
+    let out = wait_worker_output_tracked(
+        "split",
+        &mut cmd,
+        ARTIFACT_TIMEOUT,
+        req.op_id.as_deref(),
+        wd.total_lines,
+    )
+    .await;
     drop(wd); // remove the materialized input, if any
     let mut res: ayame_core::SplitResult = parse_worker_json("split", &out?)?;
     // UI-facing part list: never leak a Windows verbatim prefix.
@@ -650,7 +790,7 @@ fn default_max() -> usize {
 pub(super) async fn api_search(
     State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
-) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::SearchResult>, ApiError> {
     // Search what the user sees: a dirty buffer runs against the cached
     // materialized snapshot so hits (line numbers, byte anchors) line up with
     // the edited view — and repeated searches reuse one materialization.
@@ -713,7 +853,7 @@ fn grep_default_max() -> usize {
 pub(super) async fn api_grep(
     State(state): State<SharedState>,
     Json(req): Json<GrepRequest>,
-) -> Result<Json<ayame_core::GrepResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::GrepResult>, ApiError> {
     let query = req.query.trim().to_string();
     if query.is_empty() {
         return Err(bad_request("query is empty"));
@@ -790,7 +930,7 @@ pub(super) struct FindResponse {
 pub(super) async fn api_find(
     State(state): State<SharedState>,
     Query(q): Query<FindQuery>,
-) -> Result<Json<FindResponse>, (StatusCode, String)> {
+) -> Result<Json<FindResponse>, ApiError> {
     // Find what the user sees: a dirty session runs against the revision-keyed
     // materialized snapshot (built once, cached), so returned line numbers and
     // byte offsets are view-accurate even with unsaved edits.
@@ -868,7 +1008,7 @@ pub(super) struct WebDiffHunk {
 pub(super) async fn api_diff(
     State(state): State<SharedState>,
     Query(q): Query<DiffQuery>,
-) -> Result<Json<WebDiffResponse>, (StatusCode, String)> {
+) -> Result<Json<WebDiffResponse>, ApiError> {
     let path = q.path.trim().to_string();
     if path.is_empty() {
         return Err(bad_request("path is empty"));
@@ -996,7 +1136,7 @@ pub(super) struct LineByteResponse {
 pub(super) async fn api_linebyte(
     State(state): State<SharedState>,
     Query(q): Query<LineByteQuery>,
-) -> Result<Json<LineByteResponse>, (StatusCode, String)> {
+) -> Result<Json<LineByteResponse>, ApiError> {
     let view = dirty_view(&state).await?;
     let doc = view.doc();
     let byte = match q.col {
@@ -1019,9 +1159,49 @@ fn spawn_dir(kind: &str) -> std::io::Result<PathBuf> {
     temp_paths::create_private_temp_dir(&format!("srv-{kind}-{n}"))
 }
 
+fn operations() -> &'static Mutex<HashMap<String, Arc<ArtifactOperation>>> {
+    ARTIFACT_OPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn valid_operation_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+}
+
+fn register_operation(
+    id: Option<&str>,
+    kind: &str,
+    total_lines: u64,
+) -> Result<Option<Arc<ArtifactOperation>>, ApiError> {
+    let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    if !valid_operation_id(id) {
+        return Err(bad_request("invalid operation id"));
+    }
+    let op = Arc::new(ArtifactOperation::new(id.to_string(), kind, total_lines));
+    operations()
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), op.clone());
+    Ok(Some(op))
+}
+
+fn lookup_operation(id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
+    operations()
+        .lock()
+        .unwrap()
+        .get(id)
+        .cloned()
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "operation not found"))
+}
+
 /// A [`Command`] re-invoking this same binary — every op worker is an isolated
 /// `ayame <subcommand>` child process.
-fn worker_command() -> Result<Command, (StatusCode, String)> {
+fn worker_command() -> Result<Command, ApiError> {
     let exe = std::env::current_exe().map_err(internal)?;
     Ok(Command::new(exe))
 }
@@ -1031,9 +1211,10 @@ fn append_worker_encoding(cmd: &mut Command, doc: &Document) {
 }
 
 /// The 502 every endpoint returns when its worker child exits unsuccessfully.
-fn worker_failed(kind: &str, status: std::process::ExitStatus) -> (StatusCode, String) {
-    (
+fn worker_failed(kind: &str, status: std::process::ExitStatus) -> ApiError {
+    ApiError::new(
         StatusCode::BAD_GATEWAY,
+        "worker_failed",
         format!(
             "{kind} worker {} - the engine is unaffected",
             describe_status(status)
@@ -1045,7 +1226,7 @@ fn worker_failed(kind: &str, status: std::process::ExitStatus) -> (StatusCode, S
 fn parse_worker_json<T: serde::de::DeserializeOwned>(
     kind: &str,
     out: &std::process::Output,
-) -> Result<T, (StatusCode, String)> {
+) -> Result<T, ApiError> {
     if !out.status.success() {
         return Err(worker_failed(kind, out.status));
     }
@@ -1057,15 +1238,32 @@ async fn run_artifact_worker(
     cmd: &mut Command,
     target: &Path,
     lines: u64,
-) -> Result<ArtifactResponse, (StatusCode, String)> {
+    op_id: Option<&str>,
+) -> Result<ArtifactResponse, ApiError> {
+    let op = register_operation(op_id, kind, lines)?;
+    if op.is_some() {
+        cmd.arg("--progress");
+    }
     cmd.stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(if op.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .kill_on_drop(true);
-    let status = wait_worker_for(kind, cmd, ARTIFACT_TIMEOUT).await?;
+    let status = wait_worker_for_tracked(kind, cmd, ARTIFACT_TIMEOUT, op.clone()).await?;
     if !status.success() {
+        if let Some(op) = &op {
+            op.done.store(true, AtomicOrdering::Relaxed);
+            op.set_message("failed");
+        }
         return Err(worker_failed(kind, status));
     }
     let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
+    if let Some(op) = &op {
+        op.processed_lines.store(lines, AtomicOrdering::Relaxed);
+        op.done.store(true, AtomicOrdering::Relaxed);
+    }
     Ok(ArtifactResponse {
         path: workspace::display_path(target),
         bytes,
@@ -1088,25 +1286,53 @@ fn describe_status(s: std::process::ExitStatus) -> String {
     }
 }
 
-async fn wait_worker_for(
+async fn wait_worker_for_tracked(
     kind: &str,
     cmd: &mut Command,
     timeout_after: Duration,
-) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+    op: Option<Arc<ArtifactOperation>>,
+) -> Result<std::process::ExitStatus, ApiError> {
     let mut child = cmd.spawn().map_err(internal)?;
-    match timeout(timeout_after, child.wait()).await {
-        Ok(waited) => waited.map_err(internal),
-        Err(_) => {
+    let progress_task = child.stderr.take().map(|stderr| {
+        let op = op.clone();
+        tokio::spawn(async move { read_progress_lines(stderr, op).await })
+    });
+    let sleep = tokio::time::sleep(timeout_after);
+    tokio::pin!(sleep);
+    let cancel = wait_for_cancel(op.clone());
+    tokio::pin!(cancel);
+
+    let res = tokio::select! {
+        waited = child.wait() => waited.map_err(internal),
+        _ = &mut sleep => {
             let _ = child.kill().await;
-            Err((
+            Err(ApiError::new(
                 StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
                 format!(
                     "{kind} worker timed out after {}s - the engine is unaffected",
                     timeout_after.as_secs()
                 ),
             ))
         }
+        _ = &mut cancel => {
+            if let Some(op) = &op {
+                op.canceled.store(true, AtomicOrdering::Relaxed);
+                op.done.store(true, AtomicOrdering::Relaxed);
+                op.set_message("canceled");
+            }
+            let _ = child.kill().await;
+            Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "canceled",
+                format!("{kind} operation canceled"),
+            ))
+        }
+    };
+    if let Some(task) = progress_task {
+        let _ = task.await;
     }
+    res
 }
 
 /// Spawn a JSON-printing worker (stdout piped, stderr discarded) and wait for
@@ -1115,21 +1341,128 @@ async fn wait_worker_output(
     kind: &str,
     cmd: &mut Command,
     timeout_after: Duration,
-) -> Result<std::process::Output, (StatusCode, String)> {
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    let child = cmd.spawn().map_err(internal)?;
-    match timeout(timeout_after, child.wait_with_output()).await {
-        Ok(waited) => waited.map_err(internal),
-        Err(_) => Err((
-            StatusCode::GATEWAY_TIMEOUT,
-            format!(
-                "{kind} worker timed out after {}s - the engine is unaffected",
-                timeout_after.as_secs()
-            ),
-        )),
+) -> Result<std::process::Output, ApiError> {
+    wait_worker_output_tracked(kind, cmd, timeout_after, None, 0).await
+}
+
+async fn wait_worker_output_tracked(
+    kind: &str,
+    cmd: &mut Command,
+    timeout_after: Duration,
+    op_id: Option<&str>,
+    total_lines: u64,
+) -> Result<std::process::Output, ApiError> {
+    let op = register_operation(op_id, kind, total_lines)?;
+    if op.is_some() {
+        cmd.arg("--progress");
     }
+    cmd.stdout(Stdio::piped())
+        .stderr(if op.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .kill_on_drop(true);
+    let mut child = cmd.spawn().map_err(internal)?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| internal("worker stdout was not piped"))?;
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout.read_to_end(&mut buf).await.map(|_| buf)
+    });
+    let progress_task = child.stderr.take().map(|stderr| {
+        let op = op.clone();
+        tokio::spawn(async move { read_progress_lines(stderr, op).await })
+    });
+    let sleep = tokio::time::sleep(timeout_after);
+    tokio::pin!(sleep);
+    let cancel = wait_for_cancel(op.clone());
+    tokio::pin!(cancel);
+
+    let status_res = tokio::select! {
+        waited = child.wait() => waited.map_err(internal),
+        _ = &mut sleep => {
+            let _ = child.kill().await;
+            Err(ApiError::new(
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
+                format!(
+                    "{kind} worker timed out after {}s - the engine is unaffected",
+                    timeout_after.as_secs()
+                ),
+            ))
+        }
+        _ = &mut cancel => {
+            if let Some(op) = &op {
+                op.canceled.store(true, AtomicOrdering::Relaxed);
+                op.done.store(true, AtomicOrdering::Relaxed);
+                op.set_message("canceled");
+            }
+            let _ = child.kill().await;
+            Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "canceled",
+                format!("{kind} operation canceled"),
+            ))
+        }
+    };
+    let stdout = stdout_task.await.map_err(internal)?.map_err(internal)?;
+    if let Some(task) = progress_task {
+        let _ = task.await;
+    }
+    let status = status_res?;
+    if let Some(op) = &op {
+        op.processed_lines
+            .store(total_lines, AtomicOrdering::Relaxed);
+        op.done.store(true, AtomicOrdering::Relaxed);
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
+}
+
+async fn wait_for_cancel(op: Option<Arc<ArtifactOperation>>) {
+    match op {
+        Some(op) => op.notify_cancel.notified().await,
+        None => future::pending::<()>().await,
+    }
+}
+
+async fn read_progress_lines(
+    stderr: tokio::process::ChildStderr,
+    op: Option<Arc<ArtifactOperation>>,
+) {
+    let Some(op) = op else {
+        return;
+    };
+    let mut lines = BufReader::new(stderr).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                if let Some((done, total)) = parse_progress_line(&line) {
+                    op.total_lines.store(total, AtomicOrdering::Relaxed);
+                    op.processed_lines
+                        .store(done.min(total), AtomicOrdering::Relaxed);
+                }
+            }
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+}
+
+fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
+    let mut parts = line.split('\t');
+    if parts.next()? != "ayame-progress" {
+        return None;
+    }
+    let done = parts.next()?.parse().ok()?;
+    let total = parts.next()?.parse().ok()?;
+    Some((done, total))
 }
 
 #[cfg(test)]
@@ -1184,6 +1517,7 @@ mod tests {
         )
         .unwrap();
         let req = SortSaveRequest {
+            op_id: None,
             path: None,
             in_place: false,
             key: None,
@@ -1198,6 +1532,42 @@ mod tests {
 
         assert_has_arg_pair(&cmd, "--encoding", "Shift_JIS");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// #81.4: the serve→worker CLI contract. The flags `sort_command` emits
+    /// must be understood by the real `ayame sort` parser, and must produce
+    /// the options they name — a dropped or renamed flag is a silent (and, for
+    /// in-place sort, destructive) wrong result. Round-trip: build the worker
+    /// command with every option set, feed the exact args to `cmd_sort`, and
+    /// check the output reflects key + numeric + reverse.
+    #[test]
+    fn sort_worker_command_round_trips_through_the_cli_parser() {
+        let path = scratch_file("rt-sort.csv", b"x,3\ny,10\nz,2\n");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let req = SortSaveRequest {
+            op_id: None,
+            path: None,
+            in_place: false,
+            key: Some(2),
+            numeric: true,
+            reverse: true,
+            delim: Some(",".into()),
+        };
+        let out = path.with_extension("rt-out");
+        let spill = path.with_extension("rt-spill");
+        let cmd = sort_command(&doc, &path, &out, &req, &spill).unwrap();
+
+        // Everything after the "sort" subcommand is what `cmd_sort` receives.
+        let args = command_args(&cmd);
+        assert_eq!(args[0], "sort");
+        crate::cli::sort::cmd_sort(&args[1..]).expect("worker args must parse and run");
+
+        // key=2 numeric reverse → descending by the second column: 10, 3, 2.
+        let sorted = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(sorted, "y,10\nx,3\nz,2\n", "round-trip options mismatch");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_dir_all(&spill);
     }
 
     #[test]
@@ -1240,6 +1610,7 @@ mod tests {
         let path = scratch_file("grep-src.log", b"a\nb\n");
         let doc = Document::open(&path, &OpenOptions::default()).unwrap();
         let req = GrepSaveRequest {
+            op_id: None,
             path: None,
             query: "ERROR".into(),
             regex: true,
@@ -1266,6 +1637,16 @@ mod tests {
         );
         assert_has_arg_pair(&cmd, "--out", &out.to_string_lossy());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parses_machine_progress_lines() {
+        assert_eq!(
+            parse_progress_line("ayame-progress\t42\t100"),
+            Some((42, 100))
+        );
+        assert_eq!(parse_progress_line("sorted 42 lines"), None);
+        assert_eq!(parse_progress_line("ayame-progress\tbad\t100"), None);
     }
 
     #[test]

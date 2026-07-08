@@ -187,12 +187,18 @@ export const MESSAGES = {
     "common.input": "入力",
     "common.options": "オプション",
     "common.error": "エラー",
+    "dialog.operation.starting": "開始しています…",
+    "dialog.operation.progress": "{done} / {total} 行",
+    "dialog.operation.canceling": "キャンセルしています…",
     // -- open / save dialog --
     "dialog.open.title": "ファイルを開く",
+    "dialog.open.chooseFolder": "フォルダを選択",
     "dialog.open.path": "パス",
     "dialog.open.fileName": "ファイル名",
+    "dialog.open.folderPath": "フォルダパス",
     "dialog.open.pathPlaceholder": "ファイルのパスを入力… (例: /var/log/huge.log)",
     "dialog.open.namePlaceholder": "保存するファイル名、またはフルパス",
+    "dialog.open.folderPlaceholder": "検索するフォルダのパス",
     "dialog.open.folder": "フォルダ",
     "dialog.open.location": "場所",
     "dialog.open.folderToTree": "表示中のフォルダをツリーに開く",
@@ -201,6 +207,7 @@ export const MESSAGES = {
       "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。",
     "dialog.open.hintSave":
       "フォルダを選び、保存するファイル名を入力します。既存ファイルを選ぶと上書き確認します。",
+    "dialog.open.hintFolder": "フォルダを開いてから、選択ボタンでそのフォルダを使います。",
     "dialog.open.recent": "最近使ったファイル",
     "dialog.open.loading": "読み込み中…",
     "dialog.open.loadingName": "読み込み中… ({name})",
@@ -298,19 +305,19 @@ export const MESSAGES = {
     "dialog.sort.order": "並び順",
     "dialog.sort.asc": "昇順 (A→Z, 小→大)",
     "dialog.sort.desc": "降順 (Z→A, 大→小)",
+    "dialog.sort.destination": "出力先",
+    "dialog.sort.newFile": "新しいタブにソート結果を作成",
+    "dialog.sort.currentFile": "現在のファイルを上書き",
     "dialog.sort.hint":
-      "現在のファイルを並び替えて上書きします。未保存の編集も含めて並び替えます。この操作は元に戻せません。",
+      "未保存の編集も含めて並び替えます。現在のファイルを上書きする場合は確認が入ります。",
     "dialog.sort.keyInvalid": "キー列は 1 以上の整数で指定してください",
-    "dialog.sort.dest": "出力先",
-    "dialog.sort.destNew": "新しいファイルに書き出す",
-    "dialog.sort.destInPlace": "現在のファイルを上書き",
     "dialog.sort.confirmTitle": "現在のファイルを上書きしますか?",
     "dialog.sort.confirmMessage":
       "{path} をディスク上で並べ替えて上書きします。この操作は取り消せず、元に戻す履歴も消えます。",
     "dialog.sort.confirmOk": "上書きしてソート",
-    "dialog.sort.newDone": "ソート結果を書き出しました: {path}",
     "dialog.sort.running": "ソート実行中…",
     "dialog.sort.done": "ソートして上書きしました",
+    "dialog.sort.newDone": "ソート結果を開きました: {path}",
     "dialog.sort.error": "ソートエラー",
     // -- split dialog --
     "dialog.split.linesPer": "1ファイルあたりの行数",
@@ -572,11 +579,17 @@ export const MESSAGES = {
     "common.input": "Input",
     "common.options": "Options",
     "common.error": "Error",
+    "dialog.operation.starting": "Starting...",
+    "dialog.operation.progress": "{done} / {total} lines",
+    "dialog.operation.canceling": "Canceling...",
     "dialog.open.title": "Open File",
+    "dialog.open.chooseFolder": "Choose Folder",
     "dialog.open.path": "Path",
     "dialog.open.fileName": "File Name",
+    "dialog.open.folderPath": "Folder Path",
     "dialog.open.pathPlaceholder": "Enter a file path... (e.g. /var/log/huge.log)",
     "dialog.open.namePlaceholder": "File name to save, or a full path",
+    "dialog.open.folderPlaceholder": "Path of the folder to search",
     "dialog.open.folder": "Folder",
     "dialog.open.location": "Location",
     "dialog.open.folderToTree": "Open the current folder in the tree",
@@ -585,6 +598,7 @@ export const MESSAGES = {
       "Drag and drop a file here to open it. For large files, entering a path is faster.",
     "dialog.open.hintSave":
       "Choose a folder and enter a file name. Selecting an existing file asks before overwriting.",
+    "dialog.open.hintFolder": "Open a folder, then use the choose button to select it.",
     "dialog.open.recent": "Recent Files",
     "dialog.open.loading": "Loading...",
     "dialog.open.loadingName": "Loading... ({name})",
@@ -657,10 +671,10 @@ export const MESSAGES = {
     "keymap.conflictKey": "That shortcut conflicts with text input.",
     "keymap.searchCase": "Search: Match Case",
     "keymap.searchWord": "Search: Whole Word",
-    "keymap.nextTab": "Next Tab",
-    "keymap.prevTab": "Previous Tab",
     "keymap.searchRegex": "Search: Regular Expression",
     "keymap.toggleSidebar": "Toggle Explorer",
+    "keymap.nextTab": "Next Tab",
+    "keymap.prevTab": "Previous Tab",
     "keymap.cannotOpen": "Could not open key bindings.",
     "keymap.jsonError": "Key bindings JSON error",
     "dialog.sort.keyColumn": "Key Column (1-based)",
@@ -674,19 +688,19 @@ export const MESSAGES = {
     "dialog.sort.order": "Order",
     "dialog.sort.asc": "Ascending (A to Z, small to large)",
     "dialog.sort.desc": "Descending (Z to A, large to small)",
+    "dialog.sort.destination": "Destination",
+    "dialog.sort.newFile": "Create sorted result in a new tab",
+    "dialog.sort.currentFile": "Overwrite current file",
     "dialog.sort.hint":
-      "Sort the current file and overwrite it. Unsaved edits are included. This operation cannot be undone.",
+      "Sorts line by line including unsaved edits. Overwriting the current file asks for confirmation.",
     "dialog.sort.keyInvalid": "Key column must be an integer greater than or equal to 1.",
-    "dialog.sort.dest": "Destination",
-    "dialog.sort.destNew": "Write to a new file",
-    "dialog.sort.destInPlace": "Overwrite the current file",
     "dialog.sort.confirmTitle": "Overwrite the current file?",
     "dialog.sort.confirmMessage":
       "This permanently reorders {path} on disk and clears the undo history. It cannot be undone.",
     "dialog.sort.confirmOk": "Overwrite and sort",
-    "dialog.sort.newDone": "Wrote sorted output: {path}",
     "dialog.sort.running": "Sorting...",
     "dialog.sort.done": "Sorted and overwritten.",
+    "dialog.sort.newDone": "Opened sorted result: {path}",
     "dialog.sort.error": "Sort error",
     "dialog.split.linesPer": "Lines per File",
     "dialog.split.outDir": "Output Folder",
@@ -715,8 +729,8 @@ export const MESSAGES = {
       "{kind}  Current: {oldStart} ({oldLen} lines)  Compare To: {newStart} ({newLen} lines)",
     "dialog.diff.unsavedIncluded": "includes unsaved edits",
     "dialog.diff.hunkTruncated": "This hunk shows only the first {n} lines.",
-    "dialog.diff.summary": "{hunks} hunk / +{added}  -{deleted}  ~{modified}",
-    "dialog.diff.omitted": "{n} hunk omitted",
+    "dialog.diff.summary": "{hunks} hunk(s) / +{added}  -{deleted}  ~{modified}",
+    "dialog.diff.omitted": "{n} hunk(s) omitted",
     "dialog.grep.query": "Search Term",
     "dialog.grep.queryPlaceholder": "String or regular expression to search for",
     "dialog.grep.dir": "Target Folder",
@@ -820,11 +834,16 @@ export function serverMessage(text) {
   return raw;
 }
 
-// Server-boundary predicate: the save endpoint reports an existing target with
-// a Japanese message (no error codes yet). Kept in the i18n/server-message
-// layer so UI modules never embed the raw string themselves.
-export function isExistsError(msg) {
-  return String(msg ?? "").includes("既に存在");
+// Server-boundary predicate: the save endpoints report an existing target with
+// the structured code "exists" (issue #81.2). Prefer that; fall back to the
+// message text for errors that predate codes or originate outside the API
+// layer. Accepts either the thrown Error (with `.code`/`.message`) or a raw
+// string. Kept here so UI modules never embed the raw server string themselves.
+export function isExistsError(e) {
+  const code = e && typeof e === "object" ? e.code : undefined;
+  if (code) return code === "exists";
+  const msg = e && typeof e === "object" ? e.message : e;
+  return /already exists|既に存在/i.test(String(msg ?? ""));
 }
 
 // Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not
