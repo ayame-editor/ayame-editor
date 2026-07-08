@@ -180,6 +180,8 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/case/save", post(ops::api_case_save))
         .route("/api/grep/save", post(ops::api_grep_save))
         .route("/api/split/save", post(ops::api_split_save))
+        .route("/api/op/progress", get(ops::api_op_progress))
+        .route("/api/op/cancel", post(ops::api_op_cancel))
         .route("/api/search", get(ops::api_search))
         .route("/api/grep", post(ops::api_grep))
         .route("/api/find", get(ops::api_find))

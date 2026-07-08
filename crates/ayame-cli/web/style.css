@@ -1175,6 +1175,55 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
   pointer-events: none;
 }
 .overlay.hidden { display: none; }
+/* Determinate progress card for long worker ops (sort/grep/split) — #78.
+   The overlay itself stays click-through; only the card captures the pointer
+   so its Cancel button works. */
+.progress-card {
+  pointer-events: auto;
+  width: min(420px, 86vw);
+  padding: 20px 22px;
+  border-radius: 12px;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--fg);
+}
+.progress-card .progress-label { font-size: 14px; font-weight: 500; }
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-dim) 30%, transparent);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+/* Indeterminate: no total yet — a sliding sliver instead of a filled bar. */
+.progress-track.indeterminate .progress-fill {
+  width: 35%;
+  animation: progress-slide 1.1s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.progress-actions { display: flex; justify-content: flex-end; }
+.progress-actions .cmd { height: 32px; min-width: 84px; border: 1px solid var(--border); }
 
 /* ---- status bar ------------------------------------------------------- */
 
@@ -2040,6 +2089,10 @@ button { border-radius: var(--radius); }
 .form-check { display: flex; align-items: center; gap: 8px; color: var(--fg); font-size: 13px; cursor: pointer; }
 .form-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 .form-hint { color: var(--fg-faint); font-size: 11.5px; }
+/* text field with a trailing "参照…" picker button (#79) */
+.form-input-browse { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.form-input-browse input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.form-browse-btn { flex: 0 0 auto; height: 36px; min-width: 64px; border: 1px solid var(--border); }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px 16px; }
 .form-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }
 

@@ -1,8 +1,28 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use ayame_core::{Document, Encoding, OpenOptions};
+
+/// A command-line *usage* error (unknown option, missing value, unknown
+/// command, …) as opposed to a runtime failure. `main` maps this to exit
+/// code 2 (grep convention); ordinary runtime errors stay at exit code 1.
+#[derive(Debug)]
+pub(crate) struct UsageError(pub String);
+
+impl std::fmt::Display for UsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UsageError {}
+
+/// Build a `UsageError` as an `anyhow::Error` (so it flows through the usual
+/// `Result` plumbing but stays downcastable in `main`).
+pub(crate) fn usage_error(msg: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(UsageError(msg.into()))
+}
 
 pub(crate) type ParsedArgs = (Vec<String>, HashMap<String, String>, HashSet<String>);
 pub(crate) type OpenedDoc = (
@@ -35,7 +55,7 @@ pub(crate) fn parse_checked(
         if a.starts_with('-') && a != "-" {
             if valued.contains(&a.as_str()) {
                 let Some(v) = args.get(i + 1) else {
-                    bail!("{a} requires a value");
+                    return Err(usage_error(format!("{a} requires a value")));
                 };
                 opts.insert(a.clone(), v.clone());
                 i += 2;
@@ -44,7 +64,7 @@ pub(crate) fn parse_checked(
             if flags.contains(&a.as_str()) {
                 parsed_flags.insert(a.clone());
             } else {
-                bail!("unknown option '{a}'");
+                return Err(usage_error(format!("unknown option '{a}'")));
             }
         } else {
             pos.push(a.clone());

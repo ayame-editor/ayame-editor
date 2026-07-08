@@ -64,11 +64,16 @@ export type SortSaveRequest = { path: string | null,
  * output atomically replaces the file, the document reloads, and the
  * (already incorporated) edit overlay is cleared.
  */
-in_place: boolean, key: number | null, numeric: boolean, reverse: boolean, delim: string | null, };
+in_place: boolean, key: number | null, numeric: boolean, reverse: boolean, delim: string | null,
+/**
+ * Client-generated id used to poll `/api/op/progress` and hit
+ * `/api/op/cancel` while this (potentially minutes-long) worker runs (#78).
+ */
+op_id: string | null, };
 
-export type ReplaceSaveRequest = { path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
+export type ReplaceSaveRequest = { path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, op_id: string | null, };
 
-export type CaseSaveRequest = { path: string | null, mode: string, jobs: number | null, chunk_lines: bigint | null, };
+export type CaseSaveRequest = { path: string | null, mode: string, jobs: number | null, chunk_lines: bigint | null, op_id: string | null, };
 
 export type SplitSaveRequest = {
 /**
@@ -78,7 +83,7 @@ lines: bigint,
 /**
  * Output directory; null/absent = the source file's directory.
  */
-dir: string | null, };
+dir: string | null, op_id: string | null, };
 
 export type GrepRequest = { query: string,
 /**
@@ -98,7 +103,7 @@ path: string | null, query: string, regex: boolean, ci: boolean, word: boolean,
 /**
  * Replace an existing output file (the OS save dialog already asked).
  */
-overwrite: boolean, jobs: number | null, chunk_lines: bigint | null, };
+overwrite: boolean, jobs: number | null, chunk_lines: bigint | null, op_id: string | null, };
 
 export type SessionState = { paths: Array<string>, active_path: string | null, };
 

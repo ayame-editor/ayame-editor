@@ -1,27 +1,53 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use super::args::{default_cache_dir, first_opt, has_flag, parse_checked};
 use super::fields::parse_size;
 use super::formatting::{commas, human_bytes};
 
 pub(crate) fn cmd_cache(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) =
-        parse_checked(args, &["--max-size", "--max-age-days"], &["--dry-run"])?;
+    let (pos, opts, flags) = parse_checked(
+        args,
+        &["--max-size", "--max-age-days"],
+        &["--dry-run", "--json"],
+    )?;
     let sub = pos.first().map(|s| s.as_str()).unwrap_or("info");
+    let json = has_flag(&flags, &["--json"]);
     let dir = default_cache_dir()
         .context("no cache directory available (set HOME or AYAME_CACHE_DIR)")?;
     let vdir = dir.join("v1");
     match sub {
-        "path" => println!("{}", dir.display()),
+        // `cache path` is machine-consumable data (e.g. `$(ayame cache path)`),
+        // so it lives on stdout in both plain and --json forms.
+        "path" => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(
+                        &serde_json::json!({ "path": dir.display().to_string() })
+                    )?
+                );
+            } else {
+                println!("{}", dir.display());
+            }
+        }
         "clear" => {
             if vdir.exists() {
                 std::fs::remove_dir_all(&vdir)
                     .with_context(|| format!("removing {}", vdir.display()))?;
             }
-            println!("cleared {}", vdir.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(
+                        &serde_json::json!({ "cleared": vdir.display().to_string() })
+                    )?
+                );
+            } else {
+                eprintln!("cleared {}", vdir.display());
+            }
         }
         "gc" => {
             let max_size = first_opt(&opts, &["--max-size"])
@@ -39,24 +65,38 @@ pub(crate) fn cmd_cache(args: &[String]) -> Result<()> {
                 Duration::from_secs(max_age_days * 86_400),
                 dry_run,
             )?;
-            println!("cache dir   {}", dir.display());
-            println!(
-                "before      {} blob(s), {}",
-                commas(report.before_count),
-                human_bytes(report.before_bytes)
-            );
-            println!(
-                "removed     {} blob(s), {}",
-                commas(report.removed_count),
-                human_bytes(report.removed_bytes)
-            );
-            println!(
-                "after       {} blob(s), {}",
-                commas(report.after_count),
-                human_bytes(report.after_bytes)
-            );
-            if dry_run {
-                println!("dry run     no files removed");
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "cache_dir": dir.display().to_string(),
+                        "dry_run": dry_run,
+                        "before": { "blobs": report.before_count, "bytes": report.before_bytes },
+                        "removed": { "blobs": report.removed_count, "bytes": report.removed_bytes },
+                        "after": { "blobs": report.after_count, "bytes": report.after_bytes },
+                    }))?
+                );
+            } else {
+                // Diagnostic summary -> stderr (data policy); nothing on stdout.
+                eprintln!("cache dir   {}", dir.display());
+                eprintln!(
+                    "before      {} blob(s), {}",
+                    commas(report.before_count),
+                    human_bytes(report.before_bytes)
+                );
+                eprintln!(
+                    "removed     {} blob(s), {}",
+                    commas(report.removed_count),
+                    human_bytes(report.removed_bytes)
+                );
+                eprintln!(
+                    "after       {} blob(s), {}",
+                    commas(report.after_count),
+                    human_bytes(report.after_bytes)
+                );
+                if dry_run {
+                    eprintln!("dry run     no files removed");
+                }
             }
         }
         "info" => {
@@ -71,11 +111,26 @@ pub(crate) fn cmd_cache(args: &[String]) -> Result<()> {
                     }
                 }
             }
-            println!("cache dir   {}", dir.display());
-            println!("index blobs {}", commas(count));
-            println!("total size  {}", human_bytes(bytes));
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "cache_dir": dir.display().to_string(),
+                        "index_blobs": count,
+                        "total_bytes": bytes,
+                    }))?
+                );
+            } else {
+                eprintln!("cache dir   {}", dir.display());
+                eprintln!("index blobs {}", commas(count));
+                eprintln!("total size  {}", human_bytes(bytes));
+            }
         }
-        other => bail!("unknown cache subcommand '{other}' (expected path|info|gc|clear)"),
+        other => {
+            return Err(super::args::usage_error(format!(
+                "unknown cache subcommand '{other}' (expected path|info|gc|clear)"
+            )))
+        }
     }
     Ok(())
 }

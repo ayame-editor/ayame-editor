@@ -4,6 +4,7 @@ use ayame_core::SearchOptions;
 use super::args::{first_opt, has_flag, open_doc};
 use super::common::maybe_crash;
 use super::formatting::{commas, human_bytes};
+use super::Outcome;
 
 pub(crate) fn cmd_stat(args: &[String]) -> Result<()> {
     let (doc, _pos, opts, flags) = open_doc(args, &[], &["--json"])?;
@@ -93,7 +94,7 @@ pub(crate) fn cmd_lines(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
+pub(crate) fn cmd_search(args: &[String]) -> Result<Outcome> {
     maybe_crash();
     let (doc, pos, opts, flags) = open_doc(
         args,
@@ -129,9 +130,15 @@ pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
         start_byte,
         max_hits: max,
     })?;
+    // grep convention: matched at all -> exit 0, zero matches -> exit 1.
+    let outcome = if res.hits.is_empty() {
+        Outcome::NoMatch
+    } else {
+        Outcome::Success
+    };
     if has_flag(&flags, &["--json"]) {
         println!("{}", serde_json::to_string(&res)?);
-        return Ok(());
+        return Ok(outcome);
     }
     for h in &res.hits {
         let text = doc.line(h.line).unwrap_or_default();
@@ -146,5 +153,5 @@ pub(crate) fn cmd_search(args: &[String]) -> Result<()> {
             ""
         }
     );
-    Ok(())
+    Ok(outcome)
 }

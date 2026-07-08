@@ -71,6 +71,19 @@ pub enum TailRefresh {
     Reindex,
 }
 
+/// Outcome of [`Document::follow_tail`] — the `Arc`-shareable counterpart of
+/// [`TailRefresh`] that hands back a freshly-built document instead of mutating
+/// in place.
+pub enum TailFollow {
+    /// The on-disk length is unchanged since the last follow.
+    Unchanged,
+    /// New bytes were appended; the returned document reuses the immutable
+    /// prefix's index and only scanned the appended tail.
+    Grew(Document),
+    /// The file shrank / was rewritten (or was empty) — reopen from scratch.
+    Reindex,
+}
+
 pub struct Document {
     path: PathBuf,
     // The mapping must outlive every borrow of `buf()`; `_file` keeps the fd open.
@@ -208,6 +221,47 @@ impl Document {
         Ok(TailRefresh::Grew)
     }
 
+    /// Follow appended data like [`refresh_tail`], but without needing `&mut` on
+    /// a shared handle: clone the existing index (the immutable prefix is never
+    /// re-scanned), extend it over just the new bytes, and return a fresh
+    /// [`Document`] for the grown file. Callers holding an `Arc<Document>` (the
+    /// serve tail-follow path) swap in the returned document instead of
+    /// rebuilding the whole index on every growth (#76).
+    ///
+    /// Returns [`TailFollow::Unchanged`] when the length is the same, or
+    /// [`TailFollow::Reindex`] when the file shrank / was replaced / was empty
+    /// (the incremental-prefix assumption does not hold — reopen from scratch).
+    pub fn follow_tail(&self) -> Result<TailFollow> {
+        let file = std::fs::File::open(&self.path)?;
+        let new_len = file.metadata()?.len();
+        if new_len == self.len {
+            return Ok(TailFollow::Unchanged);
+        }
+        if new_len < self.len || self.len == 0 {
+            return Ok(TailFollow::Reindex);
+        }
+        let new_mmap = unsafe { Mmap::map(&file)? };
+        if (new_mmap.len() as u64) < new_len {
+            // A racing shrink between the stat and the map: reopen rather than
+            // index bytes that may already be gone.
+            return Ok(TailFollow::Reindex);
+        }
+        let mut index = self.index.clone();
+        index.extend_tail(&new_mmap);
+        Ok(TailFollow::Grew(Document {
+            path: self.path.clone(),
+            _file: file,
+            mmap: Some(new_mmap),
+            len: new_len,
+            base: self.base,
+            encoding: self.encoding,
+            eol: self.eol,
+            index,
+            index_ms: self.index_ms,
+            from_cache: false,
+        }))
+    }
+
     #[inline]
     pub fn encoding(&self) -> Encoding {
         self.encoding
@@ -308,6 +362,45 @@ impl Document {
             .into_iter()
             .map(|(n, s, e)| (n, &buf[s as usize..e as usize]))
             .collect()
+    }
+
+    /// Scan raw (terminator-stripped) line bytes in line-aligned batches,
+    /// invoking `on_line(line_no, bytes)` for each line in order. Batching keeps
+    /// peak memory at `O(batch)` — one sparse-index lookup per batch — so data
+    /// ops share this loop instead of re-rolling it. `on_line` may fail; the
+    /// first error stops the scan and propagates.
+    pub fn for_each_raw_line<F>(&self, on_line: F) -> Result<()>
+    where
+        F: FnMut(u64, &[u8]) -> Result<()>,
+    {
+        self.for_each_raw_line_batched(on_line, |_| {})
+    }
+
+    /// Like [`Document::for_each_raw_line`], but also calls `on_batch(processed)`
+    /// after each fully-scanned batch, where `processed` is the cumulative number
+    /// of lines scanned so far — a hook for coarse progress reporting that fires
+    /// at the same cadence as the hand-rolled batch loops it replaces.
+    pub fn for_each_raw_line_batched<F, G>(&self, mut on_line: F, mut on_batch: G) -> Result<()>
+    where
+        F: FnMut(u64, &[u8]) -> Result<()>,
+        G: FnMut(u64),
+    {
+        const BATCH: u64 = 8192;
+        let total = self.line_count();
+        let mut start = 0u64;
+        while start < total {
+            let batch = self.raw_line_ranges(start, BATCH);
+            if batch.is_empty() {
+                break;
+            }
+            let advanced = batch.len() as u64;
+            for (line_no, raw) in batch {
+                on_line(line_no, raw)?;
+            }
+            start += advanced;
+            on_batch(start);
+        }
+        Ok(())
     }
 
     /// Raw line text and original terminator bytes for up to `count` lines.
@@ -785,6 +878,38 @@ mod tests {
         // Truncating (a shrink) signals that a full reindex is needed.
         std::fs::write(&path, b"fresh\n").unwrap();
         assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Reindex);
+    }
+
+    #[test]
+    fn follow_tail_builds_a_grown_document_reusing_the_prefix() {
+        use std::fs::OpenOptions as FsOpenOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("follow2.log");
+        std::fs::write(&path, b"line 0\nline 1\n").unwrap();
+
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        assert_eq!(doc.line_count(), 2);
+        // No change yet: `follow_tail` leaves the original untouched.
+        assert!(matches!(doc.follow_tail().unwrap(), TailFollow::Unchanged));
+        assert_eq!(doc.line_count(), 2);
+
+        // Append out-of-band and follow it into a fresh, longer document.
+        let mut f = FsOpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"line 2\nline 3\n").unwrap();
+        f.flush().unwrap();
+        let grown = match doc.follow_tail().unwrap() {
+            TailFollow::Grew(d) => d,
+            _ => panic!("expected Grew after an append"),
+        };
+        assert_eq!(grown.line_count(), 4);
+        assert_eq!(grown.line(3).unwrap(), "line 3");
+        assert_eq!(grown.byte_len(), std::fs::metadata(&path).unwrap().len());
+        // The source document is unchanged (it was shared behind an Arc).
+        assert_eq!(doc.line_count(), 2);
+
+        // Truncating (a shrink) asks for a full reindex.
+        std::fs::write(&path, b"fresh\n").unwrap();
+        assert!(matches!(doc.follow_tail().unwrap(), TailFollow::Reindex));
     }
 
     #[test]

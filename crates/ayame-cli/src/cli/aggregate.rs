@@ -24,7 +24,7 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
             "--spill-dir",
             "--out-groups",
         ],
-        &["--csv"],
+        &["--csv", "--json"],
     )?;
     let key_column = parse_key(&opts)?;
     let value_column = match first_opt(&opts, &["--value"]) {
@@ -47,7 +47,10 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
     let has_value = value_column.is_some();
 
     let out_groups = first_opt(&opts, &["--out-groups"]).map(PathBuf::from);
-    let stats = if let Some(out_path) = out_groups.as_deref() {
+    let stats = if has_flag(&flags, &["--json"]) {
+        // Machine-readable rows on stdout (data); the summary stays on stderr.
+        group_to_json(&doc, &gopts, has_value)?
+    } else if let Some(out_path) = out_groups.as_deref() {
         write_group_artifact(&doc, &gopts, has_value, out_path)?
     } else {
         let stdout = std::io::stdout();
@@ -60,7 +63,7 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
         commas(stats.runs as u64),
         human_bytes(stats.spill_bytes),
     );
-    if let Some(out_path) = out_groups {
+    if let Some(out_path) = out_groups.filter(|_| !has_flag(&flags, &["--json"])) {
         eprintln!("groups -> {}", out_path.display());
     }
     if custom_spill.is_none() {
@@ -125,6 +128,39 @@ fn temp_sibling(path: &Path) -> PathBuf {
     temp_sibling_with_label(path, "groups")
 }
 
+/// Collect the group rows into a JSON array on stdout (one object per group).
+/// Value aggregates (`sum`/`min`/`max`/`avg`) are present only when `--value`
+/// was requested and the group had at least one parseable number, else `null`.
+fn group_to_json(
+    doc: &Document,
+    opts: &GroupOptions,
+    has_value: bool,
+) -> Result<ayame_core::ops::GroupStats> {
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    let stats = ayame_core::ops::group(doc, opts, |row| {
+        let key = String::from_utf8_lossy(&row.key).into_owned();
+        let mut obj = serde_json::Map::new();
+        obj.insert("key".into(), serde_json::Value::String(key));
+        obj.insert("count".into(), serde_json::Value::from(row.count));
+        if has_value {
+            if row.numeric_count > 0 {
+                obj.insert("sum".into(), serde_json::json!(row.sum));
+                obj.insert("min".into(), serde_json::json!(row.min));
+                obj.insert("max".into(), serde_json::json!(row.max));
+                obj.insert("avg".into(), serde_json::json!(row.avg().unwrap()));
+            } else {
+                obj.insert("sum".into(), serde_json::Value::Null);
+                obj.insert("min".into(), serde_json::Value::Null);
+                obj.insert("max".into(), serde_json::Value::Null);
+                obj.insert("avg".into(), serde_json::Value::Null);
+            }
+        }
+        rows.push(serde_json::Value::Object(obj));
+    })?;
+    println!("{}", serde_json::to_string(&rows)?);
+    Ok(stats)
+}
+
 fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std::io::Result<()> {
     let key = String::from_utf8_lossy(&row.key);
     if has_value {
@@ -159,7 +195,14 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
             "--quote",
             "--out-order",
         ],
-        &["--numeric", "--min", "--smallest", "--asc", "--csv"],
+        &[
+            "--numeric",
+            "--min",
+            "--smallest",
+            "--asc",
+            "--csv",
+            "--json",
+        ],
     )?;
     let n: usize = first_opt(&opts, &["-n", "--top"])
         .unwrap_or("10")
@@ -173,6 +216,21 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
         n,
     };
     let lines = ayame_core::ops::top_n(&doc, &topts);
+    if has_flag(&flags, &["--json"]) {
+        // Each entry keeps the 1-based line number alongside its text so the
+        // ranking survives a pipe into `jq` and friends.
+        let rows: Vec<serde_json::Value> = lines
+            .iter()
+            .map(|&ln| {
+                serde_json::json!({
+                    "line": ln + 1,
+                    "text": doc.line(ln).unwrap_or_default(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
     if let Some(outp) = first_opt(&opts, &["--out-order"]) {
         let file = std::fs::File::create(outp).with_context(|| format!("creating '{outp}'"))?;
         let mut w = BufWriter::new(file);
@@ -206,7 +264,7 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
             "--precision",
             "-p",
         ],
-        &["--csv"],
+        &["--csv", "--json"],
     )?;
     let precision: u32 = first_opt(&opts, &["--precision", "-p"])
         .map(|s| s.parse::<u32>())
@@ -221,8 +279,19 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
             precision,
         },
     );
-    println!("{}", res.estimate); // pipeable count on stdout
     let err_pct = 104.0 / (res.registers as f64).sqrt();
+    if has_flag(&flags, &["--json"]) {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "estimate": res.estimate,
+                "registers": res.registers,
+                "memory_bytes": res.memory_bytes,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("{}", res.estimate); // pipeable count on stdout
     eprintln!(
         "≈{} distinct values (HyperLogLog: {} registers, {}, ~{:.1}% std. error)",
         commas(res.estimate),

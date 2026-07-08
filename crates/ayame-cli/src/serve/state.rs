@@ -935,24 +935,26 @@ impl AppState {
             return s;
         }
 
-        let path = snap.doc.path().to_path_buf();
-        // Follow growth without the index cache. The cache key is keyed on
-        // (len, mtime), which both change on every append, so a growing file is
-        // a guaranteed miss that rebuilds the index AND writes a fresh cache
-        // blob every poll — leaving an unbounded trail of dead blobs on disk for
-        // a busy multi-GB log. Skipping the cache here costs nothing on the read
-        // side (it was already a full rebuild) and stops the pollution (#76).
-        // (Reusing the immutable prefix via Document::refresh_tail would also
-        // avoid the rebuild, but that needs &mut on the Arc-shared document.)
-        let tail_opts = ayame_core::OpenOptions {
-            cache_dir: None,
-            ..self.open_opts.clone()
-        };
-        let opened = Document::open(&path, &tail_opts);
-        let Ok(new_doc) = opened else {
-            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-            s.changed = true;
-            return s;
+        // Follow growth incrementally: `follow_tail` clones the existing index
+        // and scans only the appended bytes (the immutable prefix is never
+        // re-read), instead of a full reopen + whole-file newline scan on every
+        // poll tick. It also never touches the on-disk index cache — that cache
+        // is keyed on (len, mtime), which both change on every append, so a
+        // growing file would be a guaranteed miss that rebuilds the index AND
+        // writes a fresh cache blob every poll, leaving an unbounded trail of
+        // dead blobs for a busy multi-GB log (#76). A shrink / rewrite / racing
+        // truncation comes back as `Reindex`, which we surface as `changed` so
+        // the client reopens from scratch.
+        let new_doc = match snap.doc.follow_tail() {
+            Ok(ayame_core::TailFollow::Grew(doc)) => doc,
+            Ok(ayame_core::TailFollow::Unchanged) => {
+                return TailStatus::at(snap.known_lines, snap.known_bytes);
+            }
+            Ok(ayame_core::TailFollow::Reindex) | Err(_) => {
+                let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
+                s.changed = true;
+                return s;
+            }
         };
         match new_doc.byte_len().cmp(&snap.known_bytes) {
             std::cmp::Ordering::Less => {

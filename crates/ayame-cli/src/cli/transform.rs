@@ -10,6 +10,8 @@ use super::args::{first_opt, has_flag, open_doc};
 use super::common::maybe_crash;
 use super::formatting::{commas, human_bytes};
 use super::progress::ProgressReporter;
+use super::wire;
+use super::Outcome;
 
 pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
     maybe_crash();
@@ -107,28 +109,34 @@ pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Value-taking flags `ayame grep-lines` accepts. The serve→worker builder
+/// emits a subset; a round-trip test enforces the contract.
+pub(crate) const GREP_LINES_VALUE_FLAGS: &[&str] = &[
+    wire::OUT,
+    wire::grep_lines::JOBS,
+    wire::grep_lines::CHUNK_LINES,
+];
+/// Boolean flags `ayame grep-lines` accepts.
+pub(crate) const GREP_LINES_BOOL_FLAGS: &[&str] = &[
+    "-e",
+    wire::grep_lines::REGEX,
+    "-i",
+    wire::grep_lines::IGNORE_CASE,
+    "-w",
+    "--word",
+    wire::grep_lines::WHOLE_WORD,
+    wire::grep_lines::OVERWRITE,
+    wire::PROGRESS,
+];
+
 /// `ayame grep-lines <FILE> <PATTERN> --out FILE` — extract every line
 /// matching PATTERN into a new file, with the search bar's exact matching
 /// semantics (`-e` regex, `-i` ignore-case, `-w` whole-word). This is the
 /// worker behind the GUI's "grep して保存" (issue #38); `--overwrite` is
 /// passed when an OS save dialog already confirmed replacing the target.
-pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
+pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<Outcome> {
     maybe_crash();
-    let (doc, pos, opts, flags) = open_doc(
-        args,
-        &["--out", "--jobs", "--chunk-lines"],
-        &[
-            "-e",
-            "--regex",
-            "-i",
-            "--ignore-case",
-            "-w",
-            "--word",
-            "--whole-word",
-            "--overwrite",
-            "--progress",
-        ],
-    )?;
+    let (doc, pos, opts, flags) = open_doc(args, GREP_LINES_VALUE_FLAGS, GREP_LINES_BOOL_FLAGS)?;
     let query = pos.get(1).context("expected PATTERN")?.clone();
     let out = first_opt(&opts, &["--out"]).context("grep-lines requires --out <FILE>")?;
     let grep_opts = GrepLinesOptions {
@@ -170,7 +178,12 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
         human_bytes(res.bytes),
         res.path.display()
     );
-    Ok(())
+    // grep convention: matched at least one line -> exit 0, none -> exit 1.
+    if res.changed_lines == 0 {
+        Ok(Outcome::NoMatch)
+    } else {
+        Ok(Outcome::Success)
+    }
 }
 
 /// `ayame split <FILE> --lines N [--out-dir DIR] [--name NAME] [--json]` — a

@@ -88,6 +88,11 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
 export function configureOpener(mode, title?) {
   state.openerMode = mode;
   const save = mode === "save";
+  // "pick" (choose a file) and "pickdir" (choose a folder) are return-a-path
+  // modes used by 2-file diff / folder grep (issue #79); they present like the
+  // open dialog but resolve the picker instead of opening the file.
+  const pickDir = mode === "pickdir";
+  const pickFileMode = mode === "pick";
   const m = $("opener");
   m.classList.toggle("save-mode", save);
   $("opener-title").textContent = title || t(save ? "menu.saveAs" : "dialog.open.title");
@@ -95,16 +100,58 @@ export function configureOpener(mode, title?) {
   $("opener-input").placeholder = t(
     save ? "dialog.open.namePlaceholder" : "dialog.open.pathPlaceholder",
   );
-  $("opener-open").textContent = t(save ? "menu.save" : "menu.open");
+  const openLabel = pickDir
+    ? "dialog.pick.selectFolder"
+    : pickFileMode
+      ? "dialog.pick.selectFile"
+      : save
+        ? "menu.save"
+        : "menu.open";
+  $("opener-open").textContent = t(openLabel);
   $("opener-folder").textContent = t(save ? "dialog.open.location" : "dialog.open.folder");
   $("opener-folder").title = t(save ? "dialog.open.folderToExplorer" : "dialog.open.folderToTree");
-  $("opener-hint").textContent = t(save ? "dialog.open.hintSave" : "dialog.open.hintOpen");
+  $("opener-hint").textContent = t(
+    pickDir
+      ? "dialog.pick.hintFolder"
+      : pickFileMode
+        ? "dialog.pick.hintFile"
+        : save
+          ? "dialog.open.hintSave"
+          : "dialog.open.hintOpen",
+  );
   openerMsg("");
   renderRecentFiles();
 }
 
+// Return-a-path pickers backed by the in-app opener modal. Used where a real
+// local path is needed but no OS dialog fits (browser diff target, and folder
+// selection in both builds, since there is no native folder dialog) — #79.
+function openerPick(mode, title, startDir): Promise<string | null> {
+  return new Promise((resolve) => {
+    configureOpener(mode, title);
+    state.openerResolve = resolve;
+    const inp = $("opener-input");
+    inp.value = "";
+    setModalOpen($("opener"), true);
+    void browse(startDir || localStorage.getItem(TREE_KEY) || null);
+    queueMicrotask(() => inp.focus());
+  });
+}
+
+export function pickFile(title, startDir): Promise<string | null> {
+  return openerPick("pick", title, startDir);
+}
+
+export function pickFolder(title, startDir): Promise<string | null> {
+  return openerPick("pickdir", title, startDir);
+}
+
 export function hideOpener() {
-  if (state.openerMode === "save") {
+  if (
+    state.openerMode === "save" ||
+    state.openerMode === "pick" ||
+    state.openerMode === "pickdir"
+  ) {
     finishSaveDialog(null);
     return;
   }
@@ -160,11 +207,14 @@ export function renderBrowse(res) {
 // must match DRIVES_DIR in serve/workspace.rs.
 export const DRIVES_DIR = "::";
 
-export function renderCwdCrumbs(path) {
-  const cwd = $("opener-cwd");
+// Render a clickable path breadcrumb trail into `host`, calling `onNavigate`
+// with the crumb path on click. Shared by the open dialog's cwd bar and the
+// sidebar tree root (they differ only in host + navigate target) — #81.
+// Lives here rather than dom.ts because of the DRIVES_DIR / "PC"-root logic.
+export function renderPathCrumbs(host, path, onNavigate) {
   const clean = String(path || "").replace(/^\\\\\?\\/, "");
-  cwd.textContent = "";
-  cwd.title = clean;
+  host.textContent = "";
+  host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
     crumbs = [{ label: "PC", path: DRIVES_DIR }];
@@ -179,16 +229,20 @@ export function renderCwdCrumbs(path) {
       sep.className = "cwd-sep";
       sep.setAttribute("aria-hidden", "true");
       sep.append(iconSvg("i-chevron-right"));
-      cwd.append(sep);
+      host.append(sep);
     }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cwd-crumb";
     btn.textContent = crumb.label;
     btn.title = crumb.path;
-    btn.addEventListener("click", () => browse(crumb.path));
-    cwd.append(btn);
+    btn.addEventListener("click", () => onNavigate(crumb.path));
+    host.append(btn);
   }
+}
+
+export function renderCwdCrumbs(path) {
+  renderPathCrumbs($("opener-cwd"), path, browse);
 }
 
 export function browseRow(ent, isUp) {
@@ -218,6 +272,11 @@ export function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
+    } else if (state.openerMode === "pick") finishSaveDialog(ent.path);
+    else if (state.openerMode === "pickdir") {
+      // Folder-only pick: clicking a file selects its containing directory.
+      $("opener-input").value = ent.name;
+      markPickedFile(ent.name);
     } else openPath(ent.path);
   });
   row.addEventListener("dblclick", () => {
@@ -343,9 +402,22 @@ export async function commitOpener() {
     if (target) finishSaveDialog(target);
     return;
   }
+  if (state.openerMode === "pickdir") {
+    if (state.openerDir === DRIVES_DIR) {
+      openerMsg(t("dialog.pick.pickFolderFirst"));
+      return;
+    }
+    finishSaveDialog(state.openerDir);
+    return;
+  }
   // Like save mode: a typed relative name means "in the folder being
   // browsed", not relative to wherever the server process was launched.
   const raw = $("opener-input").value.trim();
+  if (state.openerMode === "pick") {
+    if (!raw) return;
+    finishSaveDialog(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
+    return;
+  }
   if (!raw) return;
   openPath(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
 }
@@ -813,32 +885,7 @@ function updateTreeNav() {
 // Render the current root as clickable path segments in the sidebar header,
 // each jumping straight to that folder (mirrors the open dialog's breadcrumbs).
 export function renderTreeCrumbs(path) {
-  const host = $("sb-root");
-  const clean = String(path || "").replace(/^\\\\\?\\/, "");
-  host.textContent = "";
-  host.title = clean;
-  let crumbs = pathCrumbs(clean);
-  if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
-  } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
-  }
-  for (const [i, crumb] of crumbs.entries()) {
-    if (i > 0) {
-      const sep = document.createElement("span");
-      sep.className = "cwd-sep";
-      sep.setAttribute("aria-hidden", "true");
-      sep.append(iconSvg("i-chevron-right"));
-      host.append(sep);
-    }
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cwd-crumb";
-    btn.textContent = crumb.label;
-    btn.title = crumb.path;
-    btn.addEventListener("click", () => treeSetRoot(crumb.path));
-    host.append(btn);
-  }
+  renderPathCrumbs($("sb-root"), path, treeSetRoot);
 }
 
 export async function treeSetRoot(dir, record = true) {

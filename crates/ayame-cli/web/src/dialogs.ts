@@ -1,5 +1,5 @@
 // Ayame Editor — dialogs module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, setModalOpen } from "./dom.js";
+import { $, commas, setModalOpen } from "./dom.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
 
@@ -144,7 +144,9 @@ export function formVisible() {
 }
 
 // fields: {id, type: "text"|"check"|"select"|"hint", label, value, placeholder,
-// title, options}. All labels/placeholders/titles arrive already localized.
+// title, options, browse}. All labels/placeholders/titles arrive already
+// localized. A text field may carry `browse: () => Promise<string|null>` to
+// render a "参照…" button that fills the field from a picker (#79).
 // Resolves to {id: value} or null on cancel.
 export function askForm(title, fields, okLabel = null): Promise<any> {
   const modal = $("form-modal");
@@ -195,7 +197,27 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
-      row.append(input);
+      // Optional "参照…" button: `f.browse` is a picker the caller supplies
+      // (file or folder), so dialogs.ts stays free of a workspace import (#79).
+      if (typeof f.browse === "function") {
+        const wrap = document.createElement("span");
+        wrap.className = "form-input-browse";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cmd form-browse-btn";
+        btn.textContent = t("dialog.pick.browse");
+        btn.addEventListener("click", async () => {
+          const picked = await f.browse();
+          if (picked != null && String(picked) !== "") {
+            input.value = picked;
+            input.focus();
+          }
+        });
+        wrap.append(input, btn);
+        row.append(wrap);
+      } else {
+        row.append(input);
+      }
       readers[f.id] = () => input.value;
     }
     body.append(row);
@@ -238,7 +260,79 @@ export function showLoading(text) {
 }
 
 export function hideLoading() {
-  $("overlay").classList.add("hidden");
+  const o = $("overlay");
+  o.classList.add("hidden");
+  o.textContent = "";
+}
+
+// A determinate progress card for long worker ops (sort/grep/split) — #78.
+// Shows a bar, a "done / total lines" readout, and (when `onCancel` is given) a
+// Cancel button. Returns a handle to feed progress and to tear it down. The
+// overlay counts as a modal (see `loadingVisible`), so edits stay blocked.
+export type ProgressHandle = {
+  setProgress: (done: number, total: number) => void;
+  close: () => void;
+};
+
+export function showProgress(label: string, onCancel?: () => void): ProgressHandle {
+  const o = $("overlay");
+  o.textContent = "";
+  const card = document.createElement("div");
+  card.className = "progress-card";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "progress-label";
+  labelEl.textContent = label;
+
+  const track = document.createElement("div");
+  track.className = "progress-track indeterminate";
+  const fill = document.createElement("div");
+  fill.className = "progress-fill";
+  track.appendChild(fill);
+
+  const meta = document.createElement("div");
+  meta.className = "progress-meta";
+  const count = document.createElement("span");
+  const pct = document.createElement("span");
+  meta.append(count, pct);
+
+  card.append(labelEl, track, meta);
+
+  if (onCancel) {
+    const actions = document.createElement("div");
+    actions.className = "progress-actions";
+    const btn = document.createElement("button");
+    btn.className = "cmd";
+    btn.textContent = t("dialog.progress.cancel");
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      labelEl.textContent = t("dialog.progress.cancelling");
+      onCancel();
+    });
+    actions.appendChild(btn);
+    card.appendChild(actions);
+  }
+
+  o.appendChild(card);
+  o.classList.remove("hidden");
+
+  return {
+    setProgress(done, total) {
+      if (total > 0) {
+        track.classList.remove("indeterminate");
+        const ratio = Math.max(0, Math.min(1, done / total));
+        fill.style.width = `${(ratio * 100).toFixed(1)}%`;
+        count.textContent = t("dialog.progress.lines", {
+          done: commas(done),
+          total: commas(total),
+        });
+        pct.textContent = `${(ratio * 100).toFixed(0)}%`;
+      }
+    },
+    close() {
+      hideLoading();
+    },
+  };
 }
 
 // True while the blocking loading overlay is up (open, sort, replace-all, …).

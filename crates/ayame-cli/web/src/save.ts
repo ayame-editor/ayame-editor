@@ -8,7 +8,8 @@ import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
 import { reloadViewport, settleEditQueue } from "./edits.js";
 import { flashCount, lastGrep } from "./search.js";
-import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import { askConfirm, askForm, showMessage } from "./dialogs.js";
+import { isOpCancelled, runTrackedOp } from "./progress.js";
 import {
   onDocumentOpened,
   openPath,
@@ -555,16 +556,19 @@ export async function sortSave() {
     );
     if (!ok) return;
   }
-  showLoading(t("dialog.sort.running"));
   try {
-    const res = await apiPost<{ path: string }, SortSaveRequest>("/api/sort/save", {
-      path: null,
-      in_place: inPlace,
-      key,
-      numeric: !!f.numeric,
-      reverse: f.order === "desc",
-      delim: key != null && f.delim ? f.delim : null,
-    });
+    const res = await runTrackedOp<{ path: string }, SortSaveRequest>(
+      t("dialog.sort.running"),
+      "/api/sort/save",
+      {
+        path: null,
+        in_place: inPlace,
+        key,
+        numeric: !!f.numeric,
+        reverse: f.order === "desc",
+        delim: key != null && f.delim ? f.delim : null,
+      },
+    );
     if (inPlace) {
       state.sel = null;
       state.extraCursors = [];
@@ -580,10 +584,9 @@ export async function sortSave() {
       flashCount(t("dialog.sort.newDone", { path: displayPath(res.path) }));
     }
   } catch (e) {
+    if (isOpCancelled(e)) return;
     flashCount(t("dialog.sort.error"), "error");
     showMessage(t("dialog.sort.error"), serverMessage(e.message));
-  } finally {
-    hideLoading();
   }
 }
 
@@ -616,19 +619,18 @@ export async function splitFile() {
     flashCount(t("dialog.split.linesInvalid"), "error");
     return;
   }
-  showLoading(t("dialog.split.running"));
   try {
     const dir = String(f.dir || "").trim();
-    const res = await apiPost<{ files: string[]; count: number }, SplitSaveRequest>(
+    const res = await runTrackedOp<{ files: string[]; count: number }, SplitSaveRequest>(
+      t("dialog.split.running"),
       "/api/split/save",
       { lines, dir: dir || null },
     );
     flashCount(t("dialog.split.done", { count: res.count, path: displayPath(res.files[0]) }));
   } catch (e) {
+    if (isOpCancelled(e)) return;
     flashCount(t("dialog.split.error"), "error");
     showMessage(t("dialog.split.error"), serverMessage(e.message));
-  } finally {
-    hideLoading();
   }
 }
 
@@ -681,21 +683,24 @@ function suggestedGrepPath() {
 }
 
 async function runGrepSave(query, opts, target) {
-  showLoading(t("dialog.grepSave.running"));
   let res;
   try {
-    res = await apiPost<ArtifactResponse, GrepSaveRequest>("/api/grep/save", {
-      path: target.path,
-      query,
-      regex: opts.regex,
-      ci: opts.ci,
-      word: opts.word,
-      overwrite: !!target.overwrite,
-      jobs: null,
-      chunk_lines: null,
-    });
+    res = await runTrackedOp<ArtifactResponse, GrepSaveRequest>(
+      t("dialog.grepSave.running"),
+      "/api/grep/save",
+      {
+        path: target.path,
+        query,
+        regex: opts.regex,
+        ci: opts.ci,
+        word: opts.word,
+        overwrite: !!target.overwrite,
+        jobs: null,
+        chunk_lines: null,
+      },
+    );
   } catch (e) {
-    hideLoading();
+    if (isOpCancelled(e)) return;
     // The in-app picker doesn't confirm overwrites itself (the OS dialog
     // does): same conflict-confirm-retry flow as save-as.
     if (!target.overwrite && isExistsError(e)) {
@@ -711,7 +716,6 @@ async function runGrepSave(query, opts, target) {
     showMessage(t("dialog.grepSave.error"), serverMessage(e.message));
     return;
   }
-  hideLoading();
   flashCount(t("file.saved", { path: displayPath(res.path) }));
   // Open the extracted lines so the result is immediately inspectable.
   await openPath(res.path);

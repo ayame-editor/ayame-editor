@@ -28,13 +28,23 @@ pub(crate) use cli::{
 
 use std::process::ExitCode;
 
+use cli::{Outcome, UsageError};
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match cli::run(args) {
-        Ok(()) => ExitCode::SUCCESS,
+        // grep convention: 0 = matched / succeeded, 1 = no match.
+        Ok(Outcome::Success) => ExitCode::SUCCESS,
+        Ok(Outcome::NoMatch) => ExitCode::from(1),
         Err(e) => {
             eprintln!("ayame: {e:#}");
-            ExitCode::FAILURE
+            // Usage / argument errors are exit code 2; other runtime failures
+            // stay at the historical exit code 1.
+            if e.downcast_ref::<UsageError>().is_some() {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }

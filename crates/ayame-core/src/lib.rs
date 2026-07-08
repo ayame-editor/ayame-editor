@@ -46,7 +46,7 @@ pub mod split;
 pub mod transform;
 pub mod wal;
 
-pub use document::{Document, FileStat, Line, OpenOptions, TailRefresh};
+pub use document::{Document, FileStat, Line, OpenOptions, TailFollow, TailRefresh};
 pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};

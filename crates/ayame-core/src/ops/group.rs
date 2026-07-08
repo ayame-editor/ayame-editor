@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
@@ -10,7 +9,8 @@ use crate::document::Document;
 use crate::fields::{decoded_text_key_into, field_bytes, FieldSpec};
 use crate::Result;
 
-use super::common::{read_full, unique_spill_dir};
+use super::common::unique_spill_dir;
+use super::spill::{self, RunCodec};
 
 // ======================= group-by (hash aggregation) =========================
 
@@ -34,7 +34,7 @@ impl Default for GroupOptions {
             key_column: None,
             value_column: None,
             fields: FieldSpec::default(),
-            budget_bytes: 256 * 1024 * 1024,
+            budget_bytes: spill::DEFAULT_BUDGET_BYTES,
             spill_dir: std::env::temp_dir().join("ayame-group"),
         }
     }
@@ -106,6 +106,53 @@ impl Acc {
     }
 }
 
+/// Codec for a spilled group: on-disk `[len][key][count][ncount][sum][min][max]`
+/// (five 8-byte LE fields), ordered by key ascending with a run tie-break so the
+/// merge folds equal keys in a stable run order.
+struct GroupCodec;
+
+impl RunCodec for GroupCodec {
+    type Record = (Vec<u8>, Acc);
+    type Order = ();
+
+    fn compare(
+        _order: (),
+        a: &(Vec<u8>, Acc),
+        a_run: usize,
+        b: &(Vec<u8>, Acc),
+        b_run: usize,
+    ) -> Ordering {
+        a.0.cmp(&b.0).then_with(|| a_run.cmp(&b_run))
+    }
+
+    fn write<W: Write>(w: &mut W, rec: &(Vec<u8>, Acc)) -> Result<u64> {
+        let (key, acc) = rec;
+        let n = spill::write_key(w, key)?;
+        w.write_all(&acc.count.to_le_bytes())?;
+        w.write_all(&acc.ncount.to_le_bytes())?;
+        w.write_all(&acc.sum.to_le_bytes())?;
+        w.write_all(&acc.min.to_le_bytes())?;
+        w.write_all(&acc.max.to_le_bytes())?;
+        Ok(n + 40)
+    }
+
+    fn read<R: Read>(r: &mut R) -> Result<Option<(Vec<u8>, Acc)>> {
+        let Some(key) = spill::read_key(r)? else {
+            return Ok(None);
+        };
+        let mut f = [0u8; 40];
+        r.read_exact(&mut f)?;
+        let acc = Acc {
+            count: u64::from_le_bytes(f[0..8].try_into().unwrap()),
+            ncount: u64::from_le_bytes(f[8..16].try_into().unwrap()),
+            sum: f64::from_le_bytes(f[16..24].try_into().unwrap()),
+            min: f64::from_le_bytes(f[24..32].try_into().unwrap()),
+            max: f64::from_le_bytes(f[32..40].try_into().unwrap()),
+        };
+        Ok(Some((key, acc)))
+    }
+}
+
 /// Group `doc` by the key field and aggregate, calling `emit` once per group in
 /// ascending key order. Keeps an in-memory map up to `budget_bytes`; when it
 /// overflows it spills a sorted partial-aggregate run and continues, then
@@ -119,52 +166,42 @@ pub fn group(
     use std::collections::HashMap;
     let spill_dir = unique_spill_dir(&opts.spill_dir)?;
     let enc = doc.encoding();
-    let total = doc.line_count();
 
     let mut map: HashMap<Vec<u8>, Acc> = HashMap::new();
     let mut map_bytes = 0usize;
     let mut runs: Vec<PathBuf> = Vec::new();
     let mut spill_bytes = 0u64;
 
-    const BATCH: u64 = 8192;
-    let mut start = 0u64;
     let mut field_scratch = Vec::new();
     let mut key_scratch = Vec::new();
-    while start < total {
-        let batch = doc.raw_line_ranges(start, BATCH);
-        if batch.is_empty() {
-            break;
-        }
-        let advanced = batch.len() as u64;
-        for (_ln, raw) in batch {
-            decoded_text_key_into(
-                raw,
-                enc,
-                opts.key_column,
-                &opts.fields,
-                &mut field_scratch,
-                &mut key_scratch,
-            );
-            let value = opts.value_column.and_then(|c| {
-                let f = field_bytes(raw, Some(c), &opts.fields, &mut field_scratch);
-                enc.decode_line(f).trim().parse::<f64>().ok()
-            });
-            match map.get_mut(key_scratch.as_slice()) {
-                Some(acc) => acc.add(value),
-                None => {
-                    map_bytes += key_scratch.len() + std::mem::size_of::<Acc>() + 48;
-                    let mut acc = Acc::new();
-                    acc.add(value);
-                    map.insert(key_scratch.clone(), acc);
-                    if map_bytes >= opts.budget_bytes {
-                        spill_bytes += spill_group(&mut map, &spill_dir, &mut runs)?;
-                        map_bytes = 0;
-                    }
+    doc.for_each_raw_line(|_ln, raw| {
+        decoded_text_key_into(
+            raw,
+            enc,
+            opts.key_column,
+            &opts.fields,
+            &mut field_scratch,
+            &mut key_scratch,
+        );
+        let value = opts.value_column.and_then(|c| {
+            let f = field_bytes(raw, Some(c), &opts.fields, &mut field_scratch);
+            enc.decode_line(f).trim().parse::<f64>().ok()
+        });
+        match map.get_mut(key_scratch.as_slice()) {
+            Some(acc) => acc.add(value),
+            None => {
+                map_bytes += key_scratch.len() + std::mem::size_of::<Acc>() + 48;
+                let mut acc = Acc::new();
+                acc.add(value);
+                map.insert(key_scratch.clone(), acc);
+                if map_bytes >= opts.budget_bytes {
+                    spill_bytes += spill_group(&mut map, &spill_dir, &mut runs)?;
+                    map_bytes = 0;
                 }
             }
         }
-        start += advanced;
-    }
+        Ok(())
+    })?;
 
     let mut groups = 0u64;
     if runs.is_empty() {
@@ -212,114 +249,29 @@ fn spill_group(
     let mut entries: Vec<(Vec<u8>, Acc)> = map.drain().collect();
     entries.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let path = dir.join(format!("grp{:05}.bin", runs.len()));
-    let mut w = BufWriter::new(File::create(&path)?);
-    let mut bytes = 0u64;
-    for (key, acc) in &entries {
-        w.write_all(&(key.len() as u32).to_le_bytes())?;
-        w.write_all(key)?;
-        w.write_all(&acc.count.to_le_bytes())?;
-        w.write_all(&acc.ncount.to_le_bytes())?;
-        w.write_all(&acc.sum.to_le_bytes())?;
-        w.write_all(&acc.min.to_le_bytes())?;
-        w.write_all(&acc.max.to_le_bytes())?;
-        bytes += 4 + key.len() as u64 + 40;
-    }
-    w.flush()?;
+    let bytes = spill::write_run::<GroupCodec>(&entries, &path)?;
     runs.push(path);
     Ok(bytes)
 }
 
-struct GroupRunReader {
-    r: BufReader<File>,
-}
-
-impl GroupRunReader {
-    fn open(path: &PathBuf) -> Result<GroupRunReader> {
-        Ok(GroupRunReader {
-            r: BufReader::new(File::open(path)?),
-        })
-    }
-    fn next_record(&mut self) -> Result<Option<(Vec<u8>, Acc)>> {
-        let mut len_b = [0u8; 4];
-        if !read_full(&mut self.r, &mut len_b)? {
-            return Ok(None);
-        }
-        let mut key = vec![0u8; u32::from_le_bytes(len_b) as usize];
-        self.r.read_exact(&mut key)?;
-        let mut f = [0u8; 40];
-        self.r.read_exact(&mut f)?;
-        let acc = Acc {
-            count: u64::from_le_bytes(f[0..8].try_into().unwrap()),
-            ncount: u64::from_le_bytes(f[8..16].try_into().unwrap()),
-            sum: f64::from_le_bytes(f[16..24].try_into().unwrap()),
-            min: f64::from_le_bytes(f[24..32].try_into().unwrap()),
-            max: f64::from_le_bytes(f[32..40].try_into().unwrap()),
-        };
-        Ok(Some((key, acc)))
-    }
-}
-
-/// Heap element ordered so the smallest key pops first (min-heap by key).
-struct GroupHeapItem {
-    key: Vec<u8>,
-    run: usize,
-    acc: Acc,
-}
-impl PartialEq for GroupHeapItem {
-    fn eq(&self, o: &Self) -> bool {
-        self.cmp(o) == Ordering::Equal
-    }
-}
-impl Eq for GroupHeapItem {}
-impl PartialOrd for GroupHeapItem {
-    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
-        Some(self.cmp(o))
-    }
-}
-impl Ord for GroupHeapItem {
-    fn cmp(&self, o: &Self) -> Ordering {
-        // Reversed: smaller key is "greater" so the max-heap yields it first.
-        o.key.cmp(&self.key).then_with(|| o.run.cmp(&self.run))
-    }
-}
-
 fn merge_groups(runs: &[PathBuf], emit: &mut impl FnMut(&GroupRow)) -> Result<u64> {
-    let mut readers: Vec<GroupRunReader> = runs
-        .iter()
-        .map(GroupRunReader::open)
-        .collect::<Result<_>>()?;
-    let mut heap: BinaryHeap<GroupHeapItem> = BinaryHeap::with_capacity(readers.len());
-    for (i, rr) in readers.iter_mut().enumerate() {
-        if let Some((key, acc)) = rr.next_record()? {
-            heap.push(GroupHeapItem { key, run: i, acc });
-        }
-    }
-
-    let mut groups = 0u64;
-    while let Some(first) = heap.pop() {
-        let key = first.key;
-        let mut acc = first.acc;
-        if let Some((k, a)) = readers[first.run].next_record()? {
-            heap.push(GroupHeapItem {
-                key: k,
-                run: first.run,
-                acc: a,
-            });
-        }
-        // Fold in the same key wherever it appears across the other runs.
-        while heap.peek().is_some_and(|t| t.key == key) {
-            let it = heap.pop().unwrap();
-            acc.combine(&it.acc);
-            if let Some((k, a)) = readers[it.run].next_record()? {
-                heap.push(GroupHeapItem {
-                    key: k,
-                    run: it.run,
-                    acc: a,
-                });
+    let run_refs: Vec<&Path> = runs.iter().map(|p| p.as_path()).collect();
+    let (groups, _bytes) = spill::kway_merge::<GroupCodec, _, _>(
+        &run_refs,
+        (),
+        |acc, cand| {
+            // Fold `cand` into `acc` when the keys match (equal-key aggregation).
+            if acc.0 == cand.0 {
+                acc.1.combine(&cand.1);
+                true
+            } else {
+                false
             }
-        }
-        emit(&group_row(key, &acc));
-        groups += 1;
-    }
+        },
+        |(key, acc)| {
+            emit(&group_row(key, &acc));
+            Ok(0)
+        },
+    )?;
     Ok(groups)
 }

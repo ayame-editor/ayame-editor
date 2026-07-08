@@ -3,7 +3,7 @@
 //! The CLI is intentionally small and `grep`/`sed`-flavored so it composes with
 //! the rest of a data engineer's toolbox; `ayame serve` launches the GUI.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 #[cfg(feature = "gui")]
 use crate::gui;
@@ -19,13 +19,25 @@ mod inspect;
 mod progress;
 mod sort;
 mod transform;
+pub(crate) mod wire;
 
 #[cfg(feature = "gui")]
 pub(crate) use args::default_cache_dir;
-pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
+pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked, usage_error, UsageError};
 pub(crate) use common::{maybe_crash, temp_work_dir};
 pub(crate) use formatting::{commas, human_bytes};
 pub(crate) use sort::sort_document_to_utf8_file;
+
+/// Result of a successful command run, distinguishing grep-style outcomes so
+/// `main` can pick the exit code: match found (0) vs. completed-but-no-match
+/// (1). Usage errors (exit 2) travel as an [`UsageError`] inside `Err`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    /// The command succeeded (and, for matchers, found at least one match).
+    Success,
+    /// A matching command (`search`, `grep-lines`) completed with zero matches.
+    NoMatch,
+}
 
 const HELP: &str = "\
 ayame — edit, transform, search and navigate text files of any size
@@ -44,7 +56,8 @@ COMMANDS:
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
     sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
     replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
-    case   <FILE> <upper|lower>   Streaming ASCII case conversion (--out FILE)
+    case   <FILE> <MODE>          Streaming case conversion (--out FILE). MODE is
+                                  upper|lower|camel|pascal|snake|kebab|constant
     grep-lines <FILE> <PATTERN>   Extract matching lines to a new file (--out FILE;
                                   -e regex, -i ignore-case, -w whole-word)
     split  <FILE> --lines N       Split into N-line parts (<stem>.partNNNN<.ext>)
@@ -63,7 +76,8 @@ COMMON OPTIONS:
     --stride <N>       Lines per index checkpoint (default 4096)
     --no-cache         Do not read/write the persistent index cache
     --cache-dir <DIR>  Override the index-cache directory
-    --json             Machine-readable output (stat/search)
+    --json             Machine-readable output (stat/search/split/group/top/
+                       distinct/cache)
     -V, --version      Show version
     -h, --help         Show this help
 
@@ -72,21 +86,30 @@ FIELD OPTIONS (sort/group/top/distinct):
     -t, --delim <C>    Field delimiter (default ',')
     --csv              RFC-4180 parsing: quoted fields may contain the delimiter
     --quote <C>        Quote char for --csv (default '\"')
-    --numeric          Treat the key as a number (sort/top; sort also accepts -n)
+    --numeric          Treat the key as a number (sort/top)
 
 TRANSFORM OPTIONS:
     --out <FILE>       Output file for sort/replace/case/grep-lines
     -i, --ignore-case  Case-insensitive replace/grep-lines
     -e, --regex        Regex replace/grep-lines pattern
-    -w, --whole-word   Whole-word grep-lines matches
+    -w, --word, --whole-word
+                       Whole-word grep-lines matches (same aliases as search)
     --overwrite        Allow grep-lines --out to replace an existing file
     --jobs <N>         Parallel replace workers (replace/case/grep-lines; 0 = Rayon default)
     --chunk-lines <N>  Lines per parallel replace chunk (default 4000000)
+
+SORT OPTIONS:
+    --out <FILE>       Write sorted text to FILE instead of stdout
+    --out-order <FILE> Write the sorted order as u64 LE line numbers
+    -r, --reverse      Descending order
+    --budget <SIZE>    In-memory budget before spilling (default 256MiB)
+    --spill-dir <DIR>  Directory for spill runs (default: a temp dir)
 
 SPLIT OPTIONS:
     --lines <N>        Lines per output part (required, at least 1)
     --out-dir <DIR>    Output directory (default: the source file's directory)
     --name <NAME>      Base file name for the parts (default: input file name)
+    --json             Emit the split result (part paths, counts) as JSON
 
 SEARCH OPTIONS:
     --start-byte <N>   Begin search at a byte offset (for worker/API resume)
@@ -163,7 +186,7 @@ fn is_known_command(cmd: &str) -> bool {
     COMMANDS.contains(&cmd) || (cfg!(feature = "gui") && cmd == "gui")
 }
 
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
+pub(crate) fn run(args: Vec<String>) -> Result<Outcome> {
     let cmd = match args.first() {
         Some(c) => c.clone(),
         None => {
@@ -172,61 +195,64 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
             // so they never land here. Plain CLI builds print help as before.
             #[cfg(feature = "gui")]
             {
-                return gui::cmd_gui(&[]);
+                return gui::cmd_gui(&[]).map(|()| Outcome::Success);
             }
             #[cfg(not(feature = "gui"))]
             {
                 print!("{HELP}");
-                return Ok(());
+                return Ok(Outcome::Success);
             }
         }
     };
     if cmd == "-h" || cmd == "--help" || cmd == "help" {
         print!("{HELP}");
-        return Ok(());
+        return Ok(Outcome::Success);
     }
     if cmd == "-V" || cmd == "--version" || cmd == "version" {
         println!("ayame {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
+        return Ok(Outcome::Success);
     }
 
     #[cfg(feature = "gui")]
     if should_open_path_in_gui(&cmd) {
-        return gui::cmd_gui(&args);
+        return gui::cmd_gui(&args).map(|()| Outcome::Success);
     }
 
     let rest = &args[1..];
+    // Most commands only ever succeed-or-error; the two matchers (`search`,
+    // `grep-lines`) additionally report whether they matched anything.
+    let ok = |r: Result<()>| r.map(|()| Outcome::Success);
     match cmd.as_str() {
-        "stat" => inspect::cmd_stat(rest),
-        "head" => inspect::cmd_head_tail(rest, false),
-        "tail" => inspect::cmd_head_tail(rest, true),
-        "line" => inspect::cmd_line(rest),
-        "lines" => inspect::cmd_lines(rest),
+        "stat" => ok(inspect::cmd_stat(rest)),
+        "head" => ok(inspect::cmd_head_tail(rest, false)),
+        "tail" => ok(inspect::cmd_head_tail(rest, true)),
+        "line" => ok(inspect::cmd_line(rest)),
+        "lines" => ok(inspect::cmd_lines(rest)),
         "search" => inspect::cmd_search(rest),
-        "diff" => diff::cmd_diff(rest),
-        "sort" => sort::cmd_sort(rest),
-        "sortdiff" | "sort-diff" => diff::cmd_sortdiff(rest),
-        "replace" => transform::cmd_replace(rest),
-        "case" => transform::cmd_case(rest),
+        "diff" => ok(diff::cmd_diff(rest)),
+        "sort" => ok(sort::cmd_sort(rest)),
+        "sortdiff" | "sort-diff" => ok(diff::cmd_sortdiff(rest)),
+        "replace" => ok(transform::cmd_replace(rest)),
+        "case" => ok(transform::cmd_case(rest)),
         "grep-lines" => transform::cmd_grep_lines(rest),
-        "split" => transform::cmd_split(rest),
-        "group" => aggregate::cmd_group(rest),
-        "top" => aggregate::cmd_top(rest),
-        "distinct" => aggregate::cmd_distinct(rest),
-        "gen" => gen::cmd_gen(rest),
-        "serve" => serve::cmd_serve(rest),
+        "split" => ok(transform::cmd_split(rest)),
+        "group" => ok(aggregate::cmd_group(rest)),
+        "top" => ok(aggregate::cmd_top(rest)),
+        "distinct" => ok(aggregate::cmd_distinct(rest)),
+        "gen" => ok(gen::cmd_gen(rest)),
+        "serve" => ok(serve::cmd_serve(rest)),
         #[cfg(feature = "typegen")]
-        "typegen" => crate::serve::typegen::cmd_typegen(rest),
+        "typegen" => ok(crate::serve::typegen::cmd_typegen(rest)),
         #[cfg(not(feature = "typegen"))]
-        "typegen" => anyhow::bail!(
+        "typegen" => Err(anyhow::anyhow!(
             "typegen requires a dev build: cargo run -p ayame-cli --features typegen -- typegen"
-        ),
+        )),
         #[cfg(feature = "gui")]
-        "gui" => gui::cmd_gui(rest),
-        "cache" => cache::cmd_cache(rest),
+        "gui" => ok(gui::cmd_gui(rest)),
+        "cache" => ok(cache::cmd_cache(rest)),
         other => {
             print!("{HELP}");
-            bail!("unknown command '{other}'");
+            Err(usage_error(format!("unknown command '{other}'")))
         }
     }
 }
@@ -266,5 +292,99 @@ mod tests {
         ] {
             assert!(is_known_command(cmd), "{cmd}");
         }
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Write `content` to a unique temp file and return its path.
+    fn temp_file(content: &str) -> std::path::PathBuf {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let seq = N.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("ayame-cli-test-{}-{seq}.csv", std::process::id()));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
+    fn search_exit_code_reflects_matches() {
+        let path = temp_file("alpha\nbeta\ngamma\n");
+        let p = path.to_str().unwrap();
+
+        let hit = run(argv(&["search", p, "beta", "--no-cache"])).unwrap();
+        assert_eq!(hit, Outcome::Success);
+
+        let miss = run(argv(&["search", p, "zzz", "--no-cache"])).unwrap();
+        assert_eq!(miss, Outcome::NoMatch);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unknown_command_is_a_usage_error() {
+        let err = run(argv(&["frobnicate"])).unwrap_err();
+        assert!(err.downcast_ref::<UsageError>().is_some());
+    }
+
+    #[test]
+    fn unknown_option_is_a_usage_error() {
+        let path = temp_file("x\n");
+        let err = run(argv(&["stat", path.to_str().unwrap(), "--bogus"])).unwrap_err();
+        assert!(err.downcast_ref::<UsageError>().is_some());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn runtime_error_is_not_a_usage_error() {
+        // Opening a missing file is a runtime failure (exit 1), not usage (2).
+        let err = run(argv(&["stat", "/no/such/ayame/file.csv", "--no-cache"])).unwrap_err();
+        assert!(err.downcast_ref::<UsageError>().is_none());
+    }
+
+    #[test]
+    fn json_smoke_runs_for_structured_commands() {
+        // These exercise the serde_json serialization paths end to end; the
+        // JSON lands on stdout, we only assert the command completes cleanly.
+        let path = temp_file("a,1\na,2\nb,3\n");
+        let p = path.to_str().unwrap();
+        assert_eq!(
+            run(argv(&[
+                "group",
+                p,
+                "-k",
+                "1",
+                "--value",
+                "2",
+                "--json",
+                "--no-cache"
+            ]))
+            .unwrap(),
+            Outcome::Success
+        );
+        assert_eq!(
+            run(argv(&[
+                "top",
+                p,
+                "-k",
+                "2",
+                "-n",
+                "2",
+                "--numeric",
+                "--json",
+                "--no-cache"
+            ]))
+            .unwrap(),
+            Outcome::Success
+        );
+        assert_eq!(
+            run(argv(&["distinct", p, "-k", "1", "--json", "--no-cache"])).unwrap(),
+            Outcome::Success
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

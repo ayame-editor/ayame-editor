@@ -10,24 +10,34 @@ use super::common::{maybe_crash, rename_or_copy, temp_sibling_with_label};
 use super::fields::{field_spec, parse_budget, parse_key};
 use super::formatting::{commas, human_bytes};
 use super::progress::ProgressReporter;
+use super::wire;
+
+/// Value-taking flags `ayame sort` accepts. The serve→worker builder
+/// (`serve/ops.rs`) emits a subset of these; a round-trip test enforces that.
+pub(crate) const SORT_VALUE_FLAGS: &[&str] = &[
+    wire::sort::KEY,
+    "-k",
+    wire::sort::DELIM,
+    "-t",
+    "--quote",
+    "--budget",
+    "--out-order",
+    wire::OUT,
+    wire::sort::SPILL_DIR,
+];
+/// Boolean flags `ayame sort` accepts.
+pub(crate) const SORT_BOOL_FLAGS: &[&str] = &[
+    wire::sort::NUMERIC,
+    "-n",
+    wire::sort::REVERSE,
+    "-r",
+    "--csv",
+    wire::PROGRESS,
+];
 
 pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &[
-            "--key",
-            "-k",
-            "--delim",
-            "-t",
-            "--quote",
-            "--budget",
-            "--out-order",
-            "--out",
-            "--spill-dir",
-        ],
-        &["--numeric", "-n", "--reverse", "-r", "--csv", "--progress"],
-    )?;
+    let (doc, _pos, opts, flags) = open_doc(args, SORT_VALUE_FLAGS, SORT_BOOL_FLAGS)?;
     let key_column = parse_key(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
     let reverse = has_flag(&flags, &["--reverse", "-r"]);

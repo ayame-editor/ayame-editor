@@ -31,9 +31,9 @@ import {
   selectionRanges,
 } from "./selection.js";
 import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
-import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
-import { openPath } from "./workspace.js";
+import { openPath, pickFile, pickFolder } from "./workspace.js";
 import { isNativeApp, nativeOpenDialog } from "./app.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
@@ -714,14 +714,15 @@ export function renderDiffView(res) {
 
 export async function diffFile() {
   const base = state.stat?.path || "";
-  // Desktop build: pick the comparison file with the OS dialog instead of
-  // hand-typing an absolute path (issue #79). Browser build keeps the prompt.
+  // Pick the comparison file with a real picker instead of hand-typing an
+  // absolute path (issue #79): the OS dialog on desktop, the in-app opener
+  // modal in the browser build.
   let path;
   if (isNativeApp()) {
     const picked = await nativeOpenDialog(pathDirName(base) || "");
     path = picked[0] || "";
   } else {
-    path = await askPrompt(t("menu.diff"), t("dialog.diff.promptPath"), base);
+    path = await pickFile(t("menu.diff"), pathDirName(base) || "");
   }
   if (path == null || path.trim() === "") return;
   showLoading(t("dialog.diff.computing"));
@@ -774,6 +775,8 @@ export async function grepFolder() {
         label: t("dialog.grep.dir"),
         value: base,
         placeholder: t("dialog.grep.dirPlaceholder"),
+        // Folder picker so the directory isn't hand-typed (issue #79).
+        browse: () => pickFolder(t("dialog.grep.dir"), base),
       },
       {
         id: "glob",

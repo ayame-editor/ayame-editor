@@ -12,6 +12,7 @@ mod common;
 mod distinct;
 mod group;
 mod sort;
+mod spill;
 mod top;
 
 pub use crate::fields::FieldSpec;

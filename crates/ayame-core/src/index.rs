@@ -74,6 +74,7 @@ impl NewlineKind {
 }
 
 /// A sparse index mapping line numbers <-> byte offsets for one buffer.
+#[derive(Clone)]
 pub struct LineIndex {
     checkpoints: Vec<Checkpoint>, // sorted ascending by both `line` and `off`
     stride: u64,
