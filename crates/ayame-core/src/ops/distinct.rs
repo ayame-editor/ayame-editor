@@ -77,27 +77,16 @@ impl Hll {
 /// Estimate the number of distinct values of the configured field.
 pub fn distinct(doc: &Document, opts: &DistinctOptions) -> DistinctResult {
     use std::hash::{Hash, Hasher};
-    let total = doc.line_count();
     let mut hll = Hll::new(opts.precision.clamp(4, 18));
     let mut scratch = Vec::new();
-    const BATCH: u64 = 8192;
-    let mut start = 0u64;
-    while start < total {
-        let batch = doc.raw_line_ranges(start, BATCH);
-        if batch.is_empty() {
-            break;
-        }
-        let advanced = batch.len() as u64;
-        for (_ln, raw) in batch {
-            // Distinctness is over the (unescaped) field bytes; identical bytes
-            // hash identically, so no decode is needed here.
-            let field = field_bytes(raw, opts.key_column, &opts.fields, &mut scratch);
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            field.hash(&mut h);
-            hll.add(h.finish());
-        }
-        start += advanced;
-    }
+    doc.for_each_raw_line(|_ln, raw| {
+        // Distinctness is over the (unescaped) field bytes; identical bytes
+        // hash identically, so no decode is needed here.
+        let field = field_bytes(raw, opts.key_column, &opts.fields, &mut scratch);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        field.hash(&mut h);
+        hll.add(h.finish());
+    });
     DistinctResult {
         estimate: hll.estimate().round() as u64,
         registers: hll.reg.len(),

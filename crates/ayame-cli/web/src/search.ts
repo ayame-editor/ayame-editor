@@ -33,7 +33,7 @@ import {
 import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
-import { openPath } from "./workspace.js";
+import { openPath, showFolderDialog } from "./workspace.js";
 import { isNativeApp, nativeOpenDialog } from "./app.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
@@ -770,10 +770,12 @@ export async function grepFolder() {
       },
       {
         id: "dir",
-        type: "text",
+        type: "path",
         label: t("dialog.grep.dir"),
         value: base,
         placeholder: t("dialog.grep.dirPlaceholder"),
+        onBrowse: (cur) =>
+          showFolderDialog(t("dialog.open.chooseFolder"), (cur || base || "").trim()),
       },
       {
         id: "glob",

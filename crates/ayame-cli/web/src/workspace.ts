@@ -85,20 +85,60 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
   });
 }
 
+// Pick a folder with the in-app browser (issue #79.1). Both builds use it: the
+// OS open dialog only returns files, and folder targets (grep's search root)
+// need a directory. Resolves with the chosen absolute path, or null on cancel.
+export function showFolderDialog(title, startDir): Promise<string | null> {
+  return new Promise((resolve) => {
+    configureOpener("folder", title);
+    state.openerResolve = resolve;
+    setModalOpen($("opener"), true);
+    browse(startDir || localStorage.getItem(TREE_KEY) || null);
+    queueMicrotask(() => ($("opener-open") as HTMLButtonElement).focus());
+  });
+}
+
+export function finishFolderDialog(value) {
+  const resolve = state.openerResolve;
+  state.openerResolve = null;
+  state.openerMode = "open";
+  setModalOpen($("opener"), false);
+  configureOpener("open");
+  // No focusEditor() here: the folder picker is opened over another modal (the
+  // grep form), so control returns there, not to the editor.
+  if (resolve) resolve(value);
+}
+
 export function configureOpener(mode, title?) {
   state.openerMode = mode;
   const save = mode === "save";
+  const folder = mode === "folder";
   const m = $("opener");
   m.classList.toggle("save-mode", save);
-  $("opener-title").textContent = title || t(save ? "menu.saveAs" : "dialog.open.title");
-  $("opener-input-label").textContent = t(save ? "dialog.open.fileName" : "dialog.open.path");
-  $("opener-input").placeholder = t(
-    save ? "dialog.open.namePlaceholder" : "dialog.open.pathPlaceholder",
+  m.classList.toggle("folder-mode", folder);
+  $("opener-title").textContent =
+    title || t(save ? "menu.saveAs" : folder ? "dialog.open.chooseFolder" : "dialog.open.title");
+  $("opener-input-label").textContent = t(
+    save ? "dialog.open.fileName" : folder ? "dialog.open.folderPath" : "dialog.open.path",
   );
-  $("opener-open").textContent = t(save ? "menu.save" : "menu.open");
+  $("opener-input").placeholder = t(
+    save
+      ? "dialog.open.namePlaceholder"
+      : folder
+        ? "dialog.open.folderPlaceholder"
+        : "dialog.open.pathPlaceholder",
+  );
+  $("opener-open").textContent = t(
+    save ? "menu.save" : folder ? "dialog.open.chooseFolder" : "menu.open",
+  );
+  // The "open current folder in tree" shortcut has no meaning while picking a
+  // folder target, so hide it in folder mode.
+  $("opener-folder").classList.toggle("hidden", folder);
   $("opener-folder").textContent = t(save ? "dialog.open.location" : "dialog.open.folder");
   $("opener-folder").title = t(save ? "dialog.open.folderToExplorer" : "dialog.open.folderToTree");
-  $("opener-hint").textContent = t(save ? "dialog.open.hintSave" : "dialog.open.hintOpen");
+  $("opener-hint").textContent = t(
+    save ? "dialog.open.hintSave" : folder ? "dialog.open.hintFolder" : "dialog.open.hintOpen",
+  );
   openerMsg("");
   renderRecentFiles();
 }
@@ -106,6 +146,10 @@ export function configureOpener(mode, title?) {
 export function hideOpener() {
   if (state.openerMode === "save") {
     finishSaveDialog(null);
+    return;
+  }
+  if (state.openerMode === "folder") {
+    finishFolderDialog(null);
     return;
   }
   // The opener doubles as the welcome screen: don't let it close while there is
@@ -147,6 +191,9 @@ export function renderBrowse(res) {
   state.openerDir = res.dir;
   state.openerEntries = res.entries || [];
   renderCwdCrumbs(res.dir);
+  // Folder mode: keep the editable path field tracking the folder in view, so
+  // "Choose Folder" and a typed override agree on what's being picked.
+  if (state.openerMode === "folder") $("opener-input").value = res.dir;
   const list = $("opener-list");
   list.textContent = "";
   if (res.parent) {
@@ -160,11 +207,14 @@ export function renderBrowse(res) {
 // must match DRIVES_DIR in serve/workspace.rs.
 export const DRIVES_DIR = "::";
 
-export function renderCwdCrumbs(path) {
-  const cwd = $("opener-cwd");
+// Shared breadcrumb renderer (issue #81.3): clears `host` and fills it with
+// clickable path segments, each invoking `onNavigate(segmentPath)`. Both the
+// open-dialog cwd bar and the sidebar tree root render the same way — they
+// differ only in host element and navigation callback.
+export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string) => void) {
   const clean = String(path || "").replace(/^\\\\\?\\/, "");
-  cwd.textContent = "";
-  cwd.title = clean;
+  host.textContent = "";
+  host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
     crumbs = [{ label: "PC", path: DRIVES_DIR }];
@@ -179,16 +229,20 @@ export function renderCwdCrumbs(path) {
       sep.className = "cwd-sep";
       sep.setAttribute("aria-hidden", "true");
       sep.append(iconSvg("i-chevron-right"));
-      cwd.append(sep);
+      host.append(sep);
     }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cwd-crumb";
     btn.textContent = crumb.label;
     btn.title = crumb.path;
-    btn.addEventListener("click", () => browse(crumb.path));
-    cwd.append(btn);
+    btn.addEventListener("click", () => onNavigate(crumb.path));
+    host.append(btn);
   }
+}
+
+export function renderCwdCrumbs(path) {
+  renderPathCrumbs($("opener-cwd"), path, browse);
 }
 
 export function browseRow(ent, isUp) {
@@ -218,7 +272,8 @@ export function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
-    } else openPath(ent.path);
+    } else if (state.openerMode === "open") openPath(ent.path);
+    // folder mode: files are not selectable targets — ignore the click.
   });
   row.addEventListener("dblclick", () => {
     if (!ent.is_dir && state.openerMode === "save") commitOpener();
@@ -266,8 +321,9 @@ export async function openRecent(path) {
 export function renderRecentFiles() {
   const box = $("opener-recent");
   if (!box) return;
-  // The recent shortcut only makes sense when opening, not when saving.
-  const list = state.openerMode === "save" ? [] : loadRecentFiles();
+  // The recent-files shortcut only makes sense when opening a file — not when
+  // saving or picking a folder target.
+  const list = state.openerMode === "open" ? loadRecentFiles() : [];
   box.textContent = "";
   if (!list.length) {
     box.classList.add("hidden");
@@ -338,6 +394,16 @@ export async function saveDialogTarget() {
 }
 
 export async function commitOpener() {
+  if (state.openerMode === "folder") {
+    const raw = $("opener-input").value.trim();
+    const dir = raw && isAbsolutePath(raw) ? raw : state.openerDir;
+    if (!dir || dir === DRIVES_DIR) {
+      openerMsg(t("dialog.open.pickFolderFirst"));
+      return;
+    }
+    finishFolderDialog(dir);
+    return;
+  }
   if (state.openerMode === "save") {
     const target = await saveDialogTarget();
     if (target) finishSaveDialog(target);
@@ -813,32 +879,7 @@ function updateTreeNav() {
 // Render the current root as clickable path segments in the sidebar header,
 // each jumping straight to that folder (mirrors the open dialog's breadcrumbs).
 export function renderTreeCrumbs(path) {
-  const host = $("sb-root");
-  const clean = String(path || "").replace(/^\\\\\?\\/, "");
-  host.textContent = "";
-  host.title = clean;
-  let crumbs = pathCrumbs(clean);
-  if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
-  } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
-  }
-  for (const [i, crumb] of crumbs.entries()) {
-    if (i > 0) {
-      const sep = document.createElement("span");
-      sep.className = "cwd-sep";
-      sep.setAttribute("aria-hidden", "true");
-      sep.append(iconSvg("i-chevron-right"));
-      host.append(sep);
-    }
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cwd-crumb";
-    btn.textContent = crumb.label;
-    btn.title = crumb.path;
-    btn.addEventListener("click", () => treeSetRoot(crumb.path));
-    host.append(btn);
-  }
+  renderPathCrumbs($("sb-root"), path, treeSetRoot);
 }
 
 export async function treeSetRoot(dir, record = true) {

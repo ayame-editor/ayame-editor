@@ -29,7 +29,7 @@ print help.
 | `sort <FILE>` | External merge sort with memory-bounded spill files. |
 | `sortdiff <OLD> <NEW>` | Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
-| `case <FILE> <upper|lower>` | Streaming ASCII case conversion to a new output file. |
+| `case <FILE> <MODE>` | Streaming case conversion (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) to a new output file. |
 | `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |
 | `split <FILE> --lines N` | Split a file into N-line parts. |
 | `group <FILE> -k COL` | Group by a key column and count or aggregate values. |
@@ -49,7 +49,7 @@ print help.
 | `--stride <N>` | file-opening commands | Lines per sparse-index checkpoint. Default: 4096. |
 | `--no-cache` | file-opening commands | Disable persistent index-cache reads and writes. |
 | `--cache-dir <DIR>` | file-opening commands | Override the index-cache directory. |
-| `--json` | `stat`, `search` | Emit machine-readable output. |
+| `--json` | `stat`, `search`, `split`, `group`, `top`, `distinct`, `cache` | Emit machine-readable output on stdout. |
 | `-V`, `--version` | global | Print the version. |
 | `-h`, `--help` | global | Print command help. |
 
@@ -63,7 +63,15 @@ print help.
 | `-t`, `--delim <C>` | Field delimiter. Default: comma. |
 | `--csv` | Use RFC 4180 CSV parsing, including quoted fields. |
 | `--quote <C>` | CSV quote character. Default: `"`. |
-| `--numeric` | Treat keys as numbers for `sort` and `top`. `sort` also accepts `-n`. |
+| `--numeric` | Treat keys as numbers for `sort` and `top`. |
+
+## Sort and Group Options
+
+| Option | Notes |
+| --- | --- |
+| `-r`, `--reverse` | Reverse the sort order (`sort`). |
+| `--budget <SIZE>` | In-memory budget before spilling to disk for `sort` / `group`. Default: 256MiB. Accepts sizes like `512MiB` or `2GiB`. |
+| `--spill-dir <DIR>` | Directory for external-merge spill files (`sort` / `group`). |
 
 ## Transform Options
 
@@ -88,6 +96,7 @@ intentionally before rerunning.
 | `--lines <N>` | Lines per output part. Required and must be at least 1. |
 | `--out-dir <DIR>` | Output directory. Default: the source file's directory. |
 | `--name <NAME>` | Base file name for parts. Default: the input file name. |
+| `--json` | Print the split result (part files and counts) as JSON. |
 
 Default split files use `<stem>.partNNNN<.ext>` names.
 
@@ -115,18 +124,36 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 
 | Command | Options |
 | --- | --- |
-| `group` | `--value <COL>` enables numeric `sum`, `min`, `max`, and `avg`; `--out-groups <FILE>` writes TSV rows. |
-| `top` | `-n <N>` sets the count; `--min` returns the smallest keys; `--out-order <FILE>` writes row order as little-endian `u64`. |
-| `distinct` | Uses the selected key column and reports an approximate distinct count. |
+| `group` | `--value <COL>` enables numeric `sum`, `min`, `max`, and `avg`; `--out-groups <FILE>` writes TSV rows; `--json` prints the run summary (`groups`, `runs`, `spill_bytes`). |
+| `top` | `-n <N>` sets the count; `--min` returns the smallest keys; `--out-order <FILE>` writes row order as little-endian `u64`; `--json` prints the selected rows. |
+| `distinct` | Uses the selected key column and reports an approximate distinct count; `--json` prints the estimate and HyperLogLog stats. |
 
 ## Cache Commands
 
 | Command | Notes |
 | --- | --- |
-| `cache path` | Print the cache directory. |
+| `cache path` | Print the cache directory to stdout. |
 | `cache info` | Show cache size and entry summary. |
 | `cache gc` | Remove old cache entries. Supports `--max-size`, `--max-age-days`, and `--dry-run`. |
 | `cache clear` | Remove cache entries. |
+
+`cache path` prints the directory to stdout (it is the one pipeable datum);
+`info`, `gc`, and `clear` write their human-readable report to stderr so stdout
+stays free for piping. Add `--json` to any subcommand for the structured form on
+stdout.
+
+## Exit Codes
+
+Ayame follows the `grep` convention:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. For `search`, at least one match was found. |
+| `1` | `search` ran cleanly but found no matches. |
+| `2` | A usage error, or a failure during the run. |
+
+`search --json` always exits `0` — machine callers read match status from the
+`hits` array rather than the exit code.
 
 ## Examples
 

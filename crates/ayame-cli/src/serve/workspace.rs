@@ -13,8 +13,8 @@ use tokio::io::AsyncWriteExt;
 use crate::temp_paths;
 
 use super::{
-    bad_request, internal, stat_response, AppState, SharedState, StatResponse, TabsResponse,
-    UiState,
+    bad_request, internal, stat_response, ApiError, AppState, SharedState, StatResponse,
+    TabsResponse, UiState,
 };
 
 // ---- workspace: open / browse / upload --------------------------------------
@@ -29,7 +29,7 @@ pub(super) struct OpenRequest {
 pub(super) async fn api_open(
     State(state): State<SharedState>,
     Json(req): Json<OpenRequest>,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     let path = req.path.trim().to_string();
     if path.is_empty() {
         return Err(bad_request("path is empty"));
@@ -43,7 +43,7 @@ pub(super) async fn api_open(
 /// file so all the normal edit/save machinery works; Save prompts for a real path.
 pub(super) async fn api_new(
     State(state): State<SharedState>,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     let dir = untitled_dir_result().map_err(internal)?;
     let target = unique_upload_path(&dir, &untitled_template_name());
     // One empty line, so the buffer is immediately editable yet still "clean"
@@ -70,7 +70,7 @@ pub(super) struct TabIdRequest {
 pub(super) async fn api_tabs_select(
     State(state): State<SharedState>,
     Json(req): Json<TabIdRequest>,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     state.switch_tab(req.id).await?;
     Ok(Json(stat_response(&state)))
 }
@@ -91,7 +91,7 @@ pub(super) async fn api_tabs_close(
 pub(super) async fn api_tabs_detach(
     State(state): State<SharedState>,
     Json(req): Json<TabIdRequest>,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     state.detach_tab(req.id).await?;
     Ok(Json(stat_response(&state)))
 }
@@ -103,19 +103,19 @@ pub(super) async fn api_ui_state(State(state): State<SharedState>) -> Json<UiSta
 pub(super) async fn api_ui_state_save(
     State(state): State<SharedState>,
     Json(req): Json<UiState>,
-) -> Result<Json<UiState>, (StatusCode, String)> {
+) -> Result<Json<UiState>, ApiError> {
     Ok(Json(state.save_ui_state(req)?))
 }
 
 pub(super) async fn api_session_save(
     State(state): State<SharedState>,
-) -> Result<Json<UiState>, (StatusCode, String)> {
+) -> Result<Json<UiState>, ApiError> {
     Ok(Json(state.save_session_snapshot()?))
 }
 
 pub(super) async fn api_session_restore(
     State(state): State<SharedState>,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     state.restore_session().await?;
     Ok(Json(stat_response(&state)))
 }
@@ -154,7 +154,7 @@ pub(super) const DRIVES_DIR: &str = "::";
 pub(super) async fn api_browse(
     State(state): State<SharedState>,
     Query(q): Query<BrowseQuery>,
-) -> Result<Json<BrowseResponse>, (StatusCode, String)> {
+) -> Result<Json<BrowseResponse>, ApiError> {
     if q.dir.as_deref().map(str::trim) == Some(DRIVES_DIR) {
         return drives_response().map(Json);
     }
@@ -224,7 +224,7 @@ fn browse_parent(dir: &Path) -> Option<String> {
 /// The virtual "PC" listing: every ready drive as a directory entry. Windows
 /// only — elsewhere the filesystem has a single root and this level is never
 /// offered as a parent (requesting it by hand is a 400, not a panic).
-fn drives_response() -> Result<BrowseResponse, (StatusCode, String)> {
+fn drives_response() -> Result<BrowseResponse, ApiError> {
     if !cfg!(windows) {
         return Err(bad_request("drive list is only available on Windows"));
     }
@@ -337,7 +337,7 @@ pub(super) async fn api_upload(
     State(state): State<SharedState>,
     Query(q): Query<UploadQuery>,
     request: Request,
-) -> Result<Json<StatResponse>, (StatusCode, String)> {
+) -> Result<Json<StatResponse>, ApiError> {
     let name = sanitize_filename(q.name.as_deref().unwrap_or("dropped.txt"));
     let dir = uploads_dir_result().map_err(internal)?;
     let (target, mut file) = create_unique_upload_file(&dir, &name)
@@ -358,8 +358,9 @@ pub(super) async fn api_upload(
         if written > MAX_UPLOAD_BYTES {
             drop(file);
             let _ = tokio::fs::remove_file(&target).await;
-            return Err((
+            return Err(ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
+                "too_large",
                 format!(
                     "upload exceeds the {} limit — open large files by path instead",
                     upload_limit_label()

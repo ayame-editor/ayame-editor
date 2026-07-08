@@ -29,7 +29,7 @@ ayame <COMMAND> [OPTIONS]
 | `sort <FILE>` | メモリ制限つき external merge sort。 |
 | `sortdiff <OLD> <NEW>` | 両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
-| `case <FILE> <upper|lower>` | ASCII 大文字 / 小文字変換を新しいファイルへ書き出し。 |
+| `case <FILE> <MODE>` | 大文字小文字変換 (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) を新しいファイルへ書き出し。 |
 | `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
 | `split <FILE> --lines N` | N 行ごとのパーツに分割。 |
 | `group <FILE> -k COL` | キー列で group-by し、count や数値集計を実行。 |
@@ -49,7 +49,7 @@ ayame <COMMAND> [OPTIONS]
 | `--stride <N>` | ファイルを開くコマンド | sparse index checkpoint の行間隔。既定は 4096。 |
 | `--no-cache` | ファイルを開くコマンド | persistent index cache を読み書きしない。 |
 | `--cache-dir <DIR>` | ファイルを開くコマンド | index cache directory を上書き。 |
-| `--json` | `stat`, `search` | machine-readable output。 |
+| `--json` | `stat`, `search`, `split`, `group`, `top`, `distinct`, `cache` | machine-readable output を stdout へ。 |
 | `-V`, `--version` | global | バージョンを表示。 |
 | `-h`, `--help` | global | ヘルプを表示。 |
 
@@ -63,7 +63,15 @@ ayame <COMMAND> [OPTIONS]
 | `-t`, `--delim <C>` | 区切り文字。既定は comma。 |
 | `--csv` | RFC 4180 CSV parsing。quote 内 delimiter を扱えます。 |
 | `--quote <C>` | CSV quote character。既定は `"`. |
-| `--numeric` | `sort` / `top` のキーを数値として扱う。`sort` は `-n` も可。 |
+| `--numeric` | `sort` / `top` のキーを数値として扱う。 |
+
+## sort / group オプション
+
+| オプション | メモ |
+| --- | --- |
+| `-r`, `--reverse` | 並び順を反転 (`sort`)。 |
+| `--budget <SIZE>` | ディスクへ spill する前のメモリ上限 (`sort` / `group`)。既定 256MiB。`512MiB` や `2GiB` の形式。 |
+| `--spill-dir <DIR>` | external-merge spill ファイルの出力先 (`sort` / `group`)。 |
 
 ## 変換オプション
 
@@ -88,6 +96,7 @@ ayame <COMMAND> [OPTIONS]
 | `--lines <N>` | 1 パーツあたりの行数。必須、1 以上。 |
 | `--out-dir <DIR>` | 出力ディレクトリ。既定は入力ファイルと同じディレクトリ。 |
 | `--name <NAME>` | パーツの base file name。既定は入力ファイル名。 |
+| `--json` | split 結果 (パーツ一覧と件数) を JSON で出力。 |
 
 既定では `<stem>.partNNNN<.ext>` 形式で出力します。
 
@@ -115,18 +124,34 @@ ayame <COMMAND> [OPTIONS]
 
 | コマンド | オプション |
 | --- | --- |
-| `group` | `--value <COL>` で数値 `sum`, `min`, `max`, `avg`。`--out-groups <FILE>` で TSV 出力。 |
-| `top` | `-n <N>` で件数指定。`--min` で小さい順。`--out-order <FILE>` は row order を little-endian `u64` で保存。 |
-| `distinct` | 選択キー列の approximate distinct count を表示。 |
+| `group` | `--value <COL>` で数値 `sum`, `min`, `max`, `avg`。`--out-groups <FILE>` で TSV 出力。`--json` は run サマリ (`groups`, `runs`, `spill_bytes`) を出力。 |
+| `top` | `-n <N>` で件数指定。`--min` で小さい順。`--out-order <FILE>` は row order を little-endian `u64` で保存。`--json` は選択された行を出力。 |
+| `distinct` | 選択キー列の approximate distinct count を表示。`--json` は推定値と HyperLogLog 統計を出力。 |
 
 ## cache コマンド
 
 | コマンド | メモ |
 | --- | --- |
-| `cache path` | cache directory を表示。 |
+| `cache path` | cache directory を stdout に表示。 |
 | `cache info` | cache size と entry summary を表示。 |
 | `cache gc` | 古い cache を削除。`--max-size`, `--max-age-days`, `--dry-run` に対応。 |
 | `cache clear` | cache entries を削除。 |
+
+`cache path` はパイプ可能な唯一の値なので stdout に出力します。`info` / `gc` /
+`clear` の人間向けレポートは stderr に出力し、stdout はパイプ用に空けます。どの
+サブコマンドも `--json` を付けると構造化した結果を stdout に出力します。
+
+## 終了コード
+
+`grep` の慣習に従います:
+
+| コード | 意味 |
+| --- | --- |
+| `0` | 成功。`search` では 1 件以上一致。 |
+| `1` | `search` は正常に完了したが一致なし。 |
+| `2` | 使い方の誤り、または実行中の失敗。 |
+
+`search --json` は常に `0` で終了します (一致有無は `hits` 配列で判断)。
 
 ## 例
 

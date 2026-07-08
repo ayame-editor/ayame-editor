@@ -4,6 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{Error, Result};
 
+/// Default in-memory budget (bytes) before an out-of-core op spills to disk.
+/// Shared by [`SortOptions`](super::SortOptions) and
+/// [`GroupOptions`](super::GroupOptions) so the two never drift apart.
+pub(super) const DEFAULT_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+
 /// Read exactly `buf.len()` bytes; `Ok(false)` if EOF before any byte was read,
 /// `Err` on a partial read (a truncated record is corruption).
 pub(super) fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<bool> {

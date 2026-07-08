@@ -310,6 +310,56 @@ impl Document {
             .collect()
     }
 
+    /// Lines per line-aligned scan batch for the whole-document visitors below.
+    /// A batch amortizes the sparse-index range lookup over 8192 lines while
+    /// keeping the borrowed slice window (and its transient `Vec`) small.
+    const SCAN_BATCH: u64 = 8192;
+
+    /// Visit every line's raw (terminator-stripped) bytes with its line number,
+    /// in order. The shared full-document scan behind the data ops — callers no
+    /// longer reimplement the `raw_line_ranges` batch loop. See
+    /// [`Document::try_for_each_raw_line`] for the fallible / progress-reporting
+    /// variant.
+    pub fn for_each_raw_line(&self, mut f: impl FnMut(u64, &[u8])) {
+        let total = self.line_count();
+        let mut start = 0u64;
+        while start < total {
+            let batch = self.raw_line_ranges(start, Self::SCAN_BATCH);
+            if batch.is_empty() {
+                break;
+            }
+            start += batch.len() as u64;
+            for (line_no, raw) in batch {
+                f(line_no, raw);
+            }
+        }
+    }
+
+    /// Like [`Document::for_each_raw_line`], but the per-line closure may fail
+    /// (propagated, stopping the scan) and `on_batch` is called with the running
+    /// line count after each batch — the seam ops like sort/group use to spill a
+    /// run mid-scan and report coarse progress.
+    pub fn try_for_each_raw_line(
+        &self,
+        mut f: impl FnMut(u64, &[u8]) -> Result<()>,
+        mut on_batch: impl FnMut(u64),
+    ) -> Result<()> {
+        let total = self.line_count();
+        let mut start = 0u64;
+        while start < total {
+            let batch = self.raw_line_ranges(start, Self::SCAN_BATCH);
+            if batch.is_empty() {
+                break;
+            }
+            start += batch.len() as u64;
+            for (line_no, raw) in batch {
+                f(line_no, raw)?;
+            }
+            on_batch(start);
+        }
+        Ok(())
+    }
+
     /// Raw line text and original terminator bytes for up to `count` lines.
     ///
     /// Returned as `(line_number, text_bytes, terminator_bytes)`. The text slice

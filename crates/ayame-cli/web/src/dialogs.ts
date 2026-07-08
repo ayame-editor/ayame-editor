@@ -1,7 +1,9 @@
 // Ayame Editor — dialogs module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, setModalOpen } from "./dom.js";
+import { api, apiPost } from "./api.js";
+import { $, commas, setModalOpen } from "./dom.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
+import type { ArtifactOpStatus, OperationCancelRequest } from "./types/api.js";
 
 // ---- generic confirm / message dialog (replaces window.confirm/alert) -----
 // The browser dialogs leak the server origin into their chrome
@@ -173,6 +175,36 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       readers[f.id] = () => cb.checked;
       continue;
     }
+    if (f.type === "path") {
+      // A text field with a "Choose Folder" button that runs the caller's
+      // picker (`onBrowse`) and writes the chosen path back (issue #79.1).
+      const prow = document.createElement("div");
+      prow.className = "form-row";
+      const plabel = document.createElement("span");
+      plabel.textContent = f.label;
+      const wrap = document.createElement("div");
+      wrap.className = "form-path";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = f.value ?? "";
+      input.placeholder = f.placeholder ?? "";
+      if (f.title) input.title = f.title;
+      const browseBtn = document.createElement("button");
+      browseBtn.type = "button";
+      browseBtn.className = "cmd";
+      browseBtn.textContent = f.browseLabel || t("dialog.open.chooseFolder");
+      browseBtn.addEventListener("click", async () => {
+        if (!f.onBrowse) return;
+        const picked = await f.onBrowse(input.value);
+        if (picked != null && picked !== "") input.value = picked;
+        input.focus();
+      });
+      wrap.append(input, browseBtn);
+      prow.append(plabel, wrap);
+      body.append(prow);
+      readers[f.id] = () => input.value;
+      continue;
+    }
     const row = document.createElement("label");
     row.className = "form-row";
     const span = document.createElement("span");
@@ -231,13 +263,111 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
 }
 
 // ---- loading overlay ------------------------------------------------------
-export function showLoading(text) {
+let loadingPoll: ReturnType<typeof setInterval> | null = null;
+let loadingOpId: string | null = null;
+
+export function newOperationId(kind = "op") {
+  const rand =
+    globalThis.crypto && "randomUUID" in globalThis.crypto
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${kind}:${rand}`;
+}
+
+function loadingParts() {
   const o = $("overlay");
-  o.textContent = text || t("dialog.open.loading");
+  let box = document.getElementById("overlay-box");
+  if (!box) {
+    o.textContent = "";
+    box = document.createElement("div");
+    box.id = "overlay-box";
+    box.className = "overlay-box";
+    const textEl = document.createElement("div");
+    textEl.id = "overlay-text";
+    textEl.className = "overlay-text";
+    const bar = document.createElement("progress");
+    bar.id = "overlay-progress";
+    bar.className = "overlay-progress";
+    bar.max = 100;
+    bar.value = 0;
+    const detail = document.createElement("div");
+    detail.id = "overlay-detail";
+    detail.className = "overlay-detail";
+    const cancel = document.createElement("button");
+    cancel.id = "overlay-cancel";
+    cancel.className = "cmd danger";
+    cancel.type = "button";
+    cancel.textContent = t("common.cancel");
+    box.append(textEl, bar, detail, cancel);
+    o.append(box);
+  }
+  return {
+    text: $("overlay-text"),
+    progress: $("overlay-progress") as HTMLProgressElement,
+    detail: $("overlay-detail"),
+    cancel: $("overlay-cancel") as HTMLButtonElement,
+  };
+}
+
+function stopLoadingPoll() {
+  if (loadingPoll != null) {
+    clearInterval(loadingPoll);
+    loadingPoll = null;
+  }
+  loadingOpId = null;
+}
+
+function updateOperationProgress(status: ArtifactOpStatus) {
+  const parts = loadingParts();
+  parts.progress.value = Math.max(0, Math.min(100, Number(status.percent) || 0));
+  parts.detail.textContent =
+    status.total_lines > 0
+      ? t("dialog.operation.progress", {
+          done: commas(status.processed_lines),
+          total: commas(status.total_lines),
+        })
+      : "";
+  if (status.canceled) parts.detail.textContent = t("dialog.operation.canceling");
+}
+
+async function pollLoadingOperation(opId: string) {
+  try {
+    const status = await api<ArtifactOpStatus>(`/api/ops/status?id=${encodeURIComponent(opId)}`);
+    if (loadingOpId !== opId) return;
+    updateOperationProgress(status);
+  } catch {
+    // The request itself owns the final success/error path; polling is only UI.
+  }
+}
+
+export function showLoading(text, opts: { opId?: string | null; cancel?: boolean } = {}) {
+  stopLoadingPoll();
+  const o = $("overlay");
+  const parts = loadingParts();
+  parts.text.textContent = text || t("dialog.open.loading");
+  parts.progress.classList.toggle("hidden", !opts.opId);
+  parts.detail.classList.toggle("hidden", !opts.opId);
+  parts.detail.textContent = opts.opId ? t("dialog.operation.starting") : "";
+  parts.cancel.textContent = t("common.cancel");
+  parts.cancel.classList.toggle("hidden", !opts.opId || !opts.cancel);
+  parts.cancel.disabled = false;
+  parts.cancel.onclick = () => {
+    const id = loadingOpId;
+    if (!id) return;
+    parts.cancel.disabled = true;
+    parts.detail.textContent = t("dialog.operation.canceling");
+    apiPost<ArtifactOpStatus, OperationCancelRequest>("/api/ops/cancel", { id }).catch(() => {});
+  };
+  if (opts.opId) {
+    loadingOpId = opts.opId;
+    pollLoadingOperation(opts.opId);
+    loadingPoll = setInterval(() => pollLoadingOperation(opts.opId!), 500);
+  }
   o.classList.remove("hidden");
 }
 
 export function hideLoading() {
+  stopLoadingPoll();
   $("overlay").classList.add("hidden");
 }
 

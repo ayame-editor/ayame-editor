@@ -146,7 +146,7 @@ export const state = {
   treeParent: null, // parent of the current tree root (for the "up" button)
   treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
-  openerMode: "open", // "open" | "save"
+  openerMode: "open", // "open" | "save" | "folder"
   openerEntries: [],
   openerResolve: null,
   // ---- caret-based (Notepad-style) editing ----
