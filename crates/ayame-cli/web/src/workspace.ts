@@ -186,7 +186,7 @@ export async function browse(dir) {
     renderBrowse(res);
     openerMsg("");
   } catch (e) {
-    openerMsg(t("dialog.open.dirError", { msg: serverMessage(e.message) }));
+    openerMsg(t("dialog.open.dirError", { msg: serverMessage(e) }));
   }
 }
 
@@ -460,7 +460,7 @@ export async function openPath(path) {
     await closeTabSilently(pristine);
     return true;
   } catch (e) {
-    reportOpenError(t("error.cannotOpen", { msg: serverMessage(e.message) }));
+    reportOpenError(t("error.cannotOpen", { msg: serverMessage(e) }));
     return false;
   } finally {
     hideLoading();
@@ -481,7 +481,7 @@ export async function uploadFile(file) {
     onDocumentOpened(await r.json());
     await closeTabSilently(pristine);
   } catch (e) {
-    reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e.message) }));
+    reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e) }));
   } finally {
     hideLoading();
   }
@@ -1056,7 +1056,7 @@ export async function newUntitled() {
     focusEditor();
   } catch (e) {
     showOpener();
-    openerMsg(t("error.newBuffer", { msg: serverMessage(e.message) }));
+    openerMsg(t("error.newBuffer", { msg: serverMessage(e) }));
   }
 }
 

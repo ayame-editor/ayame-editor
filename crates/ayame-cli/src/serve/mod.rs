@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use ayame_core::{Document, FileStat};
@@ -32,6 +31,7 @@ use crate::{first_opt, has_flag, open_opts, parse_checked};
 
 mod assets;
 mod edit;
+mod error;
 mod ops;
 mod security;
 mod state;
@@ -39,6 +39,7 @@ mod state;
 pub(crate) mod typegen;
 pub(crate) mod workspace;
 
+use error::{bad_request, internal};
 use security::NetPolicy;
 use state::{AppState, SharedState, TabsResponse, TailStatus, UiState};
 
@@ -408,14 +409,6 @@ async fn api_tail_poll(State(state): State<SharedState>) -> Json<TailStatus> {
         .await
         .unwrap_or_else(|_| TailStatus::closed());
     Json(status)
-}
-
-fn bad_request(e: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::BAD_REQUEST, e.to_string())
-}
-
-fn internal(e: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
 fn default_save_copy_path(path: &Path) -> PathBuf {
@@ -1549,8 +1542,14 @@ mod tests {
         )
         .await;
         assert_eq!(status, 400, "body: {body}");
-        assert!(body.contains(r"C:\ayame-no-such-dir"), "body: {body}");
-        assert!(!body.contains(r"\\?\"), "body: {body}");
+        // The error is now a structured `{code, message}` body; the path lives
+        // in `message` (verbatim prefix stripped). Parse so JSON backslash
+        // escaping doesn't confuse the substring checks.
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["code"], "invalid_input", "body: {body}");
+        let msg = json["message"].as_str().unwrap();
+        assert!(msg.contains(r"C:\ayame-no-such-dir"), "message: {msg}");
+        assert!(!msg.contains(r"\\?\"), "message: {msg}");
 
         let _ = std::fs::remove_file(&f);
     }

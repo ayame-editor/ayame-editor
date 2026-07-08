@@ -4,6 +4,30 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added a determinate progress bar with a Cancel button to long file
+  operations (sort, grep-to-file, split): the worker streams its line progress
+  to the server (`/api/op/progress`), and cancelling kills the worker cleanly
+  (`/api/op/cancel`). The busy overlay already blocks edits for the duration,
+  and CLI runs print a progress line to stderr on a TTY. (#78)
+- Tail-follow (`tail -f`) now extends the line index over just the appended
+  bytes (`Document::follow_tail`) instead of reopening and re-scanning the
+  whole file on every growth, and no longer leaves stale index-cache blobs on
+  disk for a growing multi-GB log. (#76)
+- The 2-file diff target and the folder-grep directory are now chosen with a
+  picker instead of hand-typed: the OS dialog on the desktop build and the
+  in-app file/folder picker in the browser build. (#79)
+- CLI consistency pass: `-n` is reserved for line counts (sort's `--numeric`
+  is long-only, keeping `-n` as a hidden alias), the same word/case/regex
+  aliases work across matching commands, `--json` is available on
+  `group`/`top`/`distinct`/`cache`, diagnostics go to stderr and data to
+  stdout, help and `CLI_REFERENCE.md` are regenerated from the parsers, and
+  exit codes follow grep convention (0 match, 1 no match, 2 usage). (#80)
+- Internal cleanups: a generic external-merge/spill engine now backs both
+  `sort` and `group` and a single `Document::for_each_raw_line` owns the
+  batch-scan loop; the serve→worker CLI flag contract is centralized with a
+  round-trip test; path breadcrumbs share one renderer; and API errors carry a
+  stable machine-readable `code`, so the web keys conflict detection and
+  message localization off the code instead of matching Japanese strings. (#81)
 - Fixed Settings labels wrapping onto a second line in both Japanese and
   English: the label column is now sized per locale to its longest label and
   never wraps; on phone widths the label stacks above its control instead.

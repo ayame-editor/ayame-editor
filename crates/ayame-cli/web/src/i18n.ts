@@ -16,9 +16,9 @@ import { state } from "./state.js";
 // (short/long arrays, indexed by Date.getDay()). normalizeLanguage(), the
 // Settings language picker (populateLanguageSelect), and browserLocale() all
 // derive from Object.keys(MESSAGES), so a new language is picked up with no code
-// change. (Server-origin errors are a separate concern: they are translated only
-// at the en boundary in serverMessage()/SERVER_MSG_EN; N-language coverage waits
-// on server-side error codes.)
+// change. (Server-origin errors are a separate concern: serverMessage() localizes
+// them by the machine-readable `code` the server now returns, falling back to
+// the server's own message when a code has no per-locale template.)
 export const MESSAGES = {
   ja: {
     // -- menu bar and menu items --
@@ -234,6 +234,18 @@ export const MESSAGES = {
     weekday: {
       short: ["日", "月", "火", "水", "木", "金", "土"],
       long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
+    },
+    // Localized templates keyed on the server error `code` (ApiErrorBody). The
+    // server detail is already Japanese, so each shows it via {message}.
+    serverCode: {
+      invalid_input: "{message}",
+      conflict: "{message}",
+      exists: "{message}",
+      io: "{message}",
+      not_found: "{message}",
+      unsupported: "{message}",
+      internal: "{message}",
+      error: "{message}",
     },
     "settings.illustration": "イラスト",
     "settings.font": "フォント",
@@ -623,6 +635,18 @@ export const MESSAGES = {
       short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
     },
+    // Localized templates keyed on the server error `code` (ApiErrorBody).
+    // {message} interpolates the server-provided detail (often a path).
+    serverCode: {
+      invalid_input: "{message}",
+      conflict: "{message}",
+      exists: "{message}",
+      io: "I/O error: {message}",
+      not_found: "Not found: {message}",
+      unsupported: "Unsupported operation: {message}",
+      internal: "Server error: {message}",
+      error: "{message}",
+    },
     "settings.illustration": "Illustration",
     "settings.font": "Font",
     "settings.fontMono": "Monospace (Consolas / Menlo)",
@@ -798,52 +822,31 @@ export const MESSAGES = {
 };
 
 // ---- server boundary ----------------------------------------------------
-// The Rust side still reports errors as Japanese strings; they reach the
-// client at runtime in e.message / stat.wal_error. This small map (plus the
-// few parameterized patterns below) is the ONLY remaining string-matching
-// translation layer — it goes away once the server exposes error codes.
-export const SERVER_MSG_EN = {
-  保存先パスが空です: "Save path is empty.",
-  選択範囲が不正です: "Selection range is invalid.",
-  矩形選択の列範囲が不正です: "Rectangle selection column range is invalid.",
-  ファイルが開かれていません: "No file is open.",
-  "選択範囲が不正です (行が範囲外)": "Selection range is invalid (line is out of range).",
-  "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください":
-    "Export was interrupted because an edit or tab switch happened while writing. Please try again.",
-  "クラッシュログは無効です（キャッシュディレクトリなし）":
-    "The crash log is disabled (no cache directory).",
-  復元できるクラッシュログはありません: "There is no crash log to recover.",
-  "復元中に編集が入ったため中断しました。ファイルを開き直してください":
-    "Recovery was interrupted by an edit. Reopen the file.",
-};
+// Errors reach the client as a structured `{ code, message }` body (the Rust
+// ApiErrorBody). serverMessage() localizes them by the machine-readable `code`
+// via each locale's SERVER_CODE_MSG map (MESSAGES[locale].serverCode) — no more
+// string-matching the human message.
 
-export const SERVER_MSG_EN_PATTERNS: [RegExp, (m: any) => string][] = [
-  [/^(.+) は既に存在します$/u, (m) => `${m[1]} already exists.`],
-  [/^(.+) での保存は未対応です$/u, (m) => `Saving as ${m[1]} is not supported.`],
-  [/^(.+) での再読込は未対応です$/u, (m) => `Reopening as ${m[1]} is not supported.`],
-  [/^クラッシュログを復元できません: (.+)$/u, (m) => `Cannot recover the crash log: ${m[1]}`],
-];
-
-// Translate a raw server-side message for the English UI; Japanese (and any
-// unknown string) passes through unchanged.
-export function serverMessage(text) {
-  const raw = String(text ?? "");
-  if (currentLocale() !== "en") return raw;
-  const exact = SERVER_MSG_EN[raw];
-  if (exact != null) return exact;
-  for (const [re, fn] of SERVER_MSG_EN_PATTERNS) {
-    const m = raw.match(re);
-    if (m) return fn(m);
-  }
-  return raw;
+// Localize a structured server error for the active UI locale, keyed on its
+// `code`. Accepts either the caught error / `{code, message}` object or a bare
+// string (e.g. stat.wal_error, or already-localized text), which passes
+// through unchanged. When the code has a template it is used (`{message}`
+// interpolates the server detail); otherwise the raw server message is shown.
+export function serverMessage(err) {
+  if (err == null) return "";
+  if (typeof err === "string") return err;
+  const code = typeof err === "object" ? err.code : undefined;
+  const detail = typeof err === "object" ? String(err.message ?? "") : String(err);
+  const locale = currentLocale();
+  const table = (MESSAGES[locale] && MESSAGES[locale].serverCode) || MESSAGES.en.serverCode || {};
+  const tmpl = code != null ? table[code] : undefined;
+  if (tmpl != null) return tmpl.replace(/\{message\}/g, detail);
+  return detail;
 }
 
-// Server-boundary predicate: the save endpoint reports an existing target with
-// a Japanese message (no error codes yet). Kept in the i18n/server-message
-// layer so UI modules never embed the raw string themselves.
-export function isExistsError(msg) {
-  return String(msg ?? "").includes("既に存在");
-}
+// Overwrite-conflict predicate — the single, code-keyed definition lives in
+// api.ts; re-exported here so existing importers keep their import path.
+export { isExistsError } from "./api.js";
 
 // Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not
 // a locale — it defers to the browser). normalizeLanguage, the language picker,

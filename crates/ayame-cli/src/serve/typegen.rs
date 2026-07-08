@@ -23,6 +23,7 @@ use super::edit::{
     CaretPosition, EditSaveRequest, EditSaveResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
+use super::error::ApiErrorBody;
 use super::ops::{
     ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest, ReplaceSaveRequest,
     SortSaveRequest, SplitSaveRequest,
@@ -38,6 +39,7 @@ fn output_path() -> PathBuf {
 
 fn bridge() -> Bridge {
     Bridge::fetch()
+        .decl(&decl::<ApiErrorBody>())
         .decl(&decl::<OpenRequest>())
         .decl(&decl::<TabIdRequest>())
         .decl(&decl::<BrowseEntry>())

@@ -280,7 +280,7 @@ export async function saveSelectionToFile() {
     hideLoading();
     // Server-boundary string match: the save endpoint reports an existing
     // target as a Japanese message (no error codes yet).
-    if (isExistsError(e.message)) {
+    if (isExistsError(e)) {
       const overwrite = await askConfirm(
         t("dialog.overwrite.title"),
         t("dialog.overwrite.ask", { name: displayPath(f.path.trim()) }),
@@ -298,12 +298,12 @@ export async function saveSelectionToFile() {
           );
         } catch (e2) {
           flashCount(t("dialog.saveSel.error"), "error");
-          showMessage(t("dialog.saveSel.error"), serverMessage(e2.message));
+          showMessage(t("dialog.saveSel.error"), serverMessage(e2));
         }
       }
     } else {
       flashCount(t("dialog.saveSel.error"), "error");
-      showMessage(t("dialog.saveSel.error"), serverMessage(e.message));
+      showMessage(t("dialog.saveSel.error"), serverMessage(e));
     }
   } finally {
     hideLoading();

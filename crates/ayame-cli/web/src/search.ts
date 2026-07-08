@@ -734,7 +734,7 @@ export async function diffFile() {
     showDiff(res);
   } catch (e) {
     flashCount(t("dialog.diff.error"), "error");
-    showMessage(t("dialog.diff.error"), serverMessage(e.message));
+    showMessage(t("dialog.diff.error"), serverMessage(e));
   } finally {
     hideLoading();
   }
@@ -817,7 +817,7 @@ export async function grepFolder() {
     showGrep(res, query, lastGrep.regex);
   } catch (e) {
     flashCount(t("dialog.grep.error"), "error");
-    showMessage(t("dialog.grep.error"), serverMessage(e.message));
+    showMessage(t("dialog.grep.error"), serverMessage(e));
   } finally {
     hideLoading();
   }

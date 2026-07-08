@@ -2,7 +2,7 @@
 import { $, commas, displayPath, isUntitled, joinPath, pathDirName, setModalOpen } from "./dom.js";
 import { DEFAULT_SETTINGS, state } from "./state.js";
 import { currentLocale, serverMessage, t, weekdayNames } from "./i18n.js";
-import { api, apiPost } from "./api.js";
+import { api, apiPost, isExistsError } from "./api.js";
 import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
@@ -228,7 +228,7 @@ export async function saveCopy() {
       }
     }
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(finalError.message));
+    showMessage(t("error.saveError"), serverMessage(finalError));
   } finally {
     savingCount--;
     setSavingUI();
@@ -236,10 +236,9 @@ export async function saveCopy() {
   }
 }
 
-export function isExistsError(e) {
-  const msg = String(e?.message || e || "");
-  return /already exists|既に存在/.test(msg);
-}
+// Re-exported so importers of save.js keep their path; the single definition
+// (code-keyed) lives in api.ts.
+export { isExistsError };
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
 // standard); untitled buffers suggest the expanded 新規ファイル名 template
@@ -360,7 +359,7 @@ export async function saveFile() {
     flashCount(t("file.saved", { path: displayPath(res.path) }));
   } catch (e) {
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(e.message));
+    showMessage(t("error.saveError"), serverMessage(e));
   } finally {
     savingCount--;
     setSavingUI();
@@ -447,7 +446,7 @@ export async function convertSave(encoding, lineEnding, bom) {
     flashCount(t("dialog.convert.savedAs", { enc: enc(encoding), eol: eol(lineEnding) }));
   } catch (e) {
     flashCount(t("dialog.convert.saveError"), "error");
-    showMessage(t("dialog.convert.go"), serverMessage(e.message));
+    showMessage(t("dialog.convert.go"), serverMessage(e));
   } finally {
     savingCount--;
     setSavingUI();
@@ -478,7 +477,7 @@ export async function reopenWithEncoding(encoding) {
     flashCount(t("dialog.convert.reopenedAs", { enc: enc(encoding) }));
   } catch (e) {
     flashCount(t("dialog.convert.reopenError"), "error");
-    showMessage(t("dialog.convert.reopen"), serverMessage(e.message));
+    showMessage(t("dialog.convert.reopen"), serverMessage(e));
   }
 }
 
@@ -586,7 +585,7 @@ export async function sortSave() {
   } catch (e) {
     if (isOpCancelled(e)) return;
     flashCount(t("dialog.sort.error"), "error");
-    showMessage(t("dialog.sort.error"), serverMessage(e.message));
+    showMessage(t("dialog.sort.error"), serverMessage(e));
   }
 }
 
@@ -630,7 +629,7 @@ export async function splitFile() {
   } catch (e) {
     if (isOpCancelled(e)) return;
     flashCount(t("dialog.split.error"), "error");
-    showMessage(t("dialog.split.error"), serverMessage(e.message));
+    showMessage(t("dialog.split.error"), serverMessage(e));
   }
 }
 
@@ -713,7 +712,7 @@ async function runGrepSave(query, opts, target) {
       return;
     }
     flashCount(t("dialog.grepSave.error"), "error");
-    showMessage(t("dialog.grepSave.error"), serverMessage(e.message));
+    showMessage(t("dialog.grepSave.error"), serverMessage(e));
     return;
   }
   flashCount(t("file.saved", { path: displayPath(res.path) }));

@@ -8,6 +8,7 @@ use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
 use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
 use serde::{Deserialize, Serialize};
 
+use super::error::{self, ApiError};
 use super::ops::WorkerInput;
 use super::{bad_request, internal};
 
@@ -86,7 +87,7 @@ impl Workspace {
 
     /// The active document and its edit overlay, or a 409 when the workspace
     /// is empty.
-    pub(super) fn doc_and_edits(&self) -> Result<(&Shared, &EditSession), (StatusCode, String)> {
+    pub(super) fn doc_and_edits(&self) -> Result<(&Shared, &EditSession), ApiError> {
         match &self.doc {
             Some(doc) => Ok((doc, &self.edits)),
             None => Err(no_document()),
@@ -95,9 +96,7 @@ impl Workspace {
 
     /// Like [`Workspace::doc_and_edits`] but with a mutable overlay, split so
     /// a handler can mutate the edits while reading the document.
-    pub(super) fn doc_and_edits_mut(
-        &mut self,
-    ) -> Result<(&Shared, &mut EditSession), (StatusCode, String)> {
+    pub(super) fn doc_and_edits_mut(&mut self) -> Result<(&Shared, &mut EditSession), ApiError> {
         let Workspace { doc, edits, .. } = self;
         match doc {
             Some(doc) => Ok((doc, edits)),
@@ -135,11 +134,7 @@ impl Workspace {
     /// Returns aside files orphaned by the transition (an active tab whose
     /// document was gone cannot be parked); the caller deletes them outside
     /// the workspace lock.
-    fn focus_tab(
-        &mut self,
-        id: u64,
-        cache_root: Option<&Path>,
-    ) -> Result<(), (StatusCode, String)> {
+    fn focus_tab(&mut self, id: u64, cache_root: Option<&Path>) -> Result<(), ApiError> {
         if self.tabs.active == Some(id) {
             return Ok(());
         }
@@ -310,11 +305,8 @@ fn attach_live_wal(cache_root: Option<&Path>, ws: &mut Workspace) {
     }
 }
 
-fn no_document() -> (StatusCode, String) {
-    (
-        StatusCode::CONFLICT,
-        "no file is open — open one first".to_string(),
-    )
+fn no_document() -> ApiError {
+    error::conflict("no file is open — open one first")
 }
 
 /// A consistent, owned snapshot of the active document and its edits, taken
@@ -506,7 +498,7 @@ impl AppState {
         serde_json::from_slice(&bytes).unwrap_or_default()
     }
 
-    pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, (StatusCode, String)> {
+    pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, ApiError> {
         ui.recent_files = clean_path_list(ui.recent_files, 24);
         ui.search_history = clean_string_list(ui.search_history, 50);
         ui.session.paths = clean_path_list(ui.session.paths, SESSION_MAX_PATHS);
@@ -526,7 +518,7 @@ impl AppState {
         Ok(ui)
     }
 
-    pub(super) fn save_session_snapshot(&self) -> Result<UiState, (StatusCode, String)> {
+    pub(super) fn save_session_snapshot(&self) -> Result<UiState, ApiError> {
         let mut ui = self.load_ui_state();
         let tabs = self.tabs_response().tabs;
         // Scratch/untitled buffers can't be reopened next launch, so keep them
@@ -544,7 +536,7 @@ impl AppState {
         self.save_ui_state(ui)
     }
 
-    pub(super) async fn restore_session(&self) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn restore_session(&self) -> Result<(), ApiError> {
         let session = self.load_ui_state().session;
         if session.paths.is_empty() {
             return Ok(());
@@ -552,7 +544,7 @@ impl AppState {
         let paths = clean_path_list(session.paths, SESSION_MAX_PATHS);
         for path in &paths {
             if let Err(e) = self.open_path(path.clone()).await {
-                eprintln!("ayame: session restore skipped '{}': {}", path, e.1);
+                eprintln!("ayame: session restore skipped '{}': {}", path, e);
             }
         }
         if let Some(active) = session.active_path {
@@ -634,7 +626,7 @@ impl AppState {
     }
 
     /// Focus an already-open tab.
-    pub(super) async fn switch_tab(&self, id: u64) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn switch_tab(&self, id: u64) -> Result<(), ApiError> {
         let _transitions = self.transitions.lock().await;
         // Leaf lock, taken while no ws guard is held (see `find_snapshot`).
         self.invalidate_dirty_snapshot();
@@ -732,13 +724,16 @@ impl AppState {
     /// carry them (`--no-cache`, or logging degraded): moving it would
     /// silently drop the edits, which is exactly what this endpoint exists to
     /// prevent.
-    pub(super) async fn detach_tab(&self, id: u64) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn detach_tab(&self, id: u64) -> Result<(), ApiError> {
         let _transitions = self.transitions.lock().await;
         self.invalidate_dirty_snapshot();
         let cache_root = self.open_opts.cache_dir.clone();
         let (asides, sync_file) = self.write(|ws| {
             let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
-                return Err((StatusCode::NOT_FOUND, "no such tab".to_string()));
+                return Err(ApiError::from((
+                    StatusCode::NOT_FOUND,
+                    "no such tab".to_string(),
+                )));
             };
             // Clone the log's file handle before the session (and with it the
             // live writer) is dropped; a cloned handle syncs the same file.
@@ -760,9 +755,8 @@ impl AppState {
                 }
             };
             if dirty && sync_file.is_none() && recoverable.is_none() {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "unsaved edits have no crash log to hand off".to_string(),
+                return Err(error::conflict(
+                    "unsaved edits have no crash log to hand off",
                 ));
             }
             ws.tabs.order.remove(idx);
@@ -803,12 +797,8 @@ impl AppState {
         // (or signals) the adopting window. Surfaced on failure — proceeding
         // could hand off a log a power loss would tear.
         if let Some(f) = sync_file {
-            f.sync_data().map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("crash log sync failed: {e}"),
-                )
-            })?;
+            f.sync_data()
+                .map_err(|e| internal(format!("crash log sync failed: {e}")))?;
         }
         remove_aside_files(asides);
         Ok(())
@@ -854,7 +844,7 @@ impl AppState {
     /// Owned snapshot of the active document + edits + revision, taken under
     /// one lock acquisition. The `EditSession` clone here is the one clone
     /// that is genuinely needed (long saves must not hold the lock).
-    pub(super) fn edit_snapshot(&self) -> Result<EditSnapshot, (StatusCode, String)> {
+    pub(super) fn edit_snapshot(&self) -> Result<EditSnapshot, ApiError> {
         self.read(|ws| {
             let (doc, edits) = ws.doc_and_edits()?;
             Ok(EditSnapshot {
@@ -873,9 +863,7 @@ impl AppState {
     /// session is not dirty against the last save, and after an in-place save
     /// that path holds exactly the saved view). Sessions passing both checks
     /// skip the copy entirely.
-    pub(super) fn doc_and_dirty_edits(
-        &self,
-    ) -> Result<(Shared, Option<EditSession>), (StatusCode, String)> {
+    pub(super) fn doc_and_dirty_edits(&self) -> Result<(Shared, Option<EditSession>), ApiError> {
         self.read(|ws| {
             let (doc, edits) = ws.doc_and_edits()?;
             let dirty = (edits.has_edits() || edits.is_dirty()).then(|| edits.clone());
@@ -1012,17 +1000,12 @@ impl AppState {
     /// retries, so nothing is ever silently lost.
     ///
     /// Caller must hold the transitions lock.
-    pub(super) fn detach_for_overwrite(
-        &self,
-        snap: &EditSnapshot,
-    ) -> Result<(), (StatusCode, String)> {
+    pub(super) fn detach_for_overwrite(&self, snap: &EditSnapshot) -> Result<(), ApiError> {
         self.write(|ws| {
             let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
             if !same_doc || ws.edits.revision() != snap.revision {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "the document changed while saving — nothing was overwritten; save again"
-                        .to_string(),
+                return Err(error::conflict(
+                    "the document changed while saving — nothing was overwritten; save again",
                 ));
             }
             ws.doc = None; // edits stay: they are restored if the replace fails
@@ -1045,17 +1028,12 @@ impl AppState {
     /// overlay and the undo/redo history stay untouched — that is what lets
     /// undo cross the save. Caller must hold the transitions lock and, on Ok,
     /// finish with [`AppState::commit_in_place_save`] after the file swap.
-    pub(super) fn confirm_overwrite(
-        &self,
-        snap: &EditSnapshot,
-    ) -> Result<(), (StatusCode, String)> {
+    pub(super) fn confirm_overwrite(&self, snap: &EditSnapshot) -> Result<(), ApiError> {
         self.read(|ws| {
             let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
             if !same_doc || ws.edits.revision() != snap.revision {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "the document changed while saving — nothing was overwritten; save again"
-                        .to_string(),
+                return Err(error::conflict(
+                    "the document changed while saving — nothing was overwritten; save again",
                 ));
             }
             Ok(())
@@ -1121,7 +1099,7 @@ impl AppState {
     /// Never touches the edit overlay. The replaced document's aside files are
     /// deleted (its mmap is gone with it). Caller must hold the transitions
     /// lock.
-    pub(super) async fn install_reloaded(&self, path: PathBuf) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn install_reloaded(&self, path: PathBuf) -> Result<(), ApiError> {
         let opts = self.open_opts.clone();
         let p = path.clone();
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
@@ -1150,7 +1128,7 @@ impl AppState {
     /// (the file on disk IS the saved state, in-place saves included) with a
     /// fresh, clean edit session, and drop the old document's aside files.
     /// Caller must hold the transitions lock.
-    pub(super) async fn reload_reverted(&self, path: PathBuf) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn reload_reverted(&self, path: PathBuf) -> Result<(), ApiError> {
         self.reload_clean(path, None).await
     }
 
@@ -1165,7 +1143,7 @@ impl AppState {
         &self,
         path: PathBuf,
         snap: &EditSnapshot,
-    ) -> Result<(), (StatusCode, String)> {
+    ) -> Result<(), ApiError> {
         self.reload_clean(path, Some(snap)).await
     }
 
@@ -1173,7 +1151,7 @@ impl AppState {
         &self,
         path: PathBuf,
         snap: Option<&EditSnapshot>,
-    ) -> Result<(), (StatusCode, String)> {
+    ) -> Result<(), ApiError> {
         let opts = self.open_opts.clone();
         let p = path.clone();
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
@@ -1189,10 +1167,8 @@ impl AppState {
             if let Some(snap) = snap {
                 let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
                 if !same_doc || ws.edits.revision() != snap.revision {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        "the document changed while saving — nothing was overwritten; save again"
-                            .to_string(),
+                    return Err(error::conflict(
+                        "the document changed while saving — nothing was overwritten; save again",
                     ));
                 }
             }
@@ -1216,7 +1192,7 @@ impl AppState {
         &self,
         path: PathBuf,
         enc: Encoding,
-    ) -> Result<(), (StatusCode, String)> {
+    ) -> Result<(), ApiError> {
         let mut opts = self.open_opts.clone();
         opts.encoding = Some(enc);
         let p = path.clone();
@@ -1252,7 +1228,7 @@ impl AppState {
     /// A path that is ALREADY open in some tab focuses that tab instead of
     /// opening a duplicate — clicking a file in the explorer means "go to that
     /// file", the same as every tabbed editor.
-    pub(super) async fn open_path(&self, path: String) -> Result<(), (StatusCode, String)> {
+    pub(super) async fn open_path(&self, path: String) -> Result<(), ApiError> {
         if let Some(id) = self.tab_with_path(Path::new(&path)).await {
             return self.switch_tab(id).await;
         }
@@ -1277,7 +1253,7 @@ impl AppState {
         })?;
         let _transitions = self.transitions.lock().await;
         let target = doc.path().to_path_buf();
-        let orphaned = self.write(|ws| {
+        let orphaned = self.write(|ws| -> Result<Vec<PathBuf>, ApiError> {
             if let Some(id) = ws.tab_with_path_literal(&target) {
                 ws.focus_tab(id, self.open_opts.cache_dir.as_deref())?;
                 return Ok(Vec::new());
@@ -1483,24 +1459,17 @@ impl AppState {
     /// still shows the same pristine document (same `Arc` identity, revision
     /// 0, no edits), the same discipline as the save commit. Returns the
     /// post-recovery stats and how many transactions were replayed.
-    pub(super) async fn recover_wal(
-        &self,
-        discard: bool,
-    ) -> Result<(EditStats, usize), (StatusCode, String)> {
+    pub(super) async fn recover_wal(&self, discard: bool) -> Result<(EditStats, usize), ApiError> {
         let _transitions = self.transitions.lock().await;
         let Some(root) = self.open_opts.cache_dir.clone() else {
-            return Err((
-                StatusCode::CONFLICT,
-                "クラッシュログは無効です（キャッシュディレクトリなし）".to_string(),
+            return Err(error::conflict(
+                "クラッシュログは無効です（キャッシュディレクトリなし）",
             ));
         };
         let doc = self.read(|ws| {
             let (doc, _) = ws.doc_and_edits()?;
             if ws.recoverable.is_none() {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "復元できるクラッシュログはありません".to_string(),
-                ));
+                return Err(error::conflict("復元できるクラッシュログはありません"));
             }
             Ok(doc.clone())
         })?;
@@ -1547,10 +1516,8 @@ impl AppState {
             // transitions lock): replaying onto a session that moved on would
             // clobber the user's typing — reject instead.
             if !same_doc || ws.edits.revision() != 0 || ws.edits.has_edits() {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "復元中に編集が入ったため中断しました。ファイルを開き直してください"
-                        .to_string(),
+                return Err(error::conflict(
+                    "復元中に編集が入ったため中断しました。ファイルを開き直してください",
                 ));
             }
             ws.recoverable = None;

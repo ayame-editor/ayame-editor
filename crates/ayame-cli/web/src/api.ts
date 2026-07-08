@@ -46,9 +46,44 @@ export type DiffResponse = {
   [key: string]: unknown;
 };
 
+// A failed API call throws this: it carries the server's machine-readable
+// `code` (see the Rust `ApiErrorBody`) alongside the human `message`, so UI
+// code can branch on `code` (e.g. isExistsError) and localize the message
+// without string-matching.
+export class ApiError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
+// Overwrite-conflict predicate, keyed on the stable server code — the single
+// definition every module shares (save.ts and selection.ts import it).
+export function isExistsError(e: unknown): boolean {
+  return (e as { code?: unknown } | null | undefined)?.code === "exists";
+}
+
+// Turn a non-OK response into an ApiError. The body is the JSON `{code,
+// message}` shape; a non-JSON/unparseable body falls back to code "error".
+async function throwResponseError(r: Response): Promise<never> {
+  const text = await r.text();
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body === "object" && typeof body.code === "string") {
+      throw new ApiError(String(body.message ?? r.statusText), body.code);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    // Not JSON (or no code field): fall through to the generic error below.
+  }
+  throw new ApiError(text || r.statusText, "error");
+}
+
 export async function api<T = unknown>(path: string): Promise<T> {
   const r = await fetch(path);
-  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  if (!r.ok) await throwResponseError(r);
   return r.json();
 }
 
@@ -61,6 +96,6 @@ export async function apiPost<T = unknown, B = Record<string, unknown>>(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  if (!r.ok) await throwResponseError(r);
   return r.json();
 }

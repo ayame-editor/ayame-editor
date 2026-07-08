@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../src/api.js";
 import { expandNameTemplate, freeMemoName, isExistsError } from "../src/save.js";
 
 describe("save-name helpers", () => {
@@ -18,9 +19,10 @@ describe("save-name helpers", () => {
     expect(freeMemoName("note.txt", new Set(["note.txt", "note-2.txt"]))).toBe("note-3.txt");
   });
 
-  it("recognizes server-side exists errors in both app languages", () => {
-    expect(isExistsError(new Error("'a.txt' already exists"))).toBe(true);
-    expect(isExistsError(new Error("a.txt は既に存在します"))).toBe(true);
+  it("recognizes server-side exists errors by their structured code", () => {
+    expect(isExistsError(new ApiError("a.txt は既に存在します", "exists"))).toBe(true);
+    expect(isExistsError(new ApiError("the document changed", "conflict"))).toBe(false);
     expect(isExistsError(new Error("permission denied"))).toBe(false);
+    expect(isExistsError(null)).toBe(false);
   });
 });

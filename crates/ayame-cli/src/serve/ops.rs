@@ -18,6 +18,7 @@ use tokio::time::{timeout, Duration};
 use crate::diff::{diff_documents, DiffKind, DiffResult};
 use crate::temp_paths;
 
+use super::error::{self, ApiError};
 use super::state::DirtySnapshotCache;
 use super::{bad_request, default_suffix_path, edit, internal, workspace, SharedState};
 
@@ -87,10 +88,7 @@ struct WorkerDoc {
     total_lines: u64,
 }
 
-async fn dirty_aware_input(
-    state: &SharedState,
-    kind: &'static str,
-) -> Result<WorkerDoc, (StatusCode, String)> {
+async fn dirty_aware_input(state: &SharedState, kind: &'static str) -> Result<WorkerDoc, ApiError> {
     let (doc, dirty) = state.doc_and_dirty_edits()?;
     let total_lines = match &dirty {
         Some(edits) => edits.total_lines(&doc),
@@ -146,7 +144,7 @@ impl DirtyView {
 /// the old snapshot. Two racing builders at the same revision produce
 /// equivalent snapshots; the last store wins and the loser's temp is cleaned
 /// up when its guard drops.
-async fn dirty_view(state: &SharedState) -> Result<DirtyView, (StatusCode, String)> {
+async fn dirty_view(state: &SharedState) -> Result<DirtyView, ApiError> {
     let (doc, dirty) = state.doc_and_dirty_edits()?;
     let Some(edits) = dirty else {
         // Clean session: any cached snapshot is stale by definition (its
@@ -234,7 +232,7 @@ pub(super) struct SortSaveRequest {
 pub(super) async fn api_sort_save(
     State(state): State<SharedState>,
     Json(req): Json<SortSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     if req.in_place {
         return sort_save_in_place(state, req).await;
     }
@@ -271,7 +269,7 @@ pub(super) async fn api_sort_save(
 async fn sort_save_in_place(
     state: SharedState,
     req: SortSaveRequest,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     // Consistent snapshot (doc + edits + revision) under one lock acquisition.
     let mut snap = state.edit_snapshot()?;
     let target = snap.doc.path().to_path_buf();
@@ -346,7 +344,7 @@ fn sort_command(
     out: &Path,
     req: &SortSaveRequest,
     spill_dir: &Path,
-) -> Result<Command, (StatusCode, String)> {
+) -> Result<Command, ApiError> {
     use crate::cli::wire;
     let mut cmd = worker_command()?;
     cmd.arg(wire::sort::CMD).arg(input);
@@ -410,7 +408,7 @@ pub(super) struct ReplaceSaveRequest {
 pub(super) async fn api_replace_save(
     State(state): State<SharedState>,
     Json(req): Json<ReplaceSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     let wd = dirty_aware_input(&state, "replace-save").await?;
     let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
     let mut cmd = worker_command()?;
@@ -463,7 +461,7 @@ pub(super) struct CaseSaveRequest {
 pub(super) async fn api_case_save(
     State(state): State<SharedState>,
     Json(req): Json<CaseSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     let mode = req.mode.trim().to_ascii_lowercase();
     if ayame_core::CaseMode::parse(&mode).is_none() {
         return Err(bad_request(
@@ -529,7 +527,7 @@ pub(super) struct GrepSaveRequest {
 pub(super) async fn api_grep_save(
     State(state): State<SharedState>,
     Json(req): Json<GrepSaveRequest>,
-) -> Result<Json<ArtifactResponse>, (StatusCode, String)> {
+) -> Result<Json<ArtifactResponse>, ApiError> {
     if req.query.is_empty() {
         return Err(bad_request("query is empty"));
     }
@@ -539,10 +537,7 @@ pub(super) async fn api_grep_save(
     // discarded: its own Conflict would surface as an opaque 502, and the web
     // overwrite-confirm flow keys off this text.
     if !req.overwrite && target.exists() {
-        return Err((
-            StatusCode::CONFLICT,
-            format!("{} は既に存在します", workspace::display_path(&target)),
-        ));
+        return Err(error::exists(&workspace::display_path(&target)));
     }
     let mut cmd = grep_save_command(&wd.doc, wd.input.path(), &target, &req)?;
     let res = run_artifact_worker(
@@ -563,7 +558,7 @@ fn grep_save_command(
     input: &Path,
     out: &Path,
     req: &GrepSaveRequest,
-) -> Result<Command, (StatusCode, String)> {
+) -> Result<Command, ApiError> {
     use crate::cli::wire;
     let mut cmd = worker_command()?;
     cmd.arg(wire::grep_lines::CMD).arg(input);
@@ -617,7 +612,7 @@ pub(super) struct SplitSaveRequest {
 pub(super) async fn api_split_save(
     State(state): State<SharedState>,
     Json(req): Json<SplitSaveRequest>,
-) -> Result<Json<ayame_core::SplitResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::SplitResult>, ApiError> {
     if req.lines == 0 {
         return Err(bad_request("lines must be at least 1"));
     }
@@ -699,7 +694,7 @@ fn default_max() -> usize {
 pub(super) async fn api_search(
     State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
-) -> Result<Json<ayame_core::SearchResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::SearchResult>, ApiError> {
     // Search what the user sees: a dirty buffer runs against the cached
     // materialized snapshot so hits (line numbers, byte anchors) line up with
     // the edited view — and repeated searches reuse one materialization.
@@ -762,7 +757,7 @@ fn grep_default_max() -> usize {
 pub(super) async fn api_grep(
     State(state): State<SharedState>,
     Json(req): Json<GrepRequest>,
-) -> Result<Json<ayame_core::GrepResult>, (StatusCode, String)> {
+) -> Result<Json<ayame_core::GrepResult>, ApiError> {
     let query = req.query.trim().to_string();
     if query.is_empty() {
         return Err(bad_request("query is empty"));
@@ -839,7 +834,7 @@ pub(super) struct FindResponse {
 pub(super) async fn api_find(
     State(state): State<SharedState>,
     Query(q): Query<FindQuery>,
-) -> Result<Json<FindResponse>, (StatusCode, String)> {
+) -> Result<Json<FindResponse>, ApiError> {
     // Find what the user sees: a dirty session runs against the revision-keyed
     // materialized snapshot (built once, cached), so returned line numbers and
     // byte offsets are view-accurate even with unsaved edits.
@@ -917,7 +912,7 @@ pub(super) struct WebDiffHunk {
 pub(super) async fn api_diff(
     State(state): State<SharedState>,
     Query(q): Query<DiffQuery>,
-) -> Result<Json<WebDiffResponse>, (StatusCode, String)> {
+) -> Result<Json<WebDiffResponse>, ApiError> {
     let path = q.path.trim().to_string();
     if path.is_empty() {
         return Err(bad_request("path is empty"));
@@ -1045,7 +1040,7 @@ pub(super) struct LineByteResponse {
 pub(super) async fn api_linebyte(
     State(state): State<SharedState>,
     Query(q): Query<LineByteQuery>,
-) -> Result<Json<LineByteResponse>, (StatusCode, String)> {
+) -> Result<Json<LineByteResponse>, ApiError> {
     let view = dirty_view(&state).await?;
     let doc = view.doc();
     let byte = match q.col {
@@ -1070,7 +1065,7 @@ fn spawn_dir(kind: &str) -> std::io::Result<PathBuf> {
 
 /// A [`Command`] re-invoking this same binary — every op worker is an isolated
 /// `ayame <subcommand>` child process.
-fn worker_command() -> Result<Command, (StatusCode, String)> {
+fn worker_command() -> Result<Command, ApiError> {
     let exe = std::env::current_exe().map_err(internal)?;
     Ok(Command::new(exe))
 }
@@ -1081,21 +1076,21 @@ fn append_worker_encoding(cmd: &mut Command, doc: &Document) {
 }
 
 /// The 502 every endpoint returns when its worker child exits unsuccessfully.
-fn worker_failed(kind: &str, status: std::process::ExitStatus) -> (StatusCode, String) {
-    (
+fn worker_failed(kind: &str, status: std::process::ExitStatus) -> ApiError {
+    ApiError::from((
         StatusCode::BAD_GATEWAY,
         format!(
             "{kind} worker {} - the engine is unaffected",
             describe_status(status)
         ),
-    )
+    ))
 }
 
 /// Check a JSON-printing worker's exit status and parse its stdout.
 fn parse_worker_json<T: serde::de::DeserializeOwned>(
     kind: &str,
     out: &std::process::Output,
-) -> Result<T, (StatusCode, String)> {
+) -> Result<T, ApiError> {
     if !out.status.success() {
         return Err(worker_failed(kind, out.status));
     }
@@ -1219,7 +1214,7 @@ async fn wait_worker_tracked(
     cmd: &mut Command,
     total: u64,
     op_id: &str,
-) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+) -> Result<std::process::ExitStatus, ApiError> {
     cmd.arg("--progress")
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -1243,21 +1238,18 @@ async fn wait_worker_tracked(
         _ = tracker.entry.cancel.notified() => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            Err((
+            Err(ApiError::from((
                 StatusCode::from_u16(499).unwrap_or(StatusCode::CONFLICT),
                 format!("{kind} worker cancelled"),
-            ))
+            )))
         }
         _ = tokio::time::sleep(ARTIFACT_TIMEOUT) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            Err((
+            Err(ApiError::from((
                 StatusCode::GATEWAY_TIMEOUT,
-                format!(
-                    "{kind} worker timed out after {}s - the engine is unaffected",
-                    ARTIFACT_TIMEOUT.as_secs()
-                ),
-            ))
+                format!("{kind} worker timed out after {}s - the engine is unaffected", ARTIFACT_TIMEOUT.as_secs()),
+            )))
         }
     };
     tracker.entry.finished.store(true, AtomicOrdering::Relaxed);
@@ -1270,7 +1262,7 @@ async fn run_artifact_worker(
     target: &Path,
     lines: u64,
     op_id: Option<&str>,
-) -> Result<ArtifactResponse, (StatusCode, String)> {
+) -> Result<ArtifactResponse, ApiError> {
     let status = match op_id {
         Some(id) => wait_worker_tracked(kind, cmd, lines, id).await?,
         None => {
@@ -1310,19 +1302,19 @@ async fn wait_worker_for(
     kind: &str,
     cmd: &mut Command,
     timeout_after: Duration,
-) -> Result<std::process::ExitStatus, (StatusCode, String)> {
+) -> Result<std::process::ExitStatus, ApiError> {
     let mut child = cmd.spawn().map_err(internal)?;
     match timeout(timeout_after, child.wait()).await {
         Ok(waited) => waited.map_err(internal),
         Err(_) => {
             let _ = child.kill().await;
-            Err((
+            Err(ApiError::from((
                 StatusCode::GATEWAY_TIMEOUT,
                 format!(
                     "{kind} worker timed out after {}s - the engine is unaffected",
                     timeout_after.as_secs()
                 ),
-            ))
+            )))
         }
     }
 }
@@ -1333,20 +1325,20 @@ async fn wait_worker_output(
     kind: &str,
     cmd: &mut Command,
     timeout_after: Duration,
-) -> Result<std::process::Output, (StatusCode, String)> {
+) -> Result<std::process::Output, ApiError> {
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
     let child = cmd.spawn().map_err(internal)?;
     match timeout(timeout_after, child.wait_with_output()).await {
         Ok(waited) => waited.map_err(internal),
-        Err(_) => Err((
+        Err(_) => Err(ApiError::from((
             StatusCode::GATEWAY_TIMEOUT,
             format!(
                 "{kind} worker timed out after {}s - the engine is unaffected",
                 timeout_after.as_secs()
             ),
-        )),
+        ))),
     }
 }
 
@@ -1357,7 +1349,7 @@ async fn wait_worker_output_tracked(
     cmd: &mut Command,
     total: u64,
     op_id: &str,
-) -> Result<std::process::Output, (StatusCode, String)> {
+) -> Result<std::process::Output, ApiError> {
     cmd.arg("--progress")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1391,21 +1383,18 @@ async fn wait_worker_output_tracked(
         _ = tracker.entry.cancel.notified() => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            Err((
+            Err(ApiError::from((
                 StatusCode::from_u16(499).unwrap_or(StatusCode::CONFLICT),
                 format!("{kind} worker cancelled"),
-            ))
+            )))
         }
         _ = tokio::time::sleep(ARTIFACT_TIMEOUT) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            Err((
+            Err(ApiError::from((
                 StatusCode::GATEWAY_TIMEOUT,
-                format!(
-                    "{kind} worker timed out after {}s - the engine is unaffected",
-                    ARTIFACT_TIMEOUT.as_secs()
-                ),
-            ))
+                format!("{kind} worker timed out after {}s - the engine is unaffected", ARTIFACT_TIMEOUT.as_secs()),
+            )))
         }
     };
     tracker.entry.finished.store(true, AtomicOrdering::Relaxed);
