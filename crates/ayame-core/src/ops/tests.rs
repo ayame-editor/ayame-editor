@@ -338,3 +338,96 @@ fn numeric_sort_and_top_push_invalid_values_to_the_end_for_largest() {
         .collect();
     assert_eq!(top, vec!["10", "3"]);
 }
+
+#[test]
+fn group_spill_matches_the_in_memory_fast_path() {
+    // The spilling path (generic run codec + combine-merge across runs) must
+    // emit exactly what the in-memory fast path does for the same input.
+    let mut data = Vec::new();
+    for i in 0..8000u64 {
+        // 500 distinct keys, uneven per-key counts, with a numeric value.
+        data.extend_from_slice(format!("k{},{i}\n", i % 500).as_bytes());
+    }
+    let (_f, doc) = doc_from(&data);
+    let run = |budget: usize, dir: &std::path::Path| {
+        let opts = GroupOptions {
+            key_column: Some(1),
+            value_column: Some(2),
+            budget_bytes: budget,
+            spill_dir: dir.to_path_buf(),
+            ..Default::default()
+        };
+        let mut rows = Vec::new();
+        let stats = group(&doc, &opts, |r| {
+            rows.push((r.key.clone(), r.count, r.numeric_count, r.sum, r.min, r.max));
+        })
+        .unwrap();
+        (rows, stats)
+    };
+    let d1 = tempfile::tempdir().unwrap();
+    let d2 = tempfile::tempdir().unwrap();
+    let (in_mem, s1) = run(1 << 30, d1.path());
+    let (spilled, s2) = run(512, d2.path());
+    assert_eq!(s1.runs, 0, "a huge budget must not spill");
+    assert!(s2.runs > 1, "a tiny budget must spill across runs");
+    assert_eq!(in_mem.len(), 500);
+    assert_eq!(
+        spilled, in_mem,
+        "spilled group must equal the in-memory result"
+    );
+}
+
+#[test]
+fn reverse_sort_with_spill_is_stable_and_descending() {
+    // Many rows, 20 keys each shared by 200 rows, tiny budget => a multi-run
+    // merge. Reverse must order keys 19..0, and within a key the original line
+    // order must survive (stable) — exercising the generic heap's reverse
+    // direction and line-number tie-break through spilling.
+    let mut data = Vec::new();
+    for i in 0..4000u64 {
+        data.extend_from_slice(format!("{},orig{i}\n", i % 20).as_bytes());
+    }
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = SortOptions {
+        key_column: Some(1),
+        numeric: true,
+        reverse: true,
+        budget_bytes: 4 * 1024,
+        spill_dir: spill.path().to_path_buf(),
+        ..Default::default()
+    };
+    let res = sort(&doc, &opts).unwrap();
+    assert!(res.runs > 1, "tiny budget should spill");
+    let lines = sorted_lines(&doc, &res);
+    assert_eq!(lines.len(), 4000);
+
+    let parse = |l: &str| -> (i64, u64) {
+        let mut p = l.split(',');
+        let key = p.next().unwrap().parse().unwrap();
+        let orig = p
+            .next()
+            .unwrap()
+            .strip_prefix("orig")
+            .unwrap()
+            .parse()
+            .unwrap();
+        (key, orig)
+    };
+    let mut prev: Option<(i64, u64)> = None;
+    for l in &lines {
+        let (key, orig) = parse(l);
+        if let Some((pk, porig)) = prev {
+            if pk == key {
+                assert!(
+                    orig > porig,
+                    "stability broken in key {key}: {orig} after {porig}"
+                );
+            } else {
+                assert!(pk > key, "keys must descend: {pk} then {key}");
+            }
+        }
+        prev = Some((key, orig));
+    }
+    assert_eq!(prev.unwrap().0, 0, "the smallest key must sort last");
+}

@@ -1,16 +1,13 @@
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-
-use rayon::prelude::*;
 
 use crate::document::Document;
 use crate::fields::{comparable_key, FieldSpec};
 use crate::Result;
 
 use super::common::{read_full, unique_spill_dir};
+use super::spill::{self, HeapEntry, Payload, RunReader};
 
 /// How to sort.
 #[derive(Clone, Debug)]
@@ -36,7 +33,7 @@ impl Default for SortOptions {
             fields: FieldSpec::default(),
             numeric: false,
             reverse: false,
-            budget_bytes: 256 * 1024 * 1024,
+            budget_bytes: super::common::DEFAULT_BUDGET_BYTES,
             spill_dir: std::env::temp_dir().join("ayame-sort"),
         }
     }
@@ -98,17 +95,10 @@ where
     let mut runs: Vec<PathBuf> = Vec::new();
     let mut spill_bytes: u64 = 0;
 
-    const BATCH: u64 = 8192;
-    let mut start = 0u64;
     let mut scratch = Vec::new();
     report_progress(&mut progress, 0, total);
-    while start < total {
-        let batch = doc.raw_line_ranges(start, BATCH);
-        if batch.is_empty() {
-            break;
-        }
-        let advanced = batch.len() as u64;
-        for (line_no, raw) in batch {
+    doc.try_for_each_raw_line(
+        |line_no, raw| {
             let key = comparable_key(
                 raw,
                 enc,
@@ -123,10 +113,10 @@ where
                 spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
                 buffered_bytes = 0;
             }
-        }
-        start += advanced;
-        report_progress(&mut progress, start, total);
-    }
+            Ok(())
+        },
+        |done| report_progress(&mut progress, done, total),
+    )?;
     if !buffer.is_empty() {
         spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
     }
@@ -185,93 +175,39 @@ impl OrderingReader {
 
 pub(super) const MERGE_FAN_IN: usize = 64;
 
+/// Build the merge-heap element for a sort run: the payload is the line number,
+/// and the stable tie-break is that same line number (smaller emitted first),
+/// so equal keys keep their original order across the merge.
+fn heap_item(key: Vec<u8>, line_no: u64, run: usize, reverse: bool) -> HeapEntry<u64> {
+    HeapEntry {
+        key,
+        payload: line_no,
+        tiebreak: line_no,
+        run,
+        reverse,
+    }
+}
+
 fn spill_run(
     records: &mut Vec<(Vec<u8>, u64)>,
     reverse: bool,
     dir: &Path,
     runs: &mut Vec<PathBuf>,
 ) -> Result<u64> {
+    let path = dir.join(format!("run{:05}.bin", runs.len()));
     // Sort the run in the same direction the merge will consume it; ties break
     // on line number so the sort is stable.
-    records.par_sort_unstable_by(|a, b| {
-        let k = a.0.cmp(&b.0);
-        let k = if reverse { k.reverse() } else { k };
-        k.then_with(|| a.1.cmp(&b.1))
-    });
-
-    let path = dir.join(format!("run{:05}.bin", runs.len()));
-    let mut w = BufWriter::new(File::create(&path)?);
-    let mut bytes = 0u64;
-    for (key, line) in records.iter() {
-        let len = key.len() as u32;
-        w.write_all(&len.to_le_bytes())?;
-        w.write_all(key)?;
-        w.write_all(&line.to_le_bytes())?;
-        bytes += 4 + key.len() as u64 + 8;
-    }
-    w.flush()?;
+    let bytes = spill::write_run(
+        records,
+        move |a, b| {
+            let k = a.0.cmp(&b.0);
+            let k = if reverse { k.reverse() } else { k };
+            k.then_with(|| a.1.cmp(&b.1))
+        },
+        &path,
+    )?;
     runs.push(path);
-    records.clear();
     Ok(bytes)
-}
-
-struct RunReader {
-    r: BufReader<File>,
-}
-
-impl RunReader {
-    fn open(path: &Path) -> Result<RunReader> {
-        Ok(RunReader {
-            r: BufReader::new(File::open(path)?),
-        })
-    }
-
-    fn next_record(&mut self) -> Result<Option<(Vec<u8>, u64)>> {
-        let mut len_b = [0u8; 4];
-        if !read_full(&mut self.r, &mut len_b)? {
-            return Ok(None);
-        }
-        let len = u32::from_le_bytes(len_b) as usize;
-        let mut key = vec![0u8; len];
-        self.r.read_exact(&mut key)?;
-        let mut line_b = [0u8; 8];
-        self.r.read_exact(&mut line_b)?;
-        Ok(Some((key, u64::from_le_bytes(line_b))))
-    }
-}
-
-/// Heap element. `Ord` is arranged so `BinaryHeap` (a max-heap) pops whichever
-/// record should be emitted next; ties prefer the smaller line number (stable).
-struct HeapItem {
-    key: Vec<u8>,
-    line_no: u64,
-    run: usize,
-    reverse: bool,
-}
-
-impl PartialEq for HeapItem {
-    fn eq(&self, o: &Self) -> bool {
-        self.cmp(o) == Ordering::Equal
-    }
-}
-impl Eq for HeapItem {}
-impl PartialOrd for HeapItem {
-    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
-        Some(self.cmp(o))
-    }
-}
-impl Ord for HeapItem {
-    fn cmp(&self, o: &Self) -> Ordering {
-        let key_ord = self.key.cmp(&o.key);
-        // Ascending: the smaller key must be "greater" so the max-heap pops it.
-        let primary = if self.reverse {
-            key_ord
-        } else {
-            key_ord.reverse()
-        };
-        // Tie-break: smaller line number emitted first => it must be "greater".
-        primary.then_with(|| o.line_no.cmp(&self.line_no))
-    }
 }
 
 fn merge_runs(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<(u64, u64)> {
@@ -310,72 +246,54 @@ fn intermediate_run_path(ordering_path: &Path, pass: usize, chunk_idx: usize) ->
     dir.join(format!("merge-pass{pass:03}-chunk{chunk_idx:05}.bin"))
 }
 
+/// Intermediate merge pass: k-way-merge `runs` into one sorted run of full
+/// `[len][key][line]` records, readable again by [`RunReader`].
 fn merge_run_records(runs: &[PathBuf], reverse: bool, output_path: &Path) -> Result<(u64, u64)> {
-    let mut readers: Vec<RunReader> = runs
+    let mut readers: Vec<RunReader<u64>> = runs
         .iter()
         .map(|p| RunReader::open(p))
         .collect::<Result<_>>()?;
-    let mut heap = seed_merge_heap(&mut readers, reverse)?;
+    let mut heap = spill::seed_heap(&mut readers, |key, line, run| {
+        heap_item(key, line, run, reverse)
+    })?;
 
     let mut out = BufWriter::new(File::create(output_path)?);
     let mut count = 0u64;
     let mut bytes = 0u64;
     while let Some(item) = heap.pop() {
-        let key_len = item.key.len() as u32;
-        out.write_all(&key_len.to_le_bytes())?;
+        out.write_all(&(item.key.len() as u32).to_le_bytes())?;
         out.write_all(&item.key)?;
-        out.write_all(&item.line_no.to_le_bytes())?;
+        item.payload.write_to(&mut out)?;
         count += 1;
         bytes += 4 + item.key.len() as u64 + 8;
-        if let Some((key, line_no)) = readers[item.run].next_record()? {
-            heap.push(HeapItem {
-                key,
-                line_no,
-                run: item.run,
-                reverse,
-            });
+        if let Some((key, line)) = readers[item.run].next_record()? {
+            heap.push(heap_item(key, line, item.run, reverse));
         }
     }
     out.flush()?;
     Ok((count, bytes))
 }
 
+/// Final merge pass: k-way-merge `runs` and write only the sorted line numbers
+/// (the ordering file), with no key framing.
 fn merge_runs_to_ordering(runs: &[PathBuf], reverse: bool, ordering_path: &Path) -> Result<u64> {
-    let mut readers: Vec<RunReader> = runs
+    let mut readers: Vec<RunReader<u64>> = runs
         .iter()
         .map(|p| RunReader::open(p))
         .collect::<Result<_>>()?;
-    let mut heap = seed_merge_heap(&mut readers, reverse)?;
+    let mut heap = spill::seed_heap(&mut readers, |key, line, run| {
+        heap_item(key, line, run, reverse)
+    })?;
 
     let mut out = BufWriter::new(File::create(ordering_path)?);
     let mut count = 0u64;
     while let Some(item) = heap.pop() {
-        out.write_all(&item.line_no.to_le_bytes())?;
+        item.payload.write_to(&mut out)?;
         count += 1;
-        if let Some((key, line_no)) = readers[item.run].next_record()? {
-            heap.push(HeapItem {
-                key,
-                line_no,
-                run: item.run,
-                reverse,
-            });
+        if let Some((key, line)) = readers[item.run].next_record()? {
+            heap.push(heap_item(key, line, item.run, reverse));
         }
     }
     out.flush()?;
     Ok(count)
-}
-
-fn seed_merge_heap(readers: &mut [RunReader], reverse: bool) -> Result<BinaryHeap<HeapItem>> {
-    let mut heap = BinaryHeap::with_capacity(readers.len());
-    for (i, rr) in readers.iter_mut().enumerate() {
-        if let Some((key, line_no)) = rr.next_record()? {
-            heap.push(HeapItem {
-                key,
-                line_no,
-                run: i,
-                reverse,
-            });
-        }
-    }
-    Ok(heap)
 }

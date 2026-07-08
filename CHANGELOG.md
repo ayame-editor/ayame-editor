@@ -4,6 +4,18 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Refactored the out-of-core data ops (#81.1, the last of #81): `sort` and
+  `group` no longer each hand-roll the external-merge machinery. A shared
+  `ops/spill.rs` now owns the run codec, run reader, sorted-run writer, and
+  k-way-merge heap element, generic over the payload each op carries (the line
+  number for sort, the aggregate accumulator for group); the two keep only their
+  distinct merge policy (sort's bounded multi-pass fan-in vs group's
+  single-pass key fold). The whole-document scan loop that was copy-pasted
+  across sort/group/top/distinct moved behind `Document::for_each_raw_line` /
+  `try_for_each_raw_line`, and the 256 MiB spill budget lives in one constant.
+  Behavior-preserving — the existing spill-equivalence and stable-sort tests
+  hold, plus a new group spill-vs-in-memory differential test and a
+  reverse-sort-with-spill stability test.
 - Fixed the "名前を付けて保存" overwrite confirmation not appearing when saving
   onto an existing file by a typed path (browser build): structured API errors
   (v0.5.15) attach a `code` to every response, and the exists-check was
