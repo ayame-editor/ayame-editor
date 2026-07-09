@@ -1887,7 +1887,17 @@ button { border-radius: var(--radius); }
   font-size: var(--font-size);
   line-height: var(--line-height);
 }
+.diff-hunk {
+  display: grid;
+  grid-template-columns: minmax(360px, max-content) minmax(360px, max-content);
+  /* Size to content (not just the visible width) so the columns actually reach
+     the widest line and the .diff-view scrolls horizontally to them; min-width
+     keeps short hunks filling the pane. */
+  width: max-content;
+  min-width: 100%;
+}
 .diff-hunk-title {
+  grid-column: 1 / -1;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1900,19 +1910,23 @@ button { border-radius: var(--radius); }
   font-size: 12px;
 }
 .diff-hunk:first-child .diff-hunk-title { border-top: none; }
+/* Both cells of a row become grid items of the hunk grid (display:contents), so
+   old and new share one set of columns: they stay aligned and grow to the widest
+   line, and the whole .diff-view scrolls horizontally to reach content that no
+   longer fits — instead of clipping each line with an ellipsis. */
 .diff-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-width: 720px;
+  display: contents;
 }
 .diff-cell {
   display: grid;
-  grid-template-columns: 7ch minmax(0, 1fr);
+  /* min = max-content so the shared hunk columns grow to the widest line (and
+     the view scrolls) instead of clipping; max = 1fr so the text (and its diff
+     highlight) still fills the column when the line is shorter than the widest. */
+  grid-template-columns: 7ch minmax(max-content, 1fr);
   min-height: var(--line-height);
   white-space: pre;
-  overflow: hidden;
 }
-.diff-cell + .diff-cell { border-left: 1px solid var(--border); }
+.diff-cell.new { border-left: 1px solid var(--border); }
 .diff-ln {
   padding: 0 10px 0 6px;
   text-align: right;
@@ -1924,8 +1938,6 @@ button { border-radius: var(--radius); }
 .diff-tx {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   padding: 0 8px;
 }
 .diff-word.changed {
@@ -1941,6 +1953,7 @@ button { border-radius: var(--radius); }
   background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
 .diff-truncated {
+  grid-column: 1 / -1;
   padding: 4px 10px;
   color: var(--fg-dim);
   font-family: var(--ui);
@@ -2162,14 +2175,14 @@ button { border-radius: var(--radius); }
   }
   .diff-paths,
   .diff-grid-head,
-  .diff-row {
+  .diff-hunk {
     grid-template-columns: 1fr;
   }
-  .diff-row {
-    min-width: 0;
+  .diff-hunk {
+    width: auto;
   }
   .diff-grid-head span + span,
-  .diff-cell + .diff-cell {
+  .diff-cell.new {
     border-left: none;
     border-top: 1px solid var(--border);
   }
