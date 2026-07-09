@@ -188,7 +188,7 @@ export const MESSAGES = {
     "common.options": "オプション",
     "common.error": "エラー",
     "dialog.operation.starting": "開始しています…",
-    "dialog.operation.progress": "{done} / {total} 行",
+    "dialog.operation.progress": "{done} / {total} 行 ({percent}%)",
     "dialog.operation.canceling": "キャンセルしています…",
     // -- open / save dialog --
     "dialog.open.title": "ファイルを開く",
@@ -580,7 +580,7 @@ export const MESSAGES = {
     "common.options": "Options",
     "common.error": "Error",
     "dialog.operation.starting": "Starting...",
-    "dialog.operation.progress": "{done} / {total} lines",
+    "dialog.operation.progress": "{done} / {total} lines ({percent}%)",
     "dialog.operation.canceling": "Canceling...",
     "dialog.open.title": "Open File",
     "dialog.open.chooseFolder": "Choose Folder",
