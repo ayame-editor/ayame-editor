@@ -1560,9 +1560,9 @@ html.saving .caret.extra { visibility: hidden; }
 
 /* ---- settings --------------------------------------------------------- */
 
-.settings-panel { width: min(680px, 94vw); }
+.settings-panel { width: min(840px, 94vw); }
 /* the memo rows pushed the panel past 80vh on short windows: scroll, don't clip */
-.settings-body { padding: 8px 14px 14px; overflow-y: auto; scrollbar-width: thin; }
+.settings-body { padding: 12px 28px 24px; overflow-y: auto; scrollbar-width: thin; }
 .set-row {
   display: flex;
   align-items: center;
@@ -1606,6 +1606,18 @@ html.saving .caret.extra { visibility: hidden; }
 .set-row.set-hint-row { padding-top: 0; margin-top: -8px; }
 .set-row.set-hint-row .set-hint { font-size: 11px; color: var(--fg-faint); }
 .set-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+/* Action buttons in a settings row (キー設定→編集 / テーマJSON→ファイルで開く /
+   画像を選択…) otherwise inherit the transparent-until-hover .cmd chrome and read
+   as plain text; give them a visible border + hover so they look clickable. */
+.set-row .cmd {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.set-row .cmd:hover {
+  border-color: var(--accent-bright);
+  background: var(--bg-elevated, var(--bg));
+}
 #set-bg-image-row.hidden { display: none; }
 #set-bg-image-name {
   min-width: 0;
