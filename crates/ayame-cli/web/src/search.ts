@@ -690,8 +690,8 @@ export function renderDiffView(res) {
           ? inlineWordDiff(oldLine.text, newLine.text)
           : null;
       row.append(
-        diffCell(oldLine, oldCls, wordDiff?.oldParts),
-        diffCell(newLine, newCls, wordDiff?.newParts),
+        diffCell(oldLine, "old " + oldCls, wordDiff?.oldParts),
+        diffCell(newLine, "new " + newCls, wordDiff?.newParts),
       );
       hunk.append(row);
     }

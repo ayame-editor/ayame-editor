@@ -12,6 +12,23 @@ export const pool = [];
 
 export let renderQueued = false;
 
+// Horizontal-scroll preservation. A not-yet-loaded row renders as a narrow "⋯"
+// placeholder (see fillRow); when a vertical scroll lands on such rows every
+// visible row collapses to that width, #content's scroll width shrinks, and the
+// browser clamps scrollLeft back to 0 — so the horizontal position is lost on
+// every scroll into un-fetched lines. A hidden zero-height spacer holds the last
+// measured content width while data loads, then we re-measure once it's in.
+let hkeeper: HTMLDivElement | null = null;
+let contentWidth = 0;
+
+function ensureHKeeper(content: HTMLElement) {
+  if (hkeeper) return;
+  hkeeper = document.createElement("div");
+  hkeeper.className = "hkeeper";
+  hkeeper.setAttribute("aria-hidden", "true");
+  content.append(hkeeper);
+}
+
 export function rowsVisible() {
   const h = $("viewport").clientHeight - (state.settings && state.settings.ruler ? 18 : 0);
   return Math.max(1, Math.ceil(h / LINE_HEIGHT));
@@ -411,16 +428,19 @@ export function appendSyntaxHighlighted(container, text) {
 
 export function render() {
   renderQueued = false;
+  const content = $("content");
   const vis = rowsVisible();
   const count = vis + OVERSCAN;
   ensurePool(count);
   ensureData(state.first, count);
+  ensureHKeeper(content);
 
   // Size the gutter to the widest visible line number (commas included). Every
   // `.ln` reads this via `min-width: var(--gutter-ch)`, so normal rows and the
   // empty [EOF] gutter share one width and the numbers right-align.
   const gutterCh = Math.max(7, formatLineNo(state.total).length);
-  $("content").style.setProperty("--gutter-ch", `${gutterCh}ch`);
+  content.style.setProperty("--gutter-ch", `${gutterCh}ch`);
+  let loading = false;
   for (let r = 0; r < pool.length; r++) {
     const row = pool[r];
     const line = state.first + r;
@@ -432,8 +452,22 @@ export function render() {
     if (line === state.total) {
       fillEofRow(row); // one marker row just past the last line
     } else {
-      fillRow(row, line, cachedLine(line));
+      const rec = cachedLine(line);
+      if (rec == null) loading = true;
+      fillRow(row, line, rec);
     }
+  }
+  // Keep the horizontal scroll position stable while rows are still loading: the
+  // "⋯" placeholders would otherwise collapse the scroll width and snap
+  // scrollLeft to 0. Hold the last good width with the spacer during the load,
+  // then re-measure once real rows are in. This runs before buildRuler(), which
+  // reads scrollLeft — so the value it mirrors onto the ruler is the preserved
+  // one, not a clamped 0.
+  if (loading) {
+    hkeeper!.style.width = `${contentWidth}px`;
+  } else {
+    hkeeper!.style.width = "0px";
+    contentWidth = content.scrollWidth;
   }
   buildRuler();
   renderSelection();
