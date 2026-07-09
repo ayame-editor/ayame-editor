@@ -37,6 +37,7 @@ import {
   refreshFindOptButtons,
   runAction,
   shortcutActionFromEvent,
+  showPopupMenu,
   toggleOpt,
 } from "./menus.js";
 import {
@@ -77,6 +78,7 @@ import {
   adjustZoom,
   applyKeymapFromBuffer,
   applyThemeFromBuffer,
+  clampZoom,
   hideSettings,
   settingsVisible,
   setZoom,
@@ -224,6 +226,21 @@ export function initEvents() {
   $("st-enc").addEventListener("click", showConvert);
   $("st-eol").addEventListener("click", showConvert);
   $("st-zoom").addEventListener("click", () => setZoom(100));
+  // Right-click the zoom % for a quick zoom-level menu (instead of only the
+  // click-to-reset), suppressing the webview's default context menu.
+  $("st-zoom").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const cur = clampZoom(Number(state.settings.zoom) || 100);
+    showPopupMenu(
+      e.clientX,
+      e.clientY,
+      [50, 75, 100, 125, 150, 200].map((z) => ({
+        label: `${z}%`,
+        checked: z === cur,
+        action: () => setZoom(z),
+      })),
+    );
+  });
   $("st-tail").addEventListener("click", () => setFollowTail(!state.followTail));
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);

@@ -87,6 +87,8 @@ export const MESSAGES = {
     // -- tabs --
     "tab.close": "タブを閉じる",
     "tab.closeName": "{name} を閉じる",
+    "tab.copyPath": "パスをコピー",
+    "tab.closeOthers": "他のタブを閉じる",
     "tab.confirmDiscard": "{name} の未保存の編集を破棄して閉じますか?",
     "tab.discardClose": "破棄して閉じる",
     "tab.switchError": "タブ切替エラー",
@@ -484,6 +486,8 @@ export const MESSAGES = {
     "toolbar.toolsTitle": "Sort, Diff, Split",
     "toolbar.newTab": "New Tab",
     "tab.close": "Close Tab",
+    "tab.copyPath": "Copy Path",
+    "tab.closeOthers": "Close Other Tabs",
     "tab.closeName": "Close {name}",
     "tab.confirmDiscard": "Discard unsaved edits in {name} and close it?",
     "tab.discardClose": "Discard and Close",
