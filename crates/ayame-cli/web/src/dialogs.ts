@@ -265,6 +265,12 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
 // ---- loading overlay ------------------------------------------------------
 let loadingPoll: ReturnType<typeof setInterval> | null = null;
 let loadingOpId: string | null = null;
+// True once a status poll has seen the tracked op, so a later "not_found" means
+// the worker finished and the op was evicted (finalizing) — not "no such op".
+let loadingSeenOp = false;
+// True after the user hits Cancel, so the post-eviction 404 keeps showing the
+// canceling state instead of switching to the finalizing one.
+let loadingCanceling = false;
 
 export function newOperationId(kind = "op") {
   const rand =
@@ -332,13 +338,37 @@ function updateOperationProgress(status: ArtifactOpStatus) {
   if (status.canceled) parts.detail.textContent = t("dialog.operation.canceling");
 }
 
+// The worker has finished (so the server evicted its tracked op and the status
+// poll now 404s), but our request is still in flight: the heavy phase is done
+// and the server/client is finalizing — for an in-place sort that means
+// re-indexing and reloading the rewritten file, slow on a huge file. Show a
+// "finishing" state so the card doesn't sit frozen at its last percentage until
+// the request finally returns and hides it.
+function showFinalizing() {
+  const parts = loadingParts();
+  parts.text.textContent = t("dialog.operation.finalizing");
+  parts.progress.value = 100;
+  parts.detail.textContent = "";
+  parts.cancel.classList.add("hidden");
+}
+
 async function pollLoadingOperation(opId: string) {
   try {
     const status = await api<ArtifactOpStatus>(`/api/ops/status?id=${encodeURIComponent(opId)}`);
     if (loadingOpId !== opId) return;
+    loadingSeenOp = true;
     updateOperationProgress(status);
-  } catch {
-    // The request itself owns the final success/error path; polling is only UI.
+  } catch (e) {
+    // Only a "not_found" after we've already seen the op means it finished and
+    // was evicted; any other error is a transient blip and polling is only UI.
+    if (
+      loadingOpId === opId &&
+      loadingSeenOp &&
+      !loadingCanceling &&
+      (e as { code?: string })?.code === "not_found"
+    ) {
+      showFinalizing();
+    }
   }
 }
 
@@ -356,12 +386,15 @@ export function showLoading(text, opts: { opId?: string | null; cancel?: boolean
   parts.cancel.onclick = () => {
     const id = loadingOpId;
     if (!id) return;
+    loadingCanceling = true;
     parts.cancel.disabled = true;
     parts.detail.textContent = t("dialog.operation.canceling");
     apiPost<ArtifactOpStatus, OperationCancelRequest>("/api/ops/cancel", { id }).catch(() => {});
   };
   if (opts.opId) {
     loadingOpId = opts.opId;
+    loadingSeenOp = false;
+    loadingCanceling = false;
     pollLoadingOperation(opts.opId);
     loadingPoll = setInterval(() => pollLoadingOperation(opts.opId!), 500);
   }
