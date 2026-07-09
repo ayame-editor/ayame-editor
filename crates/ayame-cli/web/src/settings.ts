@@ -292,13 +292,16 @@ export function applySettings(s) {
   // ---- whitespace glyphs: swap the zenkaku-space box for an underline ----
   root.classList.toggle("zenkaku-underline", !!s.zenkakuUnderline);
   // ---- background mode + illustration (user overrides on top of the theme) ----
+  delete root.dataset.bg;
   if (s.bgMode === "solid") {
     const flat = getComputedStyle(root).getPropertyValue("--bg").trim() || "#FBF8F1";
     root.style.setProperty("--desk", flat);
   } else if (s.bgMode === "image" && s.bgImage) {
-    // Custom wallpaper: cover the desk; the theme paper shows through any
-    // transparency and while the data: URL decodes.
-    root.style.setProperty("--desk", `url("${s.bgImage}") center / cover no-repeat, var(--bg)`);
+    // Custom image: show it as-is in the editor background layer (#ambient),
+    // not cropped into the あやめ default's fixed, masked bottom-left corner.
+    // The default (watercolor) mode keeps the あやめ illustration there.
+    root.dataset.bg = "image";
+    root.style.setProperty("--ambient-img", `url("${s.bgImage}")`);
   }
   if (typeof s.illus === "number") root.style.setProperty("--illus", String(s.illus));
   // ---- font / size ----

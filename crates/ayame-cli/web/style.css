@@ -1708,6 +1708,17 @@ button { border-radius: var(--radius); }
   mask-image:
     radial-gradient(125% 120% at 0% 100%, #000 44%, rgba(0,0,0,.72) 62%, transparent 84%);
 }
+/* Custom-image background (設定 → 背景 = カスタム画像): show the picture as-is
+   across the editor area instead of the あやめ default's fixed, masked
+   bottom-left corner. Opacity still follows the イラスト (--illus) slider. */
+:root[data-bg="image"] #ambient {
+  inset: 0;
+  width: auto;
+  height: auto;
+  background: var(--ambient-img, none) center / contain no-repeat;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
 
 .settings-panel { width: min(680px, 94vw); }
 #apply-theme.hidden,
