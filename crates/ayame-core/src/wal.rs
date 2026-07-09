@@ -1010,6 +1010,50 @@ mod tests {
         assert!(recovered.is_dirty());
     }
 
+    /// #5 regression: a clean save followed by a tab re-focus must leave nothing
+    /// to recover. Re-focusing rebuilds the crash writer from scratch
+    /// (`WalWriter::create`, so `base_gen == 0` and `can_snapshot()` is true) and
+    /// used to `wal_compact()` the still-`has_edits()` session even though it was
+    /// clean — writing an effective snapshot of already-saved content. On the
+    /// next launch the reopened saved file's header matched, so that snapshot
+    /// made the log look `Recoverable` and the editor falsely offered recovery.
+    #[test]
+    fn refocus_after_a_clean_save_leaves_nothing_to_recover() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        // Edit + in-place save + reset (the commit_in_place_save path).
+        live.replace_range(&doc, 0, 0, 0, 1, "A").unwrap();
+        live.save_to_path_overwrite(&doc, f.path()).unwrap();
+        live.mark_saved();
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal_reset_for_save(&doc, header);
+        assert!(!live.is_dirty(), "the saved session is clean");
+        assert!(
+            live.has_edits(),
+            "but keeps history so undo can cross the save"
+        );
+
+        // Re-focusing the tab rebuilds the writer from scratch, then compacts
+        // because the session still has_edits() (attach_live_wal's condition).
+        let fresh = WalWriter::create(&wal, Header::for_document(&doc).unwrap()).unwrap();
+        live.set_wal(Some(fresh));
+        live.wal_compact();
+        drop(live);
+
+        // Next launch: the reopened saved file must inspect Clean — a clean save
+        // has nothing to recover.
+        let doc2 = reopen(f.path());
+        assert_eq!(
+            inspect(&wal, &Header::for_document(&doc2).unwrap()),
+            RecoveryInfo::Clean,
+            "a clean save must not offer crash recovery on the next launch"
+        );
+    }
+
     /// The owner's repro for the wrong-base snapshot: doc ["a","b"] → insert
     /// "x" → save (reset_for_save; disk now a,x,b) → undo (view a,b;
     /// unreplayable → degradation snapshot) → crash. Replay onto the SAVED
