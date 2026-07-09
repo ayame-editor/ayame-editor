@@ -467,6 +467,16 @@ impl EditSession {
     /// keeps compaction working.
     pub fn wal_compact(&mut self) {
         let Some(mut w) = self.wal.take() else { return };
+        // A clean session has nothing unsaved to protect: its overlay only
+        // exists so undo can cross the last save. Snapshotting it would write
+        // already-saved content into the crash log, and because the log's header
+        // matches the saved file the next launch reads that snapshot as a
+        // recoverable crash and falsely offers to restore it (#5). Compacting a
+        // clean log is redundant anyway — a save already resets it to the header.
+        if !self.is_dirty() {
+            self.wal = Some(w);
+            return;
+        }
         if !w.can_snapshot() {
             self.wal = Some(w);
             return;

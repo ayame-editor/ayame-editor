@@ -23,9 +23,21 @@ import {
   openNewWindow,
   requestEditorClose,
 } from "./app.js";
-import { expectWalHandoff, maybeOfferWalRecovery, noteWalError, savingCount } from "./save.js";
+import {
+  expectWalHandoff,
+  maybeOfferWalRecovery,
+  noteWalError,
+  saveCopy,
+  savingCount,
+} from "./save.js";
 import { clearLineCache, focusEditor, render, scheduleRender, setCaret } from "./editor.js";
-import { fileMenuVisible, hideFileMenu, initMenuBar, updateStatusMeta } from "./menus.js";
+import {
+  fileMenuVisible,
+  hideFileMenu,
+  initMenuBar,
+  showPopupMenu,
+  updateStatusMeta,
+} from "./menus.js";
 import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
@@ -622,6 +634,37 @@ export function renderTabs(list) {
         e.preventDefault();
         closeTab(tab.id); // middle-click closes
       }
+    });
+    // Right-click a tab for tab-scoped actions instead of the webview default menu.
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showPopupMenu(e.clientX, e.clientY, [
+        { label: t("common.close"), action: () => closeTab(tab.id) },
+        {
+          label: t("menu.saveAs"),
+          action: async () => {
+            if (!tab.active) await selectTab(tab.id);
+            saveCopy();
+          },
+        },
+        {
+          label: t("tab.copyPath"),
+          disabled: !tab.path,
+          action: () => {
+            navigator.clipboard?.writeText(displayPath(tab.path)).catch(() => {});
+          },
+        },
+        { separator: true },
+        {
+          label: t("tab.closeOthers"),
+          disabled: state.tabs.length < 2,
+          action: () => {
+            // Snapshot ids first — closeTab mutates state.tabs as it runs.
+            const others = state.tabs.filter((o) => o.id !== tab.id).map((o) => o.id);
+            for (const id of others) closeTab(id);
+          },
+        },
+      ]);
     });
     el.addEventListener("dragstart", (e) => startTabDrag(e, tab));
     el.addEventListener("dragend", (e) => finishTabDrag(e, tab));

@@ -497,6 +497,72 @@ export function initContextMenu() {
   });
 }
 
+// ---- reusable pop-up menu (tab / zoom right-click) --------------------------
+
+export interface PopupMenuItem {
+  label?: string;
+  action?: () => void;
+  disabled?: boolean;
+  checked?: boolean;
+  separator?: boolean;
+}
+
+// A lightweight context menu positioned at (x, y). Reuses the .file-menu look
+// and the .ctx-menu pointer positioning, and dismisses on outside click / Esc.
+export function showPopupMenu(x: number, y: number, items: PopupMenuItem[]) {
+  document.getElementById("popup-menu")?.remove();
+  const menu = document.createElement("div");
+  menu.id = "popup-menu";
+  menu.className = "file-menu ctx-menu";
+  menu.setAttribute("role", "menu");
+  const close = () => {
+    menu.remove();
+    document.removeEventListener("pointerdown", onDown, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onDown = (e: Event) => {
+    if (!(e.target as any)?.closest?.("#popup-menu")) close();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  };
+  for (const it of items) {
+    if (it.separator) {
+      const sep = document.createElement("div");
+      sep.className = "menu-sep";
+      menu.append(sep);
+      continue;
+    }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "menu-item" + (it.checked ? " checked" : "");
+    b.setAttribute("role", "menuitem");
+    b.disabled = !!it.disabled;
+    const label = document.createElement("span");
+    label.className = "menu-label";
+    label.textContent = it.label || "";
+    b.append(label);
+    b.addEventListener("click", () => {
+      close();
+      it.action?.();
+    });
+    menu.append(b);
+  }
+  document.body.append(menu);
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - mw - 8))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - mh - 8))}px`;
+  // Defer wiring the dismiss listeners so the opening right-click doesn't close it.
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+  }, 0);
+}
+
 // ---- status bar ------------------------------------------------------------
 
 export function updateStatusMeta() {
