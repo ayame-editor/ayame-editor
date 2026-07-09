@@ -802,6 +802,19 @@ html[data-sidebar-side="right"] #sidebar {
   z-index: 2;
 }
 
+/* Zero-height spacer that holds #content's horizontal scroll width while rows
+   are still loading, so scrolling vertically into not-yet-fetched lines can't
+   collapse the width and reset scrollLeft. Hidden, but still affects layout. */
+.hkeeper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Custom multi-line selection highlight (drawn behind/over the text). */
 #sel-layer {
   position: absolute;
