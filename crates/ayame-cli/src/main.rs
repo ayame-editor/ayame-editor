@@ -21,6 +21,8 @@ mod temp_paths;
 
 #[cfg(feature = "gui")]
 pub(crate) use cli::default_cache_dir;
+#[cfg(feature = "gui")]
+pub(crate) use cli::{check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport};
 pub(crate) use cli::{
     commas, first_opt, has_flag, human_bytes, maybe_crash, open_opts, parse_checked,
     sort_document_to_utf8_file, temp_work_dir,

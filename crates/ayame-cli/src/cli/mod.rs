@@ -21,6 +21,7 @@ mod progress;
 // the real `sort` parser with the flags `sort_command` emits.
 pub(crate) mod sort;
 mod transform;
+mod update;
 
 #[cfg(feature = "gui")]
 pub(crate) use args::default_cache_dir;
@@ -28,6 +29,10 @@ pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
 pub(crate) use common::{maybe_crash, temp_work_dir};
 pub(crate) use formatting::{commas, human_bytes};
 pub(crate) use sort::sort_document_to_utf8_file;
+#[cfg(feature = "gui")]
+pub(crate) use update::{
+    check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport,
+};
 
 const HELP: &str = "\
 ayame — edit, transform, search and navigate text files of any size
@@ -59,6 +64,8 @@ COMMANDS:
                                   --allow-remote for non-loopback hosts)
     gui    [FILE]                 Open the editor in a native desktop window
     cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
+    update                        Update Ayame from the GitHub release artifacts
+    remove                        Remove the installed Ayame binary/app
     version                       Show version
 
 COMMON OPTIONS:
@@ -123,6 +130,17 @@ CACHE OPTIONS:
     --max-age-days <N>    cache gc age limit (default 30)
     --dry-run             print what gc would remove
 
+UPDATE OPTIONS:
+    --version <VERSION>   Install a specific release (default latest)
+    --install-dir <DIR>   Install to DIR instead of replacing the current install
+    --force               Install even when the selected release is not newer
+    --dry-run             Resolve the release and print the target without changing files
+
+REMOVE OPTIONS:
+    --install-dir <DIR>   Remove the install in DIR instead of the current install
+    --yes                 Remove without an interactive confirmation prompt
+    --dry-run             Print the target without changing files
+
 DIFF OPTIONS:
     --summary             print only counts
     --max-hunks <N>       max hunks to print/store (default 200)
@@ -172,6 +190,8 @@ const COMMANDS: &[&str] = &[
     "serve",
     "typegen",
     "cache",
+    "update",
+    "remove",
 ];
 
 #[cfg(any(feature = "gui", test))]
@@ -245,6 +265,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
         #[cfg(feature = "gui")]
         "gui" => gui::cmd_gui(rest).map(|_| 0),
         "cache" => cache::cmd_cache(rest).map(|_| 0),
+        "update" => update::cmd_update(rest).map(|_| 0),
+        "remove" => update::cmd_remove(rest).map(|_| 0),
         other => {
             print!("{HELP}");
             bail!("unknown command '{other}'");
@@ -284,6 +306,8 @@ mod tests {
             "serve",
             "typegen",
             "cache",
+            "update",
+            "remove",
         ] {
             assert!(is_known_command(cmd), "{cmd}");
         }

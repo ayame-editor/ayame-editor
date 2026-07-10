@@ -254,6 +254,7 @@ export const MESSAGES = {
     "settings.ruler": "列ルーラー",
     "settings.lineNumberCommas": "行番号をカンマ区切りで表示",
     "settings.restoreSession": "セッション復元",
+    "settings.updateCheckOnStartup": "起動時に更新を確認",
     "settings.confirmExit": "終了確認",
     "settings.memoName": "新規ファイルの名前",
     "settings.memoNameHint":
@@ -643,6 +644,7 @@ export const MESSAGES = {
     "settings.ruler": "Column Ruler",
     "settings.lineNumberCommas": "Comma-Separate Line Numbers",
     "settings.restoreSession": "Restore Session",
+    "settings.updateCheckOnStartup": "Check for updates on startup",
     "settings.confirmExit": "Confirm Exit",
     "settings.memoName": "New file name",
     "settings.memoNameHint":

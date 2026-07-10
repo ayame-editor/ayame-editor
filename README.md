@@ -13,7 +13,7 @@ Runs on macOS, Windows, and Linux.
 - View, search, and edit huge files without loading the whole file into memory.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII.
 - Run search, replace, sort, two-file diff, folder grep, and file splitting from the GUI.
-- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `diff`, `sort`, `sortdiff`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, and `cache`.
+- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `diff`, `sort`, `sortdiff`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, `cache`, `update`, and `remove`.
 - Includes tabs, an explorer, rectangular selection, multi-cursor editing, and tail-follow mode.
 - Customizable themes, fonts, wrapping, whitespace display, and key bindings.
 
@@ -27,6 +27,13 @@ Download the build for your OS from the
 - Linux: single executable
 
 You can also install from the terminal.
+
+Scoop users can install from this repository bucket:
+
+```powershell
+scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop install ayame
+```
 
 macOS:
 
@@ -45,6 +52,13 @@ Linux:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
+
+Update later with `ayame update`. Remove a standalone install with
+`ayame remove --yes`. Nix-managed binaries should be updated or removed through
+Nix instead of self-modifying `/nix/store`.
+
+Homebrew tap templates are in `packaging/homebrew/` for publishing
+`brew install --cask hjosugi/tap/ayame` and `brew install hjosugi/tap/ayame`.
 
 ## More
 

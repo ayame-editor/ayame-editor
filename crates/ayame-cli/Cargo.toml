@@ -25,12 +25,15 @@ typeship = { version = "0.2", optional = true }
 typeship-ts-rs = { version = "0.2", optional = true }
 ayame-core = { path = "../ayame-core" }
 anyhow.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "io-util"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["catch-panic"] }
 futures-util = { version = "0.3", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Native window (feature = "gui"): the OS webview (WKWebView / WebView2 /
 # WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.

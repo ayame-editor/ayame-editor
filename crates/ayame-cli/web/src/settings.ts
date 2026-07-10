@@ -38,6 +38,7 @@ export function loadSettings() {
     // image mode without a stored image (cleared / failed persist) → theme default
     if (merged.bgMode === "image" && !merged.bgImage) merged.bgMode = "watercolor";
     merged.language = normalizeLanguage(merged.language);
+    merged.updateCheckOnStartup = merged.updateCheckOnStartup !== false;
     merged.keymap = sanitizeKeymap(merged.keymap);
     return merged;
   } catch {
@@ -341,6 +342,7 @@ export function updateSetting(key, value) {
     applyLocale();
     postNativeMessage(`ayame:language:${state.settings.language}`);
   }
+  if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
 }
 
 export const ZOOM_STEP = 10;
@@ -531,9 +533,16 @@ export function updateSidebarSideButtons() {
   });
 }
 
+function notifyNativeUpdateCheckSetting() {
+  postNativeMessage(
+    `ayame:update-check-startup:${state.settings.updateCheckOnStartup === false ? "off" : "on"}`,
+  );
+}
+
 export function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
+  notifyNativeUpdateCheckSetting();
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
@@ -642,6 +651,10 @@ export function initSettings() {
   $("set-restore-session").checked = state.settings.restoreSession !== false;
   $("set-restore-session").addEventListener("change", () =>
     updateSetting("restoreSession", $("set-restore-session").checked),
+  );
+  $("set-update-check-startup").checked = state.settings.updateCheckOnStartup !== false;
+  $("set-update-check-startup").addEventListener("change", () =>
+    updateSetting("updateCheckOnStartup", $("set-update-check-startup").checked),
   );
   $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
   $("set-confirm-last-tab-close").addEventListener("change", () =>

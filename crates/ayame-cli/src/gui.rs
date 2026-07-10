@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebContext, WebViewBuilder};
 
@@ -166,6 +166,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     let _ = ipc_proxy.send_event(GuiEvent::Language(lang.to_string()));
                     #[cfg(not(target_os = "macos"))]
                     let _ = lang;
+                } else if let Some(value) = msg.strip_prefix("ayame:update-check-startup:") {
+                    let enabled = matches!(value, "1" | "true" | "on");
+                    let _ = ipc_proxy.send_event(GuiEvent::UpdateCheckStartup(enabled));
                 } else if let Some(title) = msg.strip_prefix("ayame:title:") {
                     let _ = ipc_proxy.send_event(GuiEvent::SetTitle(clean_window_title(title)));
                 }
@@ -194,6 +197,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     let mut close_pending = false;
     let mut close_deadline: Option<Instant> = None;
     let mut shown = false;
+    let mut update_check_enabled: Option<bool> = None;
+    let mut update_check_started = false;
+    let mut update_installing = false;
     // Latest NON-maximized geometry seen this session, so quitting while
     // maximized still remembers where the normal window lived (the loaded
     // state would otherwise be written back, losing this session's moves).
@@ -229,6 +235,12 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     if start_maximized {
                         window.set_maximized(true);
                     }
+                    maybe_start_startup_update_check(
+                        &proxy,
+                        shown,
+                        update_check_enabled,
+                        &mut update_check_started,
+                    );
                 }
             }
             Event::WindowEvent {
@@ -284,6 +296,39 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                         window.set_maximized(true);
                     }
                 }
+                maybe_start_startup_update_check(
+                    &proxy,
+                    shown,
+                    update_check_enabled,
+                    &mut update_check_started,
+                );
+            }
+            Event::UserEvent(GuiEvent::UpdateCheckStartup(enabled)) => {
+                update_check_enabled = Some(enabled);
+                maybe_start_startup_update_check(
+                    &proxy,
+                    shown,
+                    update_check_enabled,
+                    &mut update_check_started,
+                );
+            }
+            Event::UserEvent(GuiEvent::UpdateAvailable(info)) => {
+                if update_check_enabled != Some(true)
+                    || update_installing
+                    || !confirm_update_dialog(&window, &info)
+                {
+                    return;
+                }
+                update_installing = true;
+                spawn_update_install(proxy.clone());
+            }
+            Event::UserEvent(GuiEvent::UpdateInstalled(report)) => {
+                update_installing = false;
+                show_update_installed_dialog(&window, &report);
+            }
+            Event::UserEvent(GuiEvent::UpdateInstallFailed(message)) => {
+                update_installing = false;
+                show_update_failed_dialog(&window, &message);
             }
             #[cfg(target_os = "macos")]
             Event::UserEvent(GuiEvent::Menu(id)) => {
@@ -364,6 +409,10 @@ enum GuiEvent {
     CloseCanceled,
     SetTitle(String),
     Ready,
+    UpdateCheckStartup(bool),
+    UpdateAvailable(crate::UpdateInfo),
+    UpdateInstalled(crate::UpdateInstallReport),
+    UpdateInstallFailed(String),
     OpenPaths(Vec<String>),
     /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
     NewWindow,
@@ -398,6 +447,102 @@ struct PickSaveRequest {
 struct PickOpenRequest {
     #[serde(default)]
     dir: String,
+}
+
+fn maybe_start_startup_update_check(
+    proxy: &EventLoopProxy<GuiEvent>,
+    shown: bool,
+    enabled: Option<bool>,
+    started: &mut bool,
+) {
+    if *started || !shown || enabled != Some(true) || !startup_update_check_allowed() {
+        return;
+    }
+    *started = true;
+    let proxy = proxy.clone();
+    std::thread::spawn(move || match crate::check_latest_update() {
+        Ok(Some(info)) => {
+            let _ = proxy.send_event(GuiEvent::UpdateAvailable(info));
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("ayame: startup update check failed: {e:#}"),
+    });
+}
+
+fn startup_update_check_allowed() -> bool {
+    !env_bool("AYAME_NO_UPDATE_CHECK").unwrap_or(false)
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    let value = std::env::var(name).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn confirm_update_dialog(window: &Window, info: &crate::UpdateInfo) -> bool {
+    let description = format!(
+        "Ayame {} is available.\n\nCurrent version: {}\nInstall target: {}\n\nUpdate now?",
+        info.release_version, info.current_version, info.install_target
+    );
+    rfd::MessageDialog::new()
+        .set_parent(window)
+        .set_level(rfd::MessageLevel::Info)
+        .set_title("Ayame update available")
+        .set_description(description)
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show()
+        == rfd::MessageDialogResult::Yes
+}
+
+fn spawn_update_install(proxy: EventLoopProxy<GuiEvent>) {
+    std::thread::spawn(move || match crate::install_latest_update() {
+        Ok(report) => {
+            let _ = proxy.send_event(GuiEvent::UpdateInstalled(report));
+        }
+        Err(e) => {
+            let _ = proxy.send_event(GuiEvent::UpdateInstallFailed(format!("{e:#}")));
+        }
+    });
+}
+
+fn show_update_installed_dialog(window: &Window, report: &crate::UpdateInstallReport) {
+    let (title, description) = if report.deferred {
+        (
+            "Update will finish after quit",
+            format!(
+                "Ayame {} was downloaded.\n\nClose Ayame, then open it again to finish installing the update.",
+                report.release_version
+            ),
+        )
+    } else {
+        (
+            "Update installed",
+            format!(
+                "Ayame {} was installed to:\n{}\n\nRestart Ayame to use the new version.",
+                report.release_version, report.destination
+            ),
+        )
+    };
+    let _ = rfd::MessageDialog::new()
+        .set_parent(window)
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(title)
+        .set_description(description)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+fn show_update_failed_dialog(window: &Window, message: &str) {
+    let _ = rfd::MessageDialog::new()
+        .set_parent(window)
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Update failed")
+        .set_description(format!("Ayame could not install the update.\n\n{message}"))
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 /// Base OS file dialog, starting in `dir` when the page suggested one that

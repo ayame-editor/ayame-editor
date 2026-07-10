@@ -39,6 +39,8 @@ print help.
 | `serve [FILE]` | Launch the local web editor. |
 | `gui [FILE]` | Open the native desktop window when the GUI feature is built. |
 | `cache [path|info|gc|clear]` | Inspect or clean the on-disk index cache. |
+| `update` | Download, verify, and install the selected GitHub release artifact. |
+| `remove` | Remove the installed Ayame binary or app bundle. |
 | `version` | Print the Ayame version. |
 
 ## Common Options
@@ -142,6 +144,21 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 stays free for piping. Add `--json` to any subcommand for the structured form on
 stdout.
 
+## Update and Remove
+
+| Command | Options |
+| --- | --- |
+| `update` | `--version <VERSION>` selects a release tag (`latest` by default); `--install-dir <DIR>` installs there instead of replacing the current install; `--force` allows installing an equal or older release; `--dry-run` resolves the release without changing files. |
+| `remove` | `--install-dir <DIR>` removes that install target instead of the current install; `--yes` skips the confirmation prompt; `--dry-run` prints the target without changing files. |
+
+`update` verifies the release `.sha256` file before installing. On macOS it
+updates `Ayame.app` when running from an app bundle; otherwise it can replace a
+standalone binary. On Windows, replacing or removing the running executable is
+completed by a helper after the current process exits. Binaries running from
+`/nix/store` are treated as Nix-managed and are not modified; update or remove
+them through Nix, or pass `--install-dir` to install a standalone release
+elsewhere.
+
 ## Exit Codes
 
 Ayame follows the `grep` convention:
@@ -176,5 +193,6 @@ ayame top huge.csv -k 2 -n 100 --numeric
 ayame distinct huge.csv -k 4
 ayame gen sample.csv --lines 100000
 ayame cache info
+ayame update --dry-run
 ayame serve huge.csv --port 8777
 ```

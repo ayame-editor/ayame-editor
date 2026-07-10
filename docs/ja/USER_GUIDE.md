@@ -24,6 +24,27 @@ Windows PowerShell:
 pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
 ```
 
+standalone install の更新:
+
+```sh
+ayame update
+```
+
+削除:
+
+```sh
+ayame remove --yes
+```
+
+binary が `/nix/store` から動いている場合、Ayame は Nix 管理とみなします。更新や
+削除は Nix 側で行うか、`--install-dir` を指定して store 外へ standalone release
+をインストールしてください。
+
+ネイティブアプリは、ウィンドウ表示後に standalone release の更新を確認し、更新が
+ある場合はインストール前に確認します。不要な場合は `設定` -> `起動時に更新を確認`
+をオフにしてください。Nix、Homebrew、Scoop など package manager 管理の install
+は自己変更せず、package manager 側で更新します。
+
 ## ファイルを開く
 
 ```sh

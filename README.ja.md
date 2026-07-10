@@ -13,7 +13,7 @@ macOS、Windows、Linux で動作します。
 - 巨大ファイルを全体読み込みせずに表示・検索・編集できます。
 - UTF-8、Shift_JIS、EUC-JP、ASCII に対応します。
 - GUI では検索、置換、ソート、2 ファイル差分、フォルダ内検索、ファイル分割を実行できます。
-- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`diff`、`sort`、`sortdiff`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache` などを使えます。
+- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`diff`、`sort`、`sortdiff`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache`、`update`、`remove` などを使えます。
 - タブ、エクスプローラー、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
 - テーマ、フォント、折り返し、空白表示、キー設定を変更できます。
 
@@ -26,6 +26,13 @@ macOS、Windows、Linux で動作します。
 - Linux: 単体実行ファイル
 
 ターミナルからインストールすることもできます。
+
+Scoop はこのリポジトリを bucket として使えます。
+
+```powershell
+scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop install ayame
+```
 
 macOS:
 
@@ -44,6 +51,14 @@ Linux:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
 ```
+
+以後は `ayame update` で更新できます。standalone install の削除は
+`ayame remove --yes` です。Nix 管理の binary は `/nix/store` を自己変更せず、
+Nix 側で更新・削除してください。
+
+Homebrew tap 用 template は `packaging/homebrew/` にあります。
+`brew install --cask hjosugi/tap/ayame` と `brew install hjosugi/tap/ayame`
+で配れる形です。
 
 ## 詳細
 

@@ -4,6 +4,17 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added standalone app self-update and removal commands: `ayame update`
+  resolves GitHub Releases, verifies `.sha256`, installs the matching
+  Linux/Windows/macOS artifact, and `ayame remove` removes standalone installs
+  with confirmation / dry-run support. Managed installs from Nix, Homebrew, and
+  Scoop are detected and left to their package manager instead.
+- Added startup update checks in the native desktop app. After the window is
+  shown, Ayame checks for a newer standalone release in the background, asks the
+  user before installing, and can be disabled from Settings with 起動時に更新を確認
+  / Check for updates on startup.
+- Added Nix development shell files, Homebrew/Scoop packaging stubs, packaging
+  documentation, and a redesigned MkDocs landing page.
 - Refactored the out-of-core data ops (#81.1, the last of #81): `sort` and
   `group` no longer each hand-roll the external-merge machinery. A shared
   `ops/spill.rs` now owns the run codec, run reader, sorted-run writer, and

@@ -39,6 +39,8 @@ ayame <COMMAND> [OPTIONS]
 | `serve [FILE]` | ローカル Web エディタを起動。 |
 | `gui [FILE]` | GUI feature の build でネイティブウィンドウを開く。 |
 | `cache [path|info|gc|clear]` | オンディスク index cache を確認 / 掃除。 |
+| `update` | GitHub release artifact をダウンロード、検証、インストール。 |
+| `remove` | インストール済みの Ayame binary / app bundle を削除。 |
 | `version` | バージョンを表示。 |
 
 ## 共通オプション
@@ -141,6 +143,20 @@ ayame <COMMAND> [OPTIONS]
 `clear` の人間向けレポートは stderr に出力し、stdout はパイプ用に空けます。どの
 サブコマンドも `--json` を付けると構造化した結果を stdout に出力します。
 
+## update / remove
+
+| コマンド | オプション |
+| --- | --- |
+| `update` | `--version <VERSION>` で release tag を指定 (`latest` が既定)。`--install-dir <DIR>` は現在の install を置き換えず、その DIR へインストール。`--force` は同じ版または古い版のインストールを許可。`--dry-run` は release 解決だけを行いファイルを変更しません。 |
+| `remove` | `--install-dir <DIR>` で現在の install ではなくその install target を削除。`--yes` は確認プロンプトを省略。`--dry-run` は対象だけ表示しファイルを変更しません。 |
+
+`update` は release の `.sha256` を検証してからインストールします。macOS では
+`.app` bundle から起動している場合は `Ayame.app` を更新し、それ以外は standalone
+binary として置き換えられます。Windows では実行中の exe を直接置き換え / 削除でき
+ないため、現在のプロセス終了後に helper が完了させます。`/nix/store` から動いて
+いる binary は Nix 管理とみなし変更しません。Nix 側で更新 / 削除するか、
+`--install-dir` で standalone release を別の場所へインストールしてください。
+
 ## 終了コード
 
 `grep` の慣習に従います:
@@ -174,5 +190,6 @@ ayame top huge.csv -k 2 -n 100 --numeric
 ayame distinct huge.csv -k 4
 ayame gen sample.csv --lines 100000
 ayame cache info
+ayame update --dry-run
 ayame serve huge.csv --port 8777
 ```

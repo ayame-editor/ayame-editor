@@ -24,6 +24,20 @@ cargo run -p ayame-cli -- --help
 通常の CLI / Web エディタ開発は Rust だけで足ります。ネイティブウィンドウ
 （`ayame gui`）を動かす時だけ `--features gui` と OS 別の WebView 依存が必要です。
 
+## Nix development shell
+
+リポジトリには再現性のある local shell 用の Nix flake があります。
+
+```sh
+nix develop
+ruby -v
+cargo test --locked
+python -m mkdocs build --strict
+```
+
+shell には Rust tooling、Node.js、pnpm、Python/MkDocs、Homebrew manifest 確認用の
+Ruby、`jq`、Linux GUI build dependencies が入っています。direnv を使う場合は
+`.envrc` の `use flake` で同じ shell を読み込みます。
 
 ## 開発体験 (ツーリング)
 

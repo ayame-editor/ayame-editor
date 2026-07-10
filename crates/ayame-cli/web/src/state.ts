@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS = {
   lineNumberCommas: true,
   confirmLastTabClose: true,
   restoreSession: true,
+  updateCheckOnStartup: true,
   showWhitespace: false,
   syntaxHighlight: true,
   zenkakuUnderline: false,

@@ -25,6 +25,20 @@ For ordinary CLI / web editor development, Rust alone is enough. Only when runni
 the native window (`ayame gui`) do you need `--features gui` and the per-OS WebView
 dependencies.
 
+## Nix development shell
+
+The repository includes a Nix flake for a reproducible local shell:
+
+```sh
+nix develop
+ruby -v
+cargo test --locked
+python -m mkdocs build --strict
+```
+
+The shell includes Rust tooling, Node.js, pnpm, Python/MkDocs, Ruby for Homebrew
+manifest checks, `jq`, and Linux GUI build dependencies. If you use direnv,
+`.envrc` loads the same shell with `use flake`.
 
 ## Developer experience (tooling)
 
