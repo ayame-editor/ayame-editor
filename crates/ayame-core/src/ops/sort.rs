@@ -191,14 +191,7 @@ fn sort_key(raw: &[u8], enc: Encoding, opts: &SortOptions, scratch: &mut Vec<u8>
     // a component, so a shorter prefix sorts before a longer equal prefix.
     let mut tuple = Vec::new();
     for &column in &opts.key_columns {
-        let component = comparable_key(
-            raw,
-            enc,
-            Some(column),
-            &opts.fields,
-            opts.numeric,
-            scratch,
-        );
+        let component = comparable_key(raw, enc, Some(column), &opts.fields, opts.numeric, scratch);
         for byte in component {
             if byte == 0 {
                 tuple.extend_from_slice(&[0, 0xff]);

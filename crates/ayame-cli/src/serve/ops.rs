@@ -1612,8 +1612,7 @@ mod tests {
         // keys=2,1 + reverse → second column descending, then first column.
         let sorted = std::fs::read_to_string(&out).unwrap();
         assert_eq!(
-            sorted,
-            "2,10\n4,3\n1,3\n3,2\n",
+            sorted, "2,10\n4,3\n1,3\n3,2\n",
             "round-trip options mismatch"
         );
         let _ = std::fs::remove_file(&path);

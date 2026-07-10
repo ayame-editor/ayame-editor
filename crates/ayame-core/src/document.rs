@@ -952,10 +952,7 @@ mod tests {
         assert_eq!(doc.line_count(), 2, "the shared source stays immutable");
         assert_eq!(followed.line_count(), 4);
         assert_eq!(followed.line(3).unwrap(), "line 3");
-        assert_eq!(
-            followed.byte_len(),
-            std::fs::metadata(&path).unwrap().len()
-        );
+        assert_eq!(followed.byte_len(), std::fs::metadata(&path).unwrap().len());
     }
 
     #[test]

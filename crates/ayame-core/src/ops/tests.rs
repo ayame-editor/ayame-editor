@@ -121,7 +121,9 @@ fn sort_progress_covers_scan_and_multi_pass_merge() {
     assert_eq!(samples.first(), Some(&(0, 400)));
     assert_eq!(samples.last(), Some(&(400, 400)));
     assert!(
-        samples.iter().any(|&(done, total)| done > 200 && done < total),
+        samples
+            .iter()
+            .any(|&(done, total)| done > 200 && done < total),
         "merge phase must advance between the scan midpoint and completion: {samples:?}"
     );
     assert!(
