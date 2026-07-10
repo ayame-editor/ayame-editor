@@ -39,7 +39,7 @@ pub(crate) fn parse_budget(opts: &HashMap<String, String>) -> Result<usize> {
 
 pub(crate) fn field_spec(opts: &HashMap<String, String>, flags: &HashSet<String>) -> FieldSpec {
     let delimiter = first_opt(opts, &["--delim", "-t"])
-        .and_then(|s| match s.as_str() {
+        .and_then(|s| match s {
             "\\t" | "tab" | "TAB" => Some(b'\t'),
             _ => s.as_bytes().first().copied(),
         })
