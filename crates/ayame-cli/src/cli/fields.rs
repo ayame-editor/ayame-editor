@@ -16,7 +16,7 @@ pub(crate) fn parse_keys(opts: &HashMap<String, String>) -> Result<Vec<usize>> {
     let Some(raw) = first_opt(opts, &["--key", "-k"]) else {
         return Ok(Vec::new());
     };
-    raw.split(|ch| matches!(ch, ',' | ';'))
+    raw.split([',', ';'])
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .map(|part| {
