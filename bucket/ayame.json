@@ -1,12 +1,12 @@
 {
-  "version": "0.5.17",
+  "version": "0.5.18",
   "description": "Desktop text editor and CLI tools for huge files.",
   "homepage": "https://github.com/hjosugi/ayame-editor",
   "license": "0BSD",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/hjosugi/ayame-editor/releases/download/v0.5.17/ayame-v0.5.17-windows-x86_64.exe#/ayame.exe",
-      "hash": "87b9f495ced700d5c04796a4013a342d3ecff6c9ca534c948ed1e29a71ba490e"
+      "url": "https://github.com/hjosugi/ayame-editor/releases/download/v0.5.18/ayame-v0.5.18-windows-x86_64.exe#/ayame.exe",
+      "hash": "f6cd837476e19d796bab62d86f14fb36c652c37fd873de45c0db0e0e5b76fb82"
     }
   },
   "bin": "ayame.exe",
