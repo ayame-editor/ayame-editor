@@ -92,7 +92,7 @@ TypeScript source は `crates/ayame-cli/web/src` にあります。Cargo build �
 bundler は不要です。
 
 UI は visible lines と viewport 周辺 cache だけを保持します。settings、recent
-files、explorer root、custom key bindings は browser local storage に保存します。
+files、最後に開いた in-app file-picker directory、custom key bindings は browser local storage に保存します。
 menu と keyboard shortcuts は action id で dispatch されるため、native macOS menu
 と in-page UI が同じ command handler を呼べます。
 

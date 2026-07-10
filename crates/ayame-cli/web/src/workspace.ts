@@ -12,7 +12,7 @@ import {
   pathDirName,
   setModalOpen,
 } from "./dom.js";
-import { TREE_KEY, state } from "./state.js";
+import { BROWSE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
 import {
@@ -30,7 +30,7 @@ import {
   saveCopy,
   savingCount,
 } from "./save.js";
-import { clearLineCache, focusEditor, render, scheduleRender, setCaret } from "./editor.js";
+import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import {
   fileMenuVisible,
   hideFileMenu,
@@ -41,7 +41,6 @@ import {
 import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
-import { saveSettings } from "./settings.js";
 import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
 
@@ -86,7 +85,7 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
     configureOpener("save", title);
     state.openerResolve = resolve;
     const inp = $("opener-input");
-    const dir = pathDirName(suggestedPath) || localStorage.getItem(TREE_KEY) || ".";
+    const dir = pathDirName(suggestedPath) || localStorage.getItem(BROWSE_KEY) || ".";
     inp.value = pathBaseName(suggestedPath) || "untitled.txt";
     setModalOpen($("opener"), true);
     browse(dir);
@@ -105,9 +104,32 @@ export function showFolderDialog(title, startDir): Promise<string | null> {
     configureOpener("folder", title);
     state.openerResolve = resolve;
     setModalOpen($("opener"), true);
-    browse(startDir || localStorage.getItem(TREE_KEY) || null);
+    browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
     queueMicrotask(() => ($("opener-open") as HTMLButtonElement).focus());
   });
+}
+
+// Pick one file without opening it in the editor. Used by tools such as the
+// browser build's two-file diff, where a real path is needed as an input.
+export function showFileDialog(title, startDir): Promise<string | null> {
+  return new Promise((resolve) => {
+    configureOpener("file", title);
+    state.openerResolve = resolve;
+    $("opener-input").value = "";
+    setModalOpen($("opener"), true);
+    browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
+    queueMicrotask(() => $("opener-input").focus());
+  });
+}
+
+export function finishFileDialog(value) {
+  const resolve = state.openerResolve;
+  state.openerResolve = null;
+  state.openerMode = "open";
+  setModalOpen($("opener"), false);
+  configureOpener("open");
+  focusEditor();
+  if (resolve) resolve(value);
 }
 
 export function finishFolderDialog(value) {
@@ -143,11 +165,6 @@ export function configureOpener(mode, title?) {
   $("opener-open").textContent = t(
     save ? "menu.save" : folder ? "dialog.open.chooseFolder" : "menu.open",
   );
-  // The "open current folder in tree" shortcut has no meaning while picking a
-  // folder target, so hide it in folder mode.
-  $("opener-folder").classList.toggle("hidden", folder);
-  $("opener-folder").textContent = t(save ? "dialog.open.location" : "dialog.open.folder");
-  $("opener-folder").title = t(save ? "dialog.open.folderToExplorer" : "dialog.open.folderToTree");
   $("opener-hint").textContent = t(
     save ? "dialog.open.hintSave" : folder ? "dialog.open.hintFolder" : "dialog.open.hintOpen",
   );
@@ -162,6 +179,10 @@ export function hideOpener() {
   }
   if (state.openerMode === "folder") {
     finishFolderDialog(null);
+    return;
+  }
+  if (state.openerMode === "file") {
+    finishFileDialog(null);
     return;
   }
   // The opener doubles as the welcome screen: don't let it close while there is
@@ -195,13 +216,18 @@ export async function browse(dir) {
     renderBrowse(res);
     openerMsg("");
   } catch (e) {
-    openerMsg(t("dialog.open.dirError", { msg: serverMessage(e.message) }));
+    openerMsg(t("dialog.open.dirError", { msg: serverMessage(e) }));
   }
 }
 
 export function renderBrowse(res) {
   state.openerDir = res.dir;
   state.openerEntries = res.entries || [];
+  try {
+    localStorage.setItem(BROWSE_KEY, res.dir);
+  } catch {
+    // Browser storage is only a convenience; browsing still works without it.
+  }
   renderCwdCrumbs(res.dir);
   // Folder mode: keep the editable path field tracking the folder in view, so
   // "Choose Folder" and a typed override agree on what's being picked.
@@ -219,10 +245,8 @@ export function renderBrowse(res) {
 // must match DRIVES_DIR in serve/workspace.rs.
 export const DRIVES_DIR = "::";
 
-// Shared breadcrumb renderer (issue #81.3): clears `host` and fills it with
-// clickable path segments, each invoking `onNavigate(segmentPath)`. Both the
-// open-dialog cwd bar and the sidebar tree root render the same way — they
-// differ only in host element and navigation callback.
+// Breadcrumb renderer (issue #81.3): clears `host` and fills it with clickable
+// path segments, each invoking `onNavigate(segmentPath)`.
 export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string) => void) {
   const clean = String(path || "").replace(/^\\\\\?\\/, "");
   host.textContent = "";
@@ -265,7 +289,9 @@ export function browseRow(ent, isUp) {
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
     "aria-label",
-    isUp ? t("tree.up") : `${ent.is_dir ? t("dialog.open.folder") : t("menu.file")}: ${ent.name}`,
+    isUp
+      ? t("dialog.open.up")
+      : `${ent.is_dir ? t("dialog.open.folder") : t("menu.file")}: ${ent.name}`,
   );
   const ic = document.createElement("span");
   ic.className = "ic";
@@ -273,7 +299,7 @@ export function browseRow(ent, isUp) {
   ic.append(iconSvg(isUp ? "i-folder-up" : ent.is_dir ? "i-folder" : "i-file"));
   const nm = document.createElement("span");
   nm.className = "nm";
-  nm.textContent = isUp ? t("tree.up") : ent.name;
+  nm.textContent = isUp ? t("dialog.open.up") : ent.name;
   const sz = document.createElement("span");
   sz.className = "sz";
   sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
@@ -284,7 +310,8 @@ export function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
-    } else if (state.openerMode === "open") openPath(ent.path);
+    } else if (state.openerMode === "file") finishFileDialog(ent.path);
+    else if (state.openerMode === "open") openPath(ent.path);
     // folder mode: files are not selectable targets — ignore the click.
   });
   row.addEventListener("dblclick", () => {
@@ -421,6 +448,12 @@ export async function commitOpener() {
     if (target) finishSaveDialog(target);
     return;
   }
+  if (state.openerMode === "file") {
+    const raw = $("opener-input").value.trim();
+    if (!raw) return;
+    finishFileDialog(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
+    return;
+  }
   // Like save mode: a typed relative name means "in the folder being
   // browsed", not relative to wherever the server process was launched.
   const raw = $("opener-input").value.trim();
@@ -466,7 +499,7 @@ export async function openPath(path) {
     await closeTabSilently(pristine);
     return true;
   } catch (e) {
-    reportOpenError(t("error.cannotOpen", { msg: serverMessage(e.message) }));
+    reportOpenError(t("error.cannotOpen", { msg: serverMessage(e) }));
     return false;
   } finally {
     hideLoading();
@@ -487,7 +520,7 @@ export async function uploadFile(file) {
     onDocumentOpened(await r.json());
     await closeTabSilently(pristine);
   } catch (e) {
-    reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e.message) }));
+    reportOpenError(t("error.loadErrorMsg", { msg: serverMessage(e) }));
   } finally {
     hideLoading();
   }
@@ -536,7 +569,6 @@ export function onDocumentOpened(stat) {
   updateStatusMeta();
   render();
   refreshTabs();
-  updateTreeActive();
   focusEditor();
   noteWalError(stat);
   maybeOfferWalRecovery(stat); // async on purpose: the open itself is done
@@ -889,199 +921,6 @@ export async function closeTab(id) {
   }
 }
 
-// ---- sidebar file tree ------------------------------------------------------
-
-export function sidebarOpen() {
-  return !$("sidebar").classList.contains("hidden");
-}
-
-export function setSidebar(open) {
-  $("sidebar").classList.toggle("hidden", !open);
-  $("toggle-sidebar").classList.toggle("on", open);
-  state.settings = { ...state.settings, sidebar: open };
-  saveSettings(state.settings);
-  if (open && !state.treeLoaded) {
-    state.treeLoaded = true;
-    treeSetRoot(localStorage.getItem(TREE_KEY) || null);
-  }
-  scheduleRender(); // viewport width changed
-}
-
-// Load `dir` (or the server default when null) as the tree root.
-// Explorer navigation history: two stacks bracketing the current root, so the
-// back/forward buttons retrace the folders the user has visited.
-const treeBack: string[] = [];
-const treeFwd: string[] = [];
-let treeCurrent: string | null = null;
-
-function updateTreeNav() {
-  ($("sb-back") as HTMLButtonElement).disabled = treeBack.length === 0;
-  ($("sb-forward") as HTMLButtonElement).disabled = treeFwd.length === 0;
-}
-
-// Render the current root as clickable path segments in the sidebar header,
-// each jumping straight to that folder (mirrors the open dialog's breadcrumbs).
-export function renderTreeCrumbs(path) {
-  renderPathCrumbs($("sb-root"), path, treeSetRoot);
-}
-
-export async function treeSetRoot(dir, record = true) {
-  try {
-    const q = dir ? `?dir=${encodeURIComponent(dir)}` : "";
-    const res = await api<BrowseResponse>(`/api/browse${q}`);
-    state.treeParent = res.parent;
-    if (record && treeCurrent && treeCurrent !== res.dir) {
-      treeBack.push(treeCurrent);
-      treeFwd.length = 0;
-    }
-    treeCurrent = res.dir;
-    renderTreeCrumbs(res.dir);
-    updateTreeNav();
-    try {
-      localStorage.setItem(TREE_KEY, res.dir);
-    } catch {
-      // ignore quota
-    }
-    const tree = $("tree");
-    tree.textContent = "";
-    tree.append(renderTreeEntries(res.entries, 0));
-  } catch {
-    // A stale saved root: fall back to the server default once.
-    if (dir) {
-      treeSetRoot(null);
-    } else {
-      $("tree").textContent = "";
-    }
-  }
-}
-
-export function treeGoBack() {
-  if (!treeBack.length) return;
-  if (treeCurrent) treeFwd.push(treeCurrent);
-  treeSetRoot(treeBack.pop() as string, false);
-}
-
-export function treeGoForward() {
-  if (!treeFwd.length) return;
-  if (treeCurrent) treeBack.push(treeCurrent);
-  treeSetRoot(treeFwd.pop() as string, false);
-}
-
-export function renderTreeEntries(entries, depth) {
-  const frag = document.createDocumentFragment();
-  for (const ent of entries) frag.append(renderTreeNode(ent, depth));
-  return frag;
-}
-
-export function renderTreeNode(ent, depth) {
-  const row = document.createElement("div");
-  row.className = "tnode " + (ent.is_dir ? "dir" : "file");
-  row.dataset.path = ent.path;
-  row.style.setProperty("--depth", String(depth));
-  if (!ent.is_dir && ent.path === state.stat?.path) row.classList.add("active");
-  const indent = document.createElement("span");
-  indent.className = "tindent";
-  for (let i = 0; i < depth; i++) {
-    const guide = document.createElement("span");
-    guide.className = "tguide";
-    indent.append(guide);
-  }
-  const chev = document.createElement("span");
-  chev.className = "chev";
-  chev.setAttribute("aria-hidden", "true");
-  const icon = document.createElement("span");
-  icon.className = "ticon " + (ent.is_dir ? "folder" : `file ${treeFileClass(ent.name)}`);
-  icon.setAttribute("aria-hidden", "true");
-  const nm = document.createElement("span");
-  nm.className = "tname";
-  nm.textContent = ent.name;
-  row.append(indent, chev, icon, nm);
-
-  if (!ent.is_dir) {
-    if (typeof ent.size === "number") {
-      const meta = document.createElement("span");
-      meta.className = "tmeta";
-      meta.textContent = humanBytes(ent.size);
-      row.append(meta);
-    }
-    row.title = displayPath(ent.path);
-    row.addEventListener("click", (e) => {
-      e.stopPropagation();
-      // Opens in a new tab; a file that is already open just gets focused
-      // (the server dedupes by path).
-      openPath(ent.path);
-    });
-    return row;
-  }
-
-  // Folder: lazily load children on first expand.
-  const kids = document.createElement("div");
-  kids.className = "tkids";
-  kids.style.display = "none";
-  let loaded = false;
-  row.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    const opening = kids.style.display === "none";
-    row.classList.toggle("open", opening);
-    if (opening && !loaded) {
-      loaded = true;
-      try {
-        const res = await api<BrowseResponse>(`/api/browse?dir=${encodeURIComponent(ent.path)}`);
-        kids.append(renderTreeEntries(res.entries, depth + 1));
-      } catch {
-        loaded = false;
-      }
-    }
-    kids.style.display = opening ? "block" : "none";
-  });
-  const frag = document.createDocumentFragment();
-  frag.append(row, kids);
-  return frag;
-}
-
-export function treeFileClass(name) {
-  const ext =
-    String(name || "")
-      .split(".")
-      .pop()
-      ?.toLowerCase() || "";
-  if (ext === "md" || ext === "markdown") return "md";
-  if (ext === "py") return "py";
-  if (ext === "json") return "json";
-  if (ext === "csv" || ext === "tsv" || ext === "xlsx") return "data";
-  return "text";
-}
-
-export function updateTreeActive() {
-  const path = state.stat?.path || "";
-  document.querySelectorAll("#tree .tnode.file").forEach((row) => {
-    row.classList.toggle("active", !!path && (row as any).dataset.path === path);
-  });
-}
-
-export function initTree() {
-  $("toggle-sidebar").addEventListener("click", () => setSidebar(!sidebarOpen()));
-  $("sb-close").addEventListener("click", () => setSidebar(false));
-  $("sb-back").addEventListener("click", treeGoBack);
-  $("sb-forward").addEventListener("click", treeGoForward);
-  $("sb-up").addEventListener("click", () => {
-    if (state.treeParent) treeSetRoot(state.treeParent);
-  });
-  $("opener-folder").addEventListener("click", () => {
-    if (!state.openerDir) return;
-    if (!sidebarOpen()) setSidebar(true);
-    state.treeLoaded = true;
-    treeSetRoot(state.openerDir);
-    if (state.openerMode === "save") {
-      openerMsg(t("dialog.open.folderShown"));
-      return;
-    }
-    hideOpener();
-  });
-  // Apply persisted visibility.
-  if (state.settings.sidebar) setSidebar(true);
-}
-
 // Start a fresh empty "untitled" buffer with a blank editable first line, so
 // the app opens to a usable page (like Notepad) instead of a dialog.
 export async function newUntitled() {
@@ -1093,7 +932,7 @@ export async function newUntitled() {
     focusEditor();
   } catch (e) {
     showOpener();
-    openerMsg(t("error.newBuffer", { msg: serverMessage(e.message) }));
+    openerMsg(t("error.newBuffer", { msg: serverMessage(e) }));
   }
 }
 

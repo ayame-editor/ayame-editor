@@ -38,7 +38,7 @@ import {
   updateCount,
   updateFindCountLabel,
 } from "./search.js";
-import { askPrompt, formVisible, promptVisible } from "./dialogs.js";
+import { askPrompt, formVisible, promptVisible, showMessage } from "./dialogs.js";
 import { anyModalOpen } from "./input.js";
 import { isBindableShortcut, normalizeShortcut, sanitizeKeymap } from "./shortcuts.js";
 import {
@@ -50,8 +50,6 @@ import {
   renderRecentFiles,
   renderTabs,
   selectRelativeTab,
-  setSidebar,
-  sidebarOpen,
 } from "./workspace.js";
 import {
   hideSettings,
@@ -65,7 +63,7 @@ import {
 
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
 
-export const APP_MENUS = ["file", "edit", "selection", "view", "tools"];
+export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"];
 
 export const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -211,8 +209,6 @@ export function updateKeyHints() {
     const text = t(labelKey);
     return key ? `${text} (${key})` : text;
   };
-  $("toggle-sidebar").title = hint("menu.explorer", "toggleSidebar");
-  $("toggle-sidebar").setAttribute("aria-label", t("menu.explorer"));
   $("undo-edit").title = hint("menu.undo", "undo");
   $("undo-edit").setAttribute("aria-label", t("menu.undo"));
   $("redo-edit").title = hint("menu.redo", "redo");
@@ -663,6 +659,9 @@ const promptGotoLine = () => {
   });
 };
 
+const showHelp = () => showMessage(t("help.title"), t("help.body"));
+const showAbout = () => showMessage(t("help.about"), t("help.aboutBody"));
+
 // The find-bar option buttons are lit when their *labelled* meaning is active.
 // `opt-case` is labelled "Match Case" but the underlying `state.ci` flag means
 // *ignore* case, so it must light up when ci is false (issue #70). The other
@@ -710,7 +709,6 @@ export const ACTIONS: Record<
   deleteLine: { run: deleteLines },
   copy: { run: copySelection, globalShortcut: true, editorOnly: true },
   cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
-  toggleSidebar: { run: () => setSidebar(!sidebarOpen()), globalShortcut: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
   },
@@ -725,6 +723,8 @@ export const ACTIONS: Record<
   nextTab: { run: () => selectRelativeTab(1), globalShortcut: true },
   prevTab: { run: () => selectRelativeTab(-1), globalShortcut: true },
   settings: { run: showSettings, globalShortcut: true },
+  help: { run: showHelp, globalShortcut: true },
+  about: { run: showAbout, globalShortcut: true },
   sortSave: { run: sortSave, globalShortcut: true },
   diffFile: { run: diffFile, globalShortcut: true },
   splitFile: { run: splitFile, globalShortcut: true },
@@ -763,7 +763,6 @@ export function runAction(action) {
 const GLOBAL_SHORTCUT_ACTIONS = [
   "commandPalette",
   "openFile",
-  "toggleSidebar",
   "newFile",
   "newWindow",
   "gotoLine",

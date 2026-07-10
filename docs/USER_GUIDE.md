@@ -122,7 +122,7 @@ option list.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
 - Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
 - Runs sort, replace, two-file diff, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
-- Includes tabs, an explorer, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
+- Includes tabs, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.
 
@@ -142,7 +142,6 @@ option list.
 | Save as | `Ctrl+Shift+S` |
 | Close tab | `Ctrl+W`, `Alt+W` |
 | Command palette | `Ctrl+Shift+P` |
-| Toggle explorer | `Ctrl+B` |
 | Find | `Ctrl+F` |
 | Replace | `Ctrl+H` |
 | Next / previous match | `F3`, `Shift+F3` |
@@ -156,7 +155,7 @@ option list.
 | Delete line | `Ctrl+Shift+K` |
 | Copy / cut | `Ctrl+C`, `Ctrl+X` |
 | Search options: case / word / regex | `Alt+C`, `Alt+W`, `Alt+R` |
-| Sort and overwrite current file | Unassigned |
+| Sort into a new temporary tab | Unassigned |
 | Diff with another file | Unassigned |
 | Split current file | Unassigned |
 | Grep a folder | Unassigned |

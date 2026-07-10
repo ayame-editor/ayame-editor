@@ -16,9 +16,8 @@ import { state } from "./state.js";
 // (short/long arrays, indexed by Date.getDay()). normalizeLanguage(), the
 // Settings language picker (populateLanguageSelect), and browserLocale() all
 // derive from Object.keys(MESSAGES), so a new language is picked up with no code
-// change. (Server-origin errors are a separate concern: they are translated only
-// at the en boundary in serverMessage()/SERVER_MSG_EN; N-language coverage waits
-// on server-side error codes.)
+// change. Server-origin errors carry stable codes; serverMessage() localizes
+// those codes without matching translated message text.
 export const MESSAGES = {
   ja: {
     // -- menu bar and menu items --
@@ -28,6 +27,7 @@ export const MESSAGES = {
     "menu.selection": "選択",
     "menu.view": "表示",
     "menu.tools": "ツール",
+    "menu.help": "ヘルプ",
     "menu.newFile": "新規ファイル",
     "menu.newWindow": "新規ウィンドウ",
     "menu.open": "開く",
@@ -56,7 +56,6 @@ export const MESSAGES = {
     "menu.caseConstant": "CONSTANT_CASE に変換",
     "menu.addCursorAbove": "カーソルを上に追加",
     "menu.addCursorBelow": "カーソルを下に追加",
-    "menu.explorer": "エクスプローラー",
     "menu.findBar": "検索バー",
     "menu.commandPalette": "コマンドパレット",
     "menu.showWhitespace": "空白・改行を表示",
@@ -65,9 +64,16 @@ export const MESSAGES = {
     "menu.wordWrap": "折り返し",
     "menu.followTail": "末尾に追従 (tail -f)",
     "menu.settings": "設定",
+    "help.open": "Ayame Editor ヘルプ",
+    "help.shortcuts": "キーボードショートカット",
+    "help.about": "Ayame Editor について",
+    "help.title": "Ayame Editor ヘルプ",
+    "help.body":
+      "巨大ファイルをメモリへ全読み込みせずに扱うテキストエディタです。\n\nよく使う操作\nCtrl+O  ファイルを開く\nCtrl+F  検索\nCtrl+H  置換\nCtrl+G  行へ移動\nCtrl+Shift+P  コマンドパレット\n\nすべてのショートカットは、ヘルプ → キーボードショートカットから確認・変更できます。",
+    "help.aboutBody":
+      "Ayame Editor\n巨大なテキスト・ログ・CSV/TSVファイル向けのデスクトップエディタです。\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "ソート",
-    "menu.sortTitle":
-      "行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)",
+    "menu.sortTitle": "行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます",
     "menu.diff": "2ファイル差分",
     "menu.split": "ファイルを分割",
     "menu.splitTitle": "行数を指定して複数ファイルに分割します (例: 100万行ずつ)",
@@ -96,12 +102,6 @@ export const MESSAGES = {
     "tab.moveDirty": "未保存のタブは保存してから移動してください",
     "tab.handoffDone": "未保存の編集を引き継ぎました",
     "tab.handoffError": "タブの引き継ぎに失敗しました (タブは元のウィンドウに残っています)",
-    // -- explorer sidebar --
-    "tree.close": "エクスプローラーを閉じる",
-    "tree.actions": "エクスプローラー操作",
-    "tree.up": "上の階層へ",
-    "tree.back": "戻る",
-    "tree.forward": "進む",
     // -- find / replace bar --
     "find.group": "検索と置換",
     "find.showReplace": "置換を表示",
@@ -191,6 +191,10 @@ export const MESSAGES = {
     "common.error": "エラー",
     "dialog.operation.starting": "開始しています…",
     "dialog.operation.progress": "{done} / {total} 行 ({percent}%)",
+    "dialog.operation.sortProgress": "{phase} ({percent}%)",
+    "dialog.operation.sortScan": "読み取り・ラン生成",
+    "dialog.operation.sortMerge": "ランをマージ",
+    "dialog.operation.sortWrite": "一時ファイルへ出力",
     "dialog.operation.finalizing": "仕上げています…",
     "dialog.operation.canceling": "キャンセルしています…",
     // -- open / save dialog --
@@ -203,9 +207,7 @@ export const MESSAGES = {
     "dialog.open.namePlaceholder": "保存するファイル名、またはフルパス",
     "dialog.open.folderPlaceholder": "検索するフォルダのパス",
     "dialog.open.folder": "フォルダ",
-    "dialog.open.location": "場所",
-    "dialog.open.folderToTree": "表示中のフォルダをツリーに開く",
-    "dialog.open.folderToExplorer": "表示中のフォルダをエクスプローラーに表示",
+    "dialog.open.up": "上の階層へ",
     "dialog.open.hintOpen":
       "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。",
     "dialog.open.hintSave":
@@ -220,7 +222,6 @@ export const MESSAGES = {
     "dialog.open.dirError": "ディレクトリを開けません: {msg}",
     "dialog.open.enterFileName": "保存するファイル名を入力してください",
     "dialog.open.pickFolderFirst": "保存先のドライブ・フォルダを選択してください",
-    "dialog.open.folderShown": "現在のフォルダをエクスプローラーに表示しました",
     // -- settings --
     "settings.theme": "テーマ",
     "settings.themeMonoPaper": "Mono Paper (単色)",
@@ -259,10 +260,6 @@ export const MESSAGES = {
     "settings.memoName": "新規ファイルの名前",
     "settings.memoNameHint":
       "使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}",
-    "settings.sidebar": "サイドバー",
-    "settings.sidebarSide": "サイドバー位置",
-    "settings.left": "左",
-    "settings.right": "右",
     "settings.themeJson": "テーマJSON",
     "settings.editInTab": "ファイルで開く",
     // -- encoding / line-ending dialog --
@@ -294,33 +291,30 @@ export const MESSAGES = {
     "keymap.searchRegex": "検索: 正規表現",
     "keymap.nextTab": "次のタブ",
     "keymap.prevTab": "前のタブ",
-    "keymap.toggleSidebar": "エクスプローラー表示",
     "keymap.cannotOpen": "キー設定を開けません",
     "keymap.jsonError": "キー設定 JSON エラー",
     // -- sort dialog --
     "dialog.sort.keyColumn": "キー列 (1始まり)",
-    "dialog.sort.keyPlaceholder": "空なら行全体で比較",
-    "dialog.sort.keyTitle":
-      "空欄: 行全体を文字列として比較 / 数字: 区切り文字で分けたその列をキーとして比較",
-    "dialog.sort.delimiter": "区切り文字",
-    "dialog.sort.delimiterTitle": "キー列を使うときの列の区切り (例: , やタブ)",
+    "dialog.sort.keyColumns": "キー列の優先順",
+    "dialog.sort.keyPlaceholder": "例: 3,1,2 (空なら行全体)",
+    "dialog.sort.keyTitle": "カンマ区切りの左から順に比較します。例: 3,1,2 は3列目→1列目→2列目",
+    "dialog.sort.format": "入力形式",
+    "dialog.sort.formatCsv": "CSV (カンマ・引用符対応)",
+    "dialog.sort.formatTsv": "TSV (タブ区切り)",
+    "dialog.sort.formatText": "テキスト (行全体)",
+    "dialog.sort.formatDelimited": "その他の区切り文字",
+    "dialog.sort.delimiter": "その他形式の区切り文字",
+    "dialog.sort.delimiterTitle": "入力形式が「その他の区切り文字」の場合だけ使います",
     "dialog.sort.numeric": "数値として比較する",
     "dialog.sort.numericTitle": "10 と 9 を文字列でなく数値の大小で並べます",
     "dialog.sort.order": "並び順",
     "dialog.sort.asc": "昇順 (A→Z, 小→大)",
     "dialog.sort.desc": "降順 (Z→A, 大→小)",
-    "dialog.sort.destination": "出力先",
-    "dialog.sort.newFile": "新しいタブにソート結果を作成",
-    "dialog.sort.currentFile": "現在のファイルを上書き",
-    "dialog.sort.hint":
-      "未保存の編集も含めて並び替えます。現在のファイルを上書きする場合は確認が入ります。",
+    "dialog.sort.hint": "未保存の編集も含め、一時ファイルへソートして新しいタブで開きます。",
     "dialog.sort.keyInvalid": "キー列は 1 以上の整数で指定してください",
-    "dialog.sort.confirmTitle": "現在のファイルを上書きしますか?",
-    "dialog.sort.confirmMessage":
-      "{path} をディスク上で並べ替えて上書きします。この操作は取り消せず、元に戻す履歴も消えます。",
-    "dialog.sort.confirmOk": "上書きしてソート",
+    "dialog.sort.textHasNoColumns":
+      "テキスト形式は行全体を比較します。列を使う場合は CSV、TSV、またはその他の区切り文字を選んでください。",
     "dialog.sort.running": "ソート実行中…",
-    "dialog.sort.done": "ソートして上書きしました",
     "dialog.sort.newDone": "ソート結果を開きました: {path}",
     "dialog.sort.error": "ソートエラー",
     // -- split dialog --
@@ -431,6 +425,7 @@ export const MESSAGES = {
     "menu.selection": "Selection",
     "menu.view": "View",
     "menu.tools": "Tools",
+    "menu.help": "Help",
     "menu.newFile": "New File",
     "menu.newWindow": "New Window",
     "menu.open": "Open",
@@ -459,7 +454,6 @@ export const MESSAGES = {
     "menu.caseConstant": "Transform to CONSTANT_CASE",
     "menu.addCursorAbove": "Add Cursor Above",
     "menu.addCursorBelow": "Add Cursor Below",
-    "menu.explorer": "Explorer",
     "menu.findBar": "Find Bar",
     "menu.commandPalette": "Command Palette",
     "menu.showWhitespace": "Show Whitespace and Line Endings",
@@ -468,9 +462,16 @@ export const MESSAGES = {
     "menu.wordWrap": "Word Wrap",
     "menu.followTail": "Follow Tail (tail -f)",
     "menu.settings": "Settings",
+    "help.open": "Ayame Editor Help",
+    "help.shortcuts": "Keyboard Shortcuts",
+    "help.about": "About Ayame Editor",
+    "help.title": "Ayame Editor Help",
+    "help.body":
+      "A text editor that works with huge files without loading the whole file into memory.\n\nCommon actions\nCtrl+O  Open File\nCtrl+F  Find\nCtrl+H  Replace\nCtrl+G  Go to Line\nCtrl+Shift+P  Command Palette\n\nView and change every shortcut from Help → Keyboard Shortcuts.",
+    "help.aboutBody":
+      "Ayame Editor\nA desktop editor for huge text, log, CSV, and TSV files.\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "Sort",
-    "menu.sortTitle":
-      "Sort lines and overwrite the current file. By default it compares whole lines; with a key column it compares that column.",
+    "menu.sortTitle": "Sort into a temporary result and open it in a new tab.",
     "menu.diff": "Two-file Diff",
     "menu.split": "Split File",
     "menu.splitTitle": "Split into multiple files by line count.",
@@ -497,11 +498,6 @@ export const MESSAGES = {
     "tab.moveDirty": "Save the tab before moving it to another window.",
     "tab.handoffDone": "Unsaved edits carried over.",
     "tab.handoffError": "Tab handoff failed (the tab stays in its original window).",
-    "tree.close": "Close Explorer",
-    "tree.actions": "Explorer Actions",
-    "tree.up": "Up One Level",
-    "tree.back": "Back",
-    "tree.forward": "Forward",
     "find.group": "Find and Replace",
     "find.showReplace": "Show Replace",
     "find.matchCase": "Match Case",
@@ -587,6 +583,10 @@ export const MESSAGES = {
     "common.error": "Error",
     "dialog.operation.starting": "Starting...",
     "dialog.operation.progress": "{done} / {total} lines ({percent}%)",
+    "dialog.operation.sortProgress": "{phase} ({percent}%)",
+    "dialog.operation.sortScan": "Reading and building runs",
+    "dialog.operation.sortMerge": "Merging runs",
+    "dialog.operation.sortWrite": "Writing the temporary result",
     "dialog.operation.finalizing": "Finalizing...",
     "dialog.operation.canceling": "Canceling...",
     "dialog.open.title": "Open File",
@@ -598,9 +598,7 @@ export const MESSAGES = {
     "dialog.open.namePlaceholder": "File name to save, or a full path",
     "dialog.open.folderPlaceholder": "Path of the folder to search",
     "dialog.open.folder": "Folder",
-    "dialog.open.location": "Location",
-    "dialog.open.folderToTree": "Open the current folder in the tree",
-    "dialog.open.folderToExplorer": "Show the current folder in Explorer",
+    "dialog.open.up": "Up One Level",
     "dialog.open.hintOpen":
       "Drag and drop a file here to open it. For large files, entering a path is faster.",
     "dialog.open.hintSave":
@@ -615,7 +613,6 @@ export const MESSAGES = {
     "dialog.open.dirError": "Cannot open directory: {msg}",
     "dialog.open.enterFileName": "Enter a file name to save.",
     "dialog.open.pickFolderFirst": "Choose a destination drive and folder first.",
-    "dialog.open.folderShown": "Showing the current folder in Explorer.",
     "settings.theme": "Theme",
     "settings.themeMonoPaper": "Mono Paper (Solid)",
     "settings.themeDark": "Dark",
@@ -649,10 +646,6 @@ export const MESSAGES = {
     "settings.memoName": "New file name",
     "settings.memoNameHint":
       "Variables: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd} (weekday) {seq} (sequence) {date} {time} {datetime}",
-    "settings.sidebar": "Sidebar",
-    "settings.sidebarSide": "Sidebar Position",
-    "settings.left": "Left",
-    "settings.right": "Right",
     "settings.themeJson": "Theme JSON",
     "settings.editInTab": "Edit in Tab",
     "dialog.convert.title": "Encoding / Line Endings",
@@ -680,34 +673,32 @@ export const MESSAGES = {
     "keymap.searchCase": "Search: Match Case",
     "keymap.searchWord": "Search: Whole Word",
     "keymap.searchRegex": "Search: Regular Expression",
-    "keymap.toggleSidebar": "Toggle Explorer",
     "keymap.nextTab": "Next Tab",
     "keymap.prevTab": "Previous Tab",
     "keymap.cannotOpen": "Could not open key bindings.",
     "keymap.jsonError": "Key bindings JSON error",
     "dialog.sort.keyColumn": "Key Column (1-based)",
-    "dialog.sort.keyPlaceholder": "Leave empty to compare whole lines",
+    "dialog.sort.keyColumns": "Key Column Priority",
+    "dialog.sort.keyPlaceholder": "Example: 3,1,2 (empty = whole line)",
     "dialog.sort.keyTitle":
-      "Empty: compare whole lines as strings. Number: compare that delimited column as the key.",
-    "dialog.sort.delimiter": "Delimiter",
-    "dialog.sort.delimiterTitle": "Column delimiter when using a key column, such as comma or tab.",
+      "Columns are compared left to right. For example, 3,1,2 means column 3, then 1, then 2.",
+    "dialog.sort.format": "Input Format",
+    "dialog.sort.formatCsv": "CSV (comma + quoted fields)",
+    "dialog.sort.formatTsv": "TSV (tab-delimited)",
+    "dialog.sort.formatText": "Text (whole lines)",
+    "dialog.sort.formatDelimited": "Other delimiter",
+    "dialog.sort.delimiter": "Other-format Delimiter",
+    "dialog.sort.delimiterTitle": "Used only when Input Format is Other delimiter.",
     "dialog.sort.numeric": "Compare as numbers",
     "dialog.sort.numericTitle": "Sort 10 and 9 by numeric value instead of string order.",
     "dialog.sort.order": "Order",
     "dialog.sort.asc": "Ascending (A to Z, small to large)",
     "dialog.sort.desc": "Descending (Z to A, large to small)",
-    "dialog.sort.destination": "Destination",
-    "dialog.sort.newFile": "Create sorted result in a new tab",
-    "dialog.sort.currentFile": "Overwrite current file",
-    "dialog.sort.hint":
-      "Sorts line by line including unsaved edits. Overwriting the current file asks for confirmation.",
+    "dialog.sort.hint": "Includes unsaved edits, writes a temporary result, and opens a new tab.",
     "dialog.sort.keyInvalid": "Key column must be an integer greater than or equal to 1.",
-    "dialog.sort.confirmTitle": "Overwrite the current file?",
-    "dialog.sort.confirmMessage":
-      "This permanently reorders {path} on disk and clears the undo history. It cannot be undone.",
-    "dialog.sort.confirmOk": "Overwrite and sort",
+    "dialog.sort.textHasNoColumns":
+      "Text format compares whole lines. Choose CSV, TSV, or Other delimiter to use columns.",
     "dialog.sort.running": "Sorting...",
-    "dialog.sort.done": "Sorted and overwritten.",
     "dialog.sort.newDone": "Opened sorted result: {path}",
     "dialog.sort.error": "Sort error",
     "dialog.split.linesPer": "Lines per File",
@@ -802,61 +793,29 @@ export const MESSAGES = {
 };
 
 // ---- server boundary ----------------------------------------------------
-// The Rust side still reports errors as Japanese strings; they reach the
-// client at runtime in e.message / stat.wal_error. This small map (plus the
-// few parameterized patterns below) is the ONLY remaining string-matching
-// translation layer — it goes away once the server exposes error codes.
-export const SERVER_MSG_EN = {
-  保存先パスが空です: "Save path is empty.",
-  選択範囲が不正です: "Selection range is invalid.",
-  矩形選択の列範囲が不正です: "Rectangle selection column range is invalid.",
-  ファイルが開かれていません: "No file is open.",
-  "選択範囲が不正です (行が範囲外)": "Selection range is invalid (line is out of range).",
-  "書き出し中に編集またはタブ切替が入ったため中断しました。もう一度実行してください":
-    "Export was interrupted because an edit or tab switch happened while writing. Please try again.",
-  "クラッシュログは無効です（キャッシュディレクトリなし）":
-    "The crash log is disabled (no cache directory).",
-  復元できるクラッシュログはありません: "There is no crash log to recover.",
-  "復元中に編集が入ったため中断しました。ファイルを開き直してください":
-    "Recovery was interrupted by an edit. Reopen the file.",
+// API failures are `{code, message}`. English uses a stable code translation;
+// Japanese and unknown codes keep the server detail. No control flow or
+// localization depends on matching human message text (#81.2).
+export const SERVER_CODE_EN = {
+  bad_request: "The request is invalid.",
+  invalid_input: "The input is invalid.",
+  exists: "The target already exists.",
+  conflict: "The document changed during the operation. Please try again.",
+  not_found: "The requested item was not found.",
+  too_large: "The request is too large.",
+  timeout: "The operation timed out.",
+  worker_failed: "The worker process failed.",
+  unsupported: "This operation is not supported.",
+  search: "The search request is invalid.",
+  io: "A file I/O error occurred.",
+  internal: "An internal error occurred.",
 };
 
-export const SERVER_MSG_EN_PATTERNS: [RegExp, (m: any) => string][] = [
-  [/^(.+) は既に存在します$/u, (m) => `${m[1]} already exists.`],
-  [/^(.+) での保存は未対応です$/u, (m) => `Saving as ${m[1]} is not supported.`],
-  [/^(.+) での再読込は未対応です$/u, (m) => `Reopening as ${m[1]} is not supported.`],
-  [/^クラッシュログを復元できません: (.+)$/u, (m) => `Cannot recover the crash log: ${m[1]}`],
-];
-
-// Translate a raw server-side message for the English UI; Japanese (and any
-// unknown string) passes through unchanged.
-export function serverMessage(text) {
-  const raw = String(text ?? "");
-  if (currentLocale() !== "en") return raw;
-  const exact = SERVER_MSG_EN[raw];
-  if (exact != null) return exact;
-  for (const [re, fn] of SERVER_MSG_EN_PATTERNS) {
-    const m = raw.match(re);
-    if (m) return fn(m);
-  }
+export function serverMessage(error) {
+  const raw = String(error && typeof error === "object" ? error.message : (error ?? ""));
+  const code = error && typeof error === "object" ? error.code : undefined;
+  if (currentLocale() === "en" && code && SERVER_CODE_EN[code]) return SERVER_CODE_EN[code];
   return raw;
-}
-
-// Server-boundary predicate: the save endpoints report an existing target with
-// the structured code "exists" (issue #81.2). Prefer that; fall back to the
-// message text for errors that predate codes or originate outside the API
-// layer. Accepts either the thrown Error (with `.code`/`.message`) or a raw
-// string. Kept here so UI modules never embed the raw server string themselves.
-export function isExistsError(e) {
-  // `code === "exists"` is a positive signal, but NOT every existing-target
-  // conflict carries it: the main save endpoint surfaces core's "already
-  // exists" Conflict through the generic error path (code "bad_request"), so we
-  // must still fall back to the message text rather than short-circuit to false
-  // on any other code.
-  const code = e && typeof e === "object" ? e.code : undefined;
-  if (code === "exists") return true;
-  const msg = e && typeof e === "object" ? e.message : e;
-  return /already exists|既に存在/i.test(String(msg ?? ""));
 }
 
 // Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not

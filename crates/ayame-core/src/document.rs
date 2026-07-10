@@ -208,6 +208,47 @@ impl Document {
         Ok(TailRefresh::Grew)
     }
 
+    /// Build a refreshed document for an append-only file without rescanning
+    /// its immutable prefix. This is the shared-`Arc` counterpart of
+    /// [`Document::refresh_tail`]: the sparse index is cloned, only the current
+    /// final line plus appended bytes are scanned, and the caller can atomically
+    /// swap the returned document into its workspace.
+    ///
+    /// `None` means the file is unchanged or needs a full reindex (shrink,
+    /// replacement, or growth from an empty file).
+    pub fn follow_tail(&self) -> Result<Option<Document>> {
+        let observed_len = self._file.metadata()?.len();
+        if observed_len <= self.len || self.len == 0 {
+            return Ok(None);
+        }
+
+        let file = self._file.try_clone()?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let mapped_len = mmap.len() as u64;
+        if mapped_len <= self.len || mapped_len < observed_len {
+            // The file raced with our stat/map (usually a rotation or shrink).
+            // Do not publish a document whose mapping and index disagree.
+            return Ok(None);
+        }
+
+        let started = Instant::now();
+        let mut index = self.index.clone();
+        index.extend_tail(&mmap);
+
+        Ok(Some(Document {
+            path: self.path.clone(),
+            _file: file,
+            mmap: Some(mmap),
+            len: mapped_len,
+            base: self.base,
+            encoding: self.encoding,
+            eol: self.eol,
+            index,
+            index_ms: started.elapsed().as_millis(),
+            from_cache: false,
+        }))
+    }
+
     #[inline]
     pub fn encoding(&self) -> Encoding {
         self.encoding
@@ -360,6 +401,39 @@ impl Document {
         Ok(())
     }
 
+    /// Fallible whole-document visitor that also exposes each line's absolute
+    /// byte range including its original terminator. Sort uses this to build a
+    /// dense on-disk offset table during its existing sequential scan, avoiding
+    /// a sparse-index walk for every line when emitting random sorted order.
+    pub fn try_for_each_raw_line_with_offsets(
+        &self,
+        mut f: impl FnMut(u64, &[u8], u64, u64) -> Result<()>,
+        mut on_batch: impl FnMut(u64),
+    ) -> Result<()> {
+        let buf = self.buf();
+        let total = self.line_count();
+        let mut start = 0u64;
+        while start < total {
+            let batch = self
+                .index
+                .line_ranges_with_terminator(buf, start, Self::SCAN_BATCH);
+            if batch.is_empty() {
+                break;
+            }
+            start += batch.len() as u64;
+            for (line_no, text_start, text_end, raw_end) in batch {
+                f(
+                    line_no,
+                    &buf[text_start as usize..text_end as usize],
+                    text_start,
+                    raw_end,
+                )?;
+            }
+            on_batch(start);
+        }
+        Ok(())
+    }
+
     /// Raw line text and original terminator bytes for up to `count` lines.
     ///
     /// Returned as `(line_number, text_bytes, terminator_bytes)`. The text slice
@@ -390,6 +464,14 @@ impl Document {
         let buf = self.buf();
         let (s, _text_end, raw_end) = self.index.line_range_with_terminator(buf, i)?;
         Some(&buf[s as usize..raw_end as usize])
+    }
+
+    /// Borrow an absolute raw byte range from the mapped file.
+    pub fn raw_byte_range(&self, start: u64, end: u64) -> Option<&[u8]> {
+        if start > end || end > self.len {
+            return None;
+        }
+        Some(&self.buf()[start as usize..end as usize])
     }
 
     /// Contiguous raw bytes spanning original lines `[start, end)`, including
@@ -851,6 +933,26 @@ mod tests {
         assert_eq!(doc.byte_len(), old_len);
         assert_ne!(doc.byte_len(), std::fs::metadata(&path).unwrap().len());
         assert_eq!(doc.line_count(), 3);
+    }
+
+    #[test]
+    fn follow_tail_returns_a_new_incrementally_extended_document() {
+        use std::fs::OpenOptions as FsOpenOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shared-follow.log");
+        std::fs::write(&path, b"line 0\nline 1\n").unwrap();
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+
+        let mut file = FsOpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b"line 2\nline 3\n").unwrap();
+        file.flush().unwrap();
+
+        let followed = doc.follow_tail().unwrap().unwrap();
+        assert_eq!(doc.line_count(), 2, "the shared source stays immutable");
+        assert_eq!(followed.line_count(), 4);
+        assert_eq!(followed.line(3).unwrap(), "line 3");
+        assert_eq!(followed.byte_len(), std::fs::metadata(&path).unwrap().len());
     }
 
     #[test]

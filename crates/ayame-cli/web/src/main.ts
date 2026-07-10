@@ -20,7 +20,6 @@ import { flashCount, loadSearchHistory } from "./search.js";
 import { hideLoading, showLoading } from "./dialogs.js";
 import { initEditor, initEvents } from "./input.js";
 import {
-  initTree,
   initWorkspace,
   newUntitled,
   onDocumentOpened,
@@ -60,7 +59,6 @@ export async function boot() {
   initEditor();
   initSelection();
   initWorkspace();
-  initTree();
   initContextMenu();
   try {
     await refreshStat();

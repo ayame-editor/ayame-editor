@@ -18,7 +18,9 @@ mod top;
 pub use crate::fields::FieldSpec;
 pub use distinct::{distinct, DistinctOptions, DistinctResult};
 pub use group::{group, GroupOptions, GroupRow, GroupStats};
-pub use sort::{sort, sort_with_progress, OrderingReader, SortOptions, SortResult};
+pub use sort::{
+    sort, sort_with_progress, LineOffsetReader, OrderingReader, SortOptions, SortResult,
+};
 pub use top::{top_n, TopOptions};
 
 #[cfg(test)]

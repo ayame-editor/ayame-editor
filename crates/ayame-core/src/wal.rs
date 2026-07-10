@@ -1101,6 +1101,38 @@ mod tests {
         assert!(recovered.is_dirty());
     }
 
+    #[test]
+    fn save_reset_uses_the_snapshot_when_a_live_edit_races_the_swap() {
+        let (f, doc) = doc_from(b"a\nb\n");
+        let dir = TempDir::new().unwrap();
+        let wal = wal_path_for(dir.path(), f.path());
+        let mut live = EditSession::default();
+        attach(&doc, &wal, &mut live);
+
+        live.replace_range(&doc, 0, 0, 0, 1, "A").unwrap();
+        let saved = live.clone();
+        saved.save_to_path_overwrite(&doc, f.path()).unwrap();
+        // This edit lands after the saved snapshot but before WAL reset.
+        live.replace_range(&doc, 1, 0, 1, 1, "B").unwrap();
+        live.mark_saved_at(saved.content_gen());
+
+        let header = Header::for_file(f.path(), doc.encoding().label()).unwrap();
+        live.wal_reset_for_save_from(&doc, header, &saved);
+        // commit_in_place_save snapshots the racing live view immediately.
+        live.wal_compact();
+        let expected = texts(&live, &doc);
+        assert_eq!(expected, vec!["A", "B"]);
+        assert!(live.is_dirty());
+        drop(live);
+
+        let reopened = reopen(f.path());
+        assert_eq!(texts(&EditSession::default(), &reopened), vec!["A", "b"]);
+        let mut recovered = EditSession::default();
+        replay(&wal, &reopened, &mut recovered).unwrap();
+        assert_eq!(texts(&recovered, &reopened), expected);
+        assert!(recovered.is_dirty());
+    }
+
     /// The same walk, redone: undo then redo lands back on the exact saved
     /// content, so the crash log must read clean and recovery must show the
     /// saved view — consistent with the live session's content_gen

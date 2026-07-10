@@ -1,14 +1,8 @@
 // Ayame Editor — save module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath, isUntitled, joinPath, pathDirName, setModalOpen } from "./dom.js";
 import { DEFAULT_SETTINGS, state } from "./state.js";
-import {
-  currentLocale,
-  isExistsError as serverIsExistsError,
-  serverMessage,
-  t,
-  weekdayNames,
-} from "./i18n.js";
-import { api, apiPost } from "./api.js";
+import { currentLocale, serverMessage, t, weekdayNames } from "./i18n.js";
+import { api, apiPost, isApiErrorCode } from "./api.js";
 import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
@@ -22,13 +16,7 @@ import {
   showLoading,
   showMessage,
 } from "./dialogs.js";
-import {
-  onDocumentOpened,
-  openPath,
-  refreshTabs,
-  showSaveDialog,
-  updateTreeActive,
-} from "./workspace.js";
+import { onDocumentOpened, openPath, refreshTabs, showSaveDialog } from "./workspace.js";
 import { saveSettings } from "./settings.js";
 import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
 import type {
@@ -150,7 +138,6 @@ export async function reloadActiveDocument({
   bumpGeneration = true,
   keepCaret = true,
   refreshTabList = true,
-  refreshTree = false,
 } = {}) {
   if (bumpGeneration) {
     state.docGen++;
@@ -163,7 +150,6 @@ export async function reloadActiveDocument({
     setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
   render();
   if (refreshTabList) refreshTabs();
-  if (refreshTree) updateTreeActive();
 }
 
 // Shared tail of every save-as-style save (名前を付けて保存 / クイックメモ保存):
@@ -174,7 +160,7 @@ export async function reloadActiveDocument({
 export async function finishSaveAs(res) {
   if (res.switched) {
     // Same tab, new document identity: refresh in place, keep the caret.
-    await reloadActiveDocument({ refreshTree: true });
+    await reloadActiveDocument();
   } else {
     // The workspace changed while saving (rare): fall back to focusing the
     // saved file — the server dedupes, so this never duplicates a tab.
@@ -240,7 +226,7 @@ export async function saveCopy() {
       }
     }
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(finalError.message));
+    showMessage(t("error.saveError"), serverMessage(finalError));
   } finally {
     savingCount--;
     setSavingUI();
@@ -249,9 +235,7 @@ export async function saveCopy() {
 }
 
 export function isExistsError(e) {
-  // Pass the whole error so the structured `code` is available (issue #81.2);
-  // serverIsExistsError falls back to the message text when there is no code.
-  return serverIsExistsError(e);
+  return isApiErrorCode(e, "exists");
 }
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
@@ -373,7 +357,7 @@ export async function saveFile() {
     flashCount(t("file.saved", { path: displayPath(res.path) }));
   } catch (e) {
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(e.message));
+    showMessage(t("error.saveError"), serverMessage(e));
   } finally {
     savingCount--;
     setSavingUI();
@@ -460,7 +444,7 @@ export async function convertSave(encoding, lineEnding, bom) {
     flashCount(t("dialog.convert.savedAs", { enc: enc(encoding), eol: eol(lineEnding) }));
   } catch (e) {
     flashCount(t("dialog.convert.saveError"), "error");
-    showMessage(t("dialog.convert.go"), serverMessage(e.message));
+    showMessage(t("dialog.convert.go"), serverMessage(e));
   } finally {
     savingCount--;
     setSavingUI();
@@ -491,23 +475,53 @@ export async function reopenWithEncoding(encoding) {
     flashCount(t("dialog.convert.reopenedAs", { enc: enc(encoding) }));
   } catch (e) {
     flashCount(t("dialog.convert.reopenError"), "error");
-    showMessage(t("dialog.convert.reopen"), serverMessage(e.message));
+    showMessage(t("dialog.convert.reopen"), serverMessage(e));
   }
 }
 
-// ソート: sorts the current tab in place — unsaved edits included — and
-// overwrites the original file on disk. All options sit in one form.
+export function sortFormatForPath(path): "csv" | "tsv" | "text" {
+  const sourcePath = String(path || "").toLowerCase();
+  if (sourcePath.endsWith(".csv")) return "csv";
+  if (sourcePath.endsWith(".tsv") || sourcePath.endsWith(".tab")) return "tsv";
+  return "text";
+}
+
+export function parseSortKeys(text): number[] {
+  const raw = String(text || "").trim();
+  return raw
+    ? raw
+        .split(/[,;\s、，]+/u)
+        .filter(Boolean)
+        .map(Number)
+    : [];
+}
+
+// ソート: include unsaved edits, write a private temporary result, and open it
+// in a new tab. The source document is never overwritten by the GUI action.
 export async function sortSave() {
   if (!state.stat?.open) return;
+  const detectedFormat = sortFormatForPath(state.stat.path);
   const f = await askForm(
     t("menu.sort"),
     [
       {
         id: "key",
         type: "text",
-        label: t("dialog.sort.keyColumn"),
+        label: t("dialog.sort.keyColumns"),
         placeholder: t("dialog.sort.keyPlaceholder"),
         title: t("dialog.sort.keyTitle"),
+      },
+      {
+        id: "format",
+        type: "select",
+        label: t("dialog.sort.format"),
+        value: detectedFormat,
+        options: [
+          ["csv", t("dialog.sort.formatCsv")],
+          ["tsv", t("dialog.sort.formatTsv")],
+          ["text", t("dialog.sort.formatText")],
+          ["delimited", t("dialog.sort.formatDelimited")],
+        ],
       },
       {
         id: "delim",
@@ -534,15 +548,6 @@ export async function sortSave() {
         ],
       },
       {
-        id: "mode",
-        type: "select",
-        label: t("dialog.sort.destination"),
-        options: [
-          ["new", t("dialog.sort.newFile")],
-          ["in_place", t("dialog.sort.currentFile")],
-        ],
-      },
-      {
         id: "_hint",
         type: "hint",
         label: t("dialog.sort.hint"),
@@ -552,52 +557,45 @@ export async function sortSave() {
   );
   if (!f) return;
   const keyText = String(f.key || "").trim();
-  const key = keyText === "" ? null : Number(keyText);
-  if (keyText !== "" && (!Number.isInteger(key) || key < 1)) {
+  const keys = parseSortKeys(keyText);
+  if (keys.some((key) => !Number.isInteger(key) || key < 1)) {
     flashCount(t("dialog.sort.keyInvalid"), "error");
     return;
   }
-  // In-place sort atomically overwrites the file and drops undo history, so
-  // confirm it like every other destructive action (issue #77). "new file" is
-  // non-destructive and needs no confirmation.
-  const inPlace = f.mode === "in_place";
-  if (inPlace) {
-    const ok = await askConfirm(
-      t("dialog.sort.confirmTitle"),
-      t("dialog.sort.confirmMessage", { path: displayPath(state.stat?.path || "") }),
-      { okLabel: t("dialog.sort.confirmOk"), danger: true },
-    );
-    if (!ok) return;
+  if (f.format === "text" && keys.length) {
+    flashCount(t("dialog.sort.textHasNoColumns"), "error");
+    return;
   }
+  const csv = f.format === "csv" || f.format === "tsv";
+  const delim =
+    f.format === "csv"
+      ? ","
+      : f.format === "tsv"
+        ? "\t"
+        : f.format === "delimited"
+          ? String(f.delim || ",")
+          : null;
   const opId = newOperationId("sort");
   showLoading(t("dialog.sort.running"), { opId, cancel: true });
   try {
     const res = await apiPost<ArtifactResponse, SortSaveRequest>("/api/sort/save", {
       op_id: opId,
       path: null,
-      in_place: inPlace,
-      key,
+      // GUI sort is deliberately non-destructive: the server writes a private
+      // temporary result and we open it as a new tab.
+      in_place: false,
+      key: keys[0] ?? null,
+      keys: keys.length ? keys : null,
       numeric: !!f.numeric,
       reverse: f.order === "desc",
-      delim: key != null && f.delim ? f.delim : null,
+      delim,
+      csv,
     });
-    if (inPlace) {
-      state.sel = null;
-      state.extraCursors = [];
-      setCaret(0, 0);
-      await reloadActiveDocument({
-        bumpGeneration: false,
-        keepCaret: false,
-        refreshTabList: false,
-      });
-      flashCount(t("dialog.sort.done"));
-    } else {
-      await openPath(res.path);
-      flashCount(t("dialog.sort.newDone", { path: displayPath(res.path) }));
-    }
+    await openPath(res.path);
+    flashCount(t("dialog.sort.newDone", { path: displayPath(res.path) }));
   } catch (e) {
     flashCount(t("dialog.sort.error"), "error");
-    showMessage(t("dialog.sort.error"), serverMessage(e.message));
+    showMessage(t("dialog.sort.error"), serverMessage(e));
   } finally {
     hideLoading();
   }
@@ -643,7 +641,7 @@ export async function splitFile() {
     flashCount(t("dialog.split.done", { count: res.count, path: displayPath(res.files[0]) }));
   } catch (e) {
     flashCount(t("dialog.split.error"), "error");
-    showMessage(t("dialog.split.error"), serverMessage(e.message));
+    showMessage(t("dialog.split.error"), serverMessage(e));
   } finally {
     hideLoading();
   }
@@ -727,7 +725,7 @@ async function runGrepSave(query, opts, target) {
       return;
     }
     flashCount(t("dialog.grepSave.error"), "error");
-    showMessage(t("dialog.grepSave.error"), serverMessage(e.message));
+    showMessage(t("dialog.grepSave.error"), serverMessage(e));
     return;
   }
   hideLoading();

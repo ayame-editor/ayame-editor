@@ -16,11 +16,6 @@
          Elements whose text/tooltips are composed at runtime (shortcut hints,
          opener mode texts, dynamic dialog titles) are owned by JS instead. -->
     <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
-      <symbol id="i-sidebar" viewBox="0 0 24 24">
-        <rect x="4" y="4.5" width="16" height="15" rx="2" />
-        <path d="M9 4.5v15" />
-        <path d="M11.8 15.5v-4.2c0-.5.3-.8.8-.8h2.2l.8 1h3.1c.5 0 .8.3.8.8v3.2h-7.7Z" />
-      </symbol>
       <symbol id="i-undo" viewBox="0 0 24 24">
         <path d="M9 8H5V4" />
         <path d="M5.4 8.3a8 8 0 1 1 2.1 8.1" />
@@ -126,7 +121,6 @@
         <div class="menu-shell">
           <button id="view-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false" data-i18n="menu.view">表示</button>
           <div id="view-menu" class="file-menu hidden" role="menu" aria-label="表示" data-i18n-aria-label="menu.view">
-            <button class="menu-item" data-menu-action="toggleSidebar" role="menuitem"><span class="menu-label" data-i18n="menu.explorer">エクスプローラー</span><span class="menu-key" data-key-action="toggleSidebar">Ctrl+B</span></button>
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label" data-i18n="menu.findBar">検索バー</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
             <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label" data-i18n="menu.commandPalette">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
@@ -138,22 +132,24 @@
           </div>
         </div>
         <button id="settings-menu-button" class="menubar-button" data-menu-action="settings" role="menuitem" data-i18n="menu.settings">設定</button>
+        <div class="menu-shell">
+          <button id="help-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false" data-i18n="menu.help">ヘルプ</button>
+          <div id="help-menu" class="file-menu hidden" role="menu" aria-label="ヘルプ" data-i18n-aria-label="menu.help">
+            <button class="menu-item" data-menu-action="help" role="menuitem"><span class="menu-label" data-i18n="help.open">Ayame Editor ヘルプ</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label" data-i18n="help.shortcuts">キーボードショートカット</span><span class="menu-key"></span></button>
+            <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label" data-i18n="menu.commandPalette">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="about" role="menuitem"><span class="menu-label" data-i18n="help.about">Ayame Editor について</span><span class="menu-key"></span></button>
+          </div>
+        </div>
       </nav>
-      <!-- Toolbar stays minimal by design: explorer open/close, undo/redo, and
-           the ツール dropdown (sort / replace / diff / case live there). Search
-           floats inside the editor viewport instead. -->
+      <!-- Toolbar stays minimal by design: undo/redo and the ツール dropdown
+           (sort / replace / diff / case live there). Search floats inside the
+           editor viewport instead. -->
       <header id="toolbar">
         <div class="tb-group">
-          <button id="toggle-sidebar" class="ico" title="エクスプローラー (Ctrl+B)" aria-label="エクスプローラー">
-            <svg class="ay-icon"><use href="#i-sidebar"></use></svg>
-          </button>
           <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
           <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
-        </div>
-
-        <div class="tb-sep"></div>
-
-        <div class="tb-group">
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
             <svg class="ay-icon"><use href="#i-undo"></use></svg>
           </button>
@@ -170,7 +166,7 @@
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール" data-i18n-aria-label="menu.tools">
             <button class="menu-item" data-menu-action="sortSave" role="menuitem"
-                    title="行単位で並び替えて現在のファイルを上書きします。既定は行全体の文字列比較、キー列を指定するとその列で比較 (昇順/降順)" data-i18n-title="menu.sortTitle">
+                    title="行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます" data-i18n-title="menu.sortTitle">
               <span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
             </button>
             <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label" data-i18n="menu.diff">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
@@ -206,27 +202,6 @@
       </nav>
 
       <div id="main">
-        <aside id="sidebar" class="hidden">
-          <div class="sb-head">
-            <svg class="ay-icon"><use href="#i-sidebar"></use></svg>
-            <span class="sb-title" data-i18n="menu.explorer">エクスプローラー</span>
-            <button id="sb-close" class="ico sb-close" title="エクスプローラーを閉じる" aria-label="エクスプローラーを閉じる" data-i18n-title="tree.close" data-i18n-aria-label="tree.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
-          </div>
-          <div id="sb-root" class="sb-root" title=""></div>
-          <div class="sb-actions" aria-label="エクスプローラー操作" data-i18n-aria-label="tree.actions">
-            <button id="sb-back" class="cmd sb-nav" title="戻る" aria-label="戻る" data-i18n-title="tree.back" data-i18n-aria-label="tree.back" disabled>
-              <svg class="ay-icon sb-nav-flip"><use href="#i-chevron-right"></use></svg>
-            </button>
-            <button id="sb-forward" class="cmd sb-nav" title="進む" aria-label="進む" data-i18n-title="tree.forward" data-i18n-aria-label="tree.forward" disabled>
-              <svg class="ay-icon"><use href="#i-chevron-right"></use></svg>
-            </button>
-            <button id="sb-up" class="cmd sb-action" title="上の階層へ" data-i18n-title="tree.up">
-              <svg class="ay-icon"><use href="#i-folder-up"></use></svg><span class="btn-label" data-i18n="tree.up">上の階層へ</span>
-            </button>
-          </div>
-          <div id="tree" class="tree"></div>
-        </aside>
-
         <main id="viewport" tabindex="0">
           <div id="ruler"><div id="ruler-inner"></div><div id="ruler-corner"></div></div>
           <!-- faint watercolor iris illustration (opacity = --illus; 0 hides it) -->
@@ -302,7 +277,6 @@
           <span id="opener-input-label" class="opener-input-label" data-i18n="dialog.open.path">パス</span>
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder" />
-          <button id="opener-folder" class="cmd" title="表示中のフォルダをツリーに開く" data-i18n="dialog.open.folder" data-i18n-title="dialog.open.folderToTree">フォルダ</button>
           <button id="opener-open" class="cmd" data-i18n="menu.open">開く</button>
         </div>
 
@@ -429,13 +403,6 @@
           <div class="set-row set-hint-row">
             <span class="set-label" aria-hidden="true"></span>
             <span class="set-hint" data-i18n="settings.memoNameHint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}</span>
-          </div>
-          <div class="set-row">
-            <span class="set-label" data-i18n="settings.sidebar">サイドバー</span>
-            <div class="seg-control" role="group" aria-label="サイドバー位置" data-i18n-aria-label="settings.sidebarSide">
-              <button type="button" id="set-sidebar-left" class="seg" data-sidebar-side="left" data-i18n="settings.left">左</button>
-              <button type="button" id="set-sidebar-right" class="seg" data-sidebar-side="right" data-i18n="settings.right">右</button>
-            </div>
           </div>
           <div class="set-row">
             <span class="set-label" data-i18n="keymap.title">キー設定</span>

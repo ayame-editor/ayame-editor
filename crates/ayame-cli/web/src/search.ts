@@ -1,6 +1,6 @@
 // Ayame Editor — search module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath, escapeRegExp, pathDirName, setModalOpen } from "./dom.js";
-import { TREE_KEY, state } from "./state.js";
+import { BROWSE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import {
   api,
@@ -31,9 +31,9 @@ import {
   selectionRanges,
 } from "./selection.js";
 import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
-import { askForm, askPrompt, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
-import { openPath, showFolderDialog } from "./workspace.js";
+import { openPath, showFileDialog, showFolderDialog } from "./workspace.js";
 import { isNativeApp, nativeOpenDialog } from "./app.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
@@ -714,14 +714,15 @@ export function renderDiffView(res) {
 
 export async function diffFile() {
   const base = state.stat?.path || "";
-  // Desktop build: pick the comparison file with the OS dialog instead of
-  // hand-typing an absolute path (issue #79). Browser build keeps the prompt.
+  // Pick the comparison file instead of hand-typing an absolute path (#79):
+  // the desktop build uses the OS dialog and the browser build reuses Ayame's
+  // in-app picker.
   let path;
   if (isNativeApp()) {
     const picked = await nativeOpenDialog(pathDirName(base) || "");
     path = picked[0] || "";
   } else {
-    path = await askPrompt(t("menu.diff"), t("dialog.diff.promptPath"), base);
+    path = await showFileDialog(t("menu.diff"), pathDirName(base) || "");
   }
   if (path == null || path.trim() === "") return;
   showLoading(t("dialog.diff.computing"));
@@ -733,7 +734,7 @@ export async function diffFile() {
     showDiff(res);
   } catch (e) {
     flashCount(t("dialog.diff.error"), "error");
-    showMessage(t("dialog.diff.error"), serverMessage(e.message));
+    showMessage(t("dialog.diff.error"), serverMessage(e));
   } finally {
     hideLoading();
   }
@@ -757,7 +758,7 @@ export function hideGrep() {
 export async function grepFolder() {
   if (anyModalOpen()) return;
   const base =
-    lastGrep.dir || localStorage.getItem(TREE_KEY) || pathDirName(state.stat?.path || "") || "";
+    lastGrep.dir || localStorage.getItem(BROWSE_KEY) || pathDirName(state.stat?.path || "") || "";
   const form = await askForm(
     t("menu.grep"),
     [
@@ -816,7 +817,7 @@ export async function grepFolder() {
     showGrep(res, query, lastGrep.regex);
   } catch (e) {
     flashCount(t("dialog.grep.error"), "error");
-    showMessage(t("dialog.grep.error"), serverMessage(e.message));
+    showMessage(t("dialog.grep.error"), serverMessage(e));
   } finally {
     hideLoading();
   }

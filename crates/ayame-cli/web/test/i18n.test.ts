@@ -4,28 +4,7 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { I18N_ATTR_MAP, isExistsError, MESSAGES } from "../src/i18n.js";
-
-describe("isExistsError", () => {
-  it("detects the structured exists code", () => {
-    expect(isExistsError({ code: "exists", message: "whatever" })).toBe(true);
-  });
-  it("falls back to the message for other codes (main save endpoint uses bad_request)", () => {
-    // Regression: every API error now carries a code, so a truthy non-exists
-    // code must NOT short-circuit past the message check.
-    expect(isExistsError({ code: "bad_request", message: "'/x' already exists" })).toBe(true);
-    expect(isExistsError({ code: "conflict", message: "/x は既に存在します" })).toBe(true);
-  });
-  it("detects a coded-less error by message", () => {
-    expect(isExistsError({ message: "既に存在します" })).toBe(true);
-    expect(isExistsError("already exists")).toBe(true);
-  });
-  it("is false for unrelated errors", () => {
-    expect(isExistsError({ code: "internal", message: "boom" })).toBe(false);
-    expect(isExistsError("some other failure")).toBe(false);
-    expect(isExistsError(null)).toBe(false);
-  });
-});
+import { I18N_ATTR_MAP, MESSAGES } from "../src/i18n.js";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

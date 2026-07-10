@@ -520,265 +520,13 @@ html.replace-open .find-group .replace-row { display: flex; }
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
 }
 
-/* ---- main area (sidebar + viewport) ---------------------------------- */
+/* ---- main area ------------------------------------------------------- */
 
 #main {
   display: flex;
   min-height: 0;
   overflow: hidden;
 }
-html[data-sidebar-side="right"] #main {
-  flex-direction: row-reverse;
-}
-
-#sidebar {
-  flex: 0 0 clamp(260px, 20vw, 340px);
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-  border-right: 1px solid var(--border);
-  overflow: hidden;
-  position: relative;
-}
-html[data-sidebar-side="right"] #sidebar {
-  border-right: none;
-  border-left: 1px solid var(--border);
-}
-#sidebar.hidden { display: none; }
-/* No illustration in the explorer: the watercolor iris (#ambient) lives in
-   the editor viewport only, so the file tree stays plain and readable. */
-
-.sb-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  position: relative;
-  z-index: 1;
-}
-.sb-head .ay-icon {
-  width: 15px;
-  height: 15px;
-  color: var(--accent-bright);
-}
-.sb-title {
-  flex: 1;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fg);
-}
-.sb-close {
-  width: 26px;
-  height: 26px;
-  color: var(--fg-dim);
-  font-size: 15px;
-}
-
-.sb-root {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-dim);
-  white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  border-bottom: 1px solid var(--border);
-  position: relative;
-  z-index: 1;
-}
-.sb-nav {
-  flex: 0 0 auto;
-  min-width: 34px;
-  justify-content: center;
-  padding: 0 8px;
-  border-color: color-mix(in srgb, var(--border) 80%, transparent);
-}
-.sb-nav:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.sb-nav-flip {
-  transform: scaleX(-1);
-}
-.sb-actions {
-  display: flex;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 7px 8px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-elevated) 66%, transparent);
-  position: relative;
-  z-index: 1;
-}
-.sb-action {
-  flex: 0 0 auto;
-  min-width: 118px;
-  justify-content: center;
-  padding: 0 10px;
-  border-color: color-mix(in srgb, var(--border) 80%, transparent);
-}
-
-.tree {
-  flex: 1;
-  overflow: auto;
-  padding: 4px 4px 8px 0;
-  font-size: 13px;
-  position: relative;
-  z-index: 1;
-}
-.tnode {
-  display: grid;
-  grid-template-columns: auto 16px 18px minmax(0, 1fr) auto;
-  align-items: center;
-  height: 24px;
-  margin: 1px 4px 1px 0;
-  padding-right: 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  color: var(--fg);
-  position: relative;
-}
-.tnode:hover {
-  background: color-mix(in srgb, var(--hover) 82%, transparent);
-}
-.tnode.active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
-  color: var(--fg);
-}
-.tnode.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-.tindent {
-  display: inline-flex;
-  height: 100%;
-  width: calc(var(--depth, 0) * 16px);
-  flex: 0 0 calc(var(--depth, 0) * 16px);
-  overflow: hidden;
-}
-.tguide {
-  width: 16px;
-  height: 100%;
-  flex: 0 0 16px;
-  position: relative;
-}
-.tguide::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 0;
-  bottom: 0;
-  border-left: 1px solid color-mix(in srgb, var(--fg-dim) 22%, transparent);
-}
-.tnode .chev {
-  width: 16px;
-  height: 20px;
-  flex: 0 0 auto;
-  color: var(--fg-dim);
-  display: grid;
-  place-items: center;
-}
-.tnode.dir .chev::before {
-  content: "";
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid currentColor;
-  transition: transform .12s ease;
-}
-.tnode.dir.open .chev::before {
-  transform: rotate(90deg);
-}
-.ticon {
-  width: 18px;
-  height: 18px;
-  position: relative;
-  color: var(--fg-dim);
-}
-.ticon.folder::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  right: 1px;
-  top: 7px;
-  bottom: 3px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 74%, var(--fg-dim));
-  opacity: .9;
-}
-.ticon.folder::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 4px;
-  width: 7px;
-  height: 4px;
-  border-radius: 2px 2px 0 0;
-  background: color-mix(in srgb, var(--accent) 62%, var(--fg-dim));
-}
-.ticon.file::before {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 3px;
-  width: 10px;
-  height: 13px;
-  border: 1px solid color-mix(in srgb, var(--fg-dim) 68%, transparent);
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--bg-elevated) 74%, transparent);
-}
-.ticon.file::after {
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  top: 5px;
-  text-align: center;
-  font-size: 8px;
-  line-height: 10px;
-  font-weight: 700;
-  color: var(--accent-bright);
-}
-.ticon.file.md::after { content: "M"; color: #2f93d1; }
-.ticon.file.py::after { content: "P"; color: #d6a22f; }
-.ticon.file.json::after { content: "{}"; font-size: 7px; color: #7a61c5; }
-.ticon.file.data::after { content: "D"; color: #3e9a62; }
-.ticon.file.text::after { content: ""; }
-.tnode .tname {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  padding-left: 3px;
-}
-.tnode.dir .tname {
-  color: var(--fg);
-  font-weight: 600;
-}
-/* File size: deliberately tiny and faint — orientation, not data. */
-.tnode .tmeta {
-  font-size: 9px;
-  color: var(--fg-dim);
-  opacity: 0.55;
-  padding-left: 6px;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-}
-
 /* ---- viewport / editor ----------------------------------------------- */
 
 #viewport {
@@ -1180,6 +928,7 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
 .overlay {
   position: absolute;
   inset: 0;
+  z-index: 26;
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -1547,8 +1296,6 @@ html.saving .caret.extra { visibility: hidden; }
   font-family: var(--ui);
   font-size: 11px;
 }
-#opener.save-mode #opener-folder { display: none; }
-
 .opener-msg { padding: 6px 16px; min-height: 18px; color: var(--danger); font-size: 12px; }
 .opener-msg.busy { color: var(--fg-dim); }
 .opener-hint {
@@ -1720,7 +1467,6 @@ button { border-radius: var(--radius); }
   mask-image: none;
 }
 
-.settings-panel { width: min(680px, 94vw); }
 #apply-theme.hidden,
 #apply-keymap.hidden { display: none; }
 
@@ -2238,9 +1984,6 @@ button { border-radius: var(--radius); }
   }
   .file-menu {
     width: min(236px, calc(100vw - 16px));
-  }
-  .sb-action .btn-label {
-    display: inline;
   }
   #statusbar {
     overflow-x: auto;

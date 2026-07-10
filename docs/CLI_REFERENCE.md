@@ -61,8 +61,8 @@ print help.
 
 | Option | Notes |
 | --- | --- |
-| `-k`, `--key <COL>` | 1-based key column. Omit to use the whole line. |
-| `-t`, `--delim <C>` | Field delimiter. Default: comma. |
+| `-k`, `--key <COL[S]>` | 1-based key column. `sort` accepts columns in priority order, for example `3,1,2`; other commands accept one column. Omit to use the whole line. |
+| `-t`, `--delim <C>` | Field delimiter. Default: comma. Use `\\t` or `tab` for TSV. |
 | `--csv` | Use RFC 4180 CSV parsing, including quoted fields. |
 | `--quote <C>` | CSV quote character. Default: `"`. |
 | `--numeric` | Treat keys as numbers for `sort` and `top`. |

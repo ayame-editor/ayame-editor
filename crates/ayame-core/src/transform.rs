@@ -650,6 +650,7 @@ enum ReplacePlan {
     Regex {
         re: regex::Regex,
         replacement: String,
+        expand_captures: bool,
     },
 }
 
@@ -681,6 +682,7 @@ impl ReplacePlan {
             MatchPlan::Regex { text, .. } | MatchPlan::DecodeLine(text) => Ok(Self::Regex {
                 re: text,
                 replacement: opts.replacement.clone(),
+                expand_captures: opts.regex,
             }),
         }
     }
@@ -768,14 +770,23 @@ fn write_replaced_line(
             replacement,
             w,
         ),
-        ReplacePlan::Regex { re, replacement } => {
+        ReplacePlan::Regex {
+            re,
+            replacement,
+            expand_captures,
+        } => {
             let text = doc.encoding().decode_line(raw);
             let count = re.find_iter(&text).count() as u64;
             if count == 0 {
                 w.write_all(raw)?;
                 return Ok((false, 0));
             }
-            let replaced = re.replace_all(&text, replacement.as_str()).into_owned();
+            let replaced = if *expand_captures {
+                re.replace_all(&text, replacement.as_str()).into_owned()
+            } else {
+                re.replace_all(&text, regex::NoExpand(replacement.as_str()))
+                    .into_owned()
+            };
             let bytes = doc.encoding().encode_text(&replaced).ok_or_else(|| {
                 Error::InvalidInput(format!(
                     "replacement result cannot be encoded as {}",
@@ -1090,6 +1101,46 @@ mod tests {
         assert_eq!(res.changed_lines, 2);
         assert_eq!(res.replacements, 2);
         assert_eq!(std::fs::read(&out).unwrap(), b"aN\nbN\nccc\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn case_insensitive_literal_replace_keeps_dollar_text_literal() {
+        let (f, doc) = doc_from(b"Item item\n");
+        let out = f.path().with_extension("literal-dollar");
+        replace_to_path(
+            &doc,
+            &out,
+            &ReplaceOptions {
+                find: "item".into(),
+                replacement: "$10 ${name}".into(),
+                regex: false,
+                case_sensitive: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), b"$10 ${name} $10 ${name}\n");
+        let _ = std::fs::remove_file(out);
+    }
+
+    #[test]
+    fn regex_replace_still_expands_capture_groups() {
+        let (f, doc) = doc_from(b"item\n");
+        let out = f.path().with_extension("regex-capture");
+        replace_to_path(
+            &doc,
+            &out,
+            &ReplaceOptions {
+                find: "(item)".into(),
+                replacement: "$1-$1".into(),
+                regex: true,
+                case_sensitive: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), b"item-item\n");
         let _ = std::fs::remove_file(out);
     }
 

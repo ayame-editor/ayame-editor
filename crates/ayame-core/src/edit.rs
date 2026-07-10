@@ -508,6 +508,23 @@ impl EditSession {
         }
     }
 
+    /// Reset the live writer using the edit snapshot whose bytes actually
+    /// reached disk. Use this when the live session may have advanced after the
+    /// save snapshot was taken; capturing `self` would describe a different
+    /// base and corrupt later recovery rebases.
+    pub fn wal_reset_for_save_from(
+        &mut self,
+        doc: &Document,
+        header: crate::wal::Header,
+        saved: &EditSession,
+    ) {
+        let Some(mut w) = self.wal.take() else { return };
+        match w.reset_for_save(header, doc, saved) {
+            Ok(()) => self.wal = Some(w),
+            Err(e) => self.wal_error = Some(format!("crash log disabled: {e}")),
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

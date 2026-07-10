@@ -311,11 +311,15 @@ pub(super) struct SortSaveRequest {
     #[serde(default)]
     key: Option<usize>,
     #[serde(default)]
+    keys: Option<Vec<usize>>,
+    #[serde(default)]
     numeric: bool,
     #[serde(default)]
     reverse: bool,
     #[serde(default)]
     delim: Option<String>,
+    #[serde(default)]
+    csv: bool,
 }
 
 pub(super) async fn api_sort_save(
@@ -438,8 +442,15 @@ fn sort_command(
     cmd.arg("sort").arg(input);
     append_worker_encoding(&mut cmd, doc);
     cmd.arg("--out").arg(out);
-    if let Some(k) = req.key {
-        cmd.arg("--key").arg(k.to_string());
+    if let Some(keys) = req.keys.as_ref().filter(|keys| !keys.is_empty()) {
+        let value = keys
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        cmd.arg("--key").arg(value);
+    } else if let Some(key) = req.key {
+        cmd.arg("--key").arg(key.to_string());
     }
     if req.numeric {
         cmd.arg("--numeric");
@@ -449,6 +460,9 @@ fn sort_command(
     }
     if let Some(d) = req.delim.as_deref().filter(|d| !d.is_empty()) {
         cmd.arg("--delim").arg(d);
+    }
+    if req.csv {
+        cmd.arg("--csv");
     }
     cmd.arg("--spill-dir").arg(spill_dir);
     Ok(cmd)
@@ -1289,7 +1303,8 @@ async fn run_artifact_worker(
     }
     let bytes = tokio::fs::metadata(target).await.map_err(internal)?.len();
     if let Some(op) = &op {
-        op.processed_lines.store(lines, AtomicOrdering::Relaxed);
+        let total = op.total_lines.load(AtomicOrdering::Relaxed);
+        op.processed_lines.store(total, AtomicOrdering::Relaxed);
         op.done.store(true, AtomicOrdering::Relaxed);
     }
     Ok(ArtifactResponse {
@@ -1442,8 +1457,8 @@ async fn wait_worker_output_tracked(
     }
     let status = status_res?;
     if let Some(op) = &op {
-        op.processed_lines
-            .store(total_lines, AtomicOrdering::Relaxed);
+        let total = op.total_lines.load(AtomicOrdering::Relaxed);
+        op.processed_lines.store(total, AtomicOrdering::Relaxed);
         op.done.store(true, AtomicOrdering::Relaxed);
     }
     Ok(std::process::Output {
@@ -1549,9 +1564,11 @@ mod tests {
             path: None,
             in_place: false,
             key: None,
+            keys: None,
             numeric: false,
             reverse: false,
             delim: None,
+            csv: false,
         };
         let out = path.with_extension("sorted");
         let spill = path.with_extension("spill");
@@ -1570,16 +1587,18 @@ mod tests {
     /// check the output reflects key + numeric + reverse.
     #[test]
     fn sort_worker_command_round_trips_through_the_cli_parser() {
-        let path = scratch_file("rt-sort.csv", b"x,3\ny,10\nz,2\n");
+        let path = scratch_file("rt-sort.csv", b"1,3\n2,10\n3,2\n4,3\n");
         let doc = Document::open(&path, &OpenOptions::default()).unwrap();
         let req = SortSaveRequest {
             op_id: None,
             path: None,
             in_place: false,
             key: Some(2),
+            keys: Some(vec![2, 1]),
             numeric: true,
             reverse: true,
             delim: Some(",".into()),
+            csv: true,
         };
         let out = path.with_extension("rt-out");
         let spill = path.with_extension("rt-spill");
@@ -1590,9 +1609,12 @@ mod tests {
         assert_eq!(args[0], "sort");
         crate::cli::sort::cmd_sort(&args[1..]).expect("worker args must parse and run");
 
-        // key=2 numeric reverse → descending by the second column: 10, 3, 2.
+        // keys=2,1 + reverse → second column descending, then first column.
         let sorted = std::fs::read_to_string(&out).unwrap();
-        assert_eq!(sorted, "y,10\nx,3\nz,2\n", "round-trip options mismatch");
+        assert_eq!(
+            sorted, "2,10\n4,3\n1,3\n3,2\n",
+            "round-trip options mismatch"
+        );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&out);
         let _ = std::fs::remove_dir_all(&spill);

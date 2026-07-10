@@ -14,7 +14,7 @@ Runs on macOS, Windows, and Linux.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII.
 - Run search, replace, sort, two-file diff, folder grep, and file splitting from the GUI.
 - Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `diff`, `sort`, `sortdiff`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, `cache`, `update`, and `remove`.
-- Includes tabs, an explorer, rectangular selection, multi-cursor editing, and tail-follow mode.
+- Includes tabs, rectangular selection, multi-cursor editing, and tail-follow mode.
 - Customizable themes, fonts, wrapping, whitespace display, and key bindings.
 
 ## Install
