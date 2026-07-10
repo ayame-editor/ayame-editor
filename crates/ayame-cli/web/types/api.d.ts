@@ -68,7 +68,7 @@ export type SortSaveRequest = { op_id: string | null, path: string | null,
  * output atomically replaces the file, the document reloads, and the
  * (already incorporated) edit overlay is cleared.
  */
-in_place: boolean, key: number | null, keys: number[] | null, numeric: boolean, reverse: boolean, delim: string | null, csv: boolean, };
+in_place: boolean, key: number | null, keys: Array<number> | null, numeric: boolean, reverse: boolean, delim: string | null, csv: boolean, };
 
 export type ReplaceSaveRequest = { op_id: string | null, path: string | null, find: string, replacement: string, regex: boolean, ci: boolean, jobs: number | null, chunk_lines: bigint | null, };
 
