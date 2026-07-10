@@ -86,10 +86,16 @@ fn sort_uses_bounded_fan_in_multi_pass_merge() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
+    let offsets_name = res
+        .line_offsets_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let leftovers: Vec<_> = std::fs::read_dir(spill.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| name != &ordering_name)
+        .filter(|name| name != &ordering_name && name != &offsets_name)
         .collect();
     assert!(
         leftovers.is_empty(),
