@@ -338,13 +338,9 @@ impl LineIndex {
         let mut cur = cp.line;
 
         while cur < i {
-            match self.find_lf(buf, off, self.len) {
-                Some(lf) => {
-                    off = lf + self.newline.width();
-                    cur += 1;
-                }
-                None => return None,
-            }
+            let lf = self.find_lf(buf, off, self.len)?;
+            off = lf + self.newline.width();
+            cur += 1;
         }
 
         Some(off)
