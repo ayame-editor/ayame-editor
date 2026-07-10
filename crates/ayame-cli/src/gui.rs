@@ -813,11 +813,6 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
         true,
         &[
             &item(
-                "toggleSidebar",
-                label("エクスプローラー", "Explorer"),
-                key(cmd, Code::KeyB),
-            ),
-            &item(
                 "commandPalette",
                 label("コマンドパレット", "Command Palette"),
                 key(shift_cmd, Code::KeyP),
@@ -835,6 +830,29 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
             ),
             &item("toggleWordWrap", label("折り返し", "Word Wrap"), None),
             &item("toggleFollowTail", label("末尾に追従", "Follow Tail"), None),
+        ],
+    )
+    .ok()?;
+
+    let help = Submenu::with_items(
+        label("ヘルプ", "Help"),
+        true,
+        &[
+            &item(
+                "help",
+                label("Ayame Editor ヘルプ", "Ayame Editor Help"),
+                None,
+            ),
+            &item(
+                "keymap",
+                label("キーボードショートカット", "Keyboard Shortcuts"),
+                None,
+            ),
+            &item(
+                "commandPalette",
+                label("コマンドパレット", "Command Palette"),
+                key(shift_cmd, Code::KeyP),
+            ),
         ],
     )
     .ok()?;
@@ -876,7 +894,10 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     // Let AppKit append the standard window list to this submenu.
     window.set_as_windows_menu_for_nsapp();
 
-    Menu::with_items(&[&app, &file, &edit, &selection, &view, &tools, &window]).ok()
+    Menu::with_items(&[
+        &app, &file, &edit, &selection, &view, &tools, &window, &help,
+    ])
+    .ok()
 }
 
 const NATIVE_CLOSE_SCRIPT: &str = r#"

@@ -103,7 +103,7 @@ type-stripped JavaScript through `build.rs`, so ordinary Rust builds do not need
 a Node bundler.
 
 The UI keeps only visible lines plus a cache around the viewport. Settings,
-recent files, explorer root, and custom key bindings are stored in browser local
+recent files, the last in-app file-picker directory, and custom key bindings are stored in browser local
 storage. Menus and keyboard shortcuts dispatch named action ids, which allows the
 native macOS menu and in-page UI to call the same command handlers.
 

@@ -15,7 +15,7 @@ export const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 
 export const SETTINGS_KEY = "ayame.settings.v1";
 
-export const TREE_KEY = "ayame.treeRoot.v1";
+export const BROWSE_KEY = "ayame.browseDir.v1";
 
 export const RECENT_KEY = "ayame.recentFiles.v1";
 
@@ -34,8 +34,6 @@ export const DEFAULT_SETTINGS = {
   font: "mono",
   fontSize: 13,
   zoom: 100,
-  sidebar: false,
-  sidebarSide: "left",
   ruler: true,
   lineNumberCommas: true,
   confirmLastTabClose: true,
@@ -72,7 +70,6 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["nextTab", "keymap.nextTab", "Ctrl+PageDown"],
   ["prevTab", "keymap.prevTab", "Ctrl+PageUp"],
   ["commandPalette", "menu.commandPalette", "Ctrl+Shift+P"],
-  ["toggleSidebar", "keymap.toggleSidebar", "Ctrl+B"],
   ["find", "menu.find", "Ctrl+F"],
   ["replace", "menu.replace", "Ctrl+H"],
   ["findNext", "find.next", "F3"],
@@ -144,10 +141,8 @@ export const state = {
   tabs: [], // open tabs from /api/tabs
   followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
   tailTimer: null, // setInterval handle while following; cleared when off
-  treeParent: null, // parent of the current tree root (for the "up" button)
-  treeLoaded: false,
   openerDir: null, // directory currently shown in the open dialog
-  openerMode: "open", // "open" | "save" | "folder"
+  openerMode: "open", // "open" | "save" | "file" | "folder"
   openerEntries: [],
   openerResolve: null,
   // ---- caret-based (Notepad-style) editing ----

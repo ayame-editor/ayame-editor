@@ -12,6 +12,23 @@ pub(crate) fn parse_key(opts: &HashMap<String, String>) -> Result<Option<usize>>
     }
 }
 
+pub(crate) fn parse_keys(opts: &HashMap<String, String>) -> Result<Vec<usize>> {
+    let Some(raw) = first_opt(opts, &["--key", "-k"]) else {
+        return Ok(Vec::new());
+    };
+    raw.split(|ch| matches!(ch, ',' | ';'))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let key = part
+                .parse::<usize>()
+                .with_context(|| format!("--key contains an invalid column '{part}'"))?;
+            anyhow::ensure!(key > 0, "--key columns are 1-based and must be at least 1");
+            Ok(key)
+        })
+        .collect()
+}
+
 /// `--budget` memory bound for the spill-to-disk ops (default 256 MiB).
 pub(crate) fn parse_budget(opts: &HashMap<String, String>) -> Result<usize> {
     match first_opt(opts, &["--budget"]) {
@@ -22,7 +39,10 @@ pub(crate) fn parse_budget(opts: &HashMap<String, String>) -> Result<usize> {
 
 pub(crate) fn field_spec(opts: &HashMap<String, String>, flags: &HashSet<String>) -> FieldSpec {
     let delimiter = first_opt(opts, &["--delim", "-t"])
-        .and_then(|s| s.as_bytes().first().copied())
+        .and_then(|s| match s.as_str() {
+            "\\t" | "tab" | "TAB" => Some(b'\t'),
+            _ => s.as_bytes().first().copied(),
+        })
         .unwrap_or(b',');
     let quote = first_opt(opts, &["--quote"])
         .and_then(|s| s.as_bytes().first().copied())
@@ -62,4 +82,19 @@ pub(crate) fn parse_size(s: &str) -> Result<usize> {
         .parse()
         .with_context(|| format!("invalid size '{s}'"))?;
     Ok((val * mult as f64) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ordered_key_columns_and_tsv_delimiter_aliases() {
+        let opts = HashMap::from([
+            ("--key".to_string(), "3,1,2".to_string()),
+            ("--delim".to_string(), "\\t".to_string()),
+        ]);
+        assert_eq!(parse_keys(&opts).unwrap(), vec![3, 1, 2]);
+        assert_eq!(field_spec(&opts, &HashSet::new()).delimiter, b'\t');
+    }
 }

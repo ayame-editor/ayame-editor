@@ -98,6 +98,141 @@ fn sort_uses_bounded_fan_in_multi_pass_merge() {
 }
 
 #[test]
+fn sort_progress_covers_scan_and_multi_pass_merge() {
+    let mut data = Vec::new();
+    for i in (0..200u64).rev() {
+        data.extend_from_slice(format!("{i:03},row{i}\n").as_bytes());
+    }
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = SortOptions {
+        key_column: Some(1),
+        numeric: true,
+        budget_bytes: 1,
+        spill_dir: spill.path().to_path_buf(),
+        ..Default::default()
+    };
+    let mut samples = Vec::new();
+
+    let result =
+        sort_with_progress(&doc, &opts, |done, total| samples.push((done, total))).unwrap();
+
+    assert_eq!(result.line_count, 200);
+    assert_eq!(samples.first(), Some(&(0, 400)));
+    assert_eq!(samples.last(), Some(&(400, 400)));
+    assert!(
+        samples.iter().any(|&(done, total)| done > 200 && done < total),
+        "merge phase must advance between the scan midpoint and completion: {samples:?}"
+    );
+    assert!(
+        samples.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "progress went backwards: {samples:?}"
+    );
+    assert!(samples.iter().all(|&(_, total)| total == 400));
+}
+
+#[test]
+fn sort_builds_dense_offsets_for_fast_random_order_output() {
+    let data = b"charlie\nalpha\nbravo";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let result = sort(
+        &doc,
+        &SortOptions {
+            spill_dir: spill.path().to_path_buf(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let offsets = LineOffsetReader::open(&result.line_offsets_path).unwrap();
+    let mut ordering = OrderingReader::open(&result.ordering_path).unwrap();
+    let mut raw = Vec::new();
+
+    while let Some(line) = ordering.next_line().unwrap() {
+        let (start, end) = offsets.raw_range(line).unwrap();
+        raw.push(doc.raw_byte_range(start, end).unwrap().to_vec());
+    }
+
+    assert_eq!(
+        raw,
+        vec![
+            b"alpha\n".to_vec(),
+            b"bravo".to_vec(),
+            b"charlie\n".to_vec(),
+        ]
+    );
+}
+
+#[test]
+fn sort_uses_multiple_key_columns_in_priority_order() {
+    let data = b"b,2,z\na,9,z\na,2,z\na,2,a\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let result = sort(
+        &doc,
+        &SortOptions {
+            key_columns: vec![1, 2, 3],
+            spill_dir: spill.path().to_path_buf(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        sorted_lines(&doc, &result),
+        vec!["a,2,a", "a,2,z", "a,9,z", "b,2,z"]
+    );
+}
+
+#[test]
+fn sort_key_columns_support_csv_quotes_and_tsv_delimiters() {
+    let csv = br#""b,x",2
+"a,y",3
+"a,y",1
+"#;
+    let csv_spill = tempfile::tempdir().unwrap();
+    let (_csv_file, csv_doc) = doc_from(csv);
+    let csv_result = sort(
+        &csv_doc,
+        &SortOptions {
+            key_columns: vec![1, 2],
+            fields: FieldSpec {
+                csv: true,
+                ..Default::default()
+            },
+            spill_dir: csv_spill.path().to_path_buf(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        sorted_lines(&csv_doc, &csv_result),
+        vec![r#""a,y",1"#, r#""a,y",3"#, r#""b,x",2"#]
+    );
+
+    let tsv = b"b\t2\na\t9\na\t1\n";
+    let tsv_spill = tempfile::tempdir().unwrap();
+    let (_tsv_file, tsv_doc) = doc_from(tsv);
+    let tsv_result = sort(
+        &tsv_doc,
+        &SortOptions {
+            key_columns: vec![1, 2],
+            fields: FieldSpec {
+                delimiter: b'\t',
+                ..Default::default()
+            },
+            spill_dir: tsv_spill.path().to_path_buf(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        sorted_lines(&tsv_doc, &tsv_result),
+        vec!["a\t1", "a\t9", "b\t2"]
+    );
+}
+
+#[test]
 fn lexicographic_reverse_and_whole_line() {
     let data = b"banana\napple\ncherry\napple\n";
     let spill = tempfile::tempdir().unwrap();

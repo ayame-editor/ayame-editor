@@ -889,7 +889,8 @@ impl AppState {
     /// the session has no pending edits, the refreshed document is opened off
     /// the workspace lock and installed only if the active tab and edit
     /// revision are still unchanged; a shrink or external replacement reports
-    /// `changed` so the client can reopen. Blocking (stat + mmap + scan), so
+    /// `changed` so the client can reopen. Blocking (stat + mmap + appended-byte
+    /// scan), so
     /// callers should run it off the async runtime.
     pub(super) fn poll_tail(&self) -> TailStatus {
         // Cheap peek under a short read lock: an Arc handle plus whether the
@@ -933,21 +934,11 @@ impl AppState {
             return s;
         }
 
-        let path = snap.doc.path().to_path_buf();
-        // Follow growth without the index cache. The cache key is keyed on
-        // (len, mtime), which both change on every append, so a growing file is
-        // a guaranteed miss that rebuilds the index AND writes a fresh cache
-        // blob every poll — leaving an unbounded trail of dead blobs on disk for
-        // a busy multi-GB log. Skipping the cache here costs nothing on the read
-        // side (it was already a full rebuild) and stops the pollution (#76).
-        // (Reusing the immutable prefix via Document::refresh_tail would also
-        // avoid the rebuild, but that needs &mut on the Arc-shared document.)
-        let tail_opts = ayame_core::OpenOptions {
-            cache_dir: None,
-            ..self.open_opts.clone()
-        };
-        let opened = Document::open(&path, &tail_opts);
-        let Ok(new_doc) = opened else {
+        // Clone the sparse index and scan only the current final line plus the
+        // appended bytes. `Document::open` would re-scan the entire file and
+        // create a fresh cache entry for every (len, mtime) pair (#76).
+        let followed = snap.doc.follow_tail();
+        let Ok(Some(new_doc)) = followed else {
             let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
             s.changed = true;
             return s;
@@ -1072,12 +1063,21 @@ impl AppState {
             // reset_for_save also captures the overlay that produced the new
             // base, so later snapshots (compaction, undo past the save point)
             // are REBASED onto the saved file instead of carrying stale
-            // old-base anchors; commit-time revision validation guarantees the
-            // live session content is exactly what reached the disk. Failures
-            // degrade the writer and surface once via take_wal_error().
+            // old-base anchors. Edits do not take the transitions lock, so one
+            // can still land during the filesystem swap after confirm_overwrite;
+            // in that case capture the saved snapshot and immediately snapshot
+            // the newer live view against it (#75). Failures degrade the writer
+            // and surface once via take_wal_error().
             if ws.edits.wal().is_some() {
                 match wal::Header::for_document(&snap.doc) {
-                    Ok(header) => ws.edits.wal_reset_for_save(&snap.doc, header),
+                    Ok(header) if ws.edits.revision() == snap.revision => {
+                        ws.edits.wal_reset_for_save(&snap.doc, header)
+                    }
+                    Ok(header) => {
+                        ws.edits
+                            .wal_reset_for_save_from(&snap.doc, header, &snap.edits);
+                        ws.edits.wal_compact();
+                    }
                     Err(e) => {
                         ws.edits.set_wal(None);
                         reset_err = Some(format!("crash log disabled: {e}"));
@@ -1240,7 +1240,7 @@ impl AppState {
     /// any previous session) are swept before opening.
     ///
     /// A path that is ALREADY open in some tab focuses that tab instead of
-    /// opening a duplicate — clicking a file in the explorer means "go to that
+    /// opening a duplicate — choosing an already-open file means "go to that
     /// file", the same as every tabbed editor.
     pub(super) async fn open_path(&self, path: String) -> Result<(), ApiError> {
         if let Some(id) = self.tab_with_path(Path::new(&path)).await {

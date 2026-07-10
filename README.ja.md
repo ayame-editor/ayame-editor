@@ -14,7 +14,7 @@ macOS、Windows、Linux で動作します。
 - UTF-8、Shift_JIS、EUC-JP、ASCII に対応します。
 - GUI では検索、置換、ソート、2 ファイル差分、フォルダ内検索、ファイル分割を実行できます。
 - CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`diff`、`sort`、`sortdiff`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache`、`update`、`remove` などを使えます。
-- タブ、エクスプローラー、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
+- タブ、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
 - テーマ、フォント、折り返し、空白表示、キー設定を変更できます。
 
 ## インストール

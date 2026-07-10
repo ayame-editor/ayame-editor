@@ -79,8 +79,8 @@ COMMON OPTIONS:
     -h, --help         Show this help
 
 FIELD OPTIONS (sort/group/top/distinct):
-    -k, --key <COL>    1-based key column (omit = whole line)
-    -t, --delim <C>    Field delimiter (default ',')
+    -k, --key <COL[S]> 1-based key column (sort accepts priority list 3,1,2)
+    -t, --delim <C>    Field delimiter (default ','; use \\t or tab for TSV)
     --csv              RFC-4180 parsing: quoted fields may contain the delimiter
     --quote <C>        Quote char for --csv (default '\"')
     --numeric          Treat the key as a number (sort/top)

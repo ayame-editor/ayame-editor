@@ -46,12 +46,18 @@ export type DiffResponse = {
   [key: string]: unknown;
 };
 
+export type ApiError = Error & { code?: string };
+
+export function isApiErrorCode(error: unknown, code: string): boolean {
+  return !!error && typeof error === "object" && (error as ApiError).code === code;
+}
+
 // Server errors are JSON `{ code, message }` (issue #81.2). Parse them into an
 // Error whose `.message` is the human text and whose `.code` is the stable
 // machine-readable slug, so callers branch on `code` instead of matching
 // localized message text. Non-JSON bodies (routing 404s, upstream proxies) fall
 // back to the raw text.
-async function errorFromResponse(r: Response): Promise<Error> {
+async function errorFromResponse(r: Response): Promise<ApiError> {
   const text = await r.text();
   let message = text || r.statusText;
   let code: string | undefined;
@@ -64,7 +70,7 @@ async function errorFromResponse(r: Response): Promise<Error> {
   } catch {
     // Not JSON — keep the raw text as the message.
   }
-  const err = new Error(message) as Error & { code?: string };
+  const err = new Error(message) as ApiError;
   if (code) err.code = code;
   return err;
 }

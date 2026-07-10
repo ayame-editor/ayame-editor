@@ -74,6 +74,7 @@ impl NewlineKind {
 }
 
 /// A sparse index mapping line numbers <-> byte offsets for one buffer.
+#[derive(Clone)]
 pub struct LineIndex {
     checkpoints: Vec<Checkpoint>, // sorted ascending by both `line` and `off`
     stride: u64,
@@ -222,11 +223,6 @@ impl LineIndex {
             // Nothing appended: the index already describes this buffer.
             return self.line_count;
         }
-        if self.newline != NewlineKind::Byte {
-            *self = Self::build_utf16(buf, self.base, self.stride, self.newline);
-            return self.line_count;
-        }
-
         // Restart at the start of the current final line: an append can extend a
         // last line that had no terminator, so that line must be re-scanned.
         let (restart_line, restart_off) = if self.line_count == 0 {

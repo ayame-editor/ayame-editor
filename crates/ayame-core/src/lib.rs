@@ -52,8 +52,8 @@ pub use encoding::{Encoding, Eol};
 pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
 pub use ops::{
-    DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats, OrderingReader,
-    SortOptions, SortResult, TopOptions,
+    DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats,
+    LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions,
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
 pub use split::{

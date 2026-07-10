@@ -63,12 +63,18 @@ impl ProgressReporter {
                 } else {
                     (done.min(total) as f64 / total as f64) * 100.0
                 };
-                eprint!(
-                    "\r{}: {} / {} lines ({pct:.1}%)",
-                    self.label,
-                    crate::commas(done.min(total)),
-                    crate::commas(total)
-                );
+                if self.label == "sort" {
+                    // Sort progress is normalized across scanning and every
+                    // merge pass, so its units are work rather than lines.
+                    eprint!("\r{}: {pct:.1}%", self.label);
+                } else {
+                    eprint!(
+                        "\r{}: {} / {} lines ({pct:.1}%)",
+                        self.label,
+                        crate::commas(done.min(total)),
+                        crate::commas(total)
+                    );
+                }
                 let _ = std::io::stderr().flush();
                 state.wrote_human = true;
             }

@@ -34,7 +34,10 @@ export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
-    merged.sidebarSide = merged.sidebarSide === "right" ? "right" : "left";
+    // Explorer/sidebar settings existed before PR #90's removal was completed.
+    // Drop them while loading so the next settings write also cleans old data.
+    delete merged.sidebar;
+    delete merged.sidebarSide;
     // image mode without a stored image (cleared / failed persist) → theme default
     if (merged.bgMode === "image" && !merged.bgImage) merged.bgMode = "watercolor";
     merged.language = normalizeLanguage(merged.language);
@@ -289,7 +292,6 @@ export function applySettings(s) {
   } else {
     root.dataset.theme = s.theme || "iris-light"; // iris-* | dark | black (unknown → :root)
   }
-  root.dataset.sidebarSide = s.sidebarSide === "right" ? "right" : "left";
   // ---- whitespace glyphs: swap the zenkaku-space box for an underline ----
   root.classList.toggle("zenkaku-underline", !!s.zenkakuUnderline);
   // ---- background mode + illustration (user overrides on top of the theme) ----
@@ -337,7 +339,6 @@ export function updateSetting(key, value) {
   state.settings = { ...state.settings, [key]: value };
   applySettings(state.settings);
   saveSettings(state.settings);
-  if (key === "sidebarSide") updateSidebarSideButtons();
   if (key === "language") {
     applyLocale();
     postNativeMessage(`ayame:language:${state.settings.language}`);
@@ -524,15 +525,6 @@ export function isKeymapDoc(path) {
   return !!path && /\.ayame-keys\.json$/i.test(path);
 }
 
-export function updateSidebarSideButtons() {
-  const side = state.settings.sidebarSide === "right" ? "right" : "left";
-  document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
-    const on = (btn as any).dataset.sidebarSide === side;
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-  });
-}
-
 function notifyNativeUpdateCheckSetting() {
   postNativeMessage(
     `ayame:update-check-startup:${state.settings.updateCheckOnStartup === false ? "off" : "on"}`,
@@ -664,12 +656,6 @@ export function initSettings() {
   $("set-memo-name").addEventListener("input", () =>
     updateSetting("memoName", $("set-memo-name").value),
   );
-  updateSidebarSideButtons();
-  document.querySelectorAll("button[data-sidebar-side]").forEach((btn) => {
-    btn.addEventListener("click", () =>
-      updateSetting("sidebarSide", (btn as any).dataset.sidebarSide),
-    );
-  });
   $("theme-json-edit").addEventListener("click", openThemeJsonDoc);
   $("keymap-open").addEventListener("click", showKeymap);
   $("keymap-close").addEventListener("click", hideKeymap);

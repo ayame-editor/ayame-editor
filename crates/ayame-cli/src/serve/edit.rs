@@ -278,7 +278,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(bad_request)?;
+        .map_err(super::output_error)?;
         // Refresh the active tab from the converted file. Skipped (switched =
         // false) if edits landed while the rewrite was streaming, so no newer
         // edit is dropped — the client then falls back to a normal open.
@@ -303,7 +303,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(bad_request)?;
+        .map_err(super::output_error)?;
         let mut switched = false;
         if req.switch_to_saved {
             switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
@@ -317,12 +317,17 @@ pub(super) async fn api_edit_save(
     let stage_for_save = stage.clone();
     let doc_for_save = snap.doc.clone();
     let edits_for_save = snap.take_edits(); // move, not a second deep clone
-    let saved = tokio::task::spawn_blocking(move || {
-        edits_for_save.save_to_path(&doc_for_save, stage_for_save)
+    let (saved, saved_edits) = tokio::task::spawn_blocking(move || {
+        let saved = edits_for_save.save_to_path(&doc_for_save, stage_for_save)?;
+        Ok::<_, ayame_core::Error>((saved, edits_for_save))
     })
     .await
     .map_err(internal)?
     .map_err(bad_request)?;
+    // Keep the exact overlay that produced the staged bytes. If an edit races
+    // the final filesystem swap, WAL rebasing must use this snapshot rather
+    // than the newer live overlay (#75).
+    snap.edits = saved_edits;
 
     // Phase 2 — commit WITHOUT reloading. Serialized against every other
     // doc-slot transition; rejected with 409 (stage discarded) if edits or the

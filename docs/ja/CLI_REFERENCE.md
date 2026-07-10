@@ -61,8 +61,8 @@ ayame <COMMAND> [OPTIONS]
 
 | オプション | メモ |
 | --- | --- |
-| `-k`, `--key <COL>` | 1-based のキー列。省略時は行全体。 |
-| `-t`, `--delim <C>` | 区切り文字。既定は comma。 |
+| `-k`, `--key <COL[S]>` | 1-based のキー列。`sort` は優先順の複数列（例: `3,1,2`）、その他は1列を指定します。省略時は行全体。 |
+| `-t`, `--delim <C>` | 区切り文字。既定は comma。TSV は `\\t` または `tab`。 |
 | `--csv` | RFC 4180 CSV parsing。quote 内 delimiter を扱えます。 |
 | `--quote <C>` | CSV quote character。既定は `"`. |
 | `--numeric` | `sort` / `top` のキーを数値として扱う。 |

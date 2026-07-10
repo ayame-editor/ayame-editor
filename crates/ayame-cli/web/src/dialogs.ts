@@ -328,13 +328,24 @@ function updateOperationProgress(status: ArtifactOpStatus) {
   const percent = Math.max(0, Math.min(100, Math.round(Number(status.percent) || 0)));
   parts.progress.value = percent;
   parts.detail.textContent =
-    status.total_lines > 0
-      ? t("dialog.operation.progress", {
-          done: commas(status.processed_lines),
-          total: commas(status.total_lines),
+    status.kind === "sort"
+      ? t("dialog.operation.sortProgress", {
           percent,
+          phase: t(
+            status.processed_lines < status.total_lines / 3
+              ? "dialog.operation.sortScan"
+              : status.processed_lines < (status.total_lines * 2) / 3
+                ? "dialog.operation.sortMerge"
+                : "dialog.operation.sortWrite",
+          ),
         })
-      : "";
+      : status.total_lines > 0
+        ? t("dialog.operation.progress", {
+            done: commas(status.processed_lines),
+            total: commas(status.total_lines),
+            percent,
+          })
+        : "";
   if (status.canceled) parts.detail.textContent = t("dialog.operation.canceling");
 }
 
