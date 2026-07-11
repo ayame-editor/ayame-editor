@@ -6,6 +6,11 @@
 
 macOS、Windows、Linux で動作します。
 
+> **ファイル比較は？** `diff` / `sortdiff` は非推奨で、姉妹プロジェクト
+> **[ayame-diff](https://github.com/hjosugi/ayame-diff)**（`ayame-diff text` /
+> `ayame-diff sorted`、Web GUI 付き）へ移行します。エディタ側は凍結し、将来の
+> リリースで削除予定です（[#104](https://github.com/hjosugi/ayame-editor/issues/104)）。
+
 ![Ayame Editor main window](docs/assets/screenshot-main.png)
 
 ## 主な機能

@@ -25,9 +25,9 @@ print help.
 | `line <FILE> <N>` | Print one 1-based line. |
 | `lines <FILE> <START> <COUNT>` | Print COUNT lines from START, both 1-based. |
 | `search <FILE> <PATTERN>` | Search with literal, regex, ignore-case, whole-word, and max-result options. |
-| `diff <OLD> <NEW>` | Compare two files with line hunks or side-by-side output. |
+| `diff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `text`. Compare two files with line hunks or side-by-side output. |
 | `sort <FILE>` | External merge sort with memory-bounded spill files. |
-| `sortdiff <OLD> <NEW>` | Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
+| `sortdiff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `sorted`. Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
 | `case <FILE> <MODE>` | Streaming case conversion (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) to a new output file. |
 | `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |

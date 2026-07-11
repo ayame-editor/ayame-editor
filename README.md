@@ -6,6 +6,11 @@ A fast desktop text editor for huge files.
 
 Runs on macOS, Windows, and Linux.
 
+> **Comparing files?** The `diff` / `sortdiff` commands are deprecated and moving
+> to the sister project **[ayame-diff](https://github.com/hjosugi/ayame-diff)**
+> (`ayame-diff text` / `ayame-diff sorted`, with a web GUI). The editor's copy
+> is frozen and will be removed in a later release. See [#104](https://github.com/hjosugi/ayame-editor/issues/104).
+
 ![Ayame Editor main window](docs/assets/screenshot-main.png)
 
 ## Features

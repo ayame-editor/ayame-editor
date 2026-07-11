@@ -25,9 +25,9 @@ ayame <COMMAND> [OPTIONS]
 | `line <FILE> <N>` | 1-based の 1 行を表示。 |
 | `lines <FILE> <START> <COUNT>` | START から COUNT 行を表示。どちらも 1-based。 |
 | `search <FILE> <PATTERN>` | リテラル、正規表現、大文字小文字無視、単語単位、件数制限つき検索。 |
-| `diff <OLD> <NEW>` | 行単位または side-by-side の差分。 |
+| `diff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `text`。行単位または side-by-side の差分。 |
 | `sort <FILE>` | メモリ制限つき external merge sort。 |
-| `sortdiff <OLD> <NEW>` | 両ファイルをソートしてから差分。`sort-diff` も利用可。 |
+| `sortdiff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `sorted`。両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
 | `case <FILE> <MODE>` | 大文字小文字変換 (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) を新しいファイルへ書き出し。 |
 | `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
