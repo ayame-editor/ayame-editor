@@ -2,8 +2,14 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.6.0 - 2026-07-12
 
+- Unified Web UI typography, control radii, shadows, syntax colors, and diff
+  colors behind semantic design tokens shared with ayame-diff. Dark and black
+  themes now define their own accent/status colors, inline deletions/additions
+  use distinct red/green word tokens, and the default runtime monospace stack
+  retains Japanese CJK fallbacks. Added token-drift tests. (#131, #132, #133,
+  #134, #135)
 - Deprecated the `diff` and `sortdiff` subcommands (#94). They now print a
   notice pointing to the sister project
   [ayame-diff](https://github.com/hjosugi/ayame-diff), whose `text` / `sorted`
