@@ -1607,6 +1607,17 @@ button { border-radius: var(--radius); }
   color: var(--fg);
   margin-bottom: 8px;
 }
+.diff-deprecated {
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn, #b8860b);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent);
+}
+.diff-deprecated a {
+  font-weight: 600;
+}
 .diff-paths {
   display: grid;
   grid-template-columns: 1fr 1fr;

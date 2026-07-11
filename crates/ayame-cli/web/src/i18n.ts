@@ -330,6 +330,8 @@ export const MESSAGES = {
     "dialog.split.error": "分割エラー",
     // -- diff view --
     "dialog.diff.title": "差分",
+    "dialog.diff.deprecated":
+      "この差分機能は非推奨です。姉妹プロジェクト ayame-diff への移行を推奨します。",
     "dialog.diff.current": "現在",
     "dialog.diff.compareTo": "比較先",
     "dialog.diff.currentFile": "現在のファイル",
@@ -712,6 +714,8 @@ export const MESSAGES = {
     "dialog.split.done": "Split into {count} files: first file {path}",
     "dialog.split.error": "Split error",
     "dialog.diff.title": "Diff",
+    "dialog.diff.deprecated":
+      "This diff feature is deprecated. Please migrate to the sister project ayame-diff.",
     "dialog.diff.current": "Current",
     "dialog.diff.compareTo": "Compare To",
     "dialog.diff.currentFile": "Current File",
