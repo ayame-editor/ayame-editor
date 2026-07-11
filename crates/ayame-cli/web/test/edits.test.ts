@@ -24,11 +24,13 @@ vi.mock("../src/search.js", () => ({
 import {
   applyCaseMode,
   applyRange,
+  backspace,
   enqueueEdit,
   reloadViewport,
   settleEditQueue,
 } from "../src/edits.js";
 import { state } from "../src/state.js";
+import { setCaret } from "../src/editor.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -56,7 +58,10 @@ describe("edit generation guards", () => {
     state.activeLine = 1;
     state.goalCol = 4;
     state.cache = { start: 0, lines: [] };
+    state.sel = null;
+    state.extraCursors = [];
     state.loadToken = 0;
+    vi.clearAllMocks();
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -113,6 +118,45 @@ describe("edit generation guards", () => {
 
     expect(state.loadToken).toBe(42);
     expect(state.cache.lines).toEqual([{ number: 0, text: "alpha" }]);
+  });
+
+  it("does not restore a zero-width rectangle after the user moves mid-delete", async () => {
+    const edit = deferredResponse();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation((input) => {
+      const path = String(input);
+      if (path === "/api/edit/replace_batch") return edit.promise;
+      if (path.startsWith("/api/lines?")) {
+        return Promise.resolve(
+          jsonResponse({ lines: [{ number: 1, text: "abcdef" }], total: 10 }),
+        );
+      }
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    state.sel = {
+      anchor: { line: 1, col: 3 },
+      head: { line: 2, col: 3 },
+      rect: true,
+    };
+
+    backspace();
+    await vi.waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/edit/replace_batch",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    state.editGen++;
+    state.sel = null;
+    state.caret = { line: 0, col: 1 };
+    state.activeLine = 0;
+    edit.resolve(jsonResponse({ stats: { total_lines: 10 } }));
+
+    await settleEditQueue();
+
+    expect(state.sel).toBeNull();
+    expect(state.caret).toEqual({ line: 0, col: 1 });
+    expect(setCaret).not.toHaveBeenCalled();
   });
 });
 

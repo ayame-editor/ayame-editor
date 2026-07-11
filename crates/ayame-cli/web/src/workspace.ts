@@ -623,6 +623,13 @@ export async function refreshTabs() {
   }
 }
 
+// Closing mutates the server's active tab and the local tab list. Keep those
+// transitions ordered so a slow confirmation or close response cannot race a
+// later close against stale state (#123).
+export async function closeTabsSequentially(ids, close = closeTab) {
+  for (const id of ids) await close(id);
+}
+
 export function renderTabs(list) {
   state.tabs = list;
   const c = $("tabs");
@@ -690,10 +697,10 @@ export function renderTabs(list) {
         {
           label: t("tab.closeOthers"),
           disabled: state.tabs.length < 2,
-          action: () => {
+          action: async () => {
             // Snapshot ids first — closeTab mutates state.tabs as it runs.
             const others = state.tabs.filter((o) => o.id !== tab.id).map((o) => o.id);
-            for (const id of others) closeTab(id);
+            await closeTabsSequentially(others);
           },
         },
       ]);

@@ -71,7 +71,9 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
         ev.stopPropagation();
         if (ev.key === "Enter") {
           ev.preventDefault();
-          finish(true);
+          // Respect the button selected with ArrowLeft/ArrowRight. Preventing
+          // the native button event means we must mirror its focused action.
+          finish(document.activeElement !== cancelBtn);
         } else if (ev.key === "Escape") {
           ev.preventDefault();
           finish(false);

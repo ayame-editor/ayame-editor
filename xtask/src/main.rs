@@ -46,6 +46,40 @@ struct Opts {
     skip_gate: bool,
 }
 
+/// Restores files when a dry-run exits, including early errors from a gate.
+/// This keeps `cargo xtask release --dry-run --bump ...` observational: it may
+/// build artifacts, but it never leaves version metadata modified.
+struct RestoreFiles {
+    files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl RestoreFiles {
+    fn capture(paths: &[PathBuf]) -> Result<Self> {
+        let files = paths
+            .iter()
+            .map(|path| {
+                let bytes = std::fs::read(path)
+                    .with_context(|| format!("reading {} for dry-run restore", path.display()))?;
+                Ok((path.clone(), bytes))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { files })
+    }
+}
+
+impl Drop for RestoreFiles {
+    fn drop(&mut self) {
+        for (path, bytes) in &self.files {
+            if let Err(error) = std::fs::write(path, bytes) {
+                eprintln!(
+                    "xtask: failed to restore {} after dry-run: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
 fn parse_opts(args: &[String]) -> Result<Opts> {
     let mut opts = Opts {
         bump: None,
@@ -205,6 +239,15 @@ fn release(args: &[String]) -> Result<()> {
         }
     }
 
+    let _dry_run_restore = if opts.dry_run && opts.bump.is_some() {
+        Some(RestoreFiles::capture(&[
+            root.join("Cargo.toml"),
+            root.join("Cargo.lock"),
+        ])?)
+    } else {
+        None
+    };
+
     let mut version = workspace_version(&root)?;
     if let Some(how) = &opts.bump {
         let next = bumped(&version, how)?;
@@ -219,7 +262,7 @@ fn release(args: &[String]) -> Result<()> {
         std::fs::write(&manifest, text.replacen(&old, &new, 1))?;
         run("cargo", &["build", "--quiet"])?; // refresh Cargo.lock
         if opts.dry_run {
-            say("dry-run: leaving the bump uncommitted");
+            say("dry-run: applying the bump temporarily; files will be restored");
         } else {
             run("git", &["add", "Cargo.toml", "Cargo.lock"])?;
             run("git", &["commit", "-m", &format!("release: v{next}")])?;
@@ -490,4 +533,31 @@ fn smoke(bin: &Path) -> Result<()> {
     })();
     let _ = std::fs::remove_dir_all(&dir);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_files_rolls_back_changes() {
+        let dir = std::env::temp_dir().join(format!(
+            "ayame-xtask-restore-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("Cargo.toml");
+        let second = dir.join("Cargo.lock");
+        std::fs::write(&first, b"original manifest").unwrap();
+        std::fs::write(&second, b"original lock").unwrap();
+        {
+            let _restore = RestoreFiles::capture(&[first.clone(), second.clone()]).unwrap();
+            std::fs::write(&first, b"changed manifest").unwrap();
+            std::fs::write(&second, b"changed lock").unwrap();
+        }
+        assert_eq!(std::fs::read(&first).unwrap(), b"original manifest");
+        assert_eq!(std::fs::read(&second).unwrap(), b"original lock");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

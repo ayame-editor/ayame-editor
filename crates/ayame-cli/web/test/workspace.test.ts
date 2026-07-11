@@ -39,7 +39,19 @@ vi.mock("../src/app.js", () => ({
 }));
 
 import { isNativeApp } from "../src/app.js";
-import { canDragOutToNewWindow, canHandoffDirtyTab } from "../src/workspace.js";
+import {
+  canDragOutToNewWindow,
+  canHandoffDirtyTab,
+  closeTabsSequentially,
+} from "../src/workspace.js";
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 describe("tab drag-out to a new window (#35)", () => {
   it("allows a clean, saved on-disk file to spawn its own window", () => {
@@ -87,5 +99,24 @@ describe("tab drag-out to a new window (#35)", () => {
   it("refuses a missing tab", () => {
     expect(canDragOutToNewWindow(null)).toBe(false);
     expect(canDragOutToNewWindow(undefined)).toBe(false);
+  });
+});
+
+describe("Close Other Tabs ordering (#123)", () => {
+  it("waits for each close before starting the next", async () => {
+    const first = deferred();
+    const second = deferred();
+    const close = vi.fn((id: number) => (id === 1 ? first.promise : second.promise));
+
+    const pending = closeTabsSequentially([1, 2], close);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenLastCalledWith(1);
+
+    first.resolve();
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    expect(close).toHaveBeenLastCalledWith(2);
+
+    second.resolve();
+    await pending;
   });
 });

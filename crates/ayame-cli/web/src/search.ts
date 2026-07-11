@@ -265,23 +265,37 @@ export async function selectNextOccurrence() {
   }
 }
 
+let countRequestToken = 0;
+let countRequestController: AbortController | null = null;
+
 export async function updateCount() {
+  const token = ++countRequestToken;
+  countRequestController?.abort();
+  countRequestController = null;
   if (!state.query) {
     $("find-count").textContent = "";
     state.searchHits = null;
     state.searchTruncated = false;
     return;
   }
+  const controller = new AbortController();
+  countRequestController = controller;
   try {
-    const res = await api<SearchResponse>(`/api/search?${qs()}&start=0&max=2000`);
+    const res = await api<SearchResponse>(`/api/search?${qs()}&start=0&max=2000`, {
+      signal: controller.signal,
+    });
+    if (token !== countRequestToken || controller.signal.aborted) return;
     state.searchHits = res.hits;
     state.searchTruncated = res.truncated;
     updateFindCountLabel();
     scheduleRender();
   } catch {
+    if (token !== countRequestToken || controller.signal.aborted) return;
     $("find-count").textContent = t("find.searchError");
     flashCount(t("find.searchError"), "error");
     scheduleRender();
+  } finally {
+    if (token === countRequestToken) countRequestController = null;
   }
 }
 

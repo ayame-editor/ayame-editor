@@ -75,8 +75,8 @@ async function errorFromResponse(r: Response): Promise<ApiError> {
   return err;
 }
 
-export async function api<T = unknown>(path: string): Promise<T> {
-  const r = await fetch(path);
+export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(path, init);
   if (!r.ok) throw await errorFromResponse(r);
   return r.json();
 }

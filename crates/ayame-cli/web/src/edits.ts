@@ -436,6 +436,7 @@ export function deleteSelectionEdit() {
 // the caret column for Backspace, after it for Delete — instead of issuing an
 // empty-range rect edit that deletes nothing and drops the selection (#74).
 async function deleteZeroWidthRect(rr, forward) {
+  const gen = state.editGen;
   const c = rr.c0;
   const lines = [];
   for (let l = rr.l0; l <= rr.l1; l++) lines.push(l);
@@ -462,6 +463,7 @@ async function deleteZeroWidthRect(rr, forward) {
     flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
+  if (state.editGen !== gen) return;
   // Keep the column caret alive at the new column so a held Backspace/Delete
   // keeps acting on every line.
   const newCol = forward ? c : Math.max(0, c - 1);
