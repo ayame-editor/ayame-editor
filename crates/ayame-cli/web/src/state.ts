@@ -24,7 +24,7 @@ export const RECENT_MAX = 12;
 export const MAX_COPY_LINES = 20000;
 
 export const FONT_STACKS = {
-  mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono",monospace',
+  mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono","Noto Sans Mono CJK JP","MS Gothic",monospace',
   "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
   system: '"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif',
 };
