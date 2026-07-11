@@ -9,7 +9,22 @@ use crate::{
     temp_work_dir,
 };
 
+/// Prints a deprecation notice pointing users to the ayame-diff sister project.
+/// The comparison features have moved there; the editor's copy is frozen and
+/// slated for removal (see hjosugi/ayame-editor#93, #104). Set AYAME_NO_DEPRECATION
+/// to silence it in scripts.
+fn deprecation_notice(old_cmd: &str, new_cmd: &str) {
+    if std::env::var_os("AYAME_NO_DEPRECATION").is_some() {
+        return;
+    }
+    eprintln!("warning: `ayame {old_cmd}` is deprecated and will be removed in a future release.");
+    eprintln!("         Comparison has moved to the sister project ayame-diff:");
+    eprintln!("           https://github.com/hjosugi/ayame-diff");
+    eprintln!("         Use `ayame-diff {new_cmd} OLD NEW` instead.");
+}
+
 pub(crate) fn cmd_diff(args: &[String]) -> Result<()> {
+    deprecation_notice("diff", "text");
     let (pos, opts, flags) = parse_checked(
         args,
         &[
@@ -42,6 +57,7 @@ pub(crate) fn cmd_diff(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_sortdiff(args: &[String]) -> Result<()> {
     maybe_crash();
+    deprecation_notice("sortdiff", "sorted");
     let (pos, opts, flags) = parse_checked(
         args,
         &[

@@ -4,6 +4,13 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Deprecated the `diff` and `sortdiff` subcommands (#94). They now print a
+  notice pointing to the sister project
+  [ayame-diff](https://github.com/hjosugi/ayame-diff), whose `text` / `sorted`
+  subcommands supersede them; the editor's copy is frozen and slated for removal
+  in a later release (see #93, #104). The notice goes to stderr (stdout output
+  is unchanged) and can be silenced with `AYAME_NO_DEPRECATION`.
+
 - Added standalone app self-update and removal commands: `ayame update`
   resolves GitHub Releases, verifies `.sha256`, installs the matching
   Linux/Windows/macOS artifact, and `ayame remove` removes standalone installs
