@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../index.md) | [日本語](index.md)
+
 <section class="doc-hero">
   <div class="doc-hero-copy">
     <p class="doc-kicker">Ayame Editor Docs</p>

@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](0001-diff-extraction-and-deprecation.en.md) | [日本語](0001-diff-extraction-and-deprecation.md)
+
 # ADR 0001: diff 機能の ayame-diff への移管方針と非推奨化スケジュール
 
 - ステータス: Accepted（2026-07-10）

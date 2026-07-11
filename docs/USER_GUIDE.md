@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](USER_GUIDE.md) | [日本語](ja/USER_GUIDE.md)
+
 # User Guide
 
 *日本語版: [ja/USER_GUIDE.md](ja/USER_GUIDE.md)*

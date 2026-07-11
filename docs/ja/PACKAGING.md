@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../PACKAGING.md) | [日本語](PACKAGING.md)
+
 # 配布
 
 Ayame の GitHub Releases を配布元の source of truth にします。各 package manager

@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](README.md) | [日本語](README.ja.md)
+
 # Ayame Editor
 
 *日本語版: [README.ja.md](README.ja.md)*

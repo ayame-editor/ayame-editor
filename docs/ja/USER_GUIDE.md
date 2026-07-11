@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../USER_GUIDE.md) | [日本語](USER_GUIDE.md)
+
 # ユーザー向け
 
 *English: [../USER_GUIDE.md](../USER_GUIDE.md)*
