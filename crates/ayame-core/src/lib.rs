@@ -40,6 +40,7 @@ mod fields;
 mod fsync;
 pub mod grep;
 pub mod index;
+mod mapfault;
 pub mod ops;
 pub mod search;
 pub mod split;
@@ -74,6 +75,12 @@ pub use wal::{LoggedOp, RecoveryInfo, WalWriter};
 pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// The mmapped base file shrank or was replaced by another process while
+    /// we were reading it. The document view is no longer trustworthy and the
+    /// caller must reopen/reindex the file. This is the recoverable form of
+    /// what used to be a SIGBUS process abort.
+    #[error("base file changed on disk (truncated or replaced), reopen required: {0}")]
+    BaseFileChanged(String),
     #[error("search error: {0}")]
     Search(String),
     #[error("invalid input: {0}")]

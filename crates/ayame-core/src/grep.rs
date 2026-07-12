@@ -172,7 +172,10 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
     if len == 0 || len > opts.max_file_bytes {
         return Ok(Vec::new());
     }
+    // SAFETY(mmap): a grepped file may be truncated by its writer mid-scan,
+    // which would SIGBUS; `watch` absorbs that and the file is skipped below.
     let mmap = unsafe { Mmap::map(&file)? };
+    let watch = crate::mapfault::MapWatch::watch(&mmap);
     let buf: &[u8] = &mmap;
     if looks_binary(buf) {
         return Ok(Vec::new());
@@ -202,6 +205,11 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
             col: hit.column,
             text: line_preview(buf, &index, enc, hit.line),
         });
+    }
+    // The file shrank while we scanned it: everything above may have been
+    // matched against zero-fill, so skip the file instead of reporting it.
+    if watch.faulted() {
+        return Err(crate::Error::BaseFileChanged(display));
     }
     Ok(out)
 }

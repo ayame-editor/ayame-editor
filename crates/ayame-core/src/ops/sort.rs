@@ -239,18 +239,24 @@ impl OrderingReader {
 /// dense table is memory-mapped, so it consumes virtual address space but no
 /// heap proportional to the document's line count.
 pub struct LineOffsetReader {
+    // Declared before `mmap` so it deregisters while the range is still mapped.
+    watch: crate::mapfault::MapWatch,
     mmap: Option<Mmap>,
 }
 
 impl LineOffsetReader {
     pub fn open(path: &Path) -> Result<LineOffsetReader> {
         let file = File::open(path)?;
+        // SAFETY(mmap): the offsets file lives in a temp/spill directory that
+        // an external cleaner may truncate; `watch` absorbs the SIGBUS and
+        // `raw_range` degrades to `None` (a "missing offset" error upstream).
         let mmap = if file.metadata()?.len() == 0 {
             None
         } else {
             Some(unsafe { Mmap::map(&file)? })
         };
-        Ok(LineOffsetReader { mmap })
+        let watch = crate::mapfault::MapWatch::watch(mmap.as_deref().unwrap_or(&[]));
+        Ok(LineOffsetReader { watch, mmap })
     }
 
     pub fn raw_range(&self, line: u64) -> Option<(u64, u64)> {
@@ -258,6 +264,9 @@ impl LineOffsetReader {
         let record = self.mmap.as_deref()?.get(start..start.checked_add(16)?)?;
         let raw_start = u64::from_le_bytes(record[0..8].try_into().ok()?);
         let raw_end = u64::from_le_bytes(record[8..16].try_into().ok()?);
+        if self.watch.faulted() {
+            return None;
+        }
         Some((raw_start, raw_end))
     }
 }

@@ -1334,6 +1334,12 @@ impl EditSession {
         w.flush()?;
         w.get_ref().sync_all()?;
         drop(w);
+        // The converted bytes were decoded from the mmap; if the base file
+        // shrank mid-save they contain zero-fill — abort before publishing.
+        if let Err(e) = doc.verify_base() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         commit_temp_file(&tmp, target, overwrite)?;
         let bytes = std::fs::metadata(target)?.len();
         Ok(SaveResult {
@@ -1463,6 +1469,13 @@ impl EditSession {
         w.flush()?;
         w.get_ref().sync_all()?;
         drop(w);
+        // Untouched runs were copied straight out of the mmap; if the base
+        // file shrank mid-save those copies are zero-fill — abort before the
+        // temp file replaces anything.
+        if let Err(e) = doc.verify_base() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         commit_temp_file(&tmp, target, overwrite)
     }
 

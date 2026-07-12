@@ -2,6 +2,19 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- The editor no longer dies with an uncatchable `SIGBUS` when another process
+  truncates (or rotates a shorter file over) a file it has memory-mapped. A
+  process-wide fault absorber (`ayame-core::mapfault`) turns the fault into a
+  sticky per-mapping flag; every read path — viewport, search, sort/group/
+  distinct/top scans, grep's per-file maps, and the spill offset tables —
+  now surfaces a clean "base file changed on disk" error (HTTP 409 in the web
+  UI) and requires a reopen, instead of aborting the whole process. Save,
+  split, sort and transform verify the base file before committing output, so
+  bytes read through a shrunk mapping can never be laundered into a saved
+  file. (#200)
+
 ## v0.7.0 - 2026-07-12
 
 - **Breaking:** removed the `diff` / `sortdiff` implementations, `/api/diff`,

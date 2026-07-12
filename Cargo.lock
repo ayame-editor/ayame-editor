@@ -337,6 +337,7 @@ dependencies = [
  "chardetng",
  "csv-core",
  "encoding_rs",
+ "libc",
  "memchr",
  "memmap2",
  "rayon",
