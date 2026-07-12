@@ -42,7 +42,12 @@ struct Checkpoint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NewlineKind {
+    /// `\n` terminators — covers LF and CRLF files (the CR is trimmed as part
+    /// of the terminator when slicing line text).
     Byte,
+    /// Lone `\r` terminators — classic-Mac files, which have no `\n` at all
+    /// and used to collapse into a single line (#196).
+    ByteCr,
     Utf16Le,
     Utf16Be,
 }
@@ -50,8 +55,16 @@ enum NewlineKind {
 impl NewlineKind {
     fn width(self) -> u64 {
         match self {
-            NewlineKind::Byte => 1,
+            NewlineKind::Byte | NewlineKind::ByteCr => 1,
             NewlineKind::Utf16Le | NewlineKind::Utf16Be => 2,
+        }
+    }
+
+    /// The terminator byte for the single-byte kinds.
+    fn byte(self) -> u8 {
+        match self {
+            NewlineKind::ByteCr => b'\r',
+            _ => b'\n',
         }
     }
 
@@ -60,6 +73,7 @@ impl NewlineKind {
             NewlineKind::Byte => 0,
             NewlineKind::Utf16Le => 1,
             NewlineKind::Utf16Be => 2,
+            NewlineKind::ByteCr => 3,
         }
     }
 
@@ -68,6 +82,7 @@ impl NewlineKind {
             0 => NewlineKind::Byte,
             1 => NewlineKind::Utf16Le,
             2 => NewlineKind::Utf16Be,
+            3 => NewlineKind::ByteCr,
             _ => return None,
         })
     }
@@ -91,6 +106,20 @@ impl LineIndex {
     /// scan only ever *reads* pages, so the OS page cache — not our heap — holds
     /// the file.
     pub fn build(buf: &[u8], base: u64, stride: u64) -> LineIndex {
+        Self::build_bytes(buf, base, stride, NewlineKind::Byte)
+    }
+
+    /// Build an index over content terminated by lone `\r` (classic Mac). The
+    /// document layer selects this when EOL detection reports [`Eol::Cr`], so
+    /// `stat()`'s line count finally agrees with its EOL label (#196).
+    ///
+    /// [`Eol::Cr`]: crate::encoding::Eol::Cr
+    pub fn build_cr(buf: &[u8], base: u64, stride: u64) -> LineIndex {
+        Self::build_bytes(buf, base, stride, NewlineKind::ByteCr)
+    }
+
+    fn build_bytes(buf: &[u8], base: u64, stride: u64, newline: NewlineKind) -> LineIndex {
+        let term = newline.byte();
         let stride = stride.max(1);
         let len = buf.len() as u64;
         if base >= len {
@@ -100,15 +129,15 @@ impl LineIndex {
                 line_count: 0,
                 base,
                 len,
-                newline: NewlineKind::Byte,
+                newline,
             };
         }
         let content = &buf[base as usize..];
         let clen = content.len() as u64;
 
         // Decide chunk boundaries (relative to `content`), then snap each interior
-        // boundary forward to the first byte *after* the next '\n' so every chunk
-        // begins exactly on a line start.
+        // boundary forward to the first byte *after* the next terminator so every
+        // chunk begins exactly on a line start.
         let threads = rayon::current_num_threads().max(1) as u64;
         let chunk_size = (clen / (threads * 4).max(1)).max(MIN_CHUNK).max(1);
 
@@ -116,7 +145,7 @@ impl LineIndex {
         starts.push(0);
         let mut b = chunk_size;
         while b < clen {
-            starts.push(snap_to_line_start(content, b, clen));
+            starts.push(snap_to_line_start(content, b, clen, term));
             b += chunk_size;
         }
         starts.push(clen);
@@ -131,7 +160,7 @@ impl LineIndex {
         // checkpoints (sampled every `stride` lines) using chunk-local numbering.
         let per: Vec<ChunkResult> = ranges
             .par_iter()
-            .map(|&(s, e)| scan_chunk(content, s, e, clen, stride))
+            .map(|&(s, e)| scan_chunk(content, s, e, clen, stride, term))
             .collect();
 
         // Sequential stitch: turn chunk-local line numbers into global ones and
@@ -154,7 +183,7 @@ impl LineIndex {
             line_count: g,
             base,
             len,
-            newline: NewlineKind::Byte,
+            newline,
         }
     }
 
@@ -459,8 +488,9 @@ impl LineIndex {
 
     fn find_lf(&self, buf: &[u8], off: u64, limit: u64) -> Option<u64> {
         match self.newline {
-            NewlineKind::Byte => {
-                memchr(b'\n', &buf[off as usize..limit as usize]).map(|rel| off + rel as u64)
+            NewlineKind::Byte | NewlineKind::ByteCr => {
+                memchr(self.newline.byte(), &buf[off as usize..limit as usize])
+                    .map(|rel| off + rel as u64)
             }
             kind => find_utf16_lf(buf, off, limit, self.base, kind),
         }
@@ -468,8 +498,8 @@ impl LineIndex {
 
     fn count_lfs(&self, buf: &[u8], off: u64, limit: u64) -> u64 {
         match self.newline {
-            NewlineKind::Byte => {
-                memchr_iter(b'\n', &buf[off as usize..limit as usize]).count() as u64
+            NewlineKind::Byte | NewlineKind::ByteCr => {
+                memchr_iter(self.newline.byte(), &buf[off as usize..limit as usize]).count() as u64
             }
             kind => {
                 let mut n = 0u64;
@@ -486,10 +516,19 @@ impl LineIndex {
     fn code_unit_at(&self, buf: &[u8], off: u64) -> Option<u16> {
         let i = off as usize;
         match self.newline {
-            NewlineKind::Byte => buf.get(i).map(|b| *b as u16),
+            NewlineKind::Byte | NewlineKind::ByteCr => buf.get(i).map(|b| *b as u16),
             NewlineKind::Utf16Le => Some(u16::from_le_bytes([*buf.get(i)?, *buf.get(i + 1)?])),
             NewlineKind::Utf16Be => Some(u16::from_be_bytes([*buf.get(i)?, *buf.get(i + 1)?])),
         }
+    }
+
+    /// Wire code of the newline strategy (matches the cache serialization).
+    /// The document layer compares this against what the file's encoding/EOL
+    /// demand, so a cache entry built with the wrong strategy (e.g. an LF
+    /// index cached for a CR-only file by an older build) reads as a miss.
+    #[inline]
+    pub fn newline_code(&self) -> u32 {
+        self.newline.as_u32()
     }
 
     // ---- persistence for the on-disk index cache ---------------------------
@@ -597,7 +636,7 @@ fn find_utf16_lf(buf: &[u8], off: u64, limit: u64, base: u64, newline: NewlineKi
         let unit = match newline {
             NewlineKind::Utf16Le => u16::from_le_bytes([buf[i], buf[i + 1]]),
             NewlineKind::Utf16Be => u16::from_be_bytes([buf[i], buf[i + 1]]),
-            NewlineKind::Byte => unreachable!("byte newlines use memchr"),
+            NewlineKind::Byte | NewlineKind::ByteCr => unreachable!("byte newlines use memchr"),
         };
         if unit == b'\n' as u16 {
             return Some(pos);
@@ -618,13 +657,14 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// Snap `pos` forward to the byte just after the next '\n', or to `clen` if none.
+/// Snap `pos` forward to the byte just after the next terminator, or to `clen`
+/// if none.
 #[inline]
-fn snap_to_line_start(content: &[u8], pos: u64, clen: u64) -> u64 {
+fn snap_to_line_start(content: &[u8], pos: u64, clen: u64, term: u8) -> u64 {
     if pos >= clen {
         return clen;
     }
-    match memchr(b'\n', &content[pos as usize..]) {
+    match memchr(term, &content[pos as usize..]) {
         Some(rel) => pos + rel as u64 + 1,
         None => clen,
     }
@@ -639,12 +679,12 @@ struct ChunkResult {
 
 /// Scan one line-aligned chunk `[s, e)` of `content`. `clen` is the content length
 /// (used to decide whether a trailing newline opens a new line).
-fn scan_chunk(content: &[u8], s: u64, e: u64, clen: u64, stride: u64) -> ChunkResult {
+fn scan_chunk(content: &[u8], s: u64, e: u64, clen: u64, stride: u64, term: u8) -> ChunkResult {
     let seg = &content[s as usize..e as usize];
     let mut samples: Vec<(u64, u64)> = Vec::new();
     samples.push((0, s)); // chunk always starts on a line start
     let mut local: u64 = 0;
-    for rel in memchr_iter(b'\n', seg) {
+    for rel in memchr_iter(term, seg) {
         let nxt = s + rel as u64 + 1;
         // A new line begins only if there is content after the '\n' that belongs
         // to *this* chunk. Newlines at the chunk boundary (nxt == e) are owned by
@@ -731,6 +771,48 @@ mod tests {
         let idx = LineIndex::build(buf, 0, 4096);
         assert_eq!(idx.line_count(), 3);
         assert_eq!(lines_of(buf, &idx), vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn cr_only_files_split_into_lines() {
+        // Classic Mac: lone '\r' terminators, no '\n' anywhere (#196).
+        let buf = b"a\rbb\rccc\r";
+        let idx = LineIndex::build_cr(buf, 0, 4096);
+        assert_eq!(idx.line_count(), 3);
+        assert_eq!(lines_of(buf, &idx), vec!["a", "bb", "ccc"]);
+        // The '\r' is the terminator: text excludes it, raw includes it.
+        let (s, text_end, raw_end) = idx.line_range_with_terminator(buf, 1).unwrap();
+        assert_eq!((s, text_end, raw_end), (2, 4, 5));
+
+        // An unterminated final line still counts.
+        let buf2 = b"a\rb";
+        let idx2 = LineIndex::build_cr(buf2, 0, 4096);
+        assert_eq!(idx2.line_count(), 2);
+        assert_eq!(lines_of(buf2, &idx2), vec!["a", "b"]);
+
+        // A stray '\n' is content in a CR-indexed file, not a terminator.
+        let buf3 = b"a\nb\rc\r";
+        let idx3 = LineIndex::build_cr(buf3, 0, 4096);
+        assert_eq!(idx3.line_count(), 2);
+        assert_eq!(lines_of(buf3, &idx3), vec!["a\nb", "c"]);
+    }
+
+    #[test]
+    fn cr_index_extends_and_serializes() {
+        let mut grown = b"x\r".to_vec();
+        let mut idx = LineIndex::build_cr(&grown, 0, 4096);
+        assert_eq!(idx.line_count(), 1);
+        grown.extend_from_slice(b"y\rz\r");
+        assert_eq!(idx.extend_tail(&grown), 3);
+        assert_eq!(lines_of(&grown, &idx), vec!["x", "y", "z"]);
+
+        // The cache roundtrip preserves the CR strategy.
+        let back = LineIndex::from_bytes(&idx.to_bytes()).expect("roundtrip");
+        assert_eq!(back.newline_code(), 3);
+        assert_eq!(back.line_count(), idx.line_count());
+        for i in 0..idx.line_count() {
+            assert_eq!(back.line_range(&grown, i), idx.line_range(&grown, i));
+        }
     }
 
     #[test]

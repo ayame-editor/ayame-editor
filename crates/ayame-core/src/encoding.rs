@@ -21,6 +21,12 @@ pub enum Encoding {
     EucJp,
     /// 7-bit ASCII (a strict, common subset; decoded as UTF-8).
     Ascii,
+    /// Stateful 7-bit JIS (mail archives, legacy exports). Decoded per line,
+    /// which assumes each line starts in ASCII designation — the universal
+    /// JIS convention; the rare line inheriting JIS mode across its newline
+    /// decodes to replacement characters instead of derailing anything (#196).
+    #[serde(rename = "iso-2022-jp")]
+    Iso2022Jp,
     /// Detected but not supported for indexing yet.
     Utf16Le,
     Utf16Be,
@@ -33,6 +39,7 @@ impl Encoding {
             Encoding::ShiftJis => "Shift_JIS",
             Encoding::EucJp => "EUC-JP",
             Encoding::Ascii => "ASCII",
+            Encoding::Iso2022Jp => "ISO-2022-JP",
             Encoding::Utf16Le => "UTF-16LE",
             Encoding::Utf16Be => "UTF-16BE",
         }
@@ -48,6 +55,7 @@ impl Encoding {
             Encoding::Utf8 | Encoding::Ascii => encoding_rs::UTF_8,
             Encoding::ShiftJis => encoding_rs::SHIFT_JIS,
             Encoding::EucJp => encoding_rs::EUC_JP,
+            Encoding::Iso2022Jp => encoding_rs::ISO_2022_JP,
             Encoding::Utf16Le => encoding_rs::UTF_16LE,
             Encoding::Utf16Be => encoding_rs::UTF_16BE,
         }
@@ -87,7 +95,7 @@ impl Encoding {
                     cut -= 1;
                 }
             }
-            Encoding::ShiftJis | Encoding::EucJp => {}
+            Encoding::ShiftJis | Encoding::EucJp | Encoding::Iso2022Jp => {}
         }
         (self.decode_line(&bytes[..cut]), true)
     }
@@ -156,6 +164,7 @@ impl Encoding {
             "ascii" | "usascii" => Encoding::Ascii,
             "shiftjis" | "sjis" | "cp932" | "windows31j" | "ms932" => Encoding::ShiftJis,
             "eucjp" | "euc" => Encoding::EucJp,
+            "iso2022jp" | "iso2022" | "jis" => Encoding::Iso2022Jp,
             "utf16" | "utf16le" => Encoding::Utf16Le,
             "utf16be" => Encoding::Utf16Be,
             _ => return None,
@@ -167,7 +176,7 @@ impl Encoding {
             Encoding::Utf8 => &[0xEF, 0xBB, 0xBF],
             Encoding::Utf16Le => &[0xFF, 0xFE],
             Encoding::Utf16Be => &[0xFE, 0xFF],
-            Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => &[],
+            Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii | Encoding::Iso2022Jp => &[],
         }
     }
 }
@@ -231,6 +240,16 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
     if prefix.is_empty() {
         return (Encoding::Utf8, 0);
     }
+    // Both of these encodings are valid UTF-8 byte-wise (NUL and ESC are legal
+    // UTF-8), so they must be recognized BEFORE the `from_utf8` shortcut or
+    // ASCII-heavy UTF-16 and 7-bit JIS text short-circuit to "UTF-8" and
+    // render as garbage (#196).
+    if let Some(wide) = detect_bomless_utf16(prefix) {
+        return (wide, 0);
+    }
+    if looks_iso_2022_jp(prefix) {
+        return (Encoding::Iso2022Jp, 0);
+    }
     // Pure ASCII is a subset of UTF-8; report it as UTF-8 (the default users
     // expect) rather than a distinct "ASCII" label. The two are byte-identical
     // for ASCII content, so nothing about saving changes.
@@ -245,6 +264,8 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
         Encoding::ShiftJis
     } else if guess == encoding_rs::EUC_JP {
         Encoding::EucJp
+    } else if guess == encoding_rs::ISO_2022_JP {
+        Encoding::Iso2022Jp
     } else if guess == encoding_rs::UTF_16LE {
         Encoding::Utf16Le
     } else if guess == encoding_rs::UTF_16BE {
@@ -255,6 +276,124 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
         Encoding::Utf8
     };
     (enc, 0)
+}
+
+/// Sniff BOM-less UTF-16 by NUL-byte parity. ASCII-heavy UTF-16 encodes each
+/// character as `byte,0x00` (LE) or `0x00,byte` (BE), putting NULs on one
+/// parity almost exclusively — while genuine text in any byte encoding
+/// contains no NULs at all, and binary blobs scatter NULs across both
+/// parities. Requires strong dominance so it can never fire on either.
+/// (CJK-heavy BOM-less UTF-16 has few NULs and stays undetected — the
+/// reported failure mode is ASCII-heavy logs/exports.)
+fn detect_bomless_utf16(prefix: &[u8]) -> Option<Encoding> {
+    if prefix.len() < 16 {
+        return None;
+    }
+    let mut even_nul = 0usize;
+    let mut odd_nul = 0usize;
+    for (i, &b) in prefix.iter().enumerate() {
+        if b == 0 {
+            if i % 2 == 0 {
+                even_nul += 1;
+            } else {
+                odd_nul += 1;
+            }
+        }
+    }
+    let units = prefix.len() / 2;
+    let dominant = (units * 3) / 10; // ≥30% of code units carry a NUL half
+    let noise = units / 20; // …while the other parity stays ≤5%
+    if odd_nul >= dominant && even_nul <= noise {
+        return Some(Encoding::Utf16Le);
+    }
+    if even_nul >= dominant && odd_nul <= noise {
+        return Some(Encoding::Utf16Be);
+    }
+    None
+}
+
+/// Sniff ISO-2022-JP by its JIS X 0208 opening escapes (`ESC $ B` / `ESC $ @`).
+/// Deliberately NOT keyed on the ASCII-return sequences (`ESC ( B` …): those
+/// double as ordinary charset designations in terminal logs, and misdetecting
+/// a colored log as JIS would mangle every CSI sequence in it.
+fn looks_iso_2022_jp(prefix: &[u8]) -> bool {
+    let mut at = 0usize;
+    while let Some(rel) = memchr::memchr(0x1B, &prefix[at..]) {
+        let i = at + rel;
+        match prefix.get(i + 1..i + 3) {
+            Some(seq) if seq == b"$B" || seq == b"$@" => return true,
+            _ => at = i + 1,
+        }
+    }
+    false
+}
+
+/// Byte offset and byte length of the decoded-character span
+/// `[char_start, char_start + char_len)` inside one raw ISO-2022-JP line.
+/// Walks the designation escapes the way the decoder segments well-formed
+/// text: escapes consume bytes but produce no characters, JIS X 0208 runs are
+/// two bytes per character, ASCII/kana runs one. Search and caret mapping use
+/// this because a re-encode round trip cannot recover mid-run byte offsets in
+/// a stateful encoding.
+pub(crate) fn iso2022jp_char_span(
+    raw: &[u8],
+    char_start: usize,
+    char_len: usize,
+) -> (usize, usize) {
+    let start = iso2022jp_col_offset(raw, char_start as u64).unwrap_or(raw.len());
+    let end = iso2022jp_col_offset(raw, (char_start + char_len) as u64).unwrap_or(raw.len());
+    (start, end.saturating_sub(start))
+}
+
+/// Byte offset where decoded character column `col` starts in one raw
+/// ISO-2022-JP line (clamped to the line end like the other legacy walkers).
+pub(crate) fn iso2022jp_col_offset(raw: &[u8], col: u64) -> Option<usize> {
+    #[derive(PartialEq)]
+    enum Mode {
+        SingleByte, // ASCII / JIS-Roman / halfwidth kana: one byte per char
+        DoubleByte, // JIS X 0208 / 0212: two bytes per char
+    }
+    let mut mode = Mode::SingleByte;
+    let mut off = 0usize;
+    let mut produced = 0u64;
+    while off < raw.len() {
+        if produced >= col {
+            return Some(off);
+        }
+        if raw[off] == 0x1B {
+            match raw.get(off + 1..off + 3) {
+                Some(seq) if seq == b"$B" || seq == b"$@" => {
+                    mode = Mode::DoubleByte;
+                    off += 3;
+                    continue;
+                }
+                Some(seq) if seq == b"(B" || seq == b"(J" || seq == b"(I" => {
+                    mode = Mode::SingleByte;
+                    off += 3;
+                    continue;
+                }
+                // ESC $ ( D — JIS X 0212 (4-byte designation).
+                Some(seq) if seq == b"$(" && raw.get(off + 3) == Some(&b'D') => {
+                    mode = Mode::DoubleByte;
+                    off += 4;
+                    continue;
+                }
+                // Malformed escape: the decoder emits a replacement character.
+                _ => {
+                    produced += 1;
+                    off += 1;
+                    continue;
+                }
+            }
+        }
+        produced += 1;
+        off += if mode == Mode::DoubleByte && off + 1 < raw.len() {
+            2
+        } else {
+            1
+        };
+    }
+    (produced >= col).then_some(off.min(raw.len()))
 }
 
 /// Line-ending styles, detected from a bounded prefix.
@@ -457,6 +596,50 @@ mod tests {
         assert_eq!(
             Encoding::ShiftJis.count_chars(&sjis),
             Encoding::ShiftJis.decode_line(&sjis).chars().count() as u64
+        );
+    }
+
+    #[test]
+    fn detects_bomless_utf16_by_nul_parity() {
+        let text = "hello utf-16 world without any byte order mark here\n".repeat(4);
+        let le: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        assert_eq!(detect(&le, None), (Encoding::Utf16Le, 0));
+        let be: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect();
+        assert_eq!(detect(&be, None), (Encoding::Utf16Be, 0));
+        // An all-zero blob has NULs on both parities: not UTF-16.
+        assert_eq!(detect(&[0u8; 64], None).0, Encoding::Utf8);
+    }
+
+    #[test]
+    fn detects_iso_2022_jp_but_not_terminal_escapes() {
+        let (jis, _, err) = encoding_rs::ISO_2022_JP.encode("日本語のテスト\nplain ascii line\n");
+        assert!(!err);
+        assert_eq!(detect(&jis, None), (Encoding::Iso2022Jp, 0));
+        let first = &jis[..jis.iter().position(|&b| b == b'\n').unwrap()];
+        assert_eq!(Encoding::Iso2022Jp.decode_line(first), "日本語のテスト");
+        // Colored terminal logs use ESC[ (CSI) and the ESC(B designation;
+        // neither may flip a log file into ISO-2022-JP.
+        let log = b"\x1b[31merror\x1b[0m done \x1b(B still ascii\n";
+        assert_eq!(detect(log, None), (Encoding::Utf8, 0));
+    }
+
+    #[test]
+    fn iso2022jp_col_offset_walks_designation_escapes() {
+        // A(0) B(1) ESC$B(3 bytes) 日(2) 本(2) ESC(B(3 bytes) C — decoded "AB日本C".
+        let (bytes, _, err) = encoding_rs::ISO_2022_JP.encode("AB日本C");
+        assert!(!err);
+        assert_eq!(Encoding::Iso2022Jp.decode_line(&bytes), "AB日本C");
+        assert_eq!(iso2022jp_col_offset(&bytes, 0), Some(0));
+        assert_eq!(iso2022jp_col_offset(&bytes, 1), Some(1));
+        assert_eq!(iso2022jp_col_offset(&bytes, 2), Some(2)); // before the opening escape
+        assert_eq!(iso2022jp_col_offset(&bytes, 4), Some(9)); // before the closing escape
+        assert_eq!(iso2022jp_col_offset(&bytes, 5), Some(bytes.len()));
+        assert_eq!(iso2022jp_col_offset(&bytes, 6), None);
+        // The span of "日本" (chars 2..4) decodes back to exactly that text.
+        let (off, len) = iso2022jp_char_span(&bytes, 2, 2);
+        assert_eq!(
+            Encoding::Iso2022Jp.decode_line(&bytes[off..off + len]),
+            "日本"
         );
     }
 
