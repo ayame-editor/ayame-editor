@@ -451,12 +451,10 @@ export function hideCtxMenu() {
 
 export function runCtxAction(action) {
   hideCtxMenu();
-  // Only the two context-menu-specific actions live here; everything else
-  // (cut / copy / selectAll / find / replace / sortSave / splitFile) shares
-  // the menu dispatcher.
+  // Only saveSelection is context-menu-specific; clipboard and editor actions
+  // share the normal menu dispatcher.
   let out;
-  if (action === "paste") out = pasteFromClipboard();
-  else if (action === "saveSelection") out = saveSelectionToFile();
+  if (action === "saveSelection") out = saveSelectionToFile();
   else out = runMenuAction(action);
   // A context-menu click leaves focus on the (now hidden) menu item, killing
   // keyboard input after cut/copy etc. Put focus back in the editor once the
@@ -730,6 +728,7 @@ export const ACTIONS: Record<
   deleteLine: { run: deleteLines },
   copy: { run: copySelection, globalShortcut: true, editorOnly: true },
   cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
+  paste: { run: pasteFromClipboard, editorOnly: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
   },

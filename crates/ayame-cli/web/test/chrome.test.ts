@@ -39,6 +39,22 @@ describe("application chrome", () => {
     expect(input).not.toContain('$("convert-save-item").addEventListener');
   });
 
+  it("keeps standard clipboard actions in Edit and exposes Paste (#159)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const actions = (selector: string) =>
+      [...doc.querySelectorAll(`${selector} [data-menu-action]`)].map((el) =>
+        el.getAttribute("data-menu-action"),
+      );
+
+    const editActions = actions("#edit-menu");
+    expect(editActions.slice(2, 6)).toEqual(["cut", "copy", "paste", "selectAll"]);
+    expect(actions("#selection-menu")).not.toEqual(
+      expect.arrayContaining(["cut", "copy", "paste", "selectAll"]),
+    );
+    expect(doc.querySelector('#edit-menu [data-menu-action="paste"] [data-i18n="menu.paste"]')).not.toBeNull();
+    expect(read("src/menus.ts")).toContain("paste: { run: pasteFromClipboard, editorOnly: true }");
+  });
+
   it("exposes search toggles, status values, and palette selection to assistive technology (#171)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     for (const id of ["opt-case", "opt-word", "opt-regex"]) {

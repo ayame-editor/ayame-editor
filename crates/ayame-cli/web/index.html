@@ -96,6 +96,11 @@
             <button class="menu-item" data-menu-action="undo" role="menuitem"><span class="menu-label" data-i18n="menu.undo">元に戻す</span><span class="menu-key" data-key-action="undo">Ctrl+Z</span></button>
             <button class="menu-item" data-menu-action="redo" role="menuitem"><span class="menu-label" data-i18n="menu.redo">やり直す</span><span class="menu-key" data-key-action="redo">Ctrl+Y</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
+            <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
+            <button class="menu-item" data-menu-action="paste" role="menuitem"><span class="menu-label" data-i18n="menu.paste">貼り付け</span><span class="menu-key">Ctrl+V</span></button>
+            <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label" data-i18n="menu.selectAll">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label" data-i18n="menu.find">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
             <button class="menu-item" data-menu-action="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
             <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label" data-i18n="menu.gotoLine">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
@@ -109,10 +114,7 @@
         <div class="menu-shell">
           <button id="selection-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false" data-i18n="menu.selection">選択</button>
           <div id="selection-menu" class="file-menu hidden" role="menu" aria-label="選択" data-i18n-aria-label="menu.selection">
-            <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label" data-i18n="menu.selectAll">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
             <button class="menu-item" data-menu-action="selectNextOccurrence" role="menuitem"><span class="menu-label" data-i18n="menu.selectNextOccurrence">次の一致を選択</span><span class="menu-key" data-key-action="selectNextOccurrence">Ctrl+D</span></button>
-            <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
-            <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="addCursorAbove" role="menuitem"><span class="menu-label" data-i18n="menu.addCursorAbove">カーソルを上に追加</span><span class="menu-key" data-key-action="addCursorAbove">Ctrl+Alt+↑</span></button>
             <button class="menu-item" data-menu-action="addCursorBelow" role="menuitem"><span class="menu-label" data-i18n="menu.addCursorBelow">カーソルを下に追加</span><span class="menu-key" data-key-action="addCursorBelow">Ctrl+Alt+↓</span></button>
@@ -560,7 +562,7 @@
     <div id="ctx-menu" class="file-menu ctx-menu hidden" role="menu" aria-label="コンテキストメニュー" data-i18n-aria-label="ctx.menu">
       <button class="menu-item" data-ctx="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
       <button class="menu-item" data-ctx="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
-      <button class="menu-item" data-ctx="paste" role="menuitem"><span class="menu-label" data-i18n="ctx.paste">貼り付け</span><span class="menu-key">Ctrl+V</span></button>
+      <button class="menu-item" data-ctx="paste" role="menuitem"><span class="menu-label" data-i18n="menu.paste">貼り付け</span><span class="menu-key">Ctrl+V</span></button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="selectAll" role="menuitem"><span class="menu-label" data-i18n="menu.selectAll">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
       <button class="menu-item" data-ctx="saveSelection" role="menuitem"

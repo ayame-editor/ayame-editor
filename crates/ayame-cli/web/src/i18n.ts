@@ -47,6 +47,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "次の一致を選択",
     "menu.copy": "コピー",
     "menu.cut": "切り取り",
+    "menu.paste": "貼り付け",
     "menu.caseUpper": "大文字に変換",
     "menu.caseLower": "小文字に変換",
     "menu.caseCamel": "camelCase に変換",
@@ -177,7 +178,6 @@ export const MESSAGES = {
     "editor.savingWait": "保存中です — 完了までお待ちください",
     // -- editor context menu --
     "ctx.menu": "コンテキストメニュー",
-    "ctx.paste": "貼り付け",
     "ctx.saveSelection": "選択箇所をファイルに保存…",
     "ctx.saveSelectionTitle":
       "選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません",
@@ -427,6 +427,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "Select Next Occurrence",
     "menu.copy": "Copy",
     "menu.cut": "Cut",
+    "menu.paste": "Paste",
     "menu.caseUpper": "Transform to Uppercase",
     "menu.caseLower": "Transform to Lowercase",
     "menu.caseCamel": "Transform to camelCase",
@@ -552,7 +553,6 @@ export const MESSAGES = {
     "editor.savingWaitInput": "Saving. Input will continue after it finishes.",
     "editor.savingWait": "Saving. Please wait until it finishes.",
     "ctx.menu": "Context Menu",
-    "ctx.paste": "Paste",
     "ctx.saveSelection": "Save Selection to File...",
     "ctx.saveSelectionTitle":
       "Write only the selected lines to another file. The clipboard line limit does not apply.",
