@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.7.2 - 2026-07-13
 
 - Fixed three encoding/EOL detection failures (#196): ASCII-heavy UTF-16
   without a BOM is now detected by NUL-byte parity instead of short-circuiting
