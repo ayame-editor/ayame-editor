@@ -59,6 +59,8 @@
   --cmd-min-width: 46px;
   --gutter-pad-start: 8px;
   --gutter-pad-end: 20px;
+  --modal-edge: 94vw;
+  --modal-body-padding: 12px 14px 14px;
   --desk:
     radial-gradient(46vw 42vh at 12% 84%, rgba(122,92,192,.12), transparent 60%),
     radial-gradient(42vw 40vh at 88% 14%, rgba(185,139,214,.10), transparent 60%),
@@ -1072,7 +1074,7 @@ mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); 
 /* Encoding / line-ending segments double as the entry point for 変換して保存. */
 #statusbar button.seg-btn {
   height: 20px;
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--status-fg) 24%, transparent);
   border-radius: calc(var(--radius-control) - 2px);
   background: transparent;
   color: inherit;
@@ -1141,7 +1143,7 @@ html.saving .caret.extra { visibility: hidden; }
 .modal.hidden { display: none; }
 
 .modal-panel {
-  width: min(640px, 92vw);
+  width: min(640px, var(--modal-edge));
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -1153,8 +1155,17 @@ html.saving .caret.extra { visibility: hidden; }
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.22);
 }
 #opener .modal-panel {
-  width: min(860px, 94vw);
+  width: min(860px, var(--modal-edge));
   max-height: min(760px, 86vh);
+}
+.settings-body,
+.keymap-body,
+.palette-body,
+.grep-body,
+.confirm-body,
+.prompt-body,
+.form-body {
+  padding: var(--modal-body-padding);
 }
 .modal-head {
   display: flex;
@@ -1352,9 +1363,9 @@ html.saving .caret.extra { visibility: hidden; }
 
 /* ---- settings --------------------------------------------------------- */
 
-.settings-panel { width: min(840px, 94vw); }
+.settings-panel { width: min(840px, var(--modal-edge)); }
 /* the memo rows pushed the panel past 80vh on short windows: scroll, don't clip */
-.settings-body { padding: 12px 28px 24px; overflow-y: auto; scrollbar-width: thin; }
+.settings-body { overflow-y: auto; scrollbar-width: thin; }
 .set-row {
   display: flex;
   align-items: center;
@@ -1511,9 +1522,8 @@ html.saving .caret.extra { visibility: hidden; }
 #apply-theme.hidden,
 #apply-keymap.hidden { display: none; }
 
-.keymap-panel { width: min(620px, 94vw); }
+.keymap-panel { width: min(620px, var(--modal-edge)); }
 .keymap-body {
-  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1574,9 +1584,8 @@ html.saving .caret.extra { visibility: hidden; }
   border-color: var(--border);
 }
 
-.palette-panel { width: min(620px, 94vw); }
+.palette-panel { width: min(620px, var(--modal-edge)); }
 .palette-body {
-  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1634,14 +1643,13 @@ html.saving .caret.extra { visibility: hidden; }
 
 /* Standalone recursive folder-search results panel. */
 .grep-panel {
-  width: min(920px, 96vw);
+  width: min(920px, var(--modal-edge));
   max-height: min(820px, 90vh);
 }
 .grep-body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 12px 14px 14px;
 }
 .grep-summary {
   font-size: var(--fs-ui);
@@ -1717,8 +1725,8 @@ html.saving .caret.extra { visibility: hidden; }
 }
 
 /* generic confirm / message modal (replaces window.confirm / window.alert) */
-.confirm-panel { width: min(460px, 92vw); }
-.confirm-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.confirm-panel { width: min(460px, var(--modal-edge)); }
+.confirm-body { display: flex; flex-direction: column; gap: 12px; }
 .confirm-message {
   color: var(--fg);
   font-size: var(--fs-ui);
@@ -1735,8 +1743,8 @@ html.saving .caret.extra { visibility: hidden; }
 .cmd.danger:hover { background: color-mix(in srgb, var(--danger) 86%, #000); color: var(--on-accent); }
 
 /* generic prompt modal (replaces window.prompt) */
-.prompt-panel { width: min(460px, 92vw); }
-.prompt-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.prompt-panel { width: min(460px, var(--modal-edge)); }
+.prompt-body { display: flex; flex-direction: column; gap: 10px; }
 .prompt-label { color: var(--fg-dim); font-size: var(--fs-ui-sm); }
 #prompt-input {
   height: 38px; box-sizing: border-box;
@@ -1768,8 +1776,8 @@ html.saving .caret.extra { visibility: hidden; }
 .ctx-menu .menu-item:disabled:hover { background: transparent; }
 
 /* generic form dialog (sort / replace / case options in one screen) */
-.form-panel { width: min(520px, 94vw); }
-.form-body { padding: 14px 16px 4px; display: flex; flex-direction: column; gap: 10px; }
+.form-panel { width: min(520px, var(--modal-edge)); }
+.form-body { display: flex; flex-direction: column; gap: 10px; }
 .form-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); align-items: center; gap: 10px; }
 .form-row > span { color: var(--fg-dim); font-size: var(--fs-ui-sm); }
 .form-row input[type="text"] {

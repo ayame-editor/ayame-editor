@@ -139,4 +139,28 @@ describe("application chrome", () => {
     expect(block(".grep-ln")).toContain(padding);
     expect(block(".replace-btn")).not.toMatch(/border\s*:/);
   });
+
+  it("uses consistent modal edges and body padding with visible status actions (#157)", () => {
+    const css = read("style.css");
+    const block = (selector: string) => css.split(`${selector} {`, 2)[1]?.split("}", 1)[0] ?? "";
+
+    for (const selector of [
+      ".modal-panel",
+      "#opener .modal-panel",
+      ".settings-panel",
+      ".keymap-panel",
+      ".palette-panel",
+      ".grep-panel",
+      ".confirm-panel",
+      ".prompt-panel",
+      ".form-panel",
+    ]) {
+      expect(block(selector), selector).toContain("var(--modal-edge)");
+    }
+    expect(css.match(/padding:\s*var\(--modal-body-padding\)/g)).toHaveLength(1);
+    for (const legacyPadding of ["12px 28px 24px", "14px 16px 16px", "14px 16px 4px"]) {
+      expect(css).not.toContain(legacyPadding);
+    }
+    expect(block("#statusbar button.seg-btn")).toMatch(/border:\s*1px solid/);
+  });
 });
