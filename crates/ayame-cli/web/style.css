@@ -55,6 +55,8 @@
   --illus: .18;
   --radius: 10px;
   --radius-control: 6px;
+  --control-h: 34px;
+  --cmd-min-width: 46px;
   --desk:
     radial-gradient(46vw 42vh at 12% 84%, rgba(122,92,192,.12), transparent 60%),
     radial-gradient(42vw 40vh at 88% 14%, rgba(185,139,214,.10), transparent 60%),
@@ -351,7 +353,11 @@ button {
   gap: 6px;
   white-space: nowrap;
 }
-button.cmd { min-width: 46px; padding: 0 11px; }
+button.cmd {
+  height: var(--control-h);
+  min-width: var(--cmd-min-width);
+  padding: 0 11px;
+}
 .menu-shell {
   position: relative;
   display: inline-flex;
@@ -1196,7 +1202,7 @@ html.saving .caret.extra { visibility: hidden; }
   border-color: var(--accent-bright);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
-.opener-path .cmd { height: 36px; flex: 0 0 auto; border: 1px solid var(--border); }
+.opener-path .cmd { flex: 0 0 auto; border: 1px solid var(--border); }
 .opener-path #opener-open {
   background: var(--accent);
   border-color: var(--accent);
@@ -1564,7 +1570,6 @@ html.saving .caret.extra { visibility: hidden; }
   margin-top: 12px;
 }
 .keymap-actions .cmd {
-  min-width: 92px;
   border-color: var(--border);
 }
 
@@ -1722,7 +1727,7 @@ html.saving .caret.extra { visibility: hidden; }
   overflow-y: auto;
 }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.confirm-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }
+.confirm-actions .cmd { border: 1px solid var(--border); }
 .confirm-actions .cmd.hidden { display: none; }
 .cmd.danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
 .cmd.danger:hover { background: color-mix(in srgb, var(--danger) 86%, #000); color: var(--on-accent); }
@@ -1741,7 +1746,7 @@ html.saving .caret.extra { visibility: hidden; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
-.prompt-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }
+.prompt-actions .cmd { border: 1px solid var(--border); }
 .cmd.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .cmd.primary:hover { background: var(--accent-bright); }
 
@@ -1793,7 +1798,7 @@ html.saving .caret.extra { visibility: hidden; }
 .form-path button { flex: 0 0 auto; white-space: nowrap; }
 .form-hint { color: var(--fg-faint); font-size: var(--fs-hint); }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px 16px; }
-.form-actions .cmd { height: 34px; min-width: 84px; border: 1px solid var(--border); }
+.form-actions .cmd { border: 1px solid var(--border); }
 
 /* clearer loading overlay */
 .overlay { font-size: var(--fs-ui-lg); font-weight: 500; }
@@ -1852,9 +1857,6 @@ html.saving .caret.extra { visibility: hidden; }
   }
   .set-label:empty {
     display: none;
-  }
-  button.cmd {
-    min-width: 34px;
   }
   button.cmd .btn-label {
     display: none;

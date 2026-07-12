@@ -117,4 +117,15 @@ describe("application chrome", () => {
     expect(css).not.toContain(".menu-button");
     expect(css).toContain(".menubar-button .btn-label");
   });
+
+  it("uses one size definition for command buttons in every container (#151)", () => {
+    const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const dimensionalSelectors = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((match) => /\.cmd\b/.test(match[1]) && /(?:height|min-width)\s*:/.test(match[2]))
+      .map((match) => match[1].trim());
+
+    expect(dimensionalSelectors).toEqual(["button.cmd"]);
+    expect(css).toContain("height: var(--control-h)");
+    expect(css).toContain("min-width: var(--cmd-min-width)");
+  });
 });
