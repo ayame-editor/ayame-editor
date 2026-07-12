@@ -2,14 +2,7 @@
 import { $, commas, displayPath, escapeRegExp, pathDirName, setModalOpen } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
-import {
-  api,
-  apiPost,
-  type DiffResponse,
-  type FindResponse,
-  type LinesResponse,
-  type SearchResponse,
-} from "./api.js";
+import { api, apiPost, type FindResponse, type LinesResponse, type SearchResponse } from "./api.js";
 import {
   focusEditor,
   lineByte,
@@ -33,8 +26,7 @@ import {
 import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
-import { openPath, showFileDialog, showFolderDialog } from "./workspace.js";
-import { isNativeApp, nativeOpenDialog } from "./app.js";
+import { openPath, showFolderDialog } from "./workspace.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import type { GrepRequest } from "./types/api.js";
 
@@ -550,213 +542,9 @@ export async function replaceAll() {
   }
 }
 
-export function diffVisible() {
-  return !$("diff-modal").classList.contains("hidden");
-}
-
-export function hideDiff() {
-  setModalOpen($("diff-modal"), false);
-  focusEditor();
-}
-
-export function showDiff(res) {
-  $("diff-summary").textContent =
-    t("dialog.diff.summary", {
-      hunks: commas(res.hunk_count),
-      added: commas(res.added),
-      deleted: commas(res.deleted),
-      modified: commas(res.modified),
-    }) +
-    (res.current_dirty ? ` / ${t("dialog.diff.unsavedIncluded")}` : "") +
-    (res.omitted_hunks ? ` / ${t("dialog.diff.omitted", { n: commas(res.omitted_hunks) })}` : "");
-  $("diff-old-path").textContent =
-    (res.old_path ? displayPath(res.old_path) : t("dialog.diff.currentFile")) +
-    (res.current_dirty ? " *" : "");
-  $("diff-new-path").textContent = res.new_path
-    ? displayPath(res.new_path)
-    : t("dialog.diff.compareTo");
-  renderDiffView(res);
-  setModalOpen($("diff-modal"), true);
-}
-
-export function diffKindLabel(kind) {
-  if (kind === "insert") return t("dialog.diff.added");
-  if (kind === "delete") return t("dialog.diff.deleted");
-  return t("dialog.diff.changed");
-}
-
-export const INLINE_DIFF_MAX_CHARS = 2000;
-
-export const INLINE_DIFF_MAX_TOKENS = 260;
-
-export function inlineTokens(text) {
-  const tokens = [];
-  const re = /(\s+|[\p{Letter}\p{Number}_]+|[^\s\p{Letter}\p{Number}_]+)/gu;
-  for (const m of String(text || "").matchAll(re)) tokens.push(m[0]);
-  return tokens;
-}
-
-export function pushDiffPart(parts, text, changed) {
-  if (!text) return;
-  const last = parts[parts.length - 1];
-  if (last && last.changed === changed) last.text += text;
-  else parts.push({ text, changed });
-}
-
-export function inlineWordDiff(oldText, newText) {
-  oldText = String(oldText || "");
-  newText = String(newText || "");
-  if (oldText === newText) return null;
-  if (oldText.length + newText.length > INLINE_DIFF_MAX_CHARS) return null;
-  const oldTokens = inlineTokens(oldText);
-  const newTokens = inlineTokens(newText);
-  if (oldTokens.length + newTokens.length > INLINE_DIFF_MAX_TOKENS) return null;
-
-  const m = oldTokens.length;
-  const n = newTokens.length;
-  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] =
-        oldTokens[i] === newTokens[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-
-  const oldParts = [];
-  const newParts = [];
-  let i = 0;
-  let j = 0;
-  while (i < m || j < n) {
-    if (i < m && j < n && oldTokens[i] === newTokens[j]) {
-      pushDiffPart(oldParts, oldTokens[i], false);
-      pushDiffPart(newParts, newTokens[j], false);
-      i++;
-      j++;
-    } else if (j >= n || (i < m && dp[i + 1][j] >= dp[i][j + 1])) {
-      pushDiffPart(oldParts, oldTokens[i], true);
-      i++;
-    } else {
-      pushDiffPart(newParts, newTokens[j], true);
-      j++;
-    }
-  }
-  return { oldParts, newParts };
-}
-
-export function appendDiffText(el, line, parts) {
-  if (!line) return;
-  if (!parts) {
-    el.textContent = line.text;
-    return;
-  }
-  for (const part of parts) {
-    const span = document.createElement("span");
-    span.className = part.changed ? "diff-word changed" : "diff-word";
-    span.textContent = part.text;
-    el.append(span);
-  }
-}
-
-export function diffCell(line, cls, parts = null) {
-  const cell = document.createElement("div");
-  cell.className = "diff-cell " + (cls || "");
-  const ln = document.createElement("span");
-  ln.className = "diff-ln";
-  ln.textContent = line ? String(line.number + 1) : "";
-  const tx = document.createElement("span");
-  tx.className = "diff-tx";
-  appendDiffText(tx, line, parts);
-  cell.append(ln, tx);
-  return cell;
-}
-
-export function renderDiffView(res) {
-  const view = $("diff-view");
-  view.textContent = "";
-  const frag = document.createDocumentFragment();
-  for (const h of res.hunks || []) {
-    const hunk = document.createElement("section");
-    hunk.className = "diff-hunk";
-    const title = document.createElement("div");
-    title.className = "diff-hunk-title";
-    title.textContent = t("dialog.diff.hunkHeader", {
-      kind: diffKindLabel(h.kind),
-      oldStart: commas(h.old_start + 1),
-      oldLen: commas(h.old_len),
-      newStart: commas(h.new_start + 1),
-      newLen: commas(h.new_len),
-    });
-    hunk.append(title);
-    const oldRows = h.old_preview || [];
-    const newRows = h.new_preview || [];
-    const max = Math.max(oldRows.length, newRows.length, 1);
-    for (let i = 0; i < max; i++) {
-      const row = document.createElement("div");
-      row.className = "diff-row";
-      const oldLine = oldRows[i] || null;
-      const newLine = newRows[i] || null;
-      const oldCls =
-        h.kind === "insert" ? "blank" : h.kind === "delete" ? "del" : oldLine ? "mod" : "blank";
-      const newCls =
-        h.kind === "delete" ? "blank" : h.kind === "insert" ? "add" : newLine ? "mod" : "blank";
-      const wordDiff =
-        h.kind === "replace" && oldLine && newLine
-          ? inlineWordDiff(oldLine.text, newLine.text)
-          : null;
-      row.append(
-        diffCell(oldLine, "old " + oldCls, wordDiff?.oldParts),
-        diffCell(newLine, "new " + newCls, wordDiff?.newParts),
-      );
-      hunk.append(row);
-    }
-    if (h.old_truncated || h.new_truncated) {
-      const tr = document.createElement("div");
-      tr.className = "diff-truncated";
-      tr.textContent = t("dialog.diff.hunkTruncated", { n: commas(res.max_lines_per_hunk || 80) });
-      hunk.append(tr);
-    }
-    frag.append(hunk);
-  }
-  if (!res.hunks || res.hunks.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "diff-truncated";
-    empty.textContent = t("dialog.diff.none");
-    frag.append(empty);
-  }
-  view.append(frag);
-}
-
-export async function diffFile() {
-  const base = state.stat?.path || "";
-  // Pick the comparison file instead of hand-typing an absolute path (#79):
-  // the desktop build uses the OS dialog and the browser build reuses Ayame's
-  // in-app picker.
-  let path;
-  if (isNativeApp()) {
-    const picked = await nativeOpenDialog(pathDirName(base) || "");
-    path = picked[0] || "";
-  } else {
-    path = await showFileDialog(t("menu.diff"), pathDirName(base) || "");
-  }
-  if (path == null || path.trim() === "") return;
-  showLoading(t("dialog.diff.computing"));
-  try {
-    const res = await api<DiffResponse>(
-      `/api/diff?path=${encodeURIComponent(path.trim())}&max_hunks=200&max_lines=80&window=128`,
-    );
-    flashCount(t("dialog.diff.hunks", { n: commas(res.hunk_count) }));
-    showDiff(res);
-  } catch (e) {
-    flashCount(t("dialog.diff.error"), "error");
-    showMessage(t("dialog.diff.error"), serverMessage(e));
-  } finally {
-    hideLoading();
-  }
-}
-
 // ---- フォルダ内検索 (Grep): recursive multi-file search -------------------
 // Prompts for a query + options, streams the hits from /api/grep, and shows
-// them in a results panel modeled on the diff view. Clicking a hit opens that
+// them in a standalone results panel. Clicking a hit opens that
 // file and jumps to the line.
 export let lastGrep = { query: "", dir: "", glob: "", ci: false, word: false, regex: false };
 

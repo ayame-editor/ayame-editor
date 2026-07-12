@@ -228,39 +228,35 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         #[cfg(target_os = "macos")]
         let _ = &macos_menu;
         match event {
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                if !shown {
-                    shown = true;
-                    window.set_visible(true);
-                    if start_maximized {
-                        window.set_maximized(true);
-                    }
-                    maybe_start_startup_update_check(
-                        &proxy,
-                        shown,
-                        update_check_enabled,
-                        &mut update_check_started,
-                    );
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) if !shown => {
+                shown = true;
+                window.set_visible(true);
+                if start_maximized {
+                    window.set_maximized(true);
                 }
+                maybe_start_startup_update_check(
+                    &proxy,
+                    shown,
+                    update_check_enabled,
+                    &mut update_check_started,
+                );
             }
             Event::WindowEvent {
                 event: WindowEvent::Moved(_) | WindowEvent::Resized(_),
                 ..
-            } => {
+            } if !window.is_maximized() => {
                 // Track the un-maximized geometry as it changes; maximized
                 // bounds are useless for restore and are skipped.
-                if !window.is_maximized() {
-                    let size = window.inner_size();
-                    if size.width > 0 && size.height > 0 {
-                        let pos = window.outer_position().ok();
-                        last_normal = Some(WindowState {
-                            x: pos.map(|p| p.x),
-                            y: pos.map(|p| p.y),
-                            width: size.width,
-                            height: size.height,
-                            maximized: false,
-                        });
-                    }
+                let size = window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    let pos = window.outer_position().ok();
+                    last_normal = Some(WindowState {
+                        x: pos.map(|p| p.x),
+                        y: pos.map(|p| p.y),
+                        width: size.width,
+                        height: size.height,
+                        maximized: false,
+                    });
                 }
             }
             Event::WindowEvent {
@@ -862,7 +858,6 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
         true,
         &[
             &item("sortSave", label("ソート", "Sort"), None),
-            &item("diffFile", label("2ファイル差分", "Diff Files"), None),
             &item("splitFile", label("ファイルを分割", "Split File"), None),
             &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
             &item("grepSave", label("grep して保存", "Grep to File"), None),

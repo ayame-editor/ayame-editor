@@ -59,11 +59,9 @@ vi.mock("../src/edits.js", () => ({
 }));
 vi.mock("../src/search.js", () => ({
   buildMatcher: vi.fn(),
-  diffVisible: vi.fn(() => false),
   findStep: vi.fn(),
   flashCount: vi.fn(),
   grepVisible: vi.fn(() => false),
-  hideDiff: vi.fn(),
   hideFind: vi.fn(),
   hideGrep: vi.fn(),
   replaceAll: vi.fn(),

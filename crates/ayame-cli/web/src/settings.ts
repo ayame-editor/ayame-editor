@@ -321,6 +321,7 @@ export function applySettings(s) {
   const zoomEl = document.getElementById("st-zoom");
   if (zoomEl) {
     zoomEl.textContent = `${zoom}%`;
+    zoomEl.setAttribute("aria-label", t("status.zoomValue", { value: `${zoom}%` }));
     zoomEl.classList.toggle("dim", zoom === 100);
   }
   invalidateFontMetrics(); // font metrics changed → remeasure + rebuild the ruler

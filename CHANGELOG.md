@@ -2,6 +2,23 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## v0.7.0 - 2026-07-12
+
+- **Breaking:** removed the `diff` / `sortdiff` implementations, `/api/diff`,
+  the Web two-file diff view, native/menu commands, diff-only CSS and tests.
+  Comparison now lives in [ayame-diff](https://github.com/hjosugi/ayame-diff):
+  replace `ayame diff OLD NEW` with `ayame-diff text OLD NEW`, and replace
+  `ayame sortdiff OLD NEW` with `ayame-diff sorted OLD NEW`. The old CLI names
+  return an actionable migration error for this release. (#94–#104)
+- Improved keyboard and assistive-technology support: search toggles expose
+  their labels and pressed state, status controls announce their values, the
+  command palette tracks its active option, all major controls have a visible
+  theme-aware focus ring, and persistent motion stops when the OS requests
+  reduced motion. (#156, #171, #183)
+- Made each visual theme own its syntax palette, with genuinely monochrome
+  highlighting in Mono Paper, and removed duplicate menu entries and the
+  double-bound encoding conversion action. (#154, #181)
+
 ## v0.6.1 - 2026-07-12
 
 - Stopped `/api/lines` viewport reads from deep-cloning up to 256 undo/redo

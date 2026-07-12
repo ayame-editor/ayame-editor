@@ -38,6 +38,7 @@ nav:
   - Home: index.md
   - User Guide: USER_GUIDE.md
   - CLI Reference: CLI_REFERENCE.md
+  - Migrating to ayame-diff: MIGRATING_TO_AYAME_DIFF.md
   - Architecture: ARCHITECTURE.md
   - Data Integrity: DATA_INTEGRITY.md
   - Packaging: PACKAGING.md
@@ -46,6 +47,7 @@ nav:
       - ホーム: ja/index.md
       - ユーザー向け: ja/USER_GUIDE.md
       - CLI リファレンス: ja/CLI_REFERENCE.md
+      - ayame-diff への移行: ja/MIGRATING_TO_AYAME_DIFF.md
       - アーキテクチャ: ja/ARCHITECTURE.md
       - データ完全性: ja/DATA_INTEGRITY.md
       - 配布: ja/PACKAGING.md

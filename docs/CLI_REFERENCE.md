@@ -25,9 +25,7 @@ print help.
 | `line <FILE> <N>` | Print one 1-based line. |
 | `lines <FILE> <START> <COUNT>` | Print COUNT lines from START, both 1-based. |
 | `search <FILE> <PATTERN>` | Search with literal, regex, ignore-case, whole-word, and max-result options. |
-| `diff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `text`. Compare two files with line hunks or side-by-side output. |
 | `sort <FILE>` | External merge sort with memory-bounded spill files. |
-| `sortdiff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `sorted`. Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
 | `case <FILE> <MODE>` | Streaming case conversion (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) to a new output file. |
 | `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |
@@ -42,6 +40,10 @@ print help.
 | `update` | Download, verify, and install the selected GitHub release artifact. |
 | `remove` | Remove the installed Ayame binary or app bundle. |
 | `version` | Print the Ayame version. |
+
+The former `diff`, `sortdiff`, and `sort-diff` commands were removed in v0.7.0.
+For one release they return an error naming the corresponding ayame-diff
+command. See [Migrating comparison workflows to ayame-diff](MIGRATING_TO_AYAME_DIFF.md).
 
 ## Common Options
 
@@ -181,9 +183,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { charLenOf, inlineWordDiff, updateCount, utf16IndexOfCol } from "../src/search.js";
+import { charLenOf, updateCount, utf16IndexOfCol } from "../src/search.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -33,20 +33,6 @@ describe("search pure helpers", () => {
     expect(utf16IndexOfCol(text, 1)).toBe(1);
     expect(utf16IndexOfCol(text, 2)).toBe(3);
     expect(utf16IndexOfCol(text, 3)).toBe(4);
-  });
-
-  it("marks changed word runs while preserving shared tokens", () => {
-    const diff = inlineWordDiff("alpha beta gamma", "alpha delta gamma");
-    expect(diff.oldParts.map((p) => [p.text, p.changed])).toEqual([
-      ["alpha ", false],
-      ["beta", true],
-      [" gamma", false],
-    ]);
-    expect(diff.newParts.map((p) => [p.text, p.changed])).toEqual([
-      ["alpha ", false],
-      ["delta", true],
-      [" gamma", false],
-    ]);
   });
 });
 

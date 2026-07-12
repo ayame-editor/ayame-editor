@@ -6,10 +6,10 @@
 
 macOS、Windows、Linux で動作します。
 
-> **ファイル比較は？** `diff` / `sortdiff` は非推奨で、姉妹プロジェクト
-> **[ayame-diff](https://github.com/hjosugi/ayame-diff)**（`ayame-diff text` /
-> `ayame-diff sorted`、Web GUI 付き）へ移行します。エディタ側は凍結し、将来の
-> リリースで削除予定です（[#104](https://github.com/hjosugi/ayame-editor/issues/104)）。
+> **ファイル比較は？** 比較機能は姉妹プロジェクト
+> **[ayame-diff](https://github.com/hjosugi/ayame-diff)** へ移管しました。
+> Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
+> 削除します。[移行ガイド](docs/ja/MIGRATING_TO_AYAME_DIFF.md)をご覧ください。
 
 ![Ayame Editor main window](docs/assets/screenshot-main.png)
 
@@ -17,8 +17,8 @@ macOS、Windows、Linux で動作します。
 
 - 巨大ファイルを全体読み込みせずに表示・検索・編集できます。
 - UTF-8、Shift_JIS、EUC-JP、ASCII に対応します。
-- GUI では検索、置換、ソート、2 ファイル差分、フォルダ内検索、ファイル分割を実行できます。
-- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`diff`、`sort`、`sortdiff`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache`、`update`、`remove` などを使えます。
+- GUI では検索、置換、ソート、フォルダ内検索、ファイル分割を実行できます。
+- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`sort`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache`、`update`、`remove` などを使えます。
 - タブ、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
 - テーマ、フォント、折り返し、空白表示、キー設定を変更できます。
 
@@ -64,6 +64,13 @@ Nix 側で更新・削除してください。
 Homebrew tap 用 template は `packaging/homebrew/` にあります。
 `brew install --cask hjosugi/tap/ayame` と `brew install hjosugi/tap/ayame`
 で配れる形です。
+
+## 姉妹プロジェクト
+
+[ayame-diff](https://github.com/hjosugi/ayame-diff) はテキスト、ソート済み
+テキスト、CSV/TSV、フォルダ、アーカイブ、バイナリ、3-way 比較を CLI と GUI で
+提供します。巨大ファイルの閲覧・編集には Ayame Editor、比較には ayame-diff を
+使い分けてください。
 
 ## 詳細
 
