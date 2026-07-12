@@ -55,6 +55,24 @@ describe("application chrome", () => {
     expect(read("src/menus.ts")).toContain("paste: { run: pasteFromClipboard, editorOnly: true }");
   });
 
+  it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const topLevelIds = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")].map(
+      (button) => button.id.replace(/-menu-button$/, ""),
+    );
+
+    expect(topLevelIds).toEqual(["file", "edit", "selection", "view", "help"]);
+    expect(doc.querySelector("#menubar > #settings-menu-button")).toBeNull();
+    expect(doc.querySelector('#edit-menu [data-menu-action="settings"]')).not.toBeNull();
+    expect(doc.querySelector("#toolbar #tools-menu-button")).not.toBeNull();
+
+    const menus = read("src/menus.ts");
+    expect(menus).toContain(
+      'export const APP_MENUS = ["file", "edit", "selection", "view", "help"]',
+    );
+    expect(menus).toContain('const DROPDOWN_MENUS = [...APP_MENUS, "tools"]');
+  });
+
   it("exposes search toggles, status values, and palette selection to assistive technology (#171)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     for (const id of ["opt-case", "opt-word", "opt-regex"]) {

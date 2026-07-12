@@ -62,7 +62,8 @@ import {
 
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
 
-export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"];
+export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
+const DROPDOWN_MENUS = [...APP_MENUS, "tools"];
 
 export const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -72,7 +73,7 @@ export const MENU_ID_ACTIONS = [
 ];
 
 export function fileMenuVisible() {
-  return APP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
+  return DROPDOWN_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
 }
 
 export function showAppMenu(id) {
@@ -115,7 +116,7 @@ export function showAppMenu(id) {
 
 export function hideFileMenu(focusButton = false) {
   let focused = false;
-  for (const id of APP_MENUS) {
+  for (const id of DROPDOWN_MENUS) {
     const menu = $(`${id}-menu`);
     const button = $(`${id}-menu-button`);
     const wasOpen = !menu.classList.contains("hidden");
@@ -841,7 +842,7 @@ export function runMenuAction(action) {
 window.__ayameMenu = runMenuAction;
 
 export function initMenuBar() {
-  for (const id of APP_MENUS) {
+  for (const id of DROPDOWN_MENUS) {
     const button = $(`${id}-menu-button`);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -849,9 +850,11 @@ export function initMenuBar() {
       if (open) hideFileMenu();
       else showAppMenu(id);
     });
-    button.addEventListener("pointerenter", () => {
-      if (fileMenuVisible()) showAppMenu(id);
-    });
+    if (APP_MENUS.includes(id)) {
+      button.addEventListener("pointerenter", () => {
+        if (fileMenuVisible()) showAppMenu(id);
+      });
+    }
   }
   document.querySelectorAll("[data-menu-action]").forEach((item) => {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));
