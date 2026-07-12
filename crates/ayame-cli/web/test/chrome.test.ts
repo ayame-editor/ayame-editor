@@ -105,4 +105,16 @@ describe("application chrome", () => {
     ].map((match) => Number(match[1]));
     expect(widths).toEqual([840]);
   });
+
+  it("keeps component styles canonical and targets the real mobile menu class (#158)", () => {
+    const css = read("style.css");
+
+    for (const selector of ["button", ".field", ".field:focus-within", ".modal-panel"]) {
+      const escaped = selector.replaceAll(".", "\\.");
+      const declarations = css.match(new RegExp(`^${escaped}\\s*\\{`, "gm"));
+      expect(declarations, selector).toHaveLength(1);
+    }
+    expect(css).not.toContain(".menu-button");
+    expect(css).toContain(".menubar-button .btn-label");
+  });
 });

@@ -339,7 +339,7 @@ button {
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg);
-  border-radius: calc(var(--radius-control) - 1px);
+  border-radius: var(--radius);
   height: 30px;
   cursor: pointer;
   font-family: var(--ui);
@@ -454,7 +454,7 @@ html.find-open .find-group { display: flex; }
   gap: 4px;
   background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   padding: 2px 6px;
   height: 30px;
 }
@@ -490,7 +490,10 @@ html.find-open .find-group { display: flex; }
   margin-left: 2px;
 }
 .field input::placeholder { color: var(--fg-faint); }
-.field:focus-within { border-color: var(--accent-bright); }
+.field:focus-within {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
 .field.error {
   border-color: var(--danger);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
@@ -908,10 +911,6 @@ html.replace-open .find-group .replace-row { display: flex; }
   opacity: 0.6;
   pointer-events: none;
 }
-/* BOM row hint; dims with the row when the target encoding is not UTF-8. */
-.set-hint { flex: 1; color: var(--fg-dim); font-size: var(--fs-ui-sm); }
-#convert-bom-row.disabled { opacity: 0.5; }
-
 mark {
   background: var(--mark-bg);
   color: var(--mark-fg);
@@ -1141,7 +1140,7 @@ html.saving .caret.extra { visibility: hidden; }
   flex-direction: column;
   background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius) + 4px);
   box-shadow: 0 26px 72px -34px color-mix(in srgb, var(--fg) 60%, #000);
   overflow: hidden;
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.22);
@@ -1360,6 +1359,9 @@ html.saving .caret.extra { visibility: hidden; }
    en "Show Whitespace and Line Endings" (the en column must be wider). */
 .set-label { flex: 0 0 var(--set-label-w, 184px); color: var(--fg-dim); white-space: nowrap; }
 :root:lang(en) { --set-label-w: 244px; }
+.set-hint { flex: 1; color: var(--fg-dim); font-size: var(--fs-ui-sm); }
+/* BOM row hint; dims with the row when the target encoding is not UTF-8. */
+#convert-bom-row.disabled { opacity: 0.5; }
 .set-row select {
   flex: 1;
   height: 30px;
@@ -1470,13 +1472,6 @@ html.saving .caret.extra { visibility: hidden; }
 .row.active {
   box-shadow: inset 2px 0 0 var(--accent), inset 0 0 20px -14px var(--accent);
 }
-button { border-radius: var(--radius); }
-.field { border-radius: var(--radius); }
-.field:focus-within {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
-}
-.modal-panel { border-radius: calc(var(--radius) + 4px); }
 
 /* Faint watercolor iris lifted from the design proposal; opacity = --illus. */
 #ambient {
@@ -1864,10 +1859,10 @@ button { border-radius: var(--radius); }
   button.cmd .btn-label {
     display: none;
   }
-  .menu-button {
+  .menubar-button {
     min-width: 54px;
   }
-  .menu-button .btn-label {
+  .menubar-button .btn-label {
     display: inline;
   }
   .file-menu {
