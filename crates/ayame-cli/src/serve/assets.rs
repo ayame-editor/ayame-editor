@@ -1,6 +1,6 @@
 use axum::extract::Path;
-use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse, Response};
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
 const STYLE_CSS: &str = include_str!("../../web/style.css");
@@ -13,8 +13,12 @@ const IRIS_WATERCOLOR: &[u8] = include_bytes!("../../web/iris-watercolor.png");
 // (web/src/*.ts → JS via oxc). Served under `/src/<path>`.
 include!(concat!(env!("OUT_DIR"), "/web_modules.rs"));
 
-pub(super) async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'none'; object-src 'none'; \
+    frame-ancestors 'none'; form-action 'none'; script-src 'self'; \
+    style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
+
+pub(super) async fn index() -> Response {
+    asset("text/html; charset=utf-8", INDEX_HTML)
 }
 
 /// Serve a transformed ES module from the embedded table. The router mounts
@@ -23,7 +27,7 @@ pub(super) async fn index() -> Html<&'static str> {
 pub(super) async fn src_module(Path(path): Path<String>) -> Response {
     match MODULES.iter().find(|(name, _)| *name == path.as_str()) {
         Some((_, body)) => asset("application/javascript; charset=utf-8", body),
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        None => secure((StatusCode::NOT_FOUND, "not found").into_response()),
     }
 }
 
@@ -44,9 +48,60 @@ pub(super) async fn iris_watercolor_png() -> Response {
 }
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {
-    ([(header::CONTENT_TYPE, content_type)], body).into_response()
+    secure(([(header::CONTENT_TYPE, content_type)], body).into_response())
 }
 
 fn asset_bytes(content_type: &'static str, body: &'static [u8]) -> Response {
-    ([(header::CONTENT_TYPE, content_type)], body).into_response()
+    secure(([(header::CONTENT_TYPE, content_type)], body).into_response())
+}
+
+fn secure(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_security_headers(response: &Response) {
+        let headers = response.headers();
+        assert_eq!(
+            headers.get(header::CONTENT_SECURITY_POLICY).unwrap(),
+            CONTENT_SECURITY_POLICY
+        );
+        assert_eq!(
+            headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert_eq!(headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(headers.get(header::REFERRER_POLICY).unwrap(), "no-referrer");
+    }
+
+    #[tokio::test]
+    async fn every_ui_asset_is_hardened() {
+        for response in [
+            index().await,
+            style_css().await,
+            favicon_svg().await,
+            ayame_logo_svg().await,
+            iris_watercolor_png().await,
+            src_module(Path("missing.js".to_string())).await,
+        ] {
+            assert_security_headers(&response);
+        }
+    }
 }

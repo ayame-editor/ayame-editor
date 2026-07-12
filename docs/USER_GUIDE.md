@@ -79,10 +79,6 @@ Then open `http://127.0.0.1:8777/`.
 
 ![Ayame Editor tools menu](assets/screenshot-tools.png)
 
-### Two-file Diff
-
-![Ayame Editor two-file diff dialog](assets/screenshot-diff.png)
-
 ## CLI Commands
 
 ```sh
@@ -92,11 +88,10 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side
 ayame sort huge.csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log
 ayame case huge.csv lower --out lower.csv
+ayame grep-lines huge.log 'ERROR' -i --out errors.log
 ayame split huge.csv --lines 1000000
 ayame group huge.csv -k 3 --value 5
 ayame top huge.csv -k 2 -n 100 --numeric
@@ -108,7 +103,7 @@ ayame serve huge.csv --port 8777
 
 These examples match the current `ayame --help` output. `sort --out <FILE>`
 writes sorted text to a file; without `--out`, `sort` writes to stdout.
-`replace` and `case` require `--out <FILE>`. `split` writes parts next to the
+`replace`, `case`, and `grep-lines` require `--out <FILE>`. `split` writes parts next to the
 input by default, using `<stem>.partNNNN<.ext>` names. Output commands refuse to
 overwrite existing files, so choose a new path when the target already exists.
 
@@ -121,10 +116,15 @@ option list.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII. If text is garbled, reopen with an explicit encoding.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
 - Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
-- Runs sort, replace, two-file diff, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
+- Runs sort, replace, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
 - Includes tabs, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.
+
+For file and directory comparison, use the sister project
+[ayame-diff](https://github.com/hjosugi/ayame-diff). The
+[diff migration guide](DIFF_MIGRATION.md) maps the former editor commands and UI
+to their replacements.
 
 ## Default Shortcuts
 

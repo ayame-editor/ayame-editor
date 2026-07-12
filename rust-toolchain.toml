@@ -1,5 +1,5 @@
 # Everyone (and CI) builds with the same stable toolchain + the components the
 # gate needs, so "works on my machine" formatting/lint drift can't happen.
 [toolchain]
-channel = "stable"
+channel = "1.94.1"
 components = ["rustfmt", "clippy"]

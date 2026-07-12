@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
@@ -199,48 +198,5 @@ fn write_ordered_lines_raw<W: Write>(
         }
     }
     progress(emitted);
-    Ok(())
-}
-
-/// Decoding line writer (UTF-8 + `\n`), for `sortdiff`'s intermediate
-/// artifacts only: they are re-opened with a forced UTF-8 encoding and
-/// compared as decoded text, possibly across two different source encodings.
-fn write_ordered_lines_utf8<W: Write>(
-    doc: &Document,
-    ordering_path: &Path,
-    w: &mut W,
-) -> Result<()> {
-    let mut rd = OrderingReader::open(ordering_path)?;
-    while let Some(ln) = rd.next_line()? {
-        if let Some(text) = doc.line(ln) {
-            writeln!(w, "{text}")?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn sort_document_to_utf8_file(
-    doc: &Document,
-    opts: &HashMap<String, String>,
-    flags: &HashSet<String>,
-    spill_dir: PathBuf,
-    out_path: &Path,
-) -> Result<()> {
-    let budget_bytes = parse_budget(opts)?;
-    let key_columns = parse_keys(opts)?;
-    let sopts = SortOptions {
-        key_column: key_columns.first().copied(),
-        key_columns,
-        fields: field_spec(opts, flags),
-        numeric: has_flag(flags, &["--numeric", "-n"]),
-        reverse: has_flag(flags, &["--reverse", "-r"]),
-        budget_bytes,
-        spill_dir: spill_dir.clone(),
-    };
-    let res = ayame_core::ops::sort(doc, &sopts)?;
-    // NOT the byte-preserving writer: sortdiff re-opens these artifacts with a
-    // forced UTF-8 encoding and compares decoded text across encodings.
-    write_sorted_output(doc, &res.ordering_path, out_path, write_ordered_lines_utf8)?;
-    let _ = std::fs::remove_dir_all(spill_dir);
     Ok(())
 }

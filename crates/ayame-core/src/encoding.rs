@@ -19,6 +19,7 @@ pub enum Encoding {
     Utf8,
     ShiftJis,
     EucJp,
+    Iso2022Jp,
     /// 7-bit ASCII (a strict, common subset; decoded as UTF-8).
     Ascii,
     /// Detected but not supported for indexing yet.
@@ -32,6 +33,7 @@ impl Encoding {
             Encoding::Utf8 => "UTF-8",
             Encoding::ShiftJis => "Shift_JIS",
             Encoding::EucJp => "EUC-JP",
+            Encoding::Iso2022Jp => "ISO-2022-JP",
             Encoding::Ascii => "ASCII",
             Encoding::Utf16Le => "UTF-16LE",
             Encoding::Utf16Be => "UTF-16BE",
@@ -48,6 +50,7 @@ impl Encoding {
             Encoding::Utf8 | Encoding::Ascii => encoding_rs::UTF_8,
             Encoding::ShiftJis => encoding_rs::SHIFT_JIS,
             Encoding::EucJp => encoding_rs::EUC_JP,
+            Encoding::Iso2022Jp => encoding_rs::ISO_2022_JP,
             Encoding::Utf16Le => encoding_rs::UTF_16LE,
             Encoding::Utf16Be => encoding_rs::UTF_16BE,
         }
@@ -97,6 +100,7 @@ impl Encoding {
             "ascii" | "usascii" => Encoding::Ascii,
             "shiftjis" | "sjis" | "cp932" | "windows31j" | "ms932" => Encoding::ShiftJis,
             "eucjp" | "euc" => Encoding::EucJp,
+            "iso2022jp" | "jis" | "jis7" => Encoding::Iso2022Jp,
             "utf16" | "utf16le" => Encoding::Utf16Le,
             "utf16be" => Encoding::Utf16Be,
             _ => return None,
@@ -108,7 +112,7 @@ impl Encoding {
             Encoding::Utf8 => &[0xEF, 0xBB, 0xBF],
             Encoding::Utf16Le => &[0xFF, 0xFE],
             Encoding::Utf16Be => &[0xFE, 0xFF],
-            Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => &[],
+            Encoding::ShiftJis | Encoding::EucJp | Encoding::Iso2022Jp | Encoding::Ascii => &[],
         }
     }
 }
@@ -172,6 +176,12 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
     if prefix.is_empty() {
         return (Encoding::Utf8, 0);
     }
+    if let Some(enc) = detect_bomless_utf16(prefix) {
+        return (enc, 0);
+    }
+    if looks_like_iso_2022_jp(prefix) {
+        return (Encoding::Iso2022Jp, 0);
+    }
     // Pure ASCII is a subset of UTF-8; report it as UTF-8 (the default users
     // expect) rather than a distinct "ASCII" label. The two are byte-identical
     // for ASCII content, so nothing about saving changes.
@@ -196,6 +206,42 @@ pub fn detect(buf: &[u8], override_enc: Option<Encoding>) -> (Encoding, usize) {
         Encoding::Utf8
     };
     (enc, 0)
+}
+
+/// Detect the common BOM-less UTF-16 shape before the UTF-8 fast path. ASCII
+/// text encoded as UTF-16 is technically valid UTF-8 because NUL is a valid
+/// byte, so relying on `from_utf8` alone produces visible NUL-filled text.
+fn detect_bomless_utf16(prefix: &[u8]) -> Option<Encoding> {
+    let pairs = prefix.len() / 2;
+    if pairs < 4 {
+        return None;
+    }
+    let mut even_nuls = 0usize;
+    let mut odd_nuls = 0usize;
+    for pair in prefix[..pairs * 2].chunks_exact(2) {
+        even_nuls += usize::from(pair[0] == 0);
+        odd_nuls += usize::from(pair[1] == 0);
+    }
+
+    // Require a strong one-sided NUL pattern and very few NULs on the payload
+    // side. This recognizes ASCII-heavy UTF-16 without classifying arbitrary
+    // binary data or ordinary UTF-8 containing an occasional NUL as UTF-16.
+    let strong = |n: usize| n * 10 >= pairs * 3;
+    let sparse = |n: usize| n * 20 <= pairs;
+    match (
+        strong(even_nuls) && sparse(odd_nuls),
+        strong(odd_nuls) && sparse(even_nuls),
+    ) {
+        (true, false) => Some(Encoding::Utf16Be),
+        (false, true) => Some(Encoding::Utf16Le),
+        _ => None,
+    }
+}
+
+fn looks_like_iso_2022_jp(prefix: &[u8]) -> bool {
+    prefix
+        .windows(3)
+        .any(|w| w == b"\x1b$B" || w == b"\x1b$@" || w == b"\x1b(I" || w == b"\x1b(J")
 }
 
 /// Line-ending styles, detected from a bounded prefix.
@@ -379,6 +425,7 @@ mod tests {
             Encoding::Utf8,
             Encoding::ShiftJis,
             Encoding::EucJp,
+            Encoding::Iso2022Jp,
             Encoding::Ascii,
         ] {
             assert_eq!(Encoding::parse(enc.label()), Some(enc));
@@ -392,6 +439,32 @@ mod tests {
         assert_eq!(detect_eol(b"a\rb\r"), Eol::Cr);
         assert_eq!(detect_eol(b"a\r\nb\nc"), Eol::Mixed);
         assert_eq!(detect_eol(b"no newline"), Eol::None);
+    }
+
+    #[test]
+    fn detects_bomless_utf16_before_utf8_fast_path() {
+        let le: Vec<u8> = "Hello UTF-16\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let be: Vec<u8> = "Hello UTF-16\n"
+            .encode_utf16()
+            .flat_map(u16::to_be_bytes)
+            .collect();
+        assert_eq!(detect(&le, None), (Encoding::Utf16Le, 0));
+        assert_eq!(detect(&be, None), (Encoding::Utf16Be, 0));
+    }
+
+    #[test]
+    fn detects_iso_2022_jp_before_utf8_fast_path() {
+        let (encoded, _, had_errors) = encoding_rs::ISO_2022_JP.encode("日本語のメールです");
+        assert!(!had_errors);
+        assert!(encoded.contains(&0x1b));
+        assert_eq!(detect(&encoded, None), (Encoding::Iso2022Jp, 0));
+        assert_eq!(
+            Encoding::Iso2022Jp.decode_line(&encoded),
+            "日本語のメールです"
+        );
     }
 
     #[test]

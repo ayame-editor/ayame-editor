@@ -1,5 +1,5 @@
 use crate::document::Document;
-use crate::fields::{field_bytes, FieldSpec};
+use crate::fields::{decoded_text_key_into, FieldSpec};
 
 // ===================== DISTINCT (HyperLogLog) ================================
 
@@ -78,13 +78,20 @@ impl Hll {
 pub fn distinct(doc: &Document, opts: &DistinctOptions) -> DistinctResult {
     use std::hash::{Hash, Hasher};
     let mut hll = Hll::new(opts.precision.clamp(4, 18));
-    let mut scratch = Vec::new();
+    let mut field_scratch = Vec::new();
+    let mut key_scratch = Vec::new();
+    let enc = doc.encoding();
     doc.for_each_raw_line(|_ln, raw| {
-        // Distinctness is over the (unescaped) field bytes; identical bytes
-        // hash identically, so no decode is needed here.
-        let field = field_bytes(raw, opts.key_column, &opts.fields, &mut scratch);
+        decoded_text_key_into(
+            raw,
+            enc,
+            opts.key_column,
+            &opts.fields,
+            &mut field_scratch,
+            &mut key_scratch,
+        );
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        field.hash(&mut h);
+        key_scratch.hash(&mut h);
         hll.add(h.finish());
     });
     DistinctResult {

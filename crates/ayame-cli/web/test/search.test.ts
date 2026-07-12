@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { charLenOf, inlineWordDiff, updateCount, utf16IndexOfCol } from "../src/search.js";
+import { charLenOf, scheduleCountUpdate, updateCount, utf16IndexOfCol } from "../src/search.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -35,19 +35,6 @@ describe("search pure helpers", () => {
     expect(utf16IndexOfCol(text, 3)).toBe(4);
   });
 
-  it("marks changed word runs while preserving shared tokens", () => {
-    const diff = inlineWordDiff("alpha beta gamma", "alpha delta gamma");
-    expect(diff.oldParts.map((p) => [p.text, p.changed])).toEqual([
-      ["alpha ", false],
-      ["beta", true],
-      [" gamma", false],
-    ]);
-    expect(diff.newParts.map((p) => [p.text, p.changed])).toEqual([
-      ["alpha ", false],
-      ["delta", true],
-      [" gamma", false],
-    ]);
-  });
 });
 
 describe("search count request generation (#123)", () => {
@@ -76,5 +63,27 @@ describe("search count request generation (#123)", () => {
     await oldCount;
     expect(state.searchHits).toEqual([{ byte: 2 }]);
     expect(document.getElementById("find-count")?.textContent).toBe("1 matches");
+  });
+
+  it("debounces count requests while the user is typing (#162)", async () => {
+    vi.useFakeTimers();
+    try {
+      document.body.innerHTML = '<span id="find-count"></span>';
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      const fetchMock = vi.fn(async () => jsonResponse({ hits: [], truncated: false }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      state.query = "a";
+      scheduleCountUpdate();
+      state.query = "ab";
+      scheduleCountUpdate();
+      await vi.advanceTimersByTimeAsync(149);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toContain("q=ab");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

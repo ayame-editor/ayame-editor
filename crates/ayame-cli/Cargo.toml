@@ -26,6 +26,7 @@ typeship-ts-rs = { version = "0.2", optional = true }
 ayame-core = { path = "../ayame-core" }
 anyhow.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ring = "0.17"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
@@ -55,12 +56,15 @@ muda = { version = "0.19", optional = true }
 # build.rs and src/serve/assets.rs. tsc is only a CI type gate, never a runtime
 # or release-build dependency.
 [build-dependencies]
-oxc_allocator = "0.138"
-oxc_parser = "0.138"
-oxc_span = "0.138"
-oxc_semantic = "0.138"
-oxc_transformer = "0.138"
-oxc_codegen = "0.138"
+# 0.129.0+ uses unstable `if let` match guards despite declaring an MSRV on
+# stable Rust. Keep this family aligned and exact until that code is removed
+# upstream; 0.128.0 builds on Rust 1.94 stable.
+oxc_allocator = "=0.128.0"
+oxc_parser = "=0.128.0"
+oxc_span = "=0.128.0"
+oxc_semantic = "=0.128.0"
+oxc_transformer = "=0.128.0"
+oxc_codegen = "=0.128.0"
 
 [lints]
 workspace = true

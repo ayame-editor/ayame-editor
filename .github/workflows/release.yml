@@ -52,12 +52,11 @@ jobs:
             rustflags: ""
     steps:
       - uses: actions/checkout@v5
-      - name: Install Rust stable
+      - name: Install Rust 1.94.1 stable
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add "${{ matrix.target }}"
+          rustup toolchain install 1.94.1 --profile minimal --target "${{ matrix.target }}"
+          rustup default 1.94.1
       - name: Install Linux webview deps
         if: runner.os == 'Linux'
         run: |
@@ -151,6 +150,26 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Sign checksums
+        shell: bash
+        env:
+          AYAME_UPDATE_SIGNING_KEY: ${{ secrets.AYAME_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AYAME_UPDATE_SIGNING_KEY:-}" ]; then
+            echo "AYAME_UPDATE_SIGNING_KEY is required for signed updates" >&2
+            exit 1
+          fi
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          chmod 600 "$key"
+          printf '%s' "$AYAME_UPDATE_SIGNING_KEY" > "$key"
+          for checksum in dist/*.sha256; do
+            openssl pkeyutl -sign -rawin -inkey "$key" \
+              -in "$checksum" -out "$checksum.sig.bin"
+            od -An -v -tx1 "$checksum.sig.bin" | tr -d ' \n' > "$checksum.sig"
+            rm -f "$checksum.sig.bin"
+          done
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

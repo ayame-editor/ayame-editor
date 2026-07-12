@@ -41,11 +41,6 @@ export type BatchEditResponse = {
   stats: { total_lines: number };
 };
 
-export type DiffResponse = {
-  hunk_count: number;
-  [key: string]: unknown;
-};
-
 export type ApiError = Error & { code?: string };
 
 export function isApiErrorCode(error: unknown, code: string): boolean {

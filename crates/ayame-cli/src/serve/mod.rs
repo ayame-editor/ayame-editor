@@ -51,9 +51,20 @@ const MAX_VIEW: u64 = 20_000;
 pub fn cmd_serve(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
+        &[
+            "--encoding",
+            "--stride",
+            "--host",
+            "--port",
+            "--cache-dir",
+            "--scratch-dir",
+        ],
         &["--no-cache", "--allow-remote"],
     )?;
+    if let Some(path) = first_opt(&opts, &["--scratch-dir"]) {
+        crate::temp_paths::configure_temp_root(Path::new(path))
+            .with_context(|| format!("configuring scratch directory {path}"))?;
+    }
     let host = first_opt(&opts, &["--host"])
         .unwrap_or("127.0.0.1")
         .to_string();
@@ -187,7 +198,6 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/search", get(ops::api_search))
         .route("/api/grep", post(ops::api_grep))
         .route("/api/find", get(ops::api_find))
-        .route("/api/diff", get(ops::api_diff))
         .route("/api/linebyte", get(ops::api_linebyte))
         .layer(axum::middleware::from_fn_with_state(
             policy,
@@ -221,6 +231,7 @@ async fn serve(
     policy: Arc<NetPolicy>,
     remote_active: bool,
 ) -> Result<()> {
+    ops::initialize_worker_executable()?;
     spawn_wal_policy(&state);
     let app = router(state.clone(), policy);
     // Resolve rather than parse: the loopback policy blesses the NAME
@@ -253,6 +264,7 @@ async fn serve(
     // the recovery artifact the next process offers to replay.
     state.cleanup_wal_files();
     state.cleanup_aside_files();
+    ops::cancel_operations_and_cleanup_worker();
     workspace::cleanup_temp_dirs();
     result
 }
@@ -275,6 +287,7 @@ fn resolve_bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
 pub(crate) fn spawn_background(state: SharedState) -> Result<SocketAddr> {
     use std::sync::mpsc;
 
+    ops::initialize_worker_executable()?;
     spawn_wal_policy(&state);
     let (tx, rx) = mpsc::channel::<Result<SocketAddr>>();
     std::thread::Builder::new()
@@ -324,6 +337,14 @@ pub(crate) fn spawn_background(state: SharedState) -> Result<SocketAddr> {
         .context("spawning server thread")?;
 
     rx.recv().context("server thread died before binding")?
+}
+
+#[cfg(feature = "gui")]
+pub(crate) fn cleanup_background(state: &SharedState) {
+    state.cleanup_wal_files();
+    state.cleanup_aside_files();
+    ops::cancel_operations_and_cleanup_worker();
+    workspace::cleanup_temp_dirs();
 }
 
 // ---- API ----------------------------------------------------------------------

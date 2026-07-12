@@ -38,6 +38,10 @@ nav:
   - Home: index.md
   - User Guide: USER_GUIDE.md
   - CLI Reference: CLI_REFERENCE.md
+  - Diff Migration: DIFF_MIGRATION.md
+  - Decisions:
+      - ADR Index: adr/README.md
+      - ADR 0001 - Diff Extraction: adr/0001-diff-extraction-and-deprecation.en.md
   - Architecture: ARCHITECTURE.md
   - Data Integrity: DATA_INTEGRITY.md
   - Packaging: PACKAGING.md
@@ -46,6 +50,8 @@ nav:
       - ホーム: ja/index.md
       - ユーザー向け: ja/USER_GUIDE.md
       - CLI リファレンス: ja/CLI_REFERENCE.md
+      - diff 移行ガイド: ja/DIFF_MIGRATION.md
+      - ADR 0001 - diff 切り出し: adr/0001-diff-extraction-and-deprecation.md
       - アーキテクチャ: ja/ARCHITECTURE.md
       - データ完全性: ja/DATA_INTEGRITY.md
       - 配布: ja/PACKAGING.md

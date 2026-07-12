@@ -24,7 +24,7 @@ vi.mock("../src/search.js", () => ({
   flashCount: vi.fn(),
 }));
 
-import { commas } from "../src/dom.js";
+import { commas, humanBytes } from "../src/dom.js";
 import { setCaret } from "../src/editor.js";
 import { gotoLine } from "../src/edits.js";
 import { state } from "../src/state.js";
@@ -75,5 +75,14 @@ describe("line-number precision at extreme scale (#53)", () => {
       gotoLine("abc");
       expect(setCaret).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("locale-aware numbers", () => {
+  it("uses the active document locale for grouping and decimal separators", () => {
+    document.documentElement.lang = "de-DE";
+    expect(commas(1234)).toBe("1.234");
+    expect(humanBytes(1536)).toBe("1,50 KiB");
+    document.documentElement.lang = "en";
   });
 });

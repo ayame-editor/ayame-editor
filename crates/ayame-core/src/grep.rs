@@ -174,14 +174,16 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
     }
     let mmap = unsafe { Mmap::map(&file)? };
     let buf: &[u8] = &mmap;
-    if looks_binary(buf) {
+    let (enc, base) = encoding::detect(buf, None);
+    if looks_binary(buf) && !enc.is_wide() {
         return Ok(Vec::new());
     }
-    let (enc, base) = encoding::detect(buf, None);
     let base = base as u64;
+    let eol = encoding::detect_eol_for(&buf[base as usize..], enc);
     let index = match enc {
         Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, DEFAULT_STRIDE),
         Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, DEFAULT_STRIDE),
+        _ if eol == crate::Eol::Cr => LineIndex::build_cr(buf, base, DEFAULT_STRIDE),
         _ => LineIndex::build(buf, base, DEFAULT_STRIDE),
     };
     let sopts = SearchOptions {

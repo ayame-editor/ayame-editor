@@ -50,3 +50,17 @@ install, it refuses to modify it and points users at the manager-native command:
 
 The same rule applies to `ayame remove`: package-manager installs should be
 removed with `brew uninstall`, `scoop uninstall`, or Nix.
+
+## Release signing
+
+Self-update trusts an Ed25519 public key compiled into `cli/update.rs`. The
+release workflow requires the matching PEM private key in the repository secret
+`AYAME_UPDATE_SIGNING_KEY`. It signs the exact bytes of every
+`<asset>.sha256` file and publishes the hexadecimal signature as
+`<asset>.sha256.sig`; release publication fails closed when the secret is
+missing.
+
+Keep the private key outside the repository with mode `0600`, restrict access to
+release maintainers, and back it up as a secret. Key rotation requires updating
+the compiled public key and shipping that update before releases signed only by
+the new key.

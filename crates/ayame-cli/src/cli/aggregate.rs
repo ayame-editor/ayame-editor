@@ -152,8 +152,8 @@ fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std:
                 "{key}\t{}\t{}\t{}\t{}\t{}",
                 row.count,
                 row.sum,
-                row.min,
-                row.max,
+                row.min.unwrap(),
+                row.max.unwrap(),
                 row.avg().unwrap()
             )
         } else {

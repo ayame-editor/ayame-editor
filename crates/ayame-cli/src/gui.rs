@@ -19,7 +19,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebContext, WebViewBuilder};
 
-use crate::{has_flag, parse_checked};
+use crate::{first_opt, has_flag, parse_checked};
 
 pub fn cmd_gui(args: &[String]) -> Result<()> {
     // Same file-opening options as `serve`; the window opens empty if no FILE.
@@ -28,9 +28,13 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // the crash-recovery prompt.
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--cache-dir"],
+        &["--encoding", "--stride", "--cache-dir", "--scratch-dir"],
         &["--no-cache", "--recover"],
     )?;
+    if let Some(path) = first_opt(&opts, &["--scratch-dir"]) {
+        crate::temp_paths::configure_temp_root(Path::new(path))
+            .with_context(|| format!("configuring scratch directory {path}"))?;
+    }
     let recover_pending = has_flag(&flags, &["--recover"]);
     let title = initial_window_title(&pos);
 
@@ -38,7 +42,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // /api/open) so the window appears immediately instead of after the first
     // index build of a huge file. Explicit open options (--encoding etc.)
     // still take the synchronous path because /api/open does not carry them.
-    let async_open = !pos.is_empty() && opts.is_empty();
+    let has_explicit_open_options = ["--encoding", "--stride", "--cache-dir"]
+        .iter()
+        .any(|name| opts.contains_key(*name));
+    let async_open = !pos.is_empty() && !has_explicit_open_options;
     let state = if async_open {
         let no_file: Vec<String> = Vec::new();
         Arc::new(crate::serve::build_state(&no_file, &opts, &flags)?)
@@ -52,7 +59,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     };
 
     // Bring the editor up behind the window and learn its loopback address.
-    let addr = crate::serve::spawn_background(state)?;
+    let addr = crate::serve::spawn_background(state.clone())?;
     let url = format!("http://{addr}/");
     eprintln!("ayame: native window → {url}");
 
@@ -213,6 +220,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         if close_pending && close_deadline.is_some_and(|deadline| now >= deadline) {
             eprintln!("ayame: close confirmation timed out; exiting");
             save_window_state(&window, last_normal.as_ref());
+            crate::serve::cleanup_background(&state);
             *control_flow = ControlFlow::Exit;
             return;
         }
@@ -228,39 +236,35 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         #[cfg(target_os = "macos")]
         let _ = &macos_menu;
         match event {
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                if !shown {
-                    shown = true;
-                    window.set_visible(true);
-                    if start_maximized {
-                        window.set_maximized(true);
-                    }
-                    maybe_start_startup_update_check(
-                        &proxy,
-                        shown,
-                        update_check_enabled,
-                        &mut update_check_started,
-                    );
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) if !shown => {
+                shown = true;
+                window.set_visible(true);
+                if start_maximized {
+                    window.set_maximized(true);
                 }
+                maybe_start_startup_update_check(
+                    &proxy,
+                    shown,
+                    update_check_enabled,
+                    &mut update_check_started,
+                );
             }
             Event::WindowEvent {
                 event: WindowEvent::Moved(_) | WindowEvent::Resized(_),
                 ..
-            } => {
+            } if !window.is_maximized() => {
                 // Track the un-maximized geometry as it changes; maximized
                 // bounds are useless for restore and are skipped.
-                if !window.is_maximized() {
-                    let size = window.inner_size();
-                    if size.width > 0 && size.height > 0 {
-                        let pos = window.outer_position().ok();
-                        last_normal = Some(WindowState {
-                            x: pos.map(|p| p.x),
-                            y: pos.map(|p| p.y),
-                            width: size.width,
-                            height: size.height,
-                            maximized: false,
-                        });
-                    }
+                let size = window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    let pos = window.outer_position().ok();
+                    last_normal = Some(WindowState {
+                        x: pos.map(|p| p.x),
+                        y: pos.map(|p| p.y),
+                        width: size.width,
+                        height: size.height,
+                        maximized: false,
+                    });
                 }
             }
             Event::WindowEvent {
@@ -274,11 +278,13 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 close_deadline = Some(Instant::now() + close_timeout);
                 if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
                     save_window_state(&window, last_normal.as_ref());
+                    crate::serve::cleanup_background(&state);
                     *control_flow = ControlFlow::Exit;
                 }
             }
             Event::UserEvent(GuiEvent::CloseConfirmed) => {
                 save_window_state(&window, last_normal.as_ref());
+                crate::serve::cleanup_background(&state);
                 *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(GuiEvent::CloseCanceled) => {
@@ -342,6 +348,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     close_deadline = Some(Instant::now() + close_timeout);
                     if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
                         save_window_state(&window, last_normal.as_ref());
+                        crate::serve::cleanup_background(&state);
                         *control_flow = ControlFlow::Exit;
                     }
                 } else if id == "newWindow" {
@@ -862,7 +869,6 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
         true,
         &[
             &item("sortSave", label("ソート", "Sort"), None),
-            &item("diffFile", label("2ファイル差分", "Diff Files"), None),
             &item("splitFile", label("ファイルを分割", "Split File"), None),
             &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
             &item("grepSave", label("grep して保存", "Grep to File"), None),

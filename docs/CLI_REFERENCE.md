@@ -25,9 +25,7 @@ print help.
 | `line <FILE> <N>` | Print one 1-based line. |
 | `lines <FILE> <START> <COUNT>` | Print COUNT lines from START, both 1-based. |
 | `search <FILE> <PATTERN>` | Search with literal, regex, ignore-case, whole-word, and max-result options. |
-| `diff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `text`. Compare two files with line hunks or side-by-side output. |
 | `sort <FILE>` | External merge sort with memory-bounded spill files. |
-| `sortdiff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `sorted`. Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
 | `case <FILE> <MODE>` | Streaming case conversion (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) to a new output file. |
 | `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |
@@ -51,6 +49,7 @@ print help.
 | `--stride <N>` | file-opening commands | Lines per sparse-index checkpoint. Default: 4096. |
 | `--no-cache` | file-opening commands | Disable persistent index-cache reads and writes. |
 | `--cache-dir <DIR>` | file-opening commands | Override the index-cache directory. |
+| `--scratch-dir <DIR>` | `serve`, `gui` | Place uploads, worker snapshots, materialized dirty views, and data-op spill files on this filesystem. `AYAME_SCRATCH_DIR` provides the same default. |
 | `--json` | `stat`, `search`, `split`, `group`, `top`, `distinct`, `cache` | Emit machine-readable output on stdout. |
 | `-V`, `--version` | global | Print the version. |
 | `-h`, `--help` | global | Print command help. |
@@ -151,10 +150,12 @@ stdout.
 | `update` | `--version <VERSION>` selects a release tag (`latest` by default); `--install-dir <DIR>` installs there instead of replacing the current install; `--force` allows installing an equal or older release; `--dry-run` resolves the release without changing files. |
 | `remove` | `--install-dir <DIR>` removes that install target instead of the current install; `--yes` skips the confirmation prompt; `--dry-run` prints the target without changing files. |
 
-`update` verifies the release `.sha256` file before installing. On macOS it
-updates `Ayame.app` when running from an app bundle; otherwise it can replace a
-standalone binary. On Windows, replacing or removing the running executable is
-completed by a helper after the current process exits. Binaries running from
+`update` verifies the Ed25519 signature on the release `.sha256` sidecar and
+then verifies the downloaded artifact before installing. Missing or invalid
+signatures are rejected. On macOS it updates `Ayame.app` when running from an
+app bundle; otherwise it can replace a standalone binary. On Windows, replacing
+or removing the running executable is completed by a helper after the current
+process exits. Binaries running from
 `/nix/store` are treated as Nix-managed and are not modified; update or remove
 them through Nix, or pass `--install-dir` to install a standalone release
 elsewhere.
@@ -181,9 +182,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

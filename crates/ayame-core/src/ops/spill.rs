@@ -24,9 +24,9 @@ use super::common::read_full;
 use crate::Result;
 
 /// Stack width for a decoded payload — comfortably above every [`Payload`]
-/// (`u64` = 8, `Acc` = 40). A generic `[0u8; P::LEN]` is not allowed, so
+/// (`u64` = 8, exact group `Acc` = 305). A generic `[0u8; P::LEN]` is not allowed, so
 /// [`RunReader::next_record`] reads into `P::LEN` of a buffer this wide instead.
-const MAX_PAYLOAD_LEN: usize = 64;
+const MAX_PAYLOAD_LEN: usize = 320;
 
 /// A fixed-width value stored next to a key in a spill run. `sort` uses `u64`
 /// (the line number); `group` uses its `Acc`.

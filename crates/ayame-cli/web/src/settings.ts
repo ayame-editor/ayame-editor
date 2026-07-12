@@ -72,7 +72,7 @@ export const THEME_PRESETS = {
       paper2: "#FDFCF8",
       ink: "#2A2140",
       inkDim: "#6E6383",
-      inkFaint: "#A99DBC",
+      inkFaint: "#756A88",
       accent: "#7A5CC0",
       accent2: "#6A4CB0",
       gold: "#C79A2E",
@@ -101,7 +101,7 @@ export const THEME_PRESETS = {
       paper2: "#FDFEFF",
       ink: "#26314A",
       inkDim: "#5E6E8A",
-      inkFaint: "#9DAAC0",
+      inkFaint: "#65748C",
       accent: "#5B79C9",
       accent2: "#4A68B8",
       gold: "#C9A24E",
@@ -130,7 +130,7 @@ export const THEME_PRESETS = {
       paper2: "#FFFBF7",
       ink: "#3A2438",
       inkDim: "#7A5A6E",
-      inkFaint: "#B79AA6",
+      inkFaint: "#806878",
       accent: "#A65CB0",
       accent2: "#944EA0",
       gold: "#E0A94E",
@@ -159,7 +159,7 @@ export const THEME_PRESETS = {
       paper2: "#FFFFFF",
       ink: "#222024",
       inkDim: "#63616A",
-      inkFaint: "#A7A4AE",
+      inkFaint: "#716E78",
       accent: "#7A5CC0",
       accent2: "#6A4CB0",
       gold: "#B7912F",
@@ -187,7 +187,7 @@ export const THEME_PRESETS = {
       paper2: "#FBFAF5",
       ink: "#24231F",
       inkDim: "#6C6A63",
-      inkFaint: "#A9A69D",
+      inkFaint: "#716E66",
       accent: "#6F6B79",
       accent2: "#605C6C",
       gold: "#7A7568",
@@ -290,7 +290,7 @@ export function applySettings(s) {
     root.dataset.theme = "custom";
     if (t) applyCustomVars(t);
   } else {
-    root.dataset.theme = s.theme || "iris-light"; // iris-* | dark | black (unknown → :root)
+    root.dataset.theme = resolveTheme(s.theme); // iris-* | dark | black (unknown → :root)
   }
   // ---- whitespace glyphs: swap the zenkaku-space box for an underline ----
   root.classList.toggle("zenkaku-underline", !!s.zenkakuUnderline);
@@ -385,8 +385,15 @@ export function themeJSONFor(id) {
   return THEME_PRESETS[id] || null;
 }
 
+export function resolveTheme(
+  id,
+  prefersDark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
+) {
+  return id === "system" ? (prefersDark ? "dark" : "iris-light") : id || "iris-light";
+}
+
 export function themeIllusPct(id) {
-  const t = themeJSONFor(id);
+  const t = themeJSONFor(resolveTheme(id));
   return Math.round(((t && t.illustration) ?? 0) * 100);
 }
 
@@ -534,6 +541,9 @@ function notifyNativeUpdateCheckSetting() {
 export function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
+  globalThis.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (state.settings.theme === "system") applySettings(state.settings);
+  });
   notifyNativeUpdateCheckSetting();
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;

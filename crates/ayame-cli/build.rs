@@ -94,17 +94,23 @@ fn transform_ts(path: &Path, source: &str) -> String {
     let source_type = SourceType::from_path(path).unwrap();
     let parser_ret = Parser::new(&allocator, source, source_type).parse();
     assert!(
-        !parser_ret.panicked,
+        !parser_ret.panicked && parser_ret.errors.is_empty(),
         "oxc failed to parse {}: {:?}",
         path.display(),
-        parser_ret.diagnostics
+        parser_ret.errors
     );
     let mut program = parser_ret.program;
-    let scoping = SemanticBuilder::new()
+    let semantic_ret = SemanticBuilder::new()
+        .with_check_syntax_error(true)
         .with_enum_eval(true)
-        .build(&program)
-        .semantic
-        .into_scoping();
+        .build(&program);
+    assert!(
+        semantic_ret.errors.is_empty(),
+        "oxc semantic validation failed for {}: {:?}",
+        path.display(),
+        semantic_ret.errors
+    );
+    let scoping = semantic_ret.semantic.into_scoping();
     let options = TransformOptions::default();
     Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     Codegen::new().build(&program).code

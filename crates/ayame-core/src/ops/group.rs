@@ -8,7 +8,7 @@ use crate::document::Document;
 use crate::fields::{decoded_text_key_into, field_bytes, FieldSpec};
 use crate::Result;
 
-use super::common::unique_spill_dir;
+use super::common::SpillGuard;
 use super::spill::{self, HeapEntry, Payload, RunReader};
 
 // ======================= group-by (hash aggregation) =========================
@@ -47,8 +47,8 @@ pub struct GroupRow {
     /// How many rows had a parseable numeric value (for avg).
     pub numeric_count: u64,
     pub sum: f64,
-    pub min: f64,
-    pub max: f64,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 impl GroupRow {
@@ -72,9 +72,169 @@ pub struct GroupStats {
 struct Acc {
     count: u64,
     ncount: u64,
-    sum: f64,
+    sum: ExactSum,
     min: f64,
     max: f64,
+}
+
+// Every finite f64 is an integer multiple of 2^-1074. Keeping that integer in
+// a fixed-width sign/magnitude accumulator makes addition exact and associative,
+// so spilling and merging partial groups cannot change the final rounded f64.
+const SUM_LIMBS: usize = 34;
+
+#[derive(Clone, Copy)]
+struct ExactSum {
+    magnitude: [u64; SUM_LIMBS],
+    negative: bool,
+}
+
+impl ExactSum {
+    const fn zero() -> Self {
+        Self {
+            magnitude: [0; SUM_LIMBS],
+            negative: false,
+        }
+    }
+
+    fn add_f64(&mut self, value: f64) {
+        debug_assert!(value.is_finite());
+        let bits = value.to_bits();
+        let exponent = ((bits >> 52) & 0x7ff) as usize;
+        let mantissa = bits & ((1u64 << 52) - 1);
+        let (mantissa, shift) = if exponent == 0 {
+            (mantissa, 0)
+        } else {
+            (mantissa | (1u64 << 52), exponent - 1)
+        };
+        if mantissa == 0 {
+            return;
+        }
+        let mut term = [0u64; SUM_LIMBS];
+        let limb = shift / 64;
+        let offset = shift % 64;
+        term[limb] = mantissa << offset;
+        if offset != 0 {
+            term[limb + 1] = mantissa >> (64 - offset);
+        }
+        self.add_signed(&term, bits >> 63 != 0);
+    }
+
+    fn combine(&mut self, other: &Self) {
+        self.add_signed(&other.magnitude, other.negative);
+    }
+
+    fn add_signed(&mut self, term: &[u64; SUM_LIMBS], negative: bool) {
+        if term.iter().all(|&limb| limb == 0) {
+            return;
+        }
+        if self.magnitude.iter().all(|&limb| limb == 0) {
+            self.magnitude = *term;
+            self.negative = negative;
+            return;
+        }
+        if self.negative == negative {
+            add_magnitude(&mut self.magnitude, term);
+            return;
+        }
+
+        match compare_magnitude(&self.magnitude, term) {
+            std::cmp::Ordering::Greater => subtract_magnitude(&mut self.magnitude, term),
+            std::cmp::Ordering::Equal => {
+                self.magnitude = [0; SUM_LIMBS];
+                self.negative = false;
+            }
+            std::cmp::Ordering::Less => {
+                let current = self.magnitude;
+                self.magnitude = *term;
+                subtract_magnitude(&mut self.magnitude, &current);
+                self.negative = negative;
+            }
+        }
+    }
+
+    fn as_f64(self) -> f64 {
+        let Some(mut highest) = highest_bit(&self.magnitude) else {
+            return 0.0;
+        };
+        let sign = u64::from(self.negative) << 63;
+        if highest < 52 {
+            return f64::from_bits(sign | self.magnitude[0]);
+        }
+
+        let shift = highest - 52;
+        let mut mantissa = shifted_low_u64(&self.magnitude, shift);
+        if shift > 0 {
+            let halfway = bit_is_set(&self.magnitude, shift - 1);
+            let below_halfway = any_bit_below(&self.magnitude, shift - 1);
+            if halfway && (below_halfway || mantissa & 1 != 0) {
+                mantissa += 1;
+                if mantissa == 1u64 << 53 {
+                    mantissa >>= 1;
+                    highest += 1;
+                }
+            }
+        }
+        if highest > 2097 {
+            return f64::from_bits(sign | (0x7ffu64 << 52));
+        }
+        let exponent_bits = (highest - 51) as u64;
+        let fraction = mantissa & ((1u64 << 52) - 1);
+        f64::from_bits(sign | (exponent_bits << 52) | fraction)
+    }
+}
+
+fn compare_magnitude(a: &[u64; SUM_LIMBS], b: &[u64; SUM_LIMBS]) -> std::cmp::Ordering {
+    a.iter().rev().cmp(b.iter().rev())
+}
+
+fn add_magnitude(a: &mut [u64; SUM_LIMBS], b: &[u64; SUM_LIMBS]) {
+    let mut carry = false;
+    for (left, right) in a.iter_mut().zip(b) {
+        let (sum, carry1) = left.overflowing_add(*right);
+        let (sum, carry2) = sum.overflowing_add(u64::from(carry));
+        *left = sum;
+        carry = carry1 || carry2;
+    }
+    debug_assert!(!carry, "exact f64 accumulator overflow");
+}
+
+fn subtract_magnitude(a: &mut [u64; SUM_LIMBS], b: &[u64; SUM_LIMBS]) {
+    let mut borrow = false;
+    for (left, right) in a.iter_mut().zip(b) {
+        let (difference, borrow1) = left.overflowing_sub(*right);
+        let (difference, borrow2) = difference.overflowing_sub(u64::from(borrow));
+        *left = difference;
+        borrow = borrow1 || borrow2;
+    }
+    debug_assert!(!borrow, "magnitude subtraction underflow");
+}
+
+fn highest_bit(value: &[u64; SUM_LIMBS]) -> Option<usize> {
+    value
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, &limb)| (limb != 0).then(|| i * 64 + (63 - limb.leading_zeros() as usize)))
+}
+
+fn shifted_low_u64(value: &[u64; SUM_LIMBS], shift: usize) -> u64 {
+    let limb = shift / 64;
+    let offset = shift % 64;
+    let mut out = value[limb] >> offset;
+    if offset != 0 && limb + 1 < SUM_LIMBS {
+        out |= value[limb + 1] << (64 - offset);
+    }
+    out
+}
+
+fn bit_is_set(value: &[u64; SUM_LIMBS], bit: usize) -> bool {
+    value[bit / 64] & (1u64 << (bit % 64)) != 0
+}
+
+fn any_bit_below(value: &[u64; SUM_LIMBS], bit: usize) -> bool {
+    let full_limbs = bit / 64;
+    value[..full_limbs].iter().any(|&limb| limb != 0)
+        || (!bit.is_multiple_of(64) && value[full_limbs] & ((1u64 << (bit % 64)) - 1) != 0)
 }
 
 impl Acc {
@@ -82,7 +242,7 @@ impl Acc {
         Acc {
             count: 0,
             ncount: 0,
-            sum: 0.0,
+            sum: ExactSum::zero(),
             min: f64::INFINITY,
             max: f64::NEG_INFINITY,
         }
@@ -91,7 +251,7 @@ impl Acc {
         self.count += 1;
         if let Some(x) = v {
             self.ncount += 1;
-            self.sum += x;
+            self.sum.add_f64(x);
             self.min = self.min.min(x);
             self.max = self.max.max(x);
         }
@@ -99,18 +259,21 @@ impl Acc {
     fn combine(&mut self, o: &Acc) {
         self.count += o.count;
         self.ncount += o.ncount;
-        self.sum += o.sum;
+        self.sum.combine(&o.sum);
         self.min = self.min.min(o.min);
         self.max = self.max.max(o.max);
     }
 }
 
 impl Payload for Acc {
-    const LEN: usize = 40;
+    const LEN: usize = 305;
     fn write_to(&self, out: &mut impl Write) -> std::io::Result<()> {
         out.write_all(&self.count.to_le_bytes())?;
         out.write_all(&self.ncount.to_le_bytes())?;
-        out.write_all(&self.sum.to_le_bytes())?;
+        out.write_all(&[u8::from(self.sum.negative)])?;
+        for limb in self.sum.magnitude {
+            out.write_all(&limb.to_le_bytes())?;
+        }
         out.write_all(&self.min.to_le_bytes())?;
         out.write_all(&self.max.to_le_bytes())?;
         Ok(())
@@ -119,9 +282,15 @@ impl Payload for Acc {
         Acc {
             count: u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
             ncount: u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
-            sum: f64::from_le_bytes(bytes[16..24].try_into().unwrap()),
-            min: f64::from_le_bytes(bytes[24..32].try_into().unwrap()),
-            max: f64::from_le_bytes(bytes[32..40].try_into().unwrap()),
+            sum: ExactSum {
+                negative: bytes[16] != 0,
+                magnitude: std::array::from_fn(|i| {
+                    let start = 17 + i * 8;
+                    u64::from_le_bytes(bytes[start..start + 8].try_into().unwrap())
+                }),
+            },
+            min: f64::from_le_bytes(bytes[289..297].try_into().unwrap()),
+            max: f64::from_le_bytes(bytes[297..305].try_into().unwrap()),
         }
     }
 }
@@ -137,7 +306,8 @@ pub fn group(
     mut emit: impl FnMut(&GroupRow),
 ) -> Result<GroupStats> {
     use std::collections::HashMap;
-    let spill_dir = unique_spill_dir(&opts.spill_dir)?;
+    let spill = SpillGuard::create(&opts.spill_dir)?;
+    let spill_dir = spill.path().to_path_buf();
     let enc = doc.encoding();
 
     let mut map: HashMap<Vec<u8>, Acc> = HashMap::new();
@@ -159,7 +329,11 @@ pub fn group(
             );
             let value = opts.value_column.and_then(|c| {
                 let f = field_bytes(raw, Some(c), &opts.fields, &mut field_scratch);
-                enc.decode_line(f).trim().parse::<f64>().ok()
+                enc.decode_line(f)
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
             });
             match map.get_mut(key_scratch.as_slice()) {
                 Some(acc) => acc.add(value),
@@ -197,7 +371,7 @@ pub fn group(
             let _ = fs::remove_file(r);
         }
     }
-    let _ = fs::remove_dir(&spill_dir);
+    spill.finish();
 
     Ok(GroupStats {
         groups,
@@ -211,9 +385,9 @@ fn group_row(key: Vec<u8>, acc: &Acc) -> GroupRow {
         key,
         count: acc.count,
         numeric_count: acc.ncount,
-        sum: acc.sum,
-        min: acc.min,
-        max: acc.max,
+        sum: acc.sum.as_f64(),
+        min: (acc.ncount > 0).then_some(acc.min),
+        max: (acc.ncount > 0).then_some(acc.max),
     }
 }
 

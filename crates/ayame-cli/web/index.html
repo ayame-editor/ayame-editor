@@ -96,6 +96,10 @@
             <button class="menu-item" data-menu-action="undo" role="menuitem"><span class="menu-label" data-i18n="menu.undo">元に戻す</span><span class="menu-key" data-key-action="undo">Ctrl+Z</span></button>
             <button class="menu-item" data-menu-action="redo" role="menuitem"><span class="menu-label" data-i18n="menu.redo">やり直す</span><span class="menu-key" data-key-action="redo">Ctrl+Y</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
+            <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
+            <button class="menu-item" data-menu-action="paste" role="menuitem"><span class="menu-label" data-i18n="menu.paste">貼り付け</span><span class="menu-key">Ctrl+V</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label" data-i18n="menu.find">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
             <button class="menu-item" data-menu-action="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
             <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label" data-i18n="menu.gotoLine">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
@@ -111,8 +115,6 @@
           <div id="selection-menu" class="file-menu hidden" role="menu" aria-label="選択" data-i18n-aria-label="menu.selection">
             <button class="menu-item" data-menu-action="selectAll" role="menuitem"><span class="menu-label" data-i18n="menu.selectAll">すべて選択</span><span class="menu-key" data-key-action="selectAll">Ctrl+A</span></button>
             <button class="menu-item" data-menu-action="selectNextOccurrence" role="menuitem"><span class="menu-label" data-i18n="menu.selectNextOccurrence">次の一致を選択</span><span class="menu-key" data-key-action="selectNextOccurrence">Ctrl+D</span></button>
-            <button class="menu-item" data-menu-action="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
-            <button class="menu-item" data-menu-action="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="addCursorAbove" role="menuitem"><span class="menu-label" data-i18n="menu.addCursorAbove">カーソルを上に追加</span><span class="menu-key" data-key-action="addCursorAbove">Ctrl+Alt+↑</span></button>
             <button class="menu-item" data-menu-action="addCursorBelow" role="menuitem"><span class="menu-label" data-i18n="menu.addCursorBelow">カーソルを下に追加</span><span class="menu-key" data-key-action="addCursorBelow">Ctrl+Alt+↓</span></button>
@@ -131,7 +133,9 @@
             <button class="menu-item" id="menu-toggle-tail" data-menu-action="toggleFollowTail" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.followTail">末尾に追従 (tail -f)</span><span class="menu-key"></span></button>
           </div>
         </div>
-        <button id="settings-menu-button" class="menubar-button" data-menu-action="settings" role="menuitem" data-i18n="menu.settings">設定</button>
+        <div class="menu-shell">
+          <button id="settings-menu-button" class="menubar-button" data-menu-action="settings" role="menuitem" data-i18n="menu.settings">設定</button>
+        </div>
         <div class="menu-shell">
           <button id="help-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false" data-i18n="menu.help">ヘルプ</button>
           <div id="help-menu" class="file-menu hidden" role="menu" aria-label="ヘルプ" data-i18n-aria-label="menu.help">
@@ -148,20 +152,22 @@
            editor viewport instead. -->
       <header id="toolbar">
         <div class="tb-group">
-          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
-          <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
+          <div class="document-actions" aria-live="polite">
+            <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
+            <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
+          </div>
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
-            <svg class="ay-icon"><use href="#i-undo"></use></svg>
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-undo"></use></svg>
           </button>
           <button id="redo-edit" class="ico" title="やり直す (Ctrl+Y)" aria-label="やり直す">
-            <svg class="ay-icon"><use href="#i-redo"></use></svg>
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-redo"></use></svg>
           </button>
         </div>
 
         <div class="tb-sep"></div>
 
         <div class="menu-shell">
-          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・差分・分割" data-i18n-title="toolbar.toolsTitle">
+          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・分割・検索" data-i18n-title="toolbar.toolsTitle">
             <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label" data-i18n="menu.tools">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール" data-i18n-aria-label="menu.tools">
@@ -169,7 +175,6 @@
                     title="行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます" data-i18n-title="menu.sortTitle">
               <span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
             </button>
-            <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label" data-i18n="menu.diff">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
             <button class="menu-item" data-menu-action="splitFile" role="menuitem"
                     title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)" data-i18n-title="menu.splitTitle">
               <span class="menu-label" data-i18n="menu.split">ファイルを分割</span><span class="menu-key" data-key-action="splitFile"></span>
@@ -220,12 +225,16 @@
             <div class="field find">
               <button id="find-expand" class="ico find-expand" title="置換を表示 (Ctrl+H)"
                       aria-label="置換を表示" aria-expanded="false"></button>
-              <svg class="ay-icon find-mag"><use href="#i-search"></use></svg>
-              <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
-              <span id="find-count" class="find-count"></span>
-              <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
-              <button id="opt-word" class="toggle" title="単語単位 (Alt+W)">ab</button>
-              <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
+              <svg class="ay-icon find-mag" aria-hidden="true" focusable="false"><use href="#i-search"></use></svg>
+              <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)"
+                     aria-label="検索" data-i18n-aria-label="menu.find" />
+              <span id="find-count" class="find-count" aria-live="polite" aria-atomic="true"></span>
+              <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)"
+                      aria-label="大文字小文字を区別" data-i18n-aria-label="find.matchCase" aria-pressed="false">Aa</button>
+              <button id="opt-word" class="toggle" title="単語単位 (Alt+W)"
+                      aria-label="単語単位" data-i18n-aria-label="find.wholeWord" aria-pressed="false">ab</button>
+              <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)"
+                      aria-label="正規表現" data-i18n-aria-label="find.regex" aria-pressed="false">.*</button>
               <button id="find-prev" class="ico" title="前の一致 (Shift+F3)" aria-label="前の一致">
                 <svg class="ay-icon"><use href="#i-up"></use></svg>
               </button>
@@ -235,12 +244,14 @@
               <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる" data-i18n-title="find.closeTitle" data-i18n-aria-label="find.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
             </div>
             <div class="field replace-row" role="group" aria-label="置換" data-i18n-aria-label="menu.replace">
-              <input id="replace-input" type="text" autocomplete="off" placeholder="置換後" data-i18n-placeholder="find.replaceWith" />
+              <input id="replace-input" type="text" autocomplete="off" placeholder="置換後"
+                     aria-label="置換後" data-i18n-placeholder="find.replaceWith" data-i18n-aria-label="find.replaceWith" />
               <button id="replace-one" class="cmd replace-btn" title="現在の一致を置換して次へ" data-i18n="menu.replace" data-i18n-title="find.replaceOneTitle">置換</button>
               <button id="replace-all" class="cmd replace-btn" title="すべての一致を置換 (元に戻せます)" data-i18n="find.replaceAll" data-i18n-title="find.replaceAllTitle">すべて置換</button>
             </div>
           </div>
-          <div id="overlay" class="overlay hidden"></div>
+          <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true"
+               aria-hidden="true" aria-labelledby="overlay-text" aria-describedby="overlay-detail"></div>
         </main>
       </div>
 
@@ -274,7 +285,7 @@
         </div>
 
         <div class="opener-path">
-          <span id="opener-input-label" class="opener-input-label" data-i18n="dialog.open.path">パス</span>
+          <label id="opener-input-label" class="opener-input-label" for="opener-input" data-i18n="dialog.open.path">パス</label>
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder" />
           <button id="opener-open" class="cmd" data-i18n="menu.open">開く</button>
@@ -302,6 +313,7 @@
           <label class="set-row">
             <span class="set-label" data-i18n="settings.theme">テーマ</span>
             <select id="set-theme">
+              <option value="system" data-i18n="settings.themeSystem">システム設定に従う</option>
               <option value="iris-light">Iris Light</option>
               <option value="iris-mist">Iris Mist</option>
               <option value="iris-dawn">Iris Dawn</option>
@@ -449,8 +461,8 @@
           </label>
           <div class="form-actions">
             <button id="convert-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
-            <button id="reopen-go" class="cmd" data-i18n="dialog.convert.reopen">開き直す</button>
-            <button id="convert-go" class="cmd primary" data-i18n="dialog.convert.go">変換して保存</button>
+            <button id="reopen-go" class="cmd" data-i18n="dialog.convert.reopen" data-i18n-title="dialog.convert.reopenHint">開き直す</button>
+            <button id="convert-go" class="cmd primary" data-i18n="dialog.convert.go" data-i18n-title="dialog.convert.goHint">変換して保存</button>
           </div>
         </div>
       </div>
@@ -481,33 +493,9 @@
           <button id="palette-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="palette-body">
-          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false" />
+          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false"
+                 aria-label="コマンドパレット" data-i18n-aria-label="menu.commandPalette" />
           <div id="palette-list" class="palette-list" role="listbox"></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="diff-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-panel diff-panel" role="dialog" aria-label="差分" data-i18n-aria-label="dialog.diff.title">
-        <div class="modal-head">
-          <div class="modal-title" data-i18n="dialog.diff.title">差分</div>
-          <button id="diff-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
-        </div>
-        <div class="diff-body">
-          <div class="diff-deprecated" role="note">
-            <span data-i18n="dialog.diff.deprecated">この差分機能は非推奨です。姉妹プロジェクト ayame-diff への移行を推奨します。</span>
-            <a href="https://github.com/hjosugi/ayame-diff" target="_blank" rel="noopener">ayame-diff</a>
-          </div>
-          <div id="diff-summary" class="diff-summary"></div>
-          <div class="diff-paths">
-            <div><span data-i18n="dialog.diff.current">現在</span><strong id="diff-old-path"></strong></div>
-            <div><span data-i18n="dialog.diff.compareTo">比較先</span><strong id="diff-new-path"></strong></div>
-          </div>
-          <div class="diff-grid-head">
-            <span data-i18n="dialog.diff.currentFile">現在のファイル</span>
-            <span data-i18n="dialog.diff.compareFile">比較先ファイル</span>
-          </div>
-          <div id="diff-view" class="diff-view"></div>
         </div>
       </div>
     </div>
@@ -569,7 +557,7 @@
           <button id="prompt-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="prompt-body">
-          <span class="prompt-label" id="prompt-label"></span>
+          <label class="prompt-label" id="prompt-label" for="prompt-input"></label>
           <input id="prompt-input" type="text" autocomplete="off" spellcheck="false" />
           <div class="prompt-actions">
             <button id="prompt-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
@@ -597,7 +585,6 @@
       <button class="menu-item" data-ctx="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="sortSave" role="menuitem"><span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key"></span></button>
-      <button class="menu-item" data-ctx="diffFile" role="menuitem"><span class="menu-label" data-i18n="menu.diff">2ファイル差分</span><span class="menu-key"></span></button>
       <button class="menu-item" data-ctx="splitFile" role="menuitem"><span class="menu-label" data-i18n="menu.split">ファイルを分割</span><span class="menu-key"></span></button>
     </div>
 

@@ -29,7 +29,6 @@ import {
 } from "./edits.js";
 import {
   buildMatcher,
-  diffFile,
   flashCount,
   findStep,
   grepFolder,
@@ -63,7 +62,8 @@ import {
 
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
 
-export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"];
+export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
+const POPUP_MENUS = [...APP_MENUS, "tools"];
 
 export const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -73,11 +73,23 @@ export const MENU_ID_ACTIONS = [
 ];
 
 export function fileMenuVisible() {
-  return APP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
+  return POPUP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
 }
 
 export function showAppMenu(id) {
   hideFileMenu();
+  if (id === "edit") {
+    const hasSelection = hasTextSelection();
+    for (const action of ["copy", "cut"]) {
+      const item = document.querySelector<HTMLButtonElement>(
+        `#edit-menu [data-menu-action="${action}"]`,
+      );
+      if (item) {
+        item.disabled = !hasSelection;
+        item.setAttribute("aria-disabled", String(!hasSelection));
+      }
+    }
+  }
   if (id === "view") {
     const ws = $("menu-toggle-ws");
     if (ws) {
@@ -116,7 +128,7 @@ export function showAppMenu(id) {
 
 export function hideFileMenu(focusButton = false) {
   let focused = false;
-  for (const id of APP_MENUS) {
+  for (const id of POPUP_MENUS) {
     const menu = $(`${id}-menu`);
     const button = $(`${id}-menu-button`);
     const wasOpen = !menu.classList.contains("hidden");
@@ -445,7 +457,7 @@ export function hideCtxMenu() {
 export function runCtxAction(action) {
   hideCtxMenu();
   // Only the two context-menu-specific actions live here; everything else
-  // (cut / copy / selectAll / find / replace / sortSave / diffFile /
+  // (cut / copy / selectAll / find / replace / sortSave /
   // splitFile) shares the menu dispatcher.
   let out;
   if (action === "paste") out = pasteFromClipboard();
@@ -587,7 +599,8 @@ export function updateStatusMeta() {
   $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
   $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
   const lines = s.view_lines ?? s.lines;
-  $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
+  $("st-enc").textContent =
+    s.bom_bytes > 0 ? `${enc(s.encoding)} (${t("status.bom")})` : enc(s.encoding);
   $("st-eol").textContent = eol(s.eol);
   // Deliberately terse: the bar shows state, the tooltip carries the numbers.
   $("st-edit").textContent = s.dirty ? t("status.unsaved") : t("status.saved");
@@ -632,7 +645,15 @@ export function enc(e) {
 }
 
 export function eol(e) {
-  return { lf: "LF", crlf: "CRLF", cr: "CR", mixed: "Mixed", none: "None" }[e] || String(e);
+  return (
+    {
+      lf: "LF",
+      crlf: "CRLF",
+      cr: "CR",
+      mixed: t("status.eolMixed"),
+      none: t("status.eolNone"),
+    }[e] || String(e)
+  );
 }
 
 export function updateStatusPos() {
@@ -673,9 +694,15 @@ function optButtonLit(key): boolean {
 // Sync the lit state of the three find-bar option buttons to `state` without
 // toggling anything — used on init so "Match Case" reflects the default.
 export function refreshFindOptButtons() {
-  $("opt-case").classList.toggle("on", optButtonLit("ci"));
-  $("opt-word").classList.toggle("on", optButtonLit("word"));
-  $("opt-regex").classList.toggle("on", optButtonLit("regex"));
+  for (const [id, key] of [
+    ["opt-case", "ci"],
+    ["opt-word", "word"],
+    ["opt-regex", "regex"],
+  ]) {
+    const pressed = optButtonLit(key);
+    $(id).classList.toggle("on", pressed);
+    $(id).setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
 }
 
 export function toggleOpt(key, id) {
@@ -709,6 +736,7 @@ export const ACTIONS: Record<
   deleteLine: { run: deleteLines },
   copy: { run: copySelection, globalShortcut: true, editorOnly: true },
   cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
+  paste: { run: pasteFromClipboard, editorOnly: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
   },
@@ -726,7 +754,6 @@ export const ACTIONS: Record<
   help: { run: showHelp, globalShortcut: true },
   about: { run: showAbout, globalShortcut: true },
   sortSave: { run: sortSave, globalShortcut: true },
-  diffFile: { run: diffFile, globalShortcut: true },
   splitFile: { run: splitFile, globalShortcut: true },
   grepFolder: { run: grepFolder, globalShortcut: true },
   grepSave: { run: grepToFile, globalShortcut: true },
@@ -779,7 +806,6 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "searchRegex",
   "searchWord",
   "sortSave",
-  "diffFile",
   "splitFile",
   "grepFolder",
   "grepSave",
@@ -823,7 +849,7 @@ export function runMenuAction(action) {
 window.__ayameMenu = runMenuAction;
 
 export function initMenuBar() {
-  for (const id of APP_MENUS) {
+  for (const id of POPUP_MENUS) {
     const button = $(`${id}-menu-button`);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -838,4 +864,80 @@ export function initMenuBar() {
   document.querySelectorAll("[data-menu-action]").forEach((item) => {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));
   });
+  $("menubar").addEventListener("keydown", onMenubarKeydown);
+}
+
+function menubarButtons(): HTMLButtonElement[] {
+  return [
+    ...document.querySelectorAll<HTMLButtonElement>("#menubar > .menu-shell > .menubar-button"),
+  ];
+}
+
+function menuIdForButton(button: HTMLButtonElement) {
+  return button.id.endsWith("-menu-button") ? button.id.slice(0, -"-menu-button".length) : null;
+}
+
+function focusMenuEdge(menu: HTMLElement, last = false) {
+  const items = [...menu.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)')];
+  (last ? items.at(-1) : items[0])?.focus();
+}
+
+function switchTopMenu(from: HTMLElement, delta: number) {
+  const buttons = menubarButtons();
+  const shell = from.closest(".menu-shell");
+  const current =
+    shell?.querySelector<HTMLButtonElement>(".menubar-button") ||
+    (from.matches(".menubar-button") ? (from as HTMLButtonElement) : null);
+  const index = current ? buttons.indexOf(current) : -1;
+  const next = buttons[(Math.max(0, index) + delta + buttons.length) % buttons.length];
+  const hadOpenMenu = fileMenuVisible();
+  hideFileMenu();
+  next.focus();
+  const id = menuIdForButton(next);
+  if (hadOpenMenu && id && APP_MENUS.includes(id)) {
+    showAppMenu(id);
+    focusMenuEdge($(`${id}-menu`));
+  }
+}
+
+export function onMenubarKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement;
+  const topButton = target.matches(".menubar-button") ? (target as HTMLButtonElement) : null;
+  const menu = target.closest<HTMLElement>("#menubar .file-menu");
+  const handled = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Escape"];
+  if (!handled.includes(e.key)) return;
+
+  if (topButton) {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      switchTopMenu(topButton, e.key === "ArrowRight" ? 1 : -1);
+    } else if (e.key === "Home" || e.key === "End") {
+      const buttons = menubarButtons();
+      (e.key === "Home" ? buttons[0] : buttons.at(-1))?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const id = menuIdForButton(topButton);
+      if (id && APP_MENUS.includes(id)) {
+        showAppMenu(id);
+        focusMenuEdge($(`${id}-menu`), e.key === "ArrowUp");
+      }
+    } else if (e.key === "Escape") {
+      hideFileMenu(true);
+    }
+  } else if (menu) {
+    const items = [
+      ...menu.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)'),
+    ];
+    const index = items.indexOf(target as HTMLButtonElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      items[(index + delta + items.length) % items.length]?.focus();
+    } else if (e.key === "Home" || e.key === "End") {
+      (e.key === "Home" ? items[0] : items.at(-1))?.focus();
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      switchTopMenu(target, e.key === "ArrowRight" ? 1 : -1);
+    } else if (e.key === "Escape") {
+      hideFileMenu(true);
+    }
+  }
+  e.preventDefault();
+  e.stopPropagation();
 }

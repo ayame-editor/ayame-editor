@@ -109,8 +109,8 @@ export function showFolderDialog(title, startDir): Promise<string | null> {
   });
 }
 
-// Pick one file without opening it in the editor. Used by tools such as the
-// browser build's two-file diff, where a real path is needed as an input.
+// Pick one file without opening it in the editor. Kept as a reusable primitive
+// for tools that need a real path as input.
 export function showFileDialog(title, startDir): Promise<string | null> {
   return new Promise((resolve) => {
     configureOpener("file", title);
@@ -238,6 +238,7 @@ export function renderBrowse(res) {
     list.append(browseRow({ name: "..", path: res.parent, is_dir: true }, true));
   }
   for (const ent of res.entries) list.append(browseRow(ent, false));
+  list.querySelector<HTMLElement>(".opener-row")?.setAttribute("tabindex", "0");
   list.scrollTop = 0;
 }
 
@@ -253,11 +254,11 @@ export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string
   host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+    crumbs = [{ label: t("opener.pc"), path: DRIVES_DIR }];
   } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
     // Windows: a "PC" root crumb in front of the drive, so other drives are
     // one click away (the drive list is also the ".." of every drive root).
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+    crumbs = [{ label: t("opener.pc"), path: DRIVES_DIR }, ...crumbs];
   }
   for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) {
@@ -285,6 +286,7 @@ export function browseRow(ent, isUp) {
   const row = document.createElement("button");
   row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
   row.type = "button";
+  row.tabIndex = -1;
   // The kind ("フォルダ" / "ファイル") moved from visible text into the icon;
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
@@ -373,6 +375,7 @@ export function renderRecentFiles() {
   head.textContent = t("dialog.open.recent");
   box.append(head);
   for (const path of list) box.append(recentRow(path));
+  box.querySelector<HTMLElement>(".opener-row")?.setAttribute("tabindex", "0");
   box.classList.remove("hidden");
 }
 
@@ -380,6 +383,7 @@ export function recentRow(path) {
   const row = document.createElement("button");
   row.className = "opener-row recent";
   row.type = "button";
+  row.tabIndex = -1;
   row.title = path;
   row.setAttribute("aria-label", `${t("dialog.open.recent")}: ${pathBaseName(path) || path}`);
   const ic = document.createElement("span");
@@ -967,6 +971,8 @@ export function initWorkspace() {
       hideOpener();
     }
   });
+  $("opener-list").addEventListener("keydown", handleOpenerListKeydown);
+  $("opener-recent").addEventListener("keydown", handleOpenerListKeydown);
   // Click on the dim backdrop (outside the panel) closes the dialog.
   $("opener").addEventListener("click", (e) => {
     if (e.target === $("opener")) hideOpener();
@@ -974,4 +980,26 @@ export function initWorkspace() {
   $("new-tab").addEventListener("click", () => newUntitled());
   initTabDropTarget();
   initDropZone();
+}
+
+export function handleOpenerListKeydown(e: KeyboardEvent) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End", "Enter"].includes(e.key)) return;
+  const list = e.currentTarget as HTMLElement;
+  const rows = [...list.querySelectorAll<HTMLButtonElement>(".opener-row:not(:disabled)")];
+  if (!rows.length) return;
+  const current = rows.indexOf(document.activeElement as HTMLButtonElement);
+  let next = current < 0 ? 0 : current;
+  if (e.key === "ArrowDown") next = (next + 1) % rows.length;
+  else if (e.key === "ArrowUp") next = (next - 1 + rows.length) % rows.length;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = rows.length - 1;
+  else if (e.key === "Enter") {
+    if (current >= 0) rows[current].click();
+    e.preventDefault();
+    return;
+  }
+  for (const [index, row] of rows.entries()) row.tabIndex = index === next ? 0 : -1;
+  rows[next].focus();
+  rows[next].scrollIntoView({ block: "nearest" });
+  e.preventDefault();
 }

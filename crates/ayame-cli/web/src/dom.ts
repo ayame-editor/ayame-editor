@@ -17,7 +17,7 @@ export function $<T extends HTMLElement = AyameElement>(id: string): T {
 }
 
 export function commas(n) {
-  return n.toLocaleString("en-US");
+  return Number(n).toLocaleString(numberLocale());
 }
 
 export function humanBytes(n) {
@@ -28,7 +28,16 @@ export function humanBytes(n) {
     v /= 1024;
     i++;
   }
-  return i === 0 ? `${n} B` : `${v.toFixed(2)} ${u[i]}`;
+  return i === 0
+    ? `${Number(n).toLocaleString(numberLocale())} B`
+    : `${new Intl.NumberFormat(numberLocale(), {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(v)} ${u[i]}`;
+}
+
+function numberLocale() {
+  return document.documentElement.lang || navigator.language || "en";
 }
 
 export function escapeRegExp(s) {
@@ -46,19 +55,134 @@ export function displayPath(path) {
 
 // Shortcuts are stored with KeyboardEvent key names ("Ctrl+Alt+ArrowUp");
 // menus and hints render the arrows as glyphs so labels stay compact.
-export function displayShortcut(shortcut) {
-  return String(shortcut || "")
+export function displayShortcut(shortcut, mac = isMacPlatform()) {
+  const display = String(shortcut || "")
     .replace(/ArrowUp/g, "↑")
     .replace(/ArrowDown/g, "↓")
     .replace(/ArrowLeft/g, "←")
     .replace(/ArrowRight/g, "→");
+  if (!mac) return display;
+  const parts = display.split("+");
+  const modifiers = parts
+    .slice(0, -1)
+    .map((part) => ({ Ctrl: "⌘", Shift: "⇧", Alt: "⌥", Meta: "⌘" })[part] || part)
+    .join("");
+  return modifiers + (parts.at(-1) || "");
 }
 
-// Show/hide one modal element, keeping the .hidden class and aria-hidden in
-// step (every modal in the app pairs the two).
+function isMacPlatform() {
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "");
+}
+
+const FOCUSABLE = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[contenteditable='true']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+let modalStack: HTMLElement[] = [];
+const modalReturnFocus = new WeakMap<HTMLElement, HTMLElement>();
+let modalTrapInstalled = false;
+
+function liveModalStack() {
+  modalStack = modalStack.filter(
+    (modal) => modal.isConnected && !modal.classList.contains("hidden"),
+  );
+  return modalStack;
+}
+
+function modalFocusables(modal: HTMLElement) {
+  return [...modal.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => !el.hidden && !el.closest("[inert]") && el.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+function syncModalIsolation() {
+  const stack = liveModalStack();
+  const top = stack.at(-1);
+  const app = document.getElementById("app");
+  if (app) {
+    app.inert = !!top;
+    if (top) app.setAttribute("aria-hidden", "true");
+    else app.removeAttribute("aria-hidden");
+  }
+  for (const modal of document.querySelectorAll<HTMLElement>(".modal")) {
+    const active = modal === top;
+    modal.inert = !active && !modal.classList.contains("hidden");
+    modal.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+}
+
+function trapModalFocus(e: KeyboardEvent) {
+  if (e.key !== "Tab") return;
+  const top = liveModalStack().at(-1);
+  if (!top) return;
+  const focusables = modalFocusables(top);
+  if (!focusables.length) {
+    e.preventDefault();
+    top.tabIndex = -1;
+    top.focus();
+    return;
+  }
+  const first = focusables[0];
+  const last = focusables.at(-1)!;
+  const active = document.activeElement;
+  if (
+    !top.contains(active) ||
+    (e.shiftKey && active === first) ||
+    (!e.shiftKey && active === last)
+  ) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+}
+
+function ensureModalTrap() {
+  if (modalTrapInstalled) return;
+  document.addEventListener("keydown", trapModalFocus, true);
+  modalTrapInstalled = true;
+}
+
+// Show/hide one modal while isolating the page behind it, trapping Tab inside
+// the topmost dialog, and restoring the previous focus on close.
 export function setModalOpen(modal, open) {
+  ensureModalTrap();
+  liveModalStack();
+  const wasOpen = !modal.classList.contains("hidden");
+  if (open && !wasOpen) {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) modalReturnFocus.set(modal, active);
+    modalStack.push(modal);
+  } else if (!open) {
+    modalStack = modalStack.filter((entry) => entry !== modal);
+  }
   modal.classList.toggle("hidden", !open);
   modal.setAttribute("aria-hidden", open ? "false" : "true");
+  syncModalIsolation();
+
+  if (open && !wasOpen) {
+    queueMicrotask(() => {
+      if (liveModalStack().at(-1) !== modal || modal.contains(document.activeElement)) return;
+      const target =
+        (modal.querySelector("[autofocus]") as HTMLElement | null) || modalFocusables(modal)[0];
+      if (target) target.focus();
+      else {
+        modal.tabIndex = -1;
+        modal.focus();
+      }
+    });
+  } else if (!open && wasOpen) {
+    const target = modalReturnFocus.get(modal);
+    if (target?.isConnected && !target.closest("[inert]")) target.focus();
+    else {
+      const top = liveModalStack().at(-1);
+      if (top) modalFocusables(top)[0]?.focus();
+    }
+  }
 }
 
 // Build an <svg><use href="#id"></use></svg> node for a sprite symbol from

@@ -562,15 +562,13 @@ fn decoded_char_span(
 fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
     let b = raw[i];
     match enc {
-        Encoding::ShiftJis => {
+        Encoding::ShiftJis
             if matches!(b, 0x81..=0x9F | 0xE0..=0xFC)
-                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC))
-            {
-                2
-            } else {
-                1
-            }
+                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC)) =>
+        {
+            2
         }
+        Encoding::ShiftJis => 1,
         Encoding::EucJp => match b {
             0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
             0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))

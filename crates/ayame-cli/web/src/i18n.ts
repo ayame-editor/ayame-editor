@@ -47,6 +47,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "次の一致を選択",
     "menu.copy": "コピー",
     "menu.cut": "切り取り",
+    "menu.paste": "貼り付け",
     "menu.caseUpper": "大文字に変換",
     "menu.caseLower": "小文字に変換",
     "menu.caseCamel": "camelCase に変換",
@@ -74,7 +75,6 @@ export const MESSAGES = {
       "Ayame Editor\n巨大なテキスト・ログ・CSV/TSVファイル向けのデスクトップエディタです。\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "ソート",
     "menu.sortTitle": "行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます",
-    "menu.diff": "2ファイル差分（非推奨）",
     "menu.split": "ファイルを分割",
     "menu.splitTitle": "行数を指定して複数ファイルに分割します (例: 100万行ずつ)",
     "menu.grep": "フォルダ内検索",
@@ -88,7 +88,7 @@ export const MESSAGES = {
     "toolbar.applyThemeTitle": "このJSONをテーマとして適用",
     "toolbar.applyKeymap": "キー設定適用",
     "toolbar.applyKeymapTitle": "このJSONをキー設定として適用",
-    "toolbar.toolsTitle": "ソート・差分・分割",
+    "toolbar.toolsTitle": "ソート・分割・検索",
     "toolbar.newTab": "新規タブ",
     // -- tabs --
     "tab.close": "タブを閉じる",
@@ -152,8 +152,12 @@ export const MESSAGES = {
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
     "status.tailFileChanged": "ファイルが外部で変更されました — 追従を停止しました",
+    "status.bom": "BOM",
+    "status.eolMixed": "混在",
+    "status.eolNone": "なし",
     // -- editor (clipboard, edits, caps) --
     "editor.label": "エディタ",
+    "editor.eof": "[ファイル末尾]",
     "editor.copied": "コピーしました",
     "editor.copyError": "コピーエラー",
     "editor.pasteBlocked": "ここからは貼り付けできません — Ctrl+V を使ってください",
@@ -224,6 +228,7 @@ export const MESSAGES = {
     "dialog.open.pickFolderFirst": "保存先のドライブ・フォルダを選択してください",
     // -- settings --
     "settings.theme": "テーマ",
+    "settings.themeSystem": "システム設定に従う",
     "settings.themeMonoPaper": "Mono Paper (単色)",
     "settings.themeDark": "ダーク",
     "settings.themeBlack": "ブラック",
@@ -240,6 +245,20 @@ export const MESSAGES = {
     // option label. Every MESSAGES block must define "language.name".
     "language.name": "日本語",
     "language.auto": "自動",
+    "language.dir": "ltr",
+    "opener.pc": "PC",
+    "server.bad_request": "リクエストが正しくありません。",
+    "server.invalid_input": "入力が正しくありません。",
+    "server.exists": "対象は既に存在します。",
+    "server.conflict": "操作中に文書が変更されました。もう一度お試しください。",
+    "server.not_found": "対象が見つかりません。",
+    "server.too_large": "リクエストが大きすぎます。",
+    "server.timeout": "操作がタイムアウトしました。",
+    "server.worker_failed": "ワーカープロセスが失敗しました。",
+    "server.unsupported": "この操作には対応していません。",
+    "server.search": "検索条件が正しくありません。",
+    "server.io": "ファイル I/O エラーが発生しました。",
+    "server.internal": "内部エラーが発生しました。",
     // Weekday names for the 新規ファイル名 template, indexed by Date.getDay()
     // (0 = Sunday). Part of this language block; en is the fallback.
     weekday: {
@@ -269,7 +288,9 @@ export const MESSAGES = {
     "dialog.convert.eolCr": "CR (旧 Mac)",
     "dialog.convert.bom": "BOMを付ける（UTF-8 / UTF-16）",
     "dialog.convert.reopen": "開き直す",
+    "dialog.convert.reopenHint": "保存せず、選んだ文字コードで元ファイルを読み直します",
     "dialog.convert.go": "変換して保存",
+    "dialog.convert.goHint": "選んだ文字コードと改行コードへ変換して保存します (Enter)",
     "dialog.convert.savedAs": "{enc} / {eol} で保存しました",
     "dialog.convert.reopenedAs": "{enc} で開き直しました",
     "dialog.convert.saveError": "変換保存エラー",
@@ -328,28 +349,6 @@ export const MESSAGES = {
     "dialog.split.running": "分割実行中…",
     "dialog.split.done": "{count} 個に分割しました: 最初のファイル {path}",
     "dialog.split.error": "分割エラー",
-    // -- diff view --
-    "dialog.diff.title": "差分",
-    "dialog.diff.deprecated":
-      "この差分機能は非推奨です。姉妹プロジェクト ayame-diff への移行を推奨します。",
-    "dialog.diff.current": "現在",
-    "dialog.diff.compareTo": "比較先",
-    "dialog.diff.currentFile": "現在のファイル",
-    "dialog.diff.compareFile": "比較先ファイル",
-    "dialog.diff.added": "追加",
-    "dialog.diff.deleted": "削除",
-    "dialog.diff.changed": "変更",
-    "dialog.diff.none": "差分はありません",
-    "dialog.diff.promptPath": "比較先ファイルパス",
-    "dialog.diff.computing": "差分を計算中…",
-    "dialog.diff.error": "差分エラー",
-    "dialog.diff.hunks": "差分: {n} hunk",
-    "dialog.diff.hunkHeader":
-      "{kind}  現在: {oldStart} ({oldLen} 行)  比較先: {newStart} ({newLen} 行)",
-    "dialog.diff.unsavedIncluded": "未保存編集込み",
-    "dialog.diff.hunkTruncated": "このhunkは先頭 {n} 行だけ表示しています",
-    "dialog.diff.summary": "{hunks} hunk / +{added}  -{deleted}  ~{modified}",
-    "dialog.diff.omitted": "{n} hunk 省略",
     // -- folder search (grep) --
     "dialog.grep.query": "検索語",
     "dialog.grep.queryPlaceholder": "検索する文字列 / 正規表現",
@@ -447,6 +446,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "Select Next Occurrence",
     "menu.copy": "Copy",
     "menu.cut": "Cut",
+    "menu.paste": "Paste",
     "menu.caseUpper": "Transform to Uppercase",
     "menu.caseLower": "Transform to Lowercase",
     "menu.caseCamel": "Transform to camelCase",
@@ -474,7 +474,6 @@ export const MESSAGES = {
       "Ayame Editor\nA desktop editor for huge text, log, CSV, and TSV files.\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "Sort",
     "menu.sortTitle": "Sort into a temporary result and open it in a new tab.",
-    "menu.diff": "Two-file Diff (deprecated)",
     "menu.split": "Split File",
     "menu.splitTitle": "Split into multiple files by line count.",
     "menu.grep": "Search Folder",
@@ -487,7 +486,7 @@ export const MESSAGES = {
     "toolbar.applyThemeTitle": "Apply this JSON as a theme",
     "toolbar.applyKeymap": "Apply Key Bindings",
     "toolbar.applyKeymapTitle": "Apply this JSON as key bindings",
-    "toolbar.toolsTitle": "Sort, Diff, Split",
+    "toolbar.toolsTitle": "Sort, Split, Search",
     "toolbar.newTab": "New Tab",
     "tab.close": "Close Tab",
     "tab.copyPath": "Copy Path",
@@ -548,7 +547,11 @@ export const MESSAGES = {
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
     "status.tailFileChanged": "The file changed externally. Tail following stopped.",
+    "status.bom": "BOM",
+    "status.eolMixed": "Mixed",
+    "status.eolNone": "None",
     "editor.label": "Editor",
+    "editor.eof": "[EOF]",
     "editor.copied": "Copied",
     "editor.copyError": "Copy error",
     "editor.pasteBlocked": "Cannot paste from here. Use Ctrl+V.",
@@ -616,6 +619,7 @@ export const MESSAGES = {
     "dialog.open.enterFileName": "Enter a file name to save.",
     "dialog.open.pickFolderFirst": "Choose a destination drive and folder first.",
     "settings.theme": "Theme",
+    "settings.themeSystem": "Follow System",
     "settings.themeMonoPaper": "Mono Paper (Solid)",
     "settings.themeDark": "Dark",
     "settings.themeBlack": "Black",
@@ -630,6 +634,20 @@ export const MESSAGES = {
     "settings.language": "Language",
     "language.name": "English",
     "language.auto": "Auto",
+    "language.dir": "ltr",
+    "opener.pc": "PC",
+    "server.bad_request": "The request is invalid.",
+    "server.invalid_input": "The input is invalid.",
+    "server.exists": "The target already exists.",
+    "server.conflict": "The document changed during the operation. Please try again.",
+    "server.not_found": "The requested item was not found.",
+    "server.too_large": "The request is too large.",
+    "server.timeout": "The operation timed out.",
+    "server.worker_failed": "The worker process failed.",
+    "server.unsupported": "This operation is not supported.",
+    "server.search": "The search request is invalid.",
+    "server.io": "A file I/O error occurred.",
+    "server.internal": "An internal error occurred.",
     weekday: {
       short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
@@ -656,7 +674,11 @@ export const MESSAGES = {
     "dialog.convert.eolCr": "CR (classic Mac)",
     "dialog.convert.bom": "Add BOM (UTF-8 / UTF-16)",
     "dialog.convert.reopen": "Reopen",
+    "dialog.convert.reopenHint":
+      "Reload the original file using the selected encoding without saving.",
     "dialog.convert.go": "Convert and Save",
+    "dialog.convert.goHint":
+      "Convert to the selected encoding and line endings, then save (Enter).",
     "dialog.convert.savedAs": "Saved as {enc} / {eol}",
     "dialog.convert.reopenedAs": "Reopened as {enc}",
     "dialog.convert.saveError": "Convert Save Error",
@@ -713,27 +735,6 @@ export const MESSAGES = {
     "dialog.split.running": "Splitting...",
     "dialog.split.done": "Split into {count} files: first file {path}",
     "dialog.split.error": "Split error",
-    "dialog.diff.title": "Diff",
-    "dialog.diff.deprecated":
-      "This diff feature is deprecated. Please migrate to the sister project ayame-diff.",
-    "dialog.diff.current": "Current",
-    "dialog.diff.compareTo": "Compare To",
-    "dialog.diff.currentFile": "Current File",
-    "dialog.diff.compareFile": "Comparison File",
-    "dialog.diff.added": "Added",
-    "dialog.diff.deleted": "Deleted",
-    "dialog.diff.changed": "Changed",
-    "dialog.diff.none": "No differences",
-    "dialog.diff.promptPath": "Comparison File Path",
-    "dialog.diff.computing": "Computing diff...",
-    "dialog.diff.error": "Diff error",
-    "dialog.diff.hunks": "Diff: {n} hunk(s)",
-    "dialog.diff.hunkHeader":
-      "{kind}  Current: {oldStart} ({oldLen} lines)  Compare To: {newStart} ({newLen} lines)",
-    "dialog.diff.unsavedIncluded": "includes unsaved edits",
-    "dialog.diff.hunkTruncated": "This hunk shows only the first {n} lines.",
-    "dialog.diff.summary": "{hunks} hunk(s) / +{added}  -{deleted}  ~{modified}",
-    "dialog.diff.omitted": "{n} hunk(s) omitted",
     "dialog.grep.query": "Search Term",
     "dialog.grep.queryPlaceholder": "String or regular expression to search for",
     "dialog.grep.dir": "Target Folder",
@@ -796,29 +797,12 @@ export const MESSAGES = {
   },
 };
 
-// ---- server boundary ----------------------------------------------------
-// API failures are `{code, message}`. English uses a stable code translation;
-// Japanese and unknown codes keep the server detail. No control flow or
-// localization depends on matching human message text (#81.2).
-export const SERVER_CODE_EN = {
-  bad_request: "The request is invalid.",
-  invalid_input: "The input is invalid.",
-  exists: "The target already exists.",
-  conflict: "The document changed during the operation. Please try again.",
-  not_found: "The requested item was not found.",
-  too_large: "The request is too large.",
-  timeout: "The operation timed out.",
-  worker_failed: "The worker process failed.",
-  unsupported: "This operation is not supported.",
-  search: "The search request is invalid.",
-  io: "A file I/O error occurred.",
-  internal: "An internal error occurred.",
-};
-
 export function serverMessage(error) {
   const raw = String(error && typeof error === "object" ? error.message : (error ?? ""));
   const code = error && typeof error === "object" ? error.code : undefined;
-  if (currentLocale() === "en" && code && SERVER_CODE_EN[code]) return SERVER_CODE_EN[code];
+  const key = code ? `server.${code}` : "";
+  const table = MESSAGES[currentLocale()] || MESSAGES.en;
+  if (key && (table[key] || MESSAGES.en[key])) return t(key);
   return raw;
 }
 
@@ -890,7 +874,9 @@ export const I18N_ATTR_MAP = [
 ];
 
 export function applyStaticI18n() {
-  document.documentElement.lang = currentLocale();
+  const locale = currentLocale();
+  document.documentElement.lang = locale;
+  document.documentElement.dir = MESSAGES[locale]?.["language.dir"] || "ltr";
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     el.textContent = t(el.getAttribute("data-i18n"));
   });

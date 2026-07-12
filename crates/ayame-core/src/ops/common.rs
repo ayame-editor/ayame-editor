@@ -35,7 +35,50 @@ pub(super) fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<bool> {
 /// returned directory after a successful or failed operation. The helper uses
 /// `create_dir` with mode 0700 on Unix and retries on collision, so it never
 /// accepts a pre-created/squatted directory.
-pub(super) fn unique_spill_dir(base: &Path) -> Result<PathBuf> {
+pub(super) struct SpillGuard {
+    dir: PathBuf,
+    external_files: Vec<PathBuf>,
+    keep_external_files: bool,
+}
+
+impl SpillGuard {
+    pub(super) fn create(base: &Path) -> Result<Self> {
+        let dir = unique_spill_dir(base)?;
+        Ok(Self {
+            dir,
+            external_files: Vec::new(),
+            keep_external_files: false,
+        })
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.dir
+    }
+
+    pub(super) fn track_external(&mut self, path: PathBuf) {
+        self.external_files.push(path);
+    }
+
+    /// Mark externally stored final outputs as successful. The private run
+    /// directory is still removed immediately; only completed outputs survive.
+    pub(super) fn finish(mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+        self.keep_external_files = true;
+    }
+}
+
+impl Drop for SpillGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+        if !self.keep_external_files {
+            for path in &self.external_files {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+fn unique_spill_dir(base: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(base)?;
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -64,4 +107,39 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spill_guard_removes_partial_runs_and_external_outputs_on_error() {
+        let base = tempfile::tempdir().unwrap();
+        let external = base.path().join("partial.ordering.bin");
+        let run_dir;
+        {
+            let mut guard = SpillGuard::create(base.path()).unwrap();
+            run_dir = guard.path().to_path_buf();
+            std::fs::write(run_dir.join("partial.run"), b"partial").unwrap();
+            std::fs::write(&external, b"partial").unwrap();
+            guard.track_external(external.clone());
+        }
+        assert!(!run_dir.exists());
+        assert!(!external.exists());
+    }
+
+    #[test]
+    fn spill_guard_keeps_only_finished_external_outputs() {
+        let base = tempfile::tempdir().unwrap();
+        let external = base.path().join("complete.ordering.bin");
+        let mut guard = SpillGuard::create(base.path()).unwrap();
+        let run_dir = guard.path().to_path_buf();
+        std::fs::write(run_dir.join("temporary.run"), b"temporary").unwrap();
+        std::fs::write(&external, b"complete").unwrap();
+        guard.track_external(external.clone());
+        guard.finish();
+        assert!(!run_dir.exists());
+        assert!(external.exists());
+    }
 }

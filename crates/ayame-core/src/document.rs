@@ -124,13 +124,13 @@ impl Document {
                             idx
                         }
                         _ => {
-                            let idx = line_index_for(buf, base, stride, encoding);
+                            let idx = line_index_for(buf, base, stride, encoding, eol);
                             cache::store(dir, &key, len, mtime, &idx);
                             idx
                         }
                     }
                 }
-                _ => line_index_for(buf, base, stride, encoding),
+                _ => line_index_for(buf, base, stride, encoding, eol),
             };
             let index_ms = t0.elapsed().as_millis();
             (encoding, base, index, eol, index_ms, from_cache)
@@ -573,12 +573,20 @@ impl Document {
     }
 }
 
-fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding) -> LineIndex {
+fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding, eol: Eol) -> LineIndex {
     match encoding {
         Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, stride),
         Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, stride),
-        Encoding::Utf8 | Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => {
-            LineIndex::build(buf, base, stride)
+        Encoding::Utf8
+        | Encoding::ShiftJis
+        | Encoding::EucJp
+        | Encoding::Iso2022Jp
+        | Encoding::Ascii => {
+            if eol == Eol::Cr {
+                LineIndex::build_cr(buf, base, stride)
+            } else {
+                LineIndex::build(buf, base, stride)
+            }
         }
     }
 }
@@ -597,15 +605,13 @@ fn legacy_col_offset(enc: Encoding, raw: &[u8], col: u64) -> Option<usize> {
 fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
     let b = raw[i];
     match enc {
-        Encoding::ShiftJis => {
+        Encoding::ShiftJis
             if matches!(b, 0x81..=0x9F | 0xE0..=0xFC)
-                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC))
-            {
-                2
-            } else {
-                1
-            }
+                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC)) =>
+        {
+            2
         }
+        Encoding::ShiftJis => 1,
         Encoding::EucJp => match b {
             0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
             0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))
@@ -828,6 +834,21 @@ mod tests {
         assert_eq!(doc.stat().eol, Eol::Lf);
         assert_eq!(doc.line_count(), 2);
         assert_eq!(doc.lines(0, 2)[1].text, "two");
+    }
+
+    #[test]
+    fn detects_bomless_utf16_and_cr_only_documents() {
+        let utf16 = write_temp(&utf16_bytes("one\ntwo\n", true, false));
+        let wide = Document::open(utf16.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(wide.encoding(), Encoding::Utf16Le);
+        assert_eq!(wide.line_count(), 2);
+        assert_eq!(wide.line(1).as_deref(), Some("two"));
+
+        let cr = write_temp(b"one\rtwo\rthree\r");
+        let legacy = Document::open(cr.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(legacy.stat().eol, Eol::Cr);
+        assert_eq!(legacy.line_count(), 3);
+        assert_eq!(legacy.lines(0, 3)[1].text, "two");
     }
 
     #[test]

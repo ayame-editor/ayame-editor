@@ -1,13 +1,15 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+
+use crate::temp_paths;
 
 #[cfg(any(windows, target_os = "macos"))]
 use std::process::{Command, Stdio};
@@ -17,6 +19,15 @@ use super::{first_opt, has_flag, parse_checked};
 const REPO: &str = "hjosugi/ayame-editor";
 const API_BASE: &str = "https://api.github.com/repos/hjosugi/ayame-editor";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+// Ed25519 public key corresponding to the offline release-signing key. Release
+// artifacts sign the exact bytes of each `<asset>.sha256` sidecar.
+const UPDATE_PUBLIC_KEY: [u8; 32] = [
+    0xdc, 0xe2, 0xb3, 0x55, 0xe1, 0xfe, 0x55, 0x65, 0x33, 0x29, 0x14, 0x60, 0x63, 0x39, 0xbc, 0x53,
+    0x6a, 0xe1, 0xbb, 0x39, 0x4d, 0xea, 0xdb, 0x77, 0x10, 0x18, 0x3a, 0x42, 0x1d, 0xac, 0x1b, 0x0d,
+];
+const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES: usize = 10_000;
+const MAX_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(feature = "gui")]
@@ -67,6 +78,11 @@ enum InstallPlan {
     MacApp { dest: PathBuf },
 }
 
+enum InstallArtifact {
+    Binary(Vec<u8>),
+    MacApp(PathBuf),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(not(windows), allow(dead_code))]
 enum InstallOutcome {
@@ -96,8 +112,10 @@ struct PreparedUpdate {
     version_order: Option<Ordering>,
     asset_name: String,
     checksum_name: String,
+    checksum_signature_name: String,
     asset_url: String,
     checksum_url: String,
+    checksum_signature_url: String,
 }
 
 struct StageDir {
@@ -279,6 +297,7 @@ fn prepare_update(version_req: &str, install_dir: Option<&Path>) -> Result<Prepa
     let version_order = cmp_version(CURRENT_VERSION, &release_version);
     let asset_name = target.asset_name(&release.tag_name);
     let checksum_name = format!("{asset_name}.sha256");
+    let checksum_signature_name = format!("{checksum_name}.sig");
     let asset_url = release
         .asset_url(&asset_name)
         .with_context(|| format!("release {} does not contain {asset_name}", release.tag_name))?
@@ -288,6 +307,15 @@ fn prepare_update(version_req: &str, install_dir: Option<&Path>) -> Result<Prepa
         .with_context(|| {
             format!(
                 "release {} does not contain checksum {checksum_name}",
+                release.tag_name
+            )
+        })?
+        .to_string();
+    let checksum_signature_url = release
+        .asset_url(&checksum_signature_name)
+        .with_context(|| {
+            format!(
+                "release {} does not contain signature {checksum_signature_name}",
                 release.tag_name
             )
         })?
@@ -302,8 +330,10 @@ fn prepare_update(version_req: &str, install_dir: Option<&Path>) -> Result<Prepa
         version_order,
         asset_name,
         checksum_name,
+        checksum_signature_name,
         asset_url,
         checksum_url,
+        checksum_signature_url,
     })
 }
 
@@ -319,9 +349,22 @@ fn download_and_install(prepared: &PreparedUpdate, print_progress: bool) -> Resu
         println!("verify: {}", prepared.checksum_name);
     }
     let checksum_text = download_text(&client, &prepared.checksum_url)?;
-    verify_sha256(&asset_path, &checksum_text)?;
+    let signature_text = download_text(&client, &prepared.checksum_signature_url)?;
+    verify_checksum_signature(checksum_text.as_bytes(), &signature_text).with_context(|| {
+        format!(
+            "release signature verification failed for {}",
+            prepared.checksum_signature_name
+        )
+    })?;
+    let verified_bytes = verify_sha256(&asset_path, &checksum_text)?;
 
-    let artifact = prepare_artifact(&prepared.target, &prepared.plan, &asset_path, &stage)?;
+    let artifact = prepare_artifact(
+        &prepared.target,
+        &prepared.plan,
+        verified_bytes,
+        &prepared.asset_name,
+        &stage,
+    )?;
     let outcome = prepared
         .plan
         .install(&artifact, &prepared.current_exe, &mut stage)?;
@@ -428,16 +471,19 @@ impl InstallPlan {
 
     fn install(
         &self,
-        source: &Path,
+        artifact: &InstallArtifact,
         current_exe: &Path,
         stage: &mut StageDir,
     ) -> Result<InstallOutcome> {
-        match self {
-            Self::Binary { dest } => install_binary(source, dest, current_exe, stage),
-            Self::MacApp { dest } => {
+        match (self, artifact) {
+            (Self::Binary { dest }, InstallArtifact::Binary(bytes)) => {
+                install_binary(bytes, dest, current_exe, stage)
+            }
+            (Self::MacApp { dest }, InstallArtifact::MacApp(source)) => {
                 install_macos_app(source, dest)?;
                 Ok(InstallOutcome::Installed)
             }
+            _ => bail!("prepared release artifact and install target do not match"),
         }
     }
 }
@@ -517,13 +563,8 @@ impl ManagedInstall {
 
 impl StageDir {
     fn create() -> Result<Self> {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let path =
-            std::env::temp_dir().join(format!("ayame-update-{}-{stamp}", std::process::id()));
-        fs::create_dir_all(&path).with_context(|| format!("creating {}", path.display()))?;
+        let path = temp_paths::create_private_temp_dir("update")
+            .context("creating private update staging directory")?;
         Ok(Self { path, keep: false })
     }
 }
@@ -592,16 +633,18 @@ fn fetch_release(client: &reqwest::blocking::Client, version_req: &str) -> Resul
 }
 
 fn download_to(client: &reqwest::blocking::Client, url: &str, dest: &Path) -> Result<()> {
-    let mut response = client
+    let response = client
         .get(url)
         .send()
         .with_context(|| format!("requesting {url}"))?
         .error_for_status()
         .with_context(|| format!("download failed: {url}"))?;
     let mut out = File::create(dest).with_context(|| format!("creating {}", dest.display()))?;
-    response
-        .copy_to(&mut out)
+    let written = io::copy(&mut response.take(MAX_DOWNLOAD_BYTES + 1), &mut out)
         .with_context(|| format!("writing {}", dest.display()))?;
+    if written > MAX_DOWNLOAD_BYTES {
+        bail!("download exceeds the {MAX_DOWNLOAD_BYTES} byte safety limit");
+    }
     out.sync_all()
         .with_context(|| format!("syncing {}", dest.display()))?;
     Ok(())
@@ -621,55 +664,56 @@ fn download_text(client: &reqwest::blocking::Client, url: &str) -> Result<String
 fn prepare_artifact(
     target: &ReleaseTarget,
     plan: &InstallPlan,
-    asset_path: &Path,
+    verified_bytes: Vec<u8>,
+    asset_name: &str,
     stage: &StageDir,
-) -> Result<PathBuf> {
+) -> Result<InstallArtifact> {
     match (target.kind, plan) {
-        (ArtifactKind::Binary, InstallPlan::Binary { .. }) => Ok(asset_path.to_path_buf()),
+        (ArtifactKind::Binary, InstallPlan::Binary { .. }) => {
+            Ok(InstallArtifact::Binary(verified_bytes))
+        }
         (ArtifactKind::MacAppZip, InstallPlan::MacApp { .. }) => {
-            prepare_macos_app(asset_path, stage)
+            prepare_macos_app(&verified_bytes, asset_name, stage).map(InstallArtifact::MacApp)
         }
         (ArtifactKind::MacAppZip, InstallPlan::Binary { .. }) => {
-            let app = prepare_macos_app(asset_path, stage)?;
+            let app = prepare_macos_app(&verified_bytes, asset_name, stage)?;
             let bin = app.join("Contents").join("MacOS").join("ayame");
             if !bin.is_file() {
                 bail!("macOS release archive does not contain {}", bin.display());
             }
-            let staged = stage.path.join("ayame");
-            fs::copy(&bin, &staged)
-                .with_context(|| format!("copying {} -> {}", bin.display(), staged.display()))?;
-            make_executable(&staged)?;
-            Ok(staged)
+            let bytes = fs::read(&bin).with_context(|| format!("reading {}", bin.display()))?;
+            Ok(InstallArtifact::Binary(bytes))
         }
         _ => bail!("release artifact and install target do not match"),
     }
 }
 
-fn prepare_macos_app(zip_path: &Path, stage: &StageDir) -> Result<PathBuf> {
+fn prepare_macos_app(zip_bytes: &[u8], archive_name: &str, stage: &StageDir) -> Result<PathBuf> {
     let extract_dir = stage.path.join("extract");
     fs::create_dir_all(&extract_dir)
         .with_context(|| format!("creating {}", extract_dir.display()))?;
-    unzip_safe(zip_path, &extract_dir)?;
+    unzip_safe(zip_bytes, archive_name, &extract_dir)?;
     let app = find_app_bundle(&extract_dir).with_context(|| {
         format!(
             "no .app bundle found inside release archive {}",
-            zip_path.display()
+            archive_name
         )
     })?;
     make_executable(&app.join("Contents").join("MacOS").join("ayame"))?;
     Ok(app)
 }
 
-fn verify_sha256(path: &Path, checksum_text: &str) -> Result<()> {
+fn verify_sha256(path: &Path, checksum_text: &str) -> Result<Vec<u8>> {
     let expected = parse_sha256(checksum_text)?;
-    let actual = sha256_file(path)?;
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let actual = sha256_bytes(&bytes);
     if actual != expected {
         bail!(
             "sha256 mismatch for {}: expected {expected}, got {actual}",
             path.display()
         );
     }
-    Ok(())
+    Ok(bytes)
 }
 
 fn parse_sha256(text: &str) -> Result<String> {
@@ -684,25 +728,52 @@ fn parse_sha256(text: &str) -> Result<String> {
     Ok(hash)
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
-    let mut file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 128 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .with_context(|| format!("reading {}", path.display()))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
+fn verify_checksum_signature(checksum_bytes: &[u8], signature_text: &str) -> Result<()> {
+    verify_ed25519_with_key(&UPDATE_PUBLIC_KEY, checksum_bytes, signature_text)
+}
+
+fn verify_ed25519_with_key(
+    public_key: &[u8; 32],
+    message: &[u8],
+    signature_text: &str,
+) -> Result<()> {
+    let signature = decode_hex::<64>(signature_text.trim())?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key)
+        .verify(message, &signature)
+        .map_err(|_| anyhow!("invalid Ed25519 signature"))
+}
+
+fn decode_hex<const N: usize>(text: &str) -> Result<[u8; N]> {
+    if text.len() != N * 2 {
+        bail!("invalid hex length: expected {}, got {}", N * 2, text.len());
     }
+    let mut bytes = [0u8; N];
+    for (i, pair) in text.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble(pair[0]).context("invalid hex signature")?;
+        let low = hex_nibble(pair[1]).context("invalid hex signature")?;
+        bytes[i] = high << 4 | low;
+    }
+    Ok(bytes)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
     let digest = hasher.finalize();
-    Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn install_binary(
-    source: &Path,
+    bytes: &[u8],
     dest: &Path,
     current_exe: &Path,
     stage: &mut StageDir,
@@ -710,7 +781,7 @@ fn install_binary(
     #[cfg(windows)]
     {
         if same_existing_path(dest, current_exe) {
-            spawn_windows_deferred_replace(source, dest, stage)?;
+            spawn_windows_deferred_replace(bytes, dest, stage)?;
             stage.keep = true;
             return Ok(InstallOutcome::Deferred);
         }
@@ -718,7 +789,7 @@ fn install_binary(
     #[cfg(not(windows))]
     let _ = (current_exe, stage);
 
-    install_binary_now(source, dest)?;
+    install_binary_now(bytes, dest)?;
     Ok(InstallOutcome::Installed)
 }
 
@@ -746,7 +817,7 @@ fn remove_file_target(path: &Path, current_exe: &Path) -> Result<InstallOutcome>
     }
 }
 
-fn install_binary_now(source: &Path, dest: &Path) -> Result<()> {
+fn install_binary_now(bytes: &[u8], dest: &Path) -> Result<()> {
     let parent = dest
         .parent()
         .with_context(|| format!("{} has no parent directory", dest.display()))?;
@@ -754,19 +825,22 @@ fn install_binary_now(source: &Path, dest: &Path) -> Result<()> {
 
     #[cfg(windows)]
     {
-        fs::copy(source, dest)
-            .with_context(|| format!("copying {} -> {}", source.display(), dest.display()))?;
+        fs::write(dest, bytes).with_context(|| format!("writing {}", dest.display()))?;
         return Ok(());
     }
 
     #[cfg(not(windows))]
     {
         let tmp = sibling_temp_path(dest, "new");
-        fs::copy(source, &tmp)
-            .with_context(|| format!("copying {} -> {}", source.display(), tmp.display()))?;
+        let mut out = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .with_context(|| format!("exclusively creating {}", tmp.display()))?;
+        out.write_all(bytes)
+            .with_context(|| format!("writing {}", tmp.display()))?;
         make_executable(&tmp)?;
-        File::open(&tmp)
-            .and_then(|f| f.sync_all())
+        out.sync_all()
             .with_context(|| format!("syncing {}", tmp.display()))?;
         if let Err(e) = fs::rename(&tmp, dest) {
             let _ = fs::remove_file(&tmp);
@@ -852,18 +926,49 @@ fn copy_symlink(src: &Path, dest: &Path) -> io::Result<()> {
     }
 }
 
-fn unzip_safe(zip_path: &Path, dest: &Path) -> Result<()> {
-    let file = File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .with_context(|| format!("reading zip archive {}", zip_path.display()))?;
+fn unzip_safe(zip_bytes: &[u8], archive_name: &str, dest: &Path) -> Result<()> {
+    let mut archive = zip::ZipArchive::new(io::Cursor::new(zip_bytes))
+        .with_context(|| format!("reading zip archive {archive_name}"))?;
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        bail!(
+            "zip archive {archive_name} contains too many entries ({} > {MAX_ARCHIVE_ENTRIES})",
+            archive.len()
+        );
+    }
+    let mut total_uncompressed = 0u64;
+    let mut outputs = HashSet::new();
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .with_context(|| format!("reading zip entry {i} from {}", zip_path.display()))?;
-        let Some(enclosed) = entry.enclosed_name() else {
-            continue;
-        };
+            .with_context(|| format!("reading zip entry {i} from {archive_name}"))?;
+        let enclosed = entry
+            .enclosed_name()
+            .with_context(|| format!("unsafe zip entry {:?} in {archive_name}", entry.name()))?;
+        total_uncompressed = total_uncompressed
+            .checked_add(entry.size())
+            .context("zip archive uncompressed size overflow")?;
+        if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_BYTES {
+            bail!(
+                "zip archive {archive_name} expands beyond the {} byte safety limit",
+                MAX_ARCHIVE_UNCOMPRESSED_BYTES
+            );
+        }
+
+        #[cfg(unix)]
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            bail!(
+                "refusing symbolic-link zip entry {:?} in {archive_name}",
+                entry.name(),
+            );
+        }
+
         let out = dest.join(enclosed);
+        if !outputs.insert(out.clone()) {
+            bail!("duplicate zip entry {:?} in {archive_name}", entry.name());
+        }
         if entry.is_dir() {
             fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
             continue;
@@ -871,13 +976,19 @@ fn unzip_safe(zip_path: &Path, dest: &Path) -> Result<()> {
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
-        let mut outfile =
-            File::create(&out).with_context(|| format!("creating {}", out.display()))?;
+        let mut outfile = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out)
+            .with_context(|| format!("exclusively creating {}", out.display()))?;
         io::copy(&mut entry, &mut outfile).with_context(|| format!("writing {}", out.display()))?;
+        outfile
+            .sync_all()
+            .with_context(|| format!("syncing {}", out.display()))?;
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&out, fs::Permissions::from_mode(mode))
+            fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o777))
                 .with_context(|| format!("setting permissions on {}", out.display()))?;
         }
     }
@@ -930,12 +1041,7 @@ fn remove_path_if_exists(path: &Path) -> Result<()> {
 }
 
 fn sibling_temp_path(path: &Path, label: &str) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let name = path.file_name().and_then(OsStr::to_str).unwrap_or("ayame");
-    parent.join(format!(
-        ".{name}.ayame-update-{label}-{}",
-        std::process::id()
-    ))
+    temp_paths::temp_sibling_with_label(path, &format!("ayame-update-{label}"))
 }
 
 #[cfg(unix)]
@@ -978,7 +1084,23 @@ fn clear_macos_quarantine(path: &Path) {
 fn clear_macos_quarantine(_path: &Path) {}
 
 #[cfg(windows)]
-fn spawn_windows_deferred_replace(source: &Path, dest: &Path, stage: &StageDir) -> Result<()> {
+fn spawn_windows_deferred_replace(bytes: &[u8], dest: &Path, stage: &StageDir) -> Result<()> {
+    let source = stage.path.join(format!(
+        "verified-ayame-{}.exe",
+        temp_paths::unique_component()
+    ));
+    let mut source_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&source)
+        .with_context(|| format!("exclusively creating {}", source.display()))?;
+    source_file
+        .write_all(bytes)
+        .with_context(|| format!("writing {}", source.display()))?;
+    source_file
+        .sync_all()
+        .with_context(|| format!("syncing {}", source.display()))?;
+    let expected_sha256 = sha256_bytes(bytes);
     let script = stage.path.join("finish-update.ps1");
     fs::write(
         &script,
@@ -987,6 +1109,7 @@ $pidToWait = [int]$args[0]
 $source = $args[1]
 $dest = $args[2]
 $stageDir = $args[3]
+$expectedSha256 = $args[4]
 for ($i = 0; $i -lt 1200; $i++) {
     if (-not (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 250
@@ -994,7 +1117,17 @@ for ($i = 0; $i -lt 1200; $i++) {
 if (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {
     throw "timed out waiting for ayame process $pidToWait to exit"
 }
-Copy-Item -LiteralPath $source -Destination $dest -Force
+$bytes = [IO.File]::ReadAllBytes($source)
+$sha256 = [Security.Cryptography.SHA256]::Create()
+try {
+    $actualSha256 = [BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant()
+} finally {
+    $sha256.Dispose()
+}
+if ($actualSha256 -ne $expectedSha256) {
+    throw "verified update artifact changed before installation"
+}
+[IO.File]::WriteAllBytes($dest, $bytes)
 Unblock-File -LiteralPath $dest -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
 "#,
@@ -1008,9 +1141,10 @@ Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(&script)
             .arg(&pid)
-            .arg(source)
+            .arg(&source)
             .arg(dest)
             .arg(&stage.path)
+            .arg(&expected_sha256)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1196,6 +1330,19 @@ fn has_component_sequence_case_insensitive(path: &Path, needle: &[&str]) -> bool
 mod tests {
     use super::*;
 
+    fn write_test_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        use zip::write::SimpleFileOptions;
+
+        let file = File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        for (name, contents) in entries {
+            archive.start_file(*name, options).unwrap();
+            archive.write_all(contents).unwrap();
+        }
+        archive.finish().unwrap();
+    }
+
     #[test]
     fn normalizes_tags() {
         assert_eq!(normalize_tag("0.5.17"), "v0.5.17");
@@ -1227,6 +1374,112 @@ mod tests {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         );
         assert!(parse_sha256("not-a-hash  ayame").is_err());
+    }
+
+    #[test]
+    fn verifies_release_signing_key_and_rejects_tampering() {
+        let message = b"ayame update signature self-test";
+        let signature = "1a47bb32b3394f448ca7d915ab94ec52bab014ce4106567f3b82f20fb69a58b0c492375a1f09840e8119372ae810bbcb694c05919bfc3ca097d0c6daf798d700";
+        verify_checksum_signature(message, signature).unwrap();
+        assert!(verify_checksum_signature(b"tampered", signature).is_err());
+        assert!(verify_checksum_signature(message, "not-a-signature").is_err());
+    }
+
+    #[test]
+    fn installs_verified_bytes_even_if_download_path_changes() {
+        let stage = StageDir::create().unwrap();
+        let downloaded = stage.path.join("downloaded-ayame");
+        let installed = stage.path.join("bin").join(default_exe_name());
+        let trusted = b"trusted release bytes";
+        fs::write(&downloaded, trusted).unwrap();
+        let checksum = format!("{}  downloaded-ayame", sha256_bytes(trusted));
+
+        let verified = verify_sha256(&downloaded, &checksum).unwrap();
+        fs::write(&downloaded, b"replacement after verification").unwrap();
+        install_binary_now(&verified, &installed).unwrap();
+
+        assert_eq!(fs::read(installed).unwrap(), trusted);
+    }
+
+    #[test]
+    fn update_stage_is_unique_and_private() {
+        let first = StageDir::create().unwrap();
+        let second = StageDir::create().unwrap();
+        assert_ne!(first.path, second.path);
+        assert!(first.path.is_dir());
+        assert!(second.path.is_dir());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&first.path).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&second.path).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
+    #[test]
+    fn unzip_rejects_path_traversal_instead_of_ignoring_it() {
+        let stage = StageDir::create().unwrap();
+        let archive = stage.path.join("traversal.zip");
+        let extract = stage.path.join("extract");
+        fs::create_dir(&extract).unwrap();
+        write_test_zip(&archive, &[("../../outside", b"owned")]);
+
+        let bytes = fs::read(&archive).unwrap();
+        let err = unzip_safe(&bytes, "traversal.zip", &extract)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unsafe zip entry"), "{err}");
+        assert!(!stage.path.join("outside").exists());
+    }
+
+    #[test]
+    fn unzip_extracts_regular_files_inside_destination() {
+        let stage = StageDir::create().unwrap();
+        let archive = stage.path.join("regular.zip");
+        let extract = stage.path.join("extract");
+        fs::create_dir(&extract).unwrap();
+        write_test_zip(&archive, &[("Ayame.app/Contents/MacOS/ayame", b"binary")]);
+
+        let bytes = fs::read(&archive).unwrap();
+        unzip_safe(&bytes, "regular.zip", &extract).unwrap();
+        assert_eq!(
+            fs::read(extract.join("Ayame.app/Contents/MacOS/ayame")).unwrap(),
+            b"binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unzip_rejects_symbolic_link_entries() {
+        use zip::write::SimpleFileOptions;
+
+        let stage = StageDir::create().unwrap();
+        let archive_path = stage.path.join("symlink.zip");
+        let file = File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .add_symlink(
+                "Ayame.app/link",
+                "../../outside",
+                SimpleFileOptions::default().unix_permissions(0o777),
+            )
+            .unwrap();
+        archive.finish().unwrap();
+        let extract = stage.path.join("extract");
+        fs::create_dir(&extract).unwrap();
+
+        let bytes = fs::read(&archive_path).unwrap();
+        let err = unzip_safe(&bytes, "symlink.zip", &extract)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("symbolic-link"), "{err}");
     }
 
     #[test]

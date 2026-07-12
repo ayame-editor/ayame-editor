@@ -2,6 +2,33 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- **Breaking:** removed the frozen `diff` / `sortdiff` implementation, the
+  `/api/diff` endpoint, Web and native diff UI, and their tests. Invoking the
+  former CLI commands returns migration guidance for
+  [ayame-diff](https://github.com/hjosugi/ayame-diff); see the
+  [migration guide](docs/DIFF_MIGRATION.md). (#94–#102, #104)
+- Hardened self-update with mandatory Ed25519-signed checksums, unpredictable
+  exclusive private staging directories, verified-byte installation that
+  closes the checksum-to-copy race, bounded downloads/archive expansion, and
+  explicit rejection of ZIP traversal, symlink, and duplicate entries, with
+  traversal and symlink regression tests. (#113, #191)
+- Restored reproducible stable-Rust builds by pinning Rust 1.94.1 and the Oxc
+  build-time toolchain to the last compatible release. The build script now
+  rejects recoverable parser and semantic errors instead of embedding damaged
+  JavaScript. (#115, #195)
+- Corrected BOM-less UTF-16 and ISO-2022-JP detection and made CR-only files
+  index as real lines, including cache-format invalidation and regression
+  coverage. (#196)
+- Made group sums exactly accumulated and spill-independent, rejected non-finite
+  numeric inputs, represented empty min/max values as absent, and unified NFC
+  key normalization across sort, top, group, and distinct. (#197, #198)
+- Snapshotted the worker executable before serving so in-process updates cannot
+  swap worker protocol versions, added GUI shutdown cancellation and scratch/WAL
+  cleanup, exposed disk-backed `--scratch-dir` / `AYAME_SCRATCH_DIR` placement,
+  and made spill cleanup RAII-safe on failures. (#137, #138, #140, #201)
+
 ## v0.6.1 - 2026-07-12
 
 - Stopped `/api/lines` viewport reads from deep-cloning up to 256 undo/redo

@@ -25,9 +25,7 @@ ayame <COMMAND> [OPTIONS]
 | `line <FILE> <N>` | 1-based の 1 行を表示。 |
 | `lines <FILE> <START> <COUNT>` | START から COUNT 行を表示。どちらも 1-based。 |
 | `search <FILE> <PATTERN>` | リテラル、正規表現、大文字小文字無視、単語単位、件数制限つき検索。 |
-| `diff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `text`。行単位または side-by-side の差分。 |
 | `sort <FILE>` | メモリ制限つき external merge sort。 |
-| `sortdiff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `sorted`。両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
 | `case <FILE> <MODE>` | 大文字小文字変換 (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) を新しいファイルへ書き出し。 |
 | `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
@@ -51,6 +49,7 @@ ayame <COMMAND> [OPTIONS]
 | `--stride <N>` | ファイルを開くコマンド | sparse index checkpoint の行間隔。既定は 4096。 |
 | `--no-cache` | ファイルを開くコマンド | persistent index cache を読み書きしない。 |
 | `--cache-dir <DIR>` | ファイルを開くコマンド | index cache directory を上書き。 |
+| `--scratch-dir <DIR>` | `serve`, `gui` | upload、worker snapshot、dirty view の実体化、data-op spill を置く filesystem を指定。`AYAME_SCRATCH_DIR` でも既定値を指定できます。 |
 | `--json` | `stat`, `search`, `split`, `group`, `top`, `distinct`, `cache` | machine-readable output を stdout へ。 |
 | `-V`, `--version` | global | バージョンを表示。 |
 | `-h`, `--help` | global | ヘルプを表示。 |
@@ -150,10 +149,12 @@ ayame <COMMAND> [OPTIONS]
 | `update` | `--version <VERSION>` で release tag を指定 (`latest` が既定)。`--install-dir <DIR>` は現在の install を置き換えず、その DIR へインストール。`--force` は同じ版または古い版のインストールを許可。`--dry-run` は release 解決だけを行いファイルを変更しません。 |
 | `remove` | `--install-dir <DIR>` で現在の install ではなくその install target を削除。`--yes` は確認プロンプトを省略。`--dry-run` は対象だけ表示しファイルを変更しません。 |
 
-`update` は release の `.sha256` を検証してからインストールします。macOS では
-`.app` bundle から起動している場合は `Ayame.app` を更新し、それ以外は standalone
-binary として置き換えられます。Windows では実行中の exe を直接置き換え / 削除でき
-ないため、現在のプロセス終了後に helper が完了させます。`/nix/store` から動いて
+`update` は release の `.sha256` に付いた Ed25519 署名を検証し、続けて download
+した artifact の checksum を検証してからインストールします。署名が無い、または
+不正な release は拒否します。macOS では `.app` bundle から起動している場合は
+`Ayame.app` を更新し、それ以外は standalone binary として置き換えられます。
+Windows では実行中の exe を直接置き換え / 削除できないため、現在のプロセス終了後に
+helper が完了させます。`/nix/store` から動いて
 いる binary は Nix 管理とみなし変更しません。Nix 側で更新 / 削除するか、
 `--install-dir` で standalone release を別の場所へインストールしてください。
 
@@ -178,9 +179,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

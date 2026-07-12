@@ -75,7 +75,7 @@ Important modules:
 | `assets.rs` | Serves embedded HTML, CSS, TypeScript modules, favicon, logo, and background assets. |
 | `state.rs` | Workspace lock, active document, tabs, edit session, WAL setup/recovery, save snapshots, and cleanup. |
 | `edit.rs` | Viewport lines, replace range/batch/rectangle, undo/redo, save, selection save, revert, reopen encoding, and WAL recovery endpoints. |
-| `ops.rs` | Search, grep, find, diff, sort-save, replace-save, case-save, and split-save endpoints. |
+| `ops.rs` | Search, grep, find, sort-save, replace-save, case-save, and split-save endpoints. |
 | `workspace.rs` | Open/new/upload/browse/tabs operations and scratch-file cleanup. |
 | `security.rs` | Loopback defaults, Host/Origin checks, remote-bind guard, DNS-rebinding and CSRF protection. |
 
@@ -90,7 +90,7 @@ The main endpoint groups are:
 | Endpoint group | Purpose |
 | --- | --- |
 | `/api/stat`, `/api/lines`, `/api/linebyte` | File metadata and viewport navigation. |
-| `/api/search`, `/api/find`, `/api/grep`, `/api/diff` | Search and comparison. |
+| `/api/search`, `/api/find`, `/api/grep` | Search. |
 | `/api/edit/*` | Replace, save, undo/redo, revert, recover, and reopen with another encoding. |
 | `/api/sort/save`, `/api/replace/save`, `/api/case/save`, `/api/split/save` | Long-running file operations exposed from the GUI. |
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | Workspace and tab management. |
@@ -131,4 +131,11 @@ bindings drift from the committed web types.
 6. let GitHub Actions build cross-platform release artifacts.
 
 The GitHub release workflow builds GUI artifacts for Windows, macOS Intel,
-macOS Apple Silicon, and Linux.
+macOS Apple Silicon, and Linux. Before publication it signs every artifact
+checksum with the Ed25519 key held in `AYAME_UPDATE_SIGNING_KEY`; self-update
+requires both the signature and checksum to verify.
+
+Serve/GUI scratch data is rooted at `--scratch-dir` (or
+`AYAME_SCRATCH_DIR`, then the platform temporary directory). Each operation
+gets an unpredictable, exclusively-created private subdirectory. Large-file
+deployments on tmpfs-backed `/tmp` should point this at a disk-backed volume.

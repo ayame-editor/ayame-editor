@@ -273,6 +273,7 @@ let loadingSeenOp = false;
 // True after the user hits Cancel, so the post-eviction 404 keeps showing the
 // canceling state instead of switching to the finalizing one.
 let loadingCanceling = false;
+let loadingReturnFocus: HTMLElement | null = null;
 
 export function newOperationId(kind = "op") {
   const rand =
@@ -290,6 +291,7 @@ function loadingParts() {
     box = document.createElement("div");
     box.id = "overlay-box";
     box.className = "overlay-box";
+    box.tabIndex = -1;
     const textEl = document.createElement("div");
     textEl.id = "overlay-text";
     textEl.className = "overlay-text";
@@ -301,6 +303,8 @@ function loadingParts() {
     const detail = document.createElement("div");
     detail.id = "overlay-detail";
     detail.className = "overlay-detail";
+    detail.setAttribute("role", "status");
+    detail.setAttribute("aria-live", "polite");
     const cancel = document.createElement("button");
     cancel.id = "overlay-cancel";
     cancel.className = "cmd danger";
@@ -411,12 +415,43 @@ export function showLoading(text, opts: { opId?: string | null; cancel?: boolean
     pollLoadingOperation(opts.opId);
     loadingPoll = setInterval(() => pollLoadingOperation(opts.opId!), 500);
   }
+  const active = document.activeElement;
+  loadingReturnFocus = active instanceof HTMLElement ? active : null;
+  for (const child of $("viewport").children) {
+    if (child !== o) (child as HTMLElement).inert = true;
+  }
   o.classList.remove("hidden");
+  o.setAttribute("aria-hidden", "false");
+  o.onkeydown = (event) => {
+    if (
+      event.key === "Escape" &&
+      !parts.cancel.classList.contains("hidden") &&
+      !parts.cancel.disabled
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      parts.cancel.click();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      (parts.cancel.classList.contains("hidden") ? $("overlay-box") : parts.cancel).focus();
+    }
+  };
+  queueMicrotask(() =>
+    (parts.cancel.classList.contains("hidden") ? $("overlay-box") : parts.cancel).focus(),
+  );
 }
 
 export function hideLoading() {
   stopLoadingPoll();
-  $("overlay").classList.add("hidden");
+  const overlay = $("overlay");
+  overlay.classList.add("hidden");
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.onkeydown = null;
+  for (const child of $("viewport").children) {
+    if (child !== overlay) (child as HTMLElement).inert = false;
+  }
+  if (loadingReturnFocus?.isConnected) loadingReturnFocus.focus();
+  loadingReturnFocus = null;
 }
 
 // True while the blocking loading overlay is up (open, sort, replace-all, …).

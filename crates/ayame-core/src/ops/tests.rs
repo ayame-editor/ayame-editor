@@ -521,6 +521,80 @@ fn group_spill_matches_the_in_memory_fast_path() {
 }
 
 #[test]
+fn group_exact_sum_is_spill_independent_and_ignores_non_finite_values() {
+    let mut data = Vec::new();
+    for _ in 0..20 {
+        for value in ["10000000000000000", "1", "-10000000000000000"] {
+            for key in 0..64 {
+                data.extend_from_slice(format!("k{key},{value}\n").as_bytes());
+            }
+        }
+    }
+    data.extend_from_slice(b"invalid,NaN\ninvalid,inf\ninvalid,-inf\ninvalid,nope\n");
+    let (_f, doc) = doc_from(&data);
+    let run = |budget: usize, dir: &std::path::Path| {
+        let opts = GroupOptions {
+            key_column: Some(1),
+            value_column: Some(2),
+            budget_bytes: budget,
+            spill_dir: dir.to_path_buf(),
+            ..Default::default()
+        };
+        let mut rows = Vec::new();
+        let stats = group(&doc, &opts, |row| rows.push(row.clone())).unwrap();
+        (rows, stats)
+    };
+    let in_memory_dir = tempfile::tempdir().unwrap();
+    let spilled_dir = tempfile::tempdir().unwrap();
+    let (in_memory, memory_stats) = run(1 << 30, in_memory_dir.path());
+    let (spilled, spill_stats) = run(512, spilled_dir.path());
+    assert_eq!(memory_stats.runs, 0);
+    assert!(spill_stats.runs > 1);
+
+    for (left, right) in in_memory.iter().zip(&spilled) {
+        assert_eq!(left.key, right.key);
+        assert_eq!(left.sum.to_bits(), right.sum.to_bits());
+        assert_eq!(left.min, right.min);
+        assert_eq!(left.max, right.max);
+        if left.key == b"invalid" {
+            assert_eq!(left.numeric_count, 0);
+            assert_eq!(left.sum, 0.0);
+            assert_eq!(left.min, None);
+            assert_eq!(left.max, None);
+        } else {
+            assert_eq!(left.sum, 20.0);
+            assert_eq!(left.avg(), Some(1.0 / 3.0));
+        }
+    }
+}
+
+#[test]
+fn unicode_equivalent_keys_match_across_group_and_distinct() {
+    let data = "caf\u{e9},1\ncafe\u{301},2\n";
+    let (_f, doc) = doc_from(data.as_bytes());
+    let dir = tempfile::tempdir().unwrap();
+    let group_options = GroupOptions {
+        key_column: Some(1),
+        value_column: Some(2),
+        spill_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    group(&doc, &group_options, |row| rows.push(row.clone())).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "caf\u{e9}".as_bytes());
+    assert_eq!(rows[0].count, 2);
+    assert_eq!(rows[0].sum, 3.0);
+
+    let distinct_options = DistinctOptions {
+        key_column: Some(1),
+        precision: 14,
+        ..Default::default()
+    };
+    assert_eq!(distinct(&doc, &distinct_options).estimate, 1);
+}
+
+#[test]
 fn reverse_sort_with_spill_is_stable_and_descending() {
     // Many rows, 20 keys each shared by 200 rows, tiny budget => a multi-run
     // merge. Reverse must order keys 19..0, and within a key the original line

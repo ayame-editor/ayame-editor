@@ -9,7 +9,7 @@ use crate::encoding::Encoding;
 use crate::fields::{comparable_key, FieldSpec};
 use crate::Result;
 
-use super::common::{read_full, unique_spill_dir};
+use super::common::{read_full, SpillGuard};
 use super::spill::{self, HeapEntry, Payload, RunReader};
 
 /// How to sort.
@@ -95,13 +95,16 @@ fn sort_inner<F>(
 where
     F: FnMut(u64, u64),
 {
-    let spill_dir = unique_spill_dir(&opts.spill_dir)?;
+    let mut spill = SpillGuard::create(&opts.spill_dir)?;
+    let spill_dir = spill.path().to_path_buf();
     let run_name = spill_dir
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("run");
     let ordering_path = opts.spill_dir.join(format!("{run_name}.ordering.bin"));
     let line_offsets_path = opts.spill_dir.join(format!("{run_name}.lines.bin"));
+    spill.track_external(ordering_path.clone());
+    spill.track_external(line_offsets_path.clone());
     let mut line_offsets = BufWriter::new(File::create(&line_offsets_path)?);
 
     // ---- phase 1: run generation ----------------------------------------
@@ -163,7 +166,7 @@ where
         let _ = fs::remove_file(r);
     }
     fs::rename(&ordering_tmp, &ordering_path)?;
-    let _ = fs::remove_dir(&spill_dir);
+    spill.finish();
 
     Ok(SortResult {
         ordering_path,

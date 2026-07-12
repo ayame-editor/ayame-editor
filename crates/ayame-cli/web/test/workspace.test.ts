@@ -43,6 +43,7 @@ import {
   canDragOutToNewWindow,
   canHandoffDirtyTab,
   closeTabsSequentially,
+  handleOpenerListKeydown,
 } from "../src/workspace.js";
 
 function deferred() {
@@ -118,5 +119,38 @@ describe("Close Other Tabs ordering (#123)", () => {
 
     second.resolve();
     await pending;
+  });
+});
+
+describe("opener keyboard navigation (#185)", () => {
+  it("moves with arrows/Home/End and activates with Enter", () => {
+    document.body.innerHTML = `<div id="list">
+      <button class="opener-row">A</button>
+      <button class="opener-row">B</button>
+      <button class="opener-row">C</button>
+    </div>`;
+    const list = document.getElementById("list")!;
+    const rows = [...list.querySelectorAll<HTMLButtonElement>("button")];
+    for (const row of rows) row.scrollIntoView = vi.fn();
+    const click = vi.fn();
+    rows[2].addEventListener("click", click);
+    rows[0].focus();
+
+    const key = (value: string) =>
+      handleOpenerListKeydown({
+        key: value,
+        currentTarget: list,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent);
+    key("ArrowDown");
+    expect(document.activeElement).toBe(rows[1]);
+    key("End");
+    expect(document.activeElement).toBe(rows[2]);
+    key("Enter");
+    expect(click).toHaveBeenCalledOnce();
+    key("Home");
+    expect(document.activeElement).toBe(rows[0]);
+    key("ArrowUp");
+    expect(document.activeElement).toBe(rows[2]);
   });
 });

@@ -30,7 +30,7 @@ export const FONT_STACKS = {
 };
 
 export const DEFAULT_SETTINGS = {
-  theme: "iris-light",
+  theme: "system",
   font: "mono",
   fontSize: 13,
   zoom: 100,
@@ -91,7 +91,6 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["searchWord", "keymap.searchWord", "Alt+W"],
   ["searchRegex", "keymap.searchRegex", "Alt+R"],
   ["sortSave", "menu.sort", ""],
-  ["diffFile", "menu.diff", ""],
   ["splitFile", "menu.split", ""],
   ["grepFolder", "menu.grep", ""],
   ["grepSave", "menu.grepSave", ""],

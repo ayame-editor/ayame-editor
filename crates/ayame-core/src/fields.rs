@@ -99,7 +99,12 @@ pub(crate) fn decoded_text_key_into(
 ) {
     out.clear();
     let field = field_bytes(raw, col, spec, field_scratch);
-    out.extend_from_slice(enc.decode_line(field).as_bytes());
+    let decoded = enc.decode_line(field);
+    if decoded.is_ascii() {
+        out.extend_from_slice(decoded.as_bytes());
+    } else {
+        out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
+    }
 }
 
 fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {

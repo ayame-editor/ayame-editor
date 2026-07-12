@@ -2,8 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/editor.js", () => ({ focusEditor: vi.fn() }));
 vi.mock("../src/i18n.js", () => ({ t: (key: string) => key }));
+vi.mock("../src/api.js", () => ({
+  api: vi.fn(async () => ({
+    kind: "sort",
+    percent: 1,
+    processed_lines: 1,
+    total_lines: 10,
+    canceled: false,
+  })),
+  apiPost: vi.fn(async () => ({})),
+}));
 
-import { askConfirm } from "../src/dialogs.js";
+import { apiPost } from "../src/api.js";
+import { askConfirm, hideLoading, showLoading } from "../src/dialogs.js";
 
 function keydownEnter() {
   document
@@ -46,5 +57,37 @@ describe("confirmation dialog keyboard actions", () => {
     (document.activeElement as HTMLElement | null)?.blur();
     keydownEnter();
     await expect(result).resolves.toBe(true);
+  });
+});
+
+describe("operation overlay accessibility", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = `
+      <main id="viewport"><button id="behind">Behind</button>
+        <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true"
+             aria-hidden="true" aria-labelledby="overlay-text" aria-describedby="overlay-detail"></div>
+      </main>`;
+  });
+
+  it("isolates the editor, focuses Cancel, and cancels with Escape", async () => {
+    const behind = document.getElementById("behind") as HTMLButtonElement;
+    behind.focus();
+    showLoading("Working", { opId: "sort:test", cancel: true });
+    await Promise.resolve();
+
+    const overlay = document.getElementById("overlay")!;
+    const cancel = document.getElementById("overlay-cancel") as HTMLButtonElement;
+    expect(overlay.getAttribute("aria-hidden")).toBe("false");
+    expect(behind.inert).toBe(true);
+    expect(document.getElementById("overlay-detail")?.getAttribute("aria-live")).toBe("polite");
+    expect(document.activeElement).toBe(cancel);
+
+    cancel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(apiPost).toHaveBeenCalledWith("/api/ops/cancel", { id: "sort:test" });
+
+    hideLoading();
+    expect(behind.inert).toBe(false);
+    expect(document.activeElement).toBe(behind);
   });
 });
