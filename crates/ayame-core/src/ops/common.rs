@@ -65,3 +65,52 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir(path)
 }
+
+/// Drop guard that deletes an op's spill directory (recursively) and any
+/// registered artifact files unless [`SpillCleanup::disarm`] ran first.
+///
+/// Sort/group used to clean up only on their success path, so a mid-op failure
+/// (disk full, base file truncated, a panicking callback) stranded partial
+/// runs, `*.ordering.bin` / `*.lines.bin` artifacts, and the spill directory
+/// on disk — gigabytes per aborted op (#201). Running the cleanup in `Drop`
+/// covers every early `?` return and unwinding panics alike; the deletions are
+/// best-effort because the guard usually fires when the op is already
+/// reporting a more useful error.
+pub(super) struct SpillCleanup {
+    dir: PathBuf,
+    files: Vec<PathBuf>,
+    armed: bool,
+}
+
+impl SpillCleanup {
+    pub(super) fn new(dir: PathBuf) -> SpillCleanup {
+        SpillCleanup {
+            dir,
+            files: Vec::new(),
+            armed: true,
+        }
+    }
+
+    /// Also delete `file` if the op does not complete (for artifacts written
+    /// outside the spill directory, like the final ordering file).
+    pub(super) fn register_file(&mut self, file: PathBuf) {
+        self.files.push(file);
+    }
+
+    /// The op finished and its artifacts are now owned by the caller.
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpillCleanup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        for f in &self.files {
+            let _ = std::fs::remove_file(f);
+        }
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}

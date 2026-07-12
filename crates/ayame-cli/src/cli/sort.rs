@@ -78,7 +78,8 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
         let mut rd = OrderingReader::open(&res.ordering_path)?;
         let mut emitted = 0u64;
         while let Some(ln) = rd.next_line()? {
-            if let Some(text) = doc.line(ln) {
+            // Sorted output is data, not display: decode the full line.
+            if let Some(text) = doc.line_full(ln) {
                 writeln!(w, "{text}")?;
             }
             emitted += 1;

@@ -55,6 +55,10 @@ pub struct OpenOptions {
 pub struct Line {
     pub number: u64,
     pub text: String,
+    /// True when `text` is only the first [`Document::MAX_VIEW_LINE_BYTES`]
+    /// of a longer line (see #201). Callers that persist text (rather than
+    /// display it) must not use a truncated line.
+    pub truncated: bool,
 }
 
 /// Summary metadata about an opened document.
@@ -387,26 +391,76 @@ impl Document {
         &self.buf()[..self.base as usize]
     }
 
+    /// Longest run of raw bytes the *view* APIs ([`Document::line`],
+    /// [`Document::lines`], [`Document::line_view`]) decode for one line. A
+    /// file with no newlines at all is a single line as long as the file, and
+    /// the bounded-memory contract ("proportional to the answer, never the
+    /// file") must hold even then (#201). Display needs at most a screenful;
+    /// anything needing full fidelity goes through [`Document::line_full`] or
+    /// the raw byte-range APIs, which never decode.
+    pub const MAX_VIEW_LINE_BYTES: usize = 4 * 1024 * 1024;
+
     /// Decoded text of line `i` (terminator stripped), or `None` if out of
     /// range — or if the base file shrank underneath the read (the document is
-    /// poisoned then; reopen to recover).
+    /// poisoned then; reopen to recover). Decoding is capped at
+    /// [`Document::MAX_VIEW_LINE_BYTES`]; use [`Document::line_view`] to learn
+    /// whether the cap was hit, or [`Document::line_full`] for full fidelity.
     pub fn line(&self, i: u64) -> Option<String> {
+        self.line_view(i).map(|(text, _truncated)| text)
+    }
+
+    /// Like [`Document::line`], but also reports whether the text was cut at
+    /// the view cap.
+    pub fn line_view(&self, i: u64) -> Option<(String, bool)> {
+        if !self.base_ok() {
+            return None;
+        }
+        let buf = self.buf();
+        let (s, e) = self.index.line_range(buf, i)?;
+        let decoded = self
+            .encoding
+            .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
+        // Re-check after the read: if the range faulted into a truncated page,
+        // the text was decoded from zero-fill and must not be shown.
+        if !self.base_ok() {
+            return None;
+        }
+        Some(decoded)
+    }
+
+    /// Decoded text of line `i` with no length cap. Allocates the whole
+    /// decoded line — `O(line length)`, which for a file without newlines is
+    /// the whole file. Reserved for fidelity-critical consumers (re-encoding
+    /// artifacts, explicit single-line extraction) that must never truncate.
+    pub fn line_full(&self, i: u64) -> Option<String> {
         if !self.base_ok() {
             return None;
         }
         let buf = self.buf();
         let (s, e) = self.index.line_range(buf, i)?;
         let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
-        // Re-check after the read: if the range faulted into a truncated page,
-        // `text` was decoded from zero-fill and must not be shown.
         if !self.base_ok() {
             return None;
         }
         Some(text)
     }
 
-    /// Up to `count` decoded lines starting at `start`. Empty once the base
-    /// file shrank underneath us (see [`Document::line`]).
+    /// Raw (undecoded, terminator-stripped) byte length of line `i`. Cheap —
+    /// two index lookups, no decode. Edit paths use this to refuse in-place
+    /// edits of lines beyond the view cap instead of rebuilding them from
+    /// truncated text.
+    pub fn line_byte_len(&self, i: u64) -> Option<u64> {
+        if !self.base_ok() {
+            return None;
+        }
+        self.index
+            .line_range(self.buf(), i)
+            .map(|(s, e)| e.saturating_sub(s))
+    }
+
+    /// Up to `count` decoded lines starting at `start`, each capped at
+    /// [`Document::MAX_VIEW_LINE_BYTES`] (see [`Line::truncated`]). Empty once
+    /// the base file shrank underneath us (see [`Document::line`]).
     pub fn lines(&self, start: u64, count: u64) -> Vec<Line> {
         if !self.base_ok() {
             return Vec::new();
@@ -416,9 +470,15 @@ impl Document {
             .index
             .line_ranges(buf, start, count)
             .into_iter()
-            .map(|(number, s, e)| Line {
-                number,
-                text: self.encoding.decode_line(&buf[s as usize..e as usize]),
+            .map(|(number, s, e)| {
+                let (text, truncated) = self
+                    .encoding
+                    .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
+                Line {
+                    number,
+                    text,
+                    truncated,
+                }
             })
             .collect();
         if !self.base_ok() {
@@ -447,7 +507,9 @@ impl Document {
         self.index.line_range(self.buf(), i).map(|(s, _)| s)
     }
 
-    /// Byte offset for decoded character column `col` on line `i`.
+    /// Byte offset for decoded character column `col` on line `i`. Columns
+    /// past the view cap of an over-long line resolve to `None` — the edit
+    /// layer refuses to splice such lines anyway (#201).
     pub fn line_col_byte(&self, i: u64, col: u64) -> Option<u64> {
         if !self.base_ok() {
             return None;
@@ -458,8 +520,13 @@ impl Document {
             let off = legacy_col_offset(self.encoding, &buf[s as usize..e as usize], col)?;
             return Some(s + off as u64);
         }
-        let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
+        let (text, truncated) = self
+            .encoding
+            .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
         let prefix: String = text.chars().take(col as usize).collect();
+        if truncated && prefix.chars().count() < col as usize {
+            return None;
+        }
         let encoded = self.encoding.encode_query(&prefix)?;
         Some(s + encoded.len() as u64)
     }
@@ -1241,6 +1308,50 @@ mod tests {
             doc.try_for_each_raw_line(|_, _| Ok(()), |_| {}),
             Err(Error::BaseFileChanged(_))
         ));
+    }
+
+    /// Issue #201: a file with no newline is one line the size of the file.
+    /// View reads must stay capped; explicitly-full reads still work.
+    #[test]
+    fn single_line_file_views_are_capped_but_full_reads_are_not() {
+        let len = Document::MAX_VIEW_LINE_BYTES + 512 * 1024;
+        let mut data = vec![b'x'; len];
+        data[0] = b'H'; // prove we see the real bytes, not zeros
+        let f = write_temp(&data);
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.line_count(), 1);
+        assert_eq!(doc.line_byte_len(0), Some(len as u64));
+
+        let lines = doc.lines(0, 1);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].truncated);
+        assert_eq!(lines[0].text.len(), Document::MAX_VIEW_LINE_BYTES);
+        assert!(lines[0].text.starts_with('H'));
+
+        let (view, truncated) = doc.line_view(0).unwrap();
+        assert!(truncated);
+        assert_eq!(view.len(), Document::MAX_VIEW_LINE_BYTES);
+        assert_eq!(doc.line(0).unwrap().len(), Document::MAX_VIEW_LINE_BYTES);
+
+        let full = doc.line_full(0).unwrap();
+        assert_eq!(full.len(), len);
+
+        // Columns inside the cap resolve; columns beyond it refuse.
+        assert_eq!(doc.line_col_byte(0, 16), Some(16));
+        assert_eq!(
+            doc.line_col_byte(0, Document::MAX_VIEW_LINE_BYTES as u64 + 10),
+            None
+        );
+    }
+
+    #[test]
+    fn short_lines_are_never_flagged_truncated() {
+        let f = write_temp("short\n日本語の行\n".as_bytes());
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        for line in doc.lines(0, 2) {
+            assert!(!line.truncated, "line {:?} wrongly flagged", line.text);
+        }
+        assert_eq!(doc.line_full(1).as_deref(), doc.line(1).as_deref());
     }
 
     #[test]

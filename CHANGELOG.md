@@ -4,6 +4,19 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- The bounded-memory contract now survives files with no (or absurdly distant)
+  newlines: view APIs decode at most 4 MiB per line (`Line.truncated` /
+  `EditLine.truncated` report the cut, `ayame line` and sorted outputs still
+  decode in full), op keys for sort/group/top/distinct are built from at most
+  the first 64 KiB of a field (longer fields fall back to sort's stable
+  original-order tie-break), and a match's character column is computed with a
+  streaming counter instead of decoding the whole line prefix. In-place edits
+  of over-cap lines are refused with a clear error instead of silently
+  truncating them, and selection export refuses truncated lines. (#201)
+- sort/group no longer strand spill runs, partial `*.ordering.bin` /
+  `*.lines.bin` artifacts, or their private spill directory when an operation
+  fails or a callback panics mid-run — cleanup now runs in a drop guard
+  covering every exit path. (#201)
 - The editor no longer dies with an uncatchable `SIGBUS` when another process
   truncates (or rotates a shorter file over) a file it has memory-mapped. A
   process-wide fault absorber (`ayame-core::mapfault`) turns the fault into a
