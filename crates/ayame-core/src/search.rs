@@ -96,6 +96,23 @@ impl MatchPlan {
         if query.is_empty() {
             return Err(error("empty query".into()));
         }
+        if enc == Encoding::Iso2022Jp {
+            // Stateful 7-bit JIS: raw-byte scanning is wrong in both directions
+            // — an encoded needle carries designation escapes that a mid-run
+            // hit lacks (misses), and ASCII needle bytes also occur inside JIS
+            // code pairs (false hits). Decode lines and match on text, whatever
+            // the query flags say.
+            let pat = if regex {
+                query.to_string()
+            } else {
+                regex::escape(query)
+            };
+            let re = regex::RegexBuilder::new(&pat)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| error(format!("invalid regex: {e}")))?;
+            return Ok(MatchPlan::DecodeLine(re));
+        }
         if !regex && case_sensitive {
             // Fast path: encode the needle into the file's encoding and scan bytes.
             // For legacy multi-byte encodings the call sites boundary-validate
@@ -549,6 +566,8 @@ fn decoded_char_span(
 ) -> (usize, usize) {
     if enc.is_wide() {
         utf16_char_span(text, char_start, char_len)
+    } else if enc == Encoding::Iso2022Jp {
+        crate::encoding::iso2022jp_char_span(raw, char_start, char_len)
     } else {
         legacy_char_span(enc, raw, char_start, char_len)
     }

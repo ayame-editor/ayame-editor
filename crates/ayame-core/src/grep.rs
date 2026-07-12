@@ -181,10 +181,13 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
         return Ok(Vec::new());
     }
     let (enc, base) = encoding::detect(buf, None);
+    let eol = encoding::detect_eol_for(&buf[base..], enc);
     let base = base as u64;
     let index = match enc {
         Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, DEFAULT_STRIDE),
         Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, DEFAULT_STRIDE),
+        // Classic-Mac files split on lone '\r' (#196), same as Document::open.
+        _ if eol == encoding::Eol::Cr => LineIndex::build_cr(buf, base, DEFAULT_STRIDE),
         _ => LineIndex::build(buf, base, DEFAULT_STRIDE),
     };
     let sopts = SearchOptions {

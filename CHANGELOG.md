@@ -2,6 +2,22 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Fixed three encoding/EOL detection failures (#196): ASCII-heavy UTF-16
+  without a BOM is now detected by NUL-byte parity instead of short-circuiting
+  to UTF-8 (which rendered interleaved NULs and built garbage sort keys);
+  ISO-2022-JP is a first-class encoding — detected by its JIS escape sequences
+  (deliberately not by the `ESC ( B` designation that also appears in colored
+  terminal logs), decoded, searchable (always through the decoded-text plan,
+  since raw-byte scans both miss mid-run matches and false-positive on escape
+  bytes), and available to convert-save and `--encoding`; and classic-Mac
+  CR-only files finally split into lines — the line index can now terminate on
+  lone `\r`, so `stat` no longer reports "1 line" next to "line ending CR",
+  and sort/group/split/tail-follow see real records. Cached indexes remember
+  their newline strategy, so an LF index cached by an older build cannot serve
+  a CR-only file.
+
 ## v0.7.1 - 2026-07-13
 
 - group-by aggregates are now deterministic and clean: `sum`/`avg` accumulate

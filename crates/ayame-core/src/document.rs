@@ -141,27 +141,32 @@ impl Document {
             let eol = encoding::detect_eol_for(&buf[base_us..], encoding);
 
             // Try the on-disk index cache for files large enough to be worth it.
-            // The index only depends on (bytes, stride) — not on the encoding —
-            // so the cache key is keyed on source identity + stride. Any miss,
-            // stale entry, or corruption falls back to a full rebuild.
+            // The index depends on (bytes, stride) and the newline strategy the
+            // encoding/EOL demand — a cached LF index must not serve a CR-only
+            // file (#196). Any miss, stale entry, or corruption falls back to a
+            // full rebuild.
             let t0 = Instant::now();
             let mut from_cache = false;
             let index = match opts.cache_dir.as_deref() {
                 Some(dir) if len >= CACHE_MIN_BYTES && !encoding.is_wide() => {
                     let key = cache::key(&path, len, mtime, stride);
                     match cache::load(dir, &key, len, mtime) {
-                        Some(idx) if idx.source_len() == len && idx.base() == base => {
+                        Some(idx)
+                            if idx.source_len() == len
+                                && idx.base() == base
+                                && idx.newline_code() == expected_newline_code(encoding, eol) =>
+                        {
                             from_cache = true;
                             idx
                         }
                         _ => {
-                            let idx = line_index_for(buf, base, stride, encoding);
+                            let idx = line_index_for(buf, base, stride, encoding, eol);
                             cache::store(dir, &key, len, mtime, &idx);
                             idx
                         }
                     }
                 }
-                _ => line_index_for(buf, base, stride, encoding),
+                _ => line_index_for(buf, base, stride, encoding, eol),
             };
             let index_ms = t0.elapsed().as_millis();
             (encoding, base, index, eol, index_ms, from_cache)
@@ -520,6 +525,12 @@ impl Document {
             let off = legacy_col_offset(self.encoding, &buf[s as usize..e as usize], col)?;
             return Some(s + off as u64);
         }
+        if self.encoding == Encoding::Iso2022Jp {
+            // Stateful encoding: a re-encode round trip cannot recover mid-run
+            // byte offsets, so walk the designation escapes over the raw line.
+            let off = encoding::iso2022jp_col_offset(&buf[s as usize..e as usize], col)?;
+            return Some(s + off as u64);
+        }
         let (text, truncated) = self
             .encoding
             .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
@@ -815,13 +826,26 @@ impl Document {
     }
 }
 
-fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding) -> LineIndex {
+fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding, eol: Eol) -> LineIndex {
     match encoding {
         Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, stride),
         Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, stride),
-        Encoding::Utf8 | Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => {
-            LineIndex::build(buf, base, stride)
-        }
+        // Classic-Mac files have no '\n' at all; index on lone '\r' so the
+        // line count agrees with the detected EOL instead of collapsing the
+        // whole file into one line (#196). (CR-only UTF-16 stays unsupported.)
+        _ if eol == Eol::Cr => LineIndex::build_cr(buf, base, stride),
+        _ => LineIndex::build(buf, base, stride),
+    }
+}
+
+/// The newline strategy `line_index_for` picks, as the index wire code — used
+/// to reject cached indexes built with a different strategy.
+fn expected_newline_code(encoding: Encoding, eol: Eol) -> u32 {
+    match encoding {
+        Encoding::Utf16Le => 1,
+        Encoding::Utf16Be => 2,
+        _ if eol == Eol::Cr => 3,
+        _ => 0,
     }
 }
 
@@ -1352,6 +1376,88 @@ mod tests {
             assert!(!line.truncated, "line {:?} wrongly flagged", line.text);
         }
         assert_eq!(doc.line_full(1).as_deref(), doc.line(1).as_deref());
+    }
+
+    /// Issue #196: CR-only (classic Mac) files used to index as ONE line while
+    /// `stat()` simultaneously reported `Eol::Cr` — an internal contradiction.
+    #[test]
+    fn cr_only_file_line_count_matches_its_detected_eol() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("classic.mac");
+        std::fs::write(&path, b"alpha\rbeta\rgamma\r").unwrap();
+        let mut doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        assert_eq!(doc.stat().eol, Eol::Cr);
+        assert_eq!(doc.line_count(), 3, "CR terminators must split lines");
+        assert_eq!(doc.line(1).as_deref(), Some("beta"));
+        assert_eq!(doc.raw_line_with_terminator(0), Some(&b"alpha\r"[..]));
+        assert_eq!(doc.default_terminator(), b"\r");
+
+        // Tail-follow keeps splitting on CR for appended data.
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        f.write_all(b"delta\r").unwrap();
+        f.flush().unwrap();
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Grew);
+        assert_eq!(doc.line_count(), 4);
+        assert_eq!(doc.line(3).as_deref(), Some("delta"));
+    }
+
+    /// Issue #196: ASCII-heavy UTF-16 without a BOM is valid UTF-8 byte-wise
+    /// and used to short-circuit to "UTF-8", rendering interleaved NULs.
+    #[test]
+    fn bomless_utf16_is_detected_and_indexed() {
+        let f = write_temp(&utf16_bytes("one\ntwo\nthree", true, false));
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Le);
+        assert_eq!(doc.line_count(), 3);
+        assert_eq!(doc.line(1).as_deref(), Some("two"));
+
+        let f = write_temp(&utf16_bytes("east\nwest", false, false));
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Be);
+        assert_eq!(doc.line(1).as_deref(), Some("west"));
+    }
+
+    /// Issue #196: ISO-2022-JP is 7-bit and used to be misdetected as UTF-8
+    /// (mojibake). It must detect, decode, and search through the text plan.
+    #[test]
+    fn iso2022jp_is_detected_decoded_and_searchable() {
+        let (bytes, _, err) =
+            encoding_rs::ISO_2022_JP.encode("最初の行\nsecond line\n三番目の行\n");
+        assert!(!err);
+        let f = write_temp(&bytes);
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Iso2022Jp);
+        assert_eq!(doc.line_count(), 3);
+        assert_eq!(doc.line(0).as_deref(), Some("最初の行"));
+
+        let hit = doc
+            .find_next("三番目", false, true, false, 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.line, 2);
+        let hit = doc
+            .find_next("second", false, true, false, 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.line, 1);
+
+        // The raw bytes contain "$B" (inside every designation escape), but
+        // the decoded text does not — a raw-byte scan would false-positive.
+        let res = doc
+            .search(&SearchOptions {
+                query: "$B".into(),
+                ..SearchOptions::default()
+            })
+            .unwrap();
+        assert!(
+            res.hits.is_empty(),
+            "escape-sequence bytes must not match as text: {:?}",
+            res.hits
+        );
     }
 
     #[test]
