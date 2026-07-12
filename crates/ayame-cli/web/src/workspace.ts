@@ -109,29 +109,6 @@ export function showFolderDialog(title, startDir): Promise<string | null> {
   });
 }
 
-// Pick one file without opening it in the editor. Used by tools such as the
-// browser build's two-file diff, where a real path is needed as an input.
-export function showFileDialog(title, startDir): Promise<string | null> {
-  return new Promise((resolve) => {
-    configureOpener("file", title);
-    state.openerResolve = resolve;
-    $("opener-input").value = "";
-    setModalOpen($("opener"), true);
-    browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
-    queueMicrotask(() => $("opener-input").focus());
-  });
-}
-
-export function finishFileDialog(value) {
-  const resolve = state.openerResolve;
-  state.openerResolve = null;
-  state.openerMode = "open";
-  setModalOpen($("opener"), false);
-  configureOpener("open");
-  focusEditor();
-  if (resolve) resolve(value);
-}
-
 export function finishFolderDialog(value) {
   const resolve = state.openerResolve;
   state.openerResolve = null;
@@ -179,10 +156,6 @@ export function hideOpener() {
   }
   if (state.openerMode === "folder") {
     finishFolderDialog(null);
-    return;
-  }
-  if (state.openerMode === "file") {
-    finishFileDialog(null);
     return;
   }
   // The opener doubles as the welcome screen: don't let it close while there is
@@ -310,8 +283,7 @@ export function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
-    } else if (state.openerMode === "file") finishFileDialog(ent.path);
-    else if (state.openerMode === "open") openPath(ent.path);
+    } else if (state.openerMode === "open") openPath(ent.path);
     // folder mode: files are not selectable targets — ignore the click.
   });
   row.addEventListener("dblclick", () => {
@@ -446,12 +418,6 @@ export async function commitOpener() {
   if (state.openerMode === "save") {
     const target = await saveDialogTarget();
     if (target) finishSaveDialog(target);
-    return;
-  }
-  if (state.openerMode === "file") {
-    const raw = $("opener-input").value.trim();
-    if (!raw) return;
-    finishFileDialog(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
     return;
   }
   // Like save mode: a typed relative name means "in the folder being

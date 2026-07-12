@@ -79,10 +79,6 @@ Then open `http://127.0.0.1:8777/`.
 
 ![Ayame Editor tools menu](assets/screenshot-tools.png)
 
-### Two-file Diff
-
-![Ayame Editor two-file diff dialog](assets/screenshot-diff.png)
-
 ## CLI Commands
 
 ```sh
@@ -92,9 +88,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side
 ayame sort huge.csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log
 ayame case huge.csv lower --out lower.csv
 ayame split huge.csv --lines 1000000
@@ -113,7 +107,8 @@ input by default, using `<stem>.partNNNN<.ext>` names. Output commands refuse to
 overwrite existing files, so choose a new path when the target already exists.
 
 Use [CLI Reference](CLI_REFERENCE.md) or `ayame --help` for the full command and
-option list.
+option list. File comparison is provided by the sister project ayame-diff; see
+[the migration guide](MIGRATING_TO_AYAME_DIFF.md).
 
 ## Main Features
 
@@ -121,7 +116,7 @@ option list.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII. If text is garbled, reopen with an explicit encoding.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
 - Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
-- Runs sort, replace, two-file diff, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
+- Runs sort, replace, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
 - Includes tabs, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.

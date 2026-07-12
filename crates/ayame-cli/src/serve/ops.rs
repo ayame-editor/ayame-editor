@@ -9,14 +9,13 @@ use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use ayame_core::{Document, EditSession, Line, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES};
+use ayame_core::{Document, EditSession, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Notify;
 use tokio::time::Duration;
 
-use crate::diff::{diff_documents, DiffKind, DiffResult};
 use crate::temp_paths;
 
 use super::state::DirtySnapshotCache;
@@ -860,7 +859,7 @@ fn grep_default_max() -> usize {
     2000
 }
 
-/// `POST /api/grep` — recursive multi-file search. Like `/api/diff`, the heavy
+/// `POST /api/grep` — recursive multi-file search. The heavy
 /// work (a directory walk + a search over each file) runs inside
 /// `spawn_blocking` and the structured hits are returned as JSON. This searches
 /// on-disk files, so it does not see the active buffer's unsaved edits.
@@ -963,174 +962,6 @@ pub(super) async fn api_find(
     .map_err(internal)?
     .map_err(bad_request)?;
     Ok(Json(FindResponse { hit }))
-}
-
-// ---- diff ----------------------------------------------------------------------
-
-#[derive(Deserialize)]
-pub(super) struct DiffQuery {
-    path: String,
-    #[serde(default = "diff_max_hunks")]
-    max_hunks: usize,
-    #[serde(default = "diff_max_lines")]
-    max_lines: u64,
-    #[serde(default = "diff_window")]
-    window: u64,
-}
-
-fn diff_max_hunks() -> usize {
-    200
-}
-
-fn diff_window() -> u64 {
-    128
-}
-
-fn diff_max_lines() -> u64 {
-    80
-}
-
-#[derive(Serialize)]
-pub(super) struct WebDiffResponse {
-    old_path: String,
-    new_path: String,
-    current_dirty: bool,
-    old_lines: u64,
-    new_lines: u64,
-    hunks: Vec<WebDiffHunk>,
-    hunk_count: u64,
-    omitted_hunks: u64,
-    added: u64,
-    deleted: u64,
-    modified: u64,
-    max_lines_per_hunk: u64,
-}
-
-#[derive(Serialize)]
-pub(super) struct WebDiffHunk {
-    kind: DiffKind,
-    old_start: u64,
-    old_len: u64,
-    new_start: u64,
-    new_len: u64,
-    old_preview: Vec<Line>,
-    new_preview: Vec<Line>,
-    old_truncated: bool,
-    new_truncated: bool,
-}
-
-pub(super) async fn api_diff(
-    State(state): State<SharedState>,
-    Query(q): Query<DiffQuery>,
-) -> Result<Json<WebDiffResponse>, ApiError> {
-    let path = q.path.trim().to_string();
-    if path.is_empty() {
-        return Err(bad_request("path is empty"));
-    }
-    let (old, dirty) = state.doc_and_dirty_edits()?;
-    let current_dirty = dirty.is_some();
-    // Both response paths are UI-facing: verbatim prefixes are stripped.
-    let old_path = workspace::display_path(old.path());
-    let new_path = workspace::strip_verbatim(&path);
-    let open_options = state.open_options();
-    let max_hunks = q.max_hunks.min(100_000);
-    let max_lines = q.max_lines.clamp(1, 500);
-    let window = q.window.max(1);
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<WebDiffResponse> {
-        let new = Document::open(&path, &open_options)
-            .with_context(|| format!("opening '{}'", workspace::strip_verbatim(&path)))?;
-        let input = materialize_worker_input(old.as_ref(), dirty.as_ref(), "diff-current")?;
-        let response = match &input {
-            WorkerInput::Materialized { path: current, .. } => {
-                // The scratch copy is read once and discarded: skip the index
-                // cache so it doesn't accumulate dead entries. (`open_options`
-                // has no later use, so it can be moved rather than cloned.)
-                let scratch_opts = ayame_core::OpenOptions {
-                    cache_dir: None,
-                    // Same as dirty_view: the materialized current buffer is in
-                    // the live doc's encoding, so force it rather than letting
-                    // auto-detection re-guess (and possibly re-misdetect) it
-                    // (issue #75). The comparison file `new` keeps auto-detect.
-                    encoding: Some(old.encoding()),
-                    ..open_options
-                };
-                let current = Document::open(current, &scratch_opts)
-                    .with_context(|| format!("opening {}", current.display()))?;
-                let diff = diff_documents(&current, &new, max_hunks, window);
-                web_diff_response(
-                    &current,
-                    &new,
-                    diff,
-                    old_path,
-                    new_path,
-                    current_dirty,
-                    max_lines,
-                )
-            }
-            WorkerInput::OnDisk(_) => {
-                let diff = diff_documents(old.as_ref(), &new, max_hunks, window);
-                web_diff_response(
-                    old.as_ref(),
-                    &new,
-                    diff,
-                    old_path,
-                    new_path,
-                    current_dirty,
-                    max_lines,
-                )
-            }
-        };
-        drop(input);
-        Ok(response)
-    })
-    .await
-    .map_err(internal)?
-    .map_err(bad_request)?;
-    Ok(Json(result))
-}
-
-fn web_diff_response(
-    old: &Document,
-    new: &Document,
-    result: DiffResult,
-    old_path: String,
-    new_path: String,
-    current_dirty: bool,
-    max_lines: u64,
-) -> WebDiffResponse {
-    let hunks = result
-        .hunks
-        .iter()
-        .map(|h| {
-            let old_count = h.old_len.min(max_lines);
-            let new_count = h.new_len.min(max_lines);
-            WebDiffHunk {
-                kind: h.kind,
-                old_start: h.old_start,
-                old_len: h.old_len,
-                new_start: h.new_start,
-                new_len: h.new_len,
-                old_preview: old.lines(h.old_start, old_count),
-                new_preview: new.lines(h.new_start, new_count),
-                old_truncated: h.old_len > old_count,
-                new_truncated: h.new_len > new_count,
-            }
-        })
-        .collect();
-    WebDiffResponse {
-        old_path,
-        new_path,
-        current_dirty,
-        old_lines: result.old_lines,
-        new_lines: result.new_lines,
-        hunks,
-        hunk_count: result.hunk_count,
-        omitted_hunks: result.omitted_hunks,
-        added: result.added,
-        deleted: result.deleted,
-        modified: result.modified,
-        max_lines_per_hunk: max_lines,
-    }
 }
 
 // ---- misc ----------------------------------------------------------------------

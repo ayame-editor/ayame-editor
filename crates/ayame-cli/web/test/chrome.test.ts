@@ -30,10 +30,47 @@ describe("application chrome", () => {
     expect(menu?.querySelector('[data-menu-action="about"]')).not.toBeNull();
   });
 
-  it("uses the in-app file picker for browser diff targets (#79)", () => {
-    const search = read("src/search.ts");
-    expect(search).toContain('showFileDialog(t("menu.diff")');
-    expect(search).not.toContain('askPrompt(t("menu.diff")');
+  it("binds conversion once and keeps shared actions in one canonical menu (#181)", () => {
+    const html = read("index.html");
+    const input = read("src/input.ts");
+    expect(html.match(/data-menu-action="find"/g)).toHaveLength(1);
+    expect(html.match(/data-menu-action="commandPalette"/g)).toHaveLength(1);
+    expect(html.match(/data-menu-action="encoding"/g)).toHaveLength(1);
+    expect(input).not.toContain('$("convert-save-item").addEventListener');
+  });
+
+  it("exposes search toggles, status values, and palette selection to assistive technology (#171)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    for (const id of ["opt-case", "opt-word", "opt-regex"]) {
+      const button = doc.querySelector(`#${id}`);
+      expect(button?.getAttribute("aria-label")).toBeTruthy();
+      expect(button?.getAttribute("aria-pressed")).toBe("false");
+    }
+    for (const id of ["st-enc", "st-eol", "st-zoom"]) {
+      expect(doc.querySelector(`#${id}`)?.getAttribute("aria-label")).toBeTruthy();
+    }
+    const input = doc.querySelector("#palette-input");
+    expect(input?.getAttribute("role")).toBe("combobox");
+    expect(input?.getAttribute("aria-controls")).toBe("palette-list");
+
+    const menus = read("src/menus.ts");
+    expect(menus).toContain('setAttribute("aria-pressed", String(pressed))');
+    expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
+  });
+
+  it("removes the editor-owned diff UI while keeping folder search standalone (#104)", () => {
+    const html = read("index.html");
+    const css = read("style.css");
+    const sources = ["api.ts", "i18n.ts", "input.ts", "menus.ts", "search.ts", "state.ts"]
+      .map((file) => read(path.join("src", file)))
+      .join("\n");
+
+    expect(html).not.toMatch(/diff-modal|diffFile|menu\.diff/);
+    expect(css).not.toMatch(/\.diff-|--(?:add|del|chg)-bg|--word-(?:add|del)/);
+    expect(sources).not.toMatch(/diffFile|dialog\.diff|\/api\/diff|DiffResponse/);
+    expect(html).toContain('id="grep-modal"');
+    expect(css).toContain(".grep-panel");
+    expect(css).toContain(".grep-results");
   });
 
   it("sorts to a temporary result and opens a new tab", () => {
@@ -50,6 +87,16 @@ describe("application chrome", () => {
 
     expect(findZ).toBeGreaterThan(0);
     expect(overlayZ).toBeGreaterThan(findZ);
+  });
+
+  it("stops persistent motion when the OS requests reduced motion (#156)", () => {
+    const css = read("style.css");
+    const reduced = css.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]+)\}\s*$/)?.[1];
+    expect(reduced).toBeTruthy();
+    expect(reduced).toContain("#caret.on");
+    expect(reduced).toContain(".caret.extra.on");
+    expect(reduced).toContain("#statusbar .saving-seg::before");
+    expect(reduced).toContain("animation: none");
   });
 
   it("does not override the widened settings popup with the old width", () => {

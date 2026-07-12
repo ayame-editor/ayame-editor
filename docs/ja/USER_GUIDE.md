@@ -79,10 +79,6 @@ ayame serve path/to/file.log --port 8777
 
 ![Ayame Editor tools menu](../assets/screenshot-tools.png)
 
-### 2 ファイル差分
-
-![Ayame Editor two-file diff dialog](../assets/screenshot-diff.png)
-
 ## CLI コマンド
 
 ```sh
@@ -92,9 +88,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side
 ayame sort huge.csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log
 ayame case huge.csv lower --out lower.csv
 ayame split huge.csv --lines 1000000
@@ -113,7 +107,8 @@ ayame serve huge.csv --port 8777
 作ります。既存ファイルは上書きしないため、出力先がある場合は別名を指定してください。
 
 全コマンドとオプションは [CLI リファレンス](CLI_REFERENCE.md) または
-`ayame --help` で確認できます。
+`ayame --help` を参照してください。ファイル比較は姉妹プロジェクト ayame-diff が
+提供します。[移行ガイド](MIGRATING_TO_AYAME_DIFF.md)も参照してください。
 
 ## 主な機能
 
@@ -121,7 +116,7 @@ ayame serve huge.csv --port 8777
 - UTF-8、Shift_JIS、EUC-JP、ASCII の読み込みに対応します。文字化けした場合は文字コードを指定して開き直せます。
 - 検索、正規表現検索、単語単位検索、大文字小文字を無視した検索に対応します。
 - 編集、元に戻す / やり直し、矩形選択、マルチカーソル、選択範囲の保存ができます。
-- ソート、置換、2 ファイル差分、フォルダ内検索、grep して保存 (一致行だけを別ファイルへ書き出し)、分割、ケース変換を GUI から実行できます。
+- ソート、置換、フォルダ内検索、grep して保存 (一致行だけを別ファイルへ書き出し)、分割、ケース変換を GUI から実行できます。
 - タブ、最近使ったファイル、tail -f 風の末尾追従を使えます。デスクトップ版ではタブを別の Ayame ウィンドウへドラッグしたり、外へドラッグして新しいウィンドウにできます — 未保存の編集もタブと一緒に移動します。
 - テーマ、フォント、折り返し、空白表示、全角空白の下線表示、キー設定を変更できます。
 - クラッシュ復旧用のログにより、未保存の編集を復元できます。

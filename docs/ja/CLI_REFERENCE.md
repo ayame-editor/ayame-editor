@@ -25,9 +25,7 @@ ayame <COMMAND> [OPTIONS]
 | `line <FILE> <N>` | 1-based の 1 行を表示。 |
 | `lines <FILE> <START> <COUNT>` | START から COUNT 行を表示。どちらも 1-based。 |
 | `search <FILE> <PATTERN>` | リテラル、正規表現、大文字小文字無視、単語単位、件数制限つき検索。 |
-| `diff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `text`。行単位または side-by-side の差分。 |
 | `sort <FILE>` | メモリ制限つき external merge sort。 |
-| `sortdiff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `sorted`。両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
 | `case <FILE> <MODE>` | 大文字小文字変換 (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) を新しいファイルへ書き出し。 |
 | `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
@@ -42,6 +40,10 @@ ayame <COMMAND> [OPTIONS]
 | `update` | GitHub release artifact をダウンロード、検証、インストール。 |
 | `remove` | インストール済みの Ayame binary / app bundle を削除。 |
 | `version` | バージョンを表示。 |
+
+従来の `diff`、`sortdiff`、`sort-diff` コマンドは v0.7.0 で削除しました。
+1 リリースの間は、対応する ayame-diff コマンドを示すエラーを返します。
+[比較ワークフローの ayame-diff 移行ガイド](MIGRATING_TO_AYAME_DIFF.md)も参照してください。
 
 ## 共通オプション
 
@@ -178,9 +180,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

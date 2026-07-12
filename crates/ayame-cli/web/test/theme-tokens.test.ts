@@ -43,12 +43,25 @@ describe("Ayame design tokens", () => {
     }
   });
 
-  it("uses semantic tokens for syntax and diff colors", () => {
-    expect(css).toContain("--add-bg:");
-    expect(css).toContain("--word-add:");
-    expect(css).toContain("--word-del:");
-    expect(css).toContain(".diff-cell.old .diff-word.changed { background: var(--word-del); }");
-    expect(css).toContain(".diff-cell.new .diff-word.changed { background: var(--word-add); }");
+  it("gives every named theme its own syntax palette and keeps Mono Paper monochrome (#154)", () => {
+    const names = ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"];
+    for (const name of names) {
+      const block = css.match(new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      expect(block).toBeTruthy();
+      for (const token of ["string", "number", "literal", "function", "link"]) {
+        expect(block).toContain(`--syn-${token}:`);
+      }
+    }
+    const mono = css.match(/html\[data-theme="mono-paper"\]\s*\{([^}]+)\}/s)?.[1] || "";
+    const colors = [...mono.matchAll(/--syn-[\w-]+:\s*#([\da-f]{6})/gi)].map((match) => match[1]);
+    expect(colors).toHaveLength(5);
+    for (const color of colors) {
+      expect(color.slice(0, 2)).toBe(color.slice(2, 4));
+      expect(color.slice(2, 4)).toBe(color.slice(4, 6));
+    }
+  });
+
+  it("uses semantic tokens for syntax colors", () => {
     expect(css).not.toMatch(/\.syn-(?:string|number|literal|function|link)[^{]*\{[^}]*#[\da-f]{3,8}/is);
   });
 
@@ -59,5 +72,11 @@ describe("Ayame design tokens", () => {
     expect(css).not.toMatch(/border-radius:\s*(?:[1-9]|1[02])px/);
     expect(css).not.toContain("color: #fff");
     expect(css).not.toMatch(/font-weight:\s*(?:560|650)/);
+  });
+
+  it("uses a theme-aware focus ring for controls and the editor viewport (#183)", () => {
+    expect(css).toContain("--focus-ring:");
+    expect(css).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus-ring\)/);
+    expect(css).toMatch(/#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s);
   });
 });

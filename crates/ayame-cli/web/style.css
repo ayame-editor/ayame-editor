@@ -45,11 +45,7 @@
   --warn: var(--gold);
   --on-accent: #FFFFFF;
   --shadow: 0 10px 34px rgb(0 0 0 / .28);
-  --add-bg: color-mix(in srgb, #39A66B 18%, transparent);
-  --del-bg: color-mix(in srgb, var(--danger) 16%, transparent);
-  --chg-bg: color-mix(in srgb, var(--gold) 20%, transparent);
-  --word-add: color-mix(in srgb, #39A66B 35%, transparent);
-  --word-del: color-mix(in srgb, var(--danger) 32%, transparent);
+  --focus-ring: var(--accent-bright);
   --syn-string: #21885F;
   --syn-number: #2F7FBF;
   --syn-literal: #9A57B0;
@@ -75,6 +71,8 @@ html[data-theme="iris-mist"] {
   --gutter-fg: #9DAAC0; --mark-bg: #E3ECFB; --mark-fg: #2C3E6B;
   --mark-active-bg: #7EC7C0; --mark-active-fg: #0F2A28; --danger: #C05C74;
   --gold: #C9A24E; --illus: .22;
+  --syn-string: #2F8068; --syn-number: #3F6FB5; --syn-literal: #7862A8;
+  --syn-function: #9B712B; --syn-link: #336FA8;
   --desk:
     radial-gradient(44vw 42vh at 14% 82%, rgba(91,121,201,.12), transparent 60%),
     radial-gradient(42vw 40vh at 86% 16%, rgba(143,182,224,.10), transparent 60%),
@@ -88,6 +86,8 @@ html[data-theme="iris-dawn"] {
   --gutter-fg: #B79AA6; --mark-bg: #FBE7C8; --mark-fg: #7A4A16;
   --mark-active-bg: #F0B85A; --mark-active-fg: #3A2205; --danger: #D96A86;
   --gold: #E0A94E; --illus: .22;
+  --syn-string: #5B8A62; --syn-number: #4E78A7; --syn-literal: #A65CB0;
+  --syn-function: #B4762E; --syn-link: #6C69A8;
   --desk:
     radial-gradient(46vw 42vh at 12% 84%, rgba(166,92,176,.13), transparent 60%),
     radial-gradient(42vw 40vh at 84% 16%, rgba(224,169,78,.11), transparent 60%),
@@ -101,6 +101,8 @@ html[data-theme="sumi-light"] {
   --gutter-fg: #A7A4AE; --mark-bg: #ECE6FA; --mark-fg: #3E2E63;
   --mark-active-bg: #7A5CC0; --mark-active-fg: #FFFFFF; --danger: #B24A5E;
   --gold: #B7912F; --illus: .16;
+  --syn-string: #3F6F5C; --syn-number: #4D6680; --syn-literal: #665A78;
+  --syn-function: #77633D; --syn-link: #4A6482;
   --desk:
     radial-gradient(40vw 40vh at 16% 82%, rgba(122,92,192,.07), transparent 60%),
     radial-gradient(34vw 34vh at 84% 20%, rgba(40,36,48,.03), transparent 60%), #FAFAF8;
@@ -113,6 +115,8 @@ html[data-theme="mono-paper"] {
   --gutter-fg: #A9A69D; --mark-bg: #E7E4EC; --mark-fg: #3A3745;
   --mark-active-bg: #6F6B79; --mark-active-fg: #FFFFFF; --danger: #9A6A6A;
   --gold: #7A7568; --illus: 0; --acrylic-blur: 8px; --desk: #F4F2EC;   /* 単色 */
+  --syn-string: #4A4A4A; --syn-number: #565656; --syn-literal: #626262;
+  --syn-function: #505050; --syn-link: #444444;
 }
 
 html[data-theme="dark"] {
@@ -129,6 +133,7 @@ html[data-theme="dark"] {
   --border: #3c3c3c;
   --accent: #9b82d8;
   --accent-bright: #b49de6;
+  --focus-ring: #c7b8f0;
   --status: #333334;
   --status-fg: #d4d4d4;
   --gutter-fg: #858585;
@@ -156,6 +161,7 @@ html[data-theme="black"] {
   --border: #222222;
   --accent: #9b82d8;
   --accent-bright: #b49de6;
+  --focus-ring: #d0c4f2;
   --status: #0d0d0d;
   --status-fg: #e8e8e8;
   --gutter-fg: #6f6f6f;
@@ -1625,156 +1631,7 @@ button { border-radius: var(--radius); }
   white-space: nowrap;
 }
 
-.diff-panel {
-  width: min(1120px, 96vw);
-  max-height: min(820px, 90vh);
-}
-.diff-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 12px 14px 14px;
-}
-.diff-summary {
-  font-size: var(--fs-ui);
-  color: var(--fg);
-  margin-bottom: 8px;
-}
-.diff-deprecated {
-  font-size: var(--fs-ui-sm);
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-}
-.diff-deprecated a {
-  font-weight: 600;
-}
-.diff-paths {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 9px;
-}
-.diff-paths > div {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  color: var(--fg-dim);
-  font-size: var(--fs-ui-sm);
-}
-.diff-paths strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
-  font-weight: 500;
-}
-.diff-grid-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: color-mix(in srgb, var(--bg-toolbar) 90%, transparent);
-  color: var(--fg-dim);
-  font-size: var(--fs-ui-sm);
-  font-weight: 600;
-}
-.diff-grid-head span {
-  min-width: 0;
-  padding: 7px 10px;
-}
-.diff-grid-head span + span { border-left: 1px solid var(--border); }
-.diff-view {
-  min-height: 0;
-  max-height: min(62vh, 620px);
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 0 0 var(--radius) var(--radius);
-  background: var(--edit-bg);
-  font-family: var(--mono);
-  font-size: var(--font-size);
-  line-height: var(--line-height);
-}
-.diff-hunk {
-  display: grid;
-  grid-template-columns: minmax(360px, max-content) minmax(360px, max-content);
-  /* Size to content (not just the visible width) so the columns actually reach
-     the widest line and the .diff-view scrolls horizontally to them; min-width
-     keeps short hunks filling the pane. */
-  width: max-content;
-  min-width: 100%;
-}
-.diff-hunk-title {
-  grid-column: 1 / -1;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 5px 10px;
-  background: color-mix(in srgb, var(--bg-toolbar) 92%, transparent);
-  color: var(--fg-dim);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  font-family: var(--ui);
-  font-size: var(--fs-ui-sm);
-}
-.diff-hunk:first-child .diff-hunk-title { border-top: none; }
-/* Both cells of a row become grid items of the hunk grid (display:contents), so
-   old and new share one set of columns: they stay aligned and grow to the widest
-   line, and the whole .diff-view scrolls horizontally to reach content that no
-   longer fits — instead of clipping each line with an ellipsis. */
-.diff-row {
-  display: contents;
-}
-.diff-cell {
-  display: grid;
-  /* min = max-content so the shared hunk columns grow to the widest line (and
-     the view scrolls) instead of clipping; max = 1fr so the text (and its diff
-     highlight) still fills the column when the line is shorter than the widest. */
-  grid-template-columns: 7ch minmax(max-content, 1fr);
-  min-height: var(--line-height);
-  white-space: pre;
-}
-.diff-cell.new { border-left: 1px solid var(--border); }
-.diff-ln {
-  padding: 0 10px 0 6px;
-  text-align: right;
-  color: var(--gutter-fg);
-  background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
-  border-right: 1px solid var(--border);
-  user-select: none;
-}
-.diff-tx {
-  display: block;
-  min-width: 0;
-  padding: 0 8px;
-}
-.diff-word.changed {
-  border-radius: calc(var(--radius-control) - 2px);
-}
-.diff-cell.old .diff-word.changed { background: var(--word-del); }
-.diff-cell.new .diff-word.changed { background: var(--word-add); }
-.diff-cell.add .diff-tx { background: var(--add-bg); }
-.diff-cell.del .diff-tx { background: var(--del-bg); }
-.diff-cell.mod .diff-tx { background: var(--chg-bg); }
-.diff-cell.blank .diff-tx {
-  color: var(--fg-faint);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-}
-.diff-truncated {
-  grid-column: 1 / -1;
-  padding: 4px 10px;
-  color: var(--fg-dim);
-  font-family: var(--ui);
-  font-size: var(--fs-ui-sm);
-  border-top: 1px dashed var(--border);
-}
-
-/* フォルダ内検索 (Grep) results panel — modeled on the diff view */
+/* Standalone recursive folder-search results panel. */
 .grep-panel {
   width: min(920px, 96vw);
   max-height: min(820px, 90vh);
@@ -1986,19 +1843,6 @@ button { border-radius: var(--radius); }
   .keymap-actions {
     flex-wrap: wrap;
   }
-  .diff-paths,
-  .diff-grid-head,
-  .diff-hunk {
-    grid-template-columns: 1fr;
-  }
-  .diff-hunk {
-    width: auto;
-  }
-  .diff-grid-head span + span,
-  .diff-cell.new {
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
 }
 
 @media (max-width: 520px) {
@@ -2038,4 +1882,47 @@ button { border-radius: var(--radius); }
     height: 246px;
     opacity: var(--illus, 0);
   }
+}
+
+/* Respect the OS accessibility preference. Carets remain visible and the save
+   indicator remains recognizable, but neither blinks or rotates. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  #caret.on {
+    animation: none;
+    opacity: 1;
+  }
+  .caret.extra.on {
+    animation: none;
+    opacity: 0.75;
+  }
+  #statusbar .saving-seg::before {
+    animation: none;
+  }
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="menuitemcheckbox"]:focus-visible,
+[role="option"]:focus-visible,
+.opener-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* The editor viewport clips an outside outline, so draw its keyboard-focus
+   ring inward without changing layout. */
+#viewport:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }

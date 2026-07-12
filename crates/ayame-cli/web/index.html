@@ -121,7 +121,6 @@
         <div class="menu-shell">
           <button id="view-menu-button" class="menubar-button" role="menuitem" aria-haspopup="true" aria-expanded="false" data-i18n="menu.view">表示</button>
           <div id="view-menu" class="file-menu hidden" role="menu" aria-label="表示" data-i18n-aria-label="menu.view">
-            <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label" data-i18n="menu.findBar">検索バー</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
             <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label" data-i18n="menu.commandPalette">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" id="menu-toggle-ws" data-menu-action="toggleWhitespace" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.showWhitespace">空白・改行を表示</span><span class="menu-key"></span></button>
@@ -137,7 +136,6 @@
           <div id="help-menu" class="file-menu hidden" role="menu" aria-label="ヘルプ" data-i18n-aria-label="menu.help">
             <button class="menu-item" data-menu-action="help" role="menuitem"><span class="menu-label" data-i18n="help.open">Ayame Editor ヘルプ</span><span class="menu-key"></span></button>
             <button class="menu-item" data-menu-action="keymap" role="menuitem"><span class="menu-label" data-i18n="help.shortcuts">キーボードショートカット</span><span class="menu-key"></span></button>
-            <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label" data-i18n="menu.commandPalette">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="about" role="menuitem"><span class="menu-label" data-i18n="help.about">Ayame Editor について</span><span class="menu-key"></span></button>
           </div>
@@ -161,7 +159,7 @@
         <div class="tb-sep"></div>
 
         <div class="menu-shell">
-          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・差分・分割" data-i18n-title="toolbar.toolsTitle">
+          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・分割" data-i18n-title="toolbar.toolsTitle">
             <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label" data-i18n="menu.tools">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール" data-i18n-aria-label="menu.tools">
@@ -169,7 +167,6 @@
                     title="行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます" data-i18n-title="menu.sortTitle">
               <span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
             </button>
-            <button class="menu-item" data-menu-action="diffFile" role="menuitem"><span class="menu-label" data-i18n="menu.diff">2ファイル差分</span><span class="menu-key" data-key-action="diffFile"></span></button>
             <button class="menu-item" data-menu-action="splitFile" role="menuitem"
                     title="行数を指定して複数ファイルに分割します (例: 100万行ずつ)" data-i18n-title="menu.splitTitle">
               <span class="menu-label" data-i18n="menu.split">ファイルを分割</span><span class="menu-key" data-key-action="splitFile"></span>
@@ -223,9 +220,9 @@
               <svg class="ay-icon find-mag"><use href="#i-search"></use></svg>
               <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
               <span id="find-count" class="find-count"></span>
-              <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)">Aa</button>
-              <button id="opt-word" class="toggle" title="単語単位 (Alt+W)">ab</button>
-              <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)">.*</button>
+              <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)" aria-label="大文字小文字を区別" data-i18n-aria-label="find.matchCase" aria-pressed="false">Aa</button>
+              <button id="opt-word" class="toggle" title="単語単位 (Alt+W)" aria-label="単語単位" data-i18n-aria-label="find.wholeWord" aria-pressed="false">ab</button>
+              <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)" aria-label="正規表現" data-i18n-aria-label="find.regex" aria-pressed="false">.*</button>
               <button id="find-prev" class="ico" title="前の一致 (Shift+F3)" aria-label="前の一致">
                 <svg class="ay-icon"><use href="#i-up"></use></svg>
               </button>
@@ -254,10 +251,10 @@
         <span id="st-pos" class="seg">—</span>
         <button id="st-tail" class="seg seg-btn" title="末尾に追従 (tail -f)" data-i18n="status.follow" data-i18n-title="menu.followTail">追従</button>
         <span id="st-edit" class="seg">—</span>
-        <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存" data-i18n-title="status.encTitle">—</button>
-        <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存" data-i18n-title="status.eolTitle">—</button>
+        <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存" data-i18n-title="status.encTitle" aria-label="文字コード: —">—</button>
+        <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存" data-i18n-title="status.eolTitle" aria-label="改行コード: —">—</button>
         <span id="st-index" class="seg dim">—</span>
-        <button id="st-zoom" class="seg seg-btn dim" title="表示倍率（クリックで100%に戻す）" data-i18n-title="status.zoomTitle">100%</button>
+        <button id="st-zoom" class="seg seg-btn dim" title="表示倍率（クリックで100%に戻す）" data-i18n-title="status.zoomTitle" aria-label="表示倍率: 100%">100%</button>
       </footer>
     </div>
 
@@ -481,33 +478,11 @@
           <button id="palette-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="palette-body">
-          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false" />
+          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false"
+                 role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+                 aria-controls="palette-list" aria-expanded="false"
+                 aria-label="コマンドパレット" data-i18n-aria-label="menu.commandPalette" />
           <div id="palette-list" class="palette-list" role="listbox"></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="diff-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-panel diff-panel" role="dialog" aria-label="差分" data-i18n-aria-label="dialog.diff.title">
-        <div class="modal-head">
-          <div class="modal-title" data-i18n="dialog.diff.title">差分</div>
-          <button id="diff-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
-        </div>
-        <div class="diff-body">
-          <div class="diff-deprecated" role="note">
-            <span data-i18n="dialog.diff.deprecated">この差分機能は非推奨です。姉妹プロジェクト ayame-diff への移行を推奨します。</span>
-            <a href="https://github.com/hjosugi/ayame-diff" target="_blank" rel="noopener">ayame-diff</a>
-          </div>
-          <div id="diff-summary" class="diff-summary"></div>
-          <div class="diff-paths">
-            <div><span data-i18n="dialog.diff.current">現在</span><strong id="diff-old-path"></strong></div>
-            <div><span data-i18n="dialog.diff.compareTo">比較先</span><strong id="diff-new-path"></strong></div>
-          </div>
-          <div class="diff-grid-head">
-            <span data-i18n="dialog.diff.currentFile">現在のファイル</span>
-            <span data-i18n="dialog.diff.compareFile">比較先ファイル</span>
-          </div>
-          <div id="diff-view" class="diff-view"></div>
         </div>
       </div>
     </div>
@@ -597,7 +572,6 @@
       <button class="menu-item" data-ctx="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="sortSave" role="menuitem"><span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key"></span></button>
-      <button class="menu-item" data-ctx="diffFile" role="menuitem"><span class="menu-label" data-i18n="menu.diff">2ファイル差分</span><span class="menu-key"></span></button>
       <button class="menu-item" data-ctx="splitFile" role="menuitem"><span class="menu-label" data-i18n="menu.split">ファイルを分割</span><span class="menu-key"></span></button>
     </div>
 

@@ -36,9 +36,3 @@ pub(crate) fn rename_or_copy(from: &Path, to: &Path) -> std::io::Result<()> {
 pub(crate) fn temp_sibling_with_label(path: &Path, label: &str) -> PathBuf {
     temp_paths::temp_sibling_with_label(path, label)
 }
-
-pub(crate) fn temp_work_dir(kind: &str) -> PathBuf {
-    temp_paths::create_private_temp_dir(kind).unwrap_or_else(|_| {
-        std::env::temp_dir().join(format!("ayame-{kind}-{}", temp_paths::unique_component()))
-    })
-}

@@ -67,7 +67,7 @@ WAL writer を持たない clone session なので、同じ edit stream を二�
 | `assets.rs` | embedded HTML、CSS、TypeScript modules、favicon、logo、background assets を配信。 |
 | `state.rs` | workspace lock、active document、tabs、edit session、WAL setup/recovery、save snapshots、cleanup。 |
 | `edit.rs` | viewport lines、replace range/batch/rectangle、undo/redo、save、selection save、revert、reopen encoding、WAL recovery endpoints。 |
-| `ops.rs` | search、grep、find、diff、sort-save、replace-save、case-save、split-save endpoints。 |
+| `ops.rs` | search、grep、find、sort-save、replace-save、case-save、split-save endpoints。 |
 | `workspace.rs` | open/new/upload/browse/tabs operations と scratch-file cleanup。 |
 | `security.rs` | loopback default、Host/Origin check、remote-bind guard、DNS-rebinding / CSRF protection。 |
 
@@ -79,7 +79,7 @@ cap し、長い処理は専用 endpoint または blocking task に逃がしま
 | Endpoint group | 目的 |
 | --- | --- |
 | `/api/stat`, `/api/lines`, `/api/linebyte` | file metadata と viewport navigation。 |
-| `/api/search`, `/api/find`, `/api/grep`, `/api/diff` | search と comparison。 |
+| `/api/search`, `/api/find`, `/api/grep` | search。 |
 | `/api/edit/*` | replace、save、undo/redo、revert、recover、別 encoding で reopen。 |
 | `/api/sort/save`, `/api/replace/save`, `/api/case/save`, `/api/split/save` | GUI から実行する長い file operations。 |
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | workspace と tab management。 |

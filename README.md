@@ -6,10 +6,10 @@ A fast desktop text editor for huge files.
 
 Runs on macOS, Windows, and Linux.
 
-> **Comparing files?** The `diff` / `sortdiff` commands are deprecated and moving
-> to the sister project **[ayame-diff](https://github.com/hjosugi/ayame-diff)**
-> (`ayame-diff text` / `ayame-diff sorted`, with a web GUI). The editor's copy
-> is frozen and will be removed in a later release. See [#104](https://github.com/hjosugi/ayame-editor/issues/104).
+> **Comparing files?** Comparison moved to the sister project
+> **[ayame-diff](https://github.com/hjosugi/ayame-diff)**. Ayame Editor v0.7.0
+> removes its `diff` / `sortdiff` implementations and two-file comparison UI.
+> See the [migration guide](docs/MIGRATING_TO_AYAME_DIFF.md).
 
 ![Ayame Editor main window](docs/assets/screenshot-main.png)
 
@@ -17,8 +17,8 @@ Runs on macOS, Windows, and Linux.
 
 - View, search, and edit huge files without loading the whole file into memory.
 - Supports UTF-8, Shift_JIS, EUC-JP, and ASCII.
-- Run search, replace, sort, two-file diff, folder grep, and file splitting from the GUI.
-- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `diff`, `sort`, `sortdiff`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, `cache`, `update`, and `remove`.
+- Run search, replace, sort, folder grep, and file splitting from the GUI.
+- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `sort`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, `cache`, `update`, and `remove`.
 - Includes tabs, rectangular selection, multi-cursor editing, and tail-follow mode.
 - Customizable themes, fonts, wrapping, whitespace display, and key bindings.
 
@@ -64,6 +64,12 @@ Nix instead of self-modifying `/nix/store`.
 
 Homebrew tap templates are in `packaging/homebrew/` for publishing
 `brew install --cask hjosugi/tap/ayame` and `brew install hjosugi/tap/ayame`.
+
+## Sister Project
+
+[ayame-diff](https://github.com/hjosugi/ayame-diff) handles text, sorted-text,
+CSV/TSV, directory, archive, binary, and three-way comparisons from its CLI or
+GUI. Use Ayame Editor to open and edit huge files, and ayame-diff to compare them.
 
 ## More
 
