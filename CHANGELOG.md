@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.7.1 - 2026-07-13
 
 - group-by aggregates are now deterministic and clean: `sum`/`avg` accumulate
   through an exact (correctly-rounded, order-independent) summation, so the
