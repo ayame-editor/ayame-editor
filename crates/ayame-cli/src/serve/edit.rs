@@ -37,7 +37,7 @@ pub(super) async fn api_lines(
     let snapshot = state.read(|ws| {
         // An empty workspace has no lines; answer with an empty page rather
         // than an error so the viewport can render nothing gracefully.
-        ws.doc().map(|doc| (doc.clone(), ws.edits.clone()))
+        ws.doc().map(|doc| (doc.clone(), ws.edits.view_clone()))
     });
     let Some((doc, edits)) = snapshot else {
         return Json(LinesResponse {

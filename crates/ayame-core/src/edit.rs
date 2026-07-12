@@ -82,6 +82,29 @@ impl Clone for EditSession {
     }
 }
 
+impl EditSession {
+    /// Clone only the content needed to render a stable read-only view.
+    ///
+    /// Unlike [`Clone`], this deliberately omits undo/redo records, WAL state,
+    /// and pending WAL errors. Viewport requests only need the sparse overlay
+    /// and generation metadata, so copying history here would make scrolling
+    /// cost proportional to up to 256 prior edit transactions.
+    #[must_use]
+    pub fn view_clone(&self) -> EditSession {
+        EditSession {
+            events: self.events.clone(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            revision: self.revision,
+            content_gen: self.content_gen,
+            next_gen: self.next_gen,
+            saved_gen: self.saved_gen,
+            wal: None,
+            wal_error: None,
+        }
+    }
+}
+
 pub(crate) const HISTORY_LIMIT: usize = 256;
 
 /// One undo/redo generation: the inverse steps of a single edit transaction,
@@ -2570,6 +2593,28 @@ mod tests {
         // edit #43 (0-based), exactly like the old snapshot history did.
         assert_eq!(texts(&edits, &doc), vec!["v43"]);
         assert!(edits.is_dirty());
+    }
+
+    #[test]
+    fn view_clone_keeps_content_without_copying_history() {
+        let (_f, doc) = doc_from(b"seed\nsecond\n");
+        let mut edits = EditSession::default();
+        for k in 0..300u32 {
+            edits.replace_line(&doc, 0, format!("value-{k}")).unwrap();
+        }
+        edits
+            .insert_line_before(&doc, 1, "inserted".into())
+            .unwrap();
+        assert_eq!(edits.undo.len(), HISTORY_LIMIT);
+
+        let view = edits.view_clone();
+        assert!(view.undo.is_empty());
+        assert!(view.redo.is_empty());
+        assert_eq!(view.revision, edits.revision);
+        assert_eq!(view.content_gen, edits.content_gen);
+        assert_eq!(view.saved_gen, edits.saved_gen);
+        assert_eq!(view.total_lines(&doc), edits.total_lines(&doc));
+        assert_eq!(texts(&view, &doc), texts(&edits, &doc));
     }
 
     #[test]
