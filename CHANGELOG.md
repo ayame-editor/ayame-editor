@@ -2,6 +2,13 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## v0.6.1 - 2026-07-12
+
+- Stopped `/api/lines` viewport reads from deep-cloning up to 256 undo/redo
+  generations on every scroll or edit refresh. Read snapshots now copy only the
+  sparse overlay and required generation metadata while preserving identical
+  rendered content. (#139)
+
 ## v0.6.0 - 2026-07-12
 
 - Hardened `cargo xtask release`: workspace versions are now read and edited
