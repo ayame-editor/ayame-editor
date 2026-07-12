@@ -578,3 +578,153 @@ fn reverse_sort_with_spill_is_stable_and_descending() {
     }
     assert_eq!(prev.unwrap().0, 0, "the smallest key must sort last");
 }
+
+// ===================== #201: bounded keys & spill cleanup =====================
+
+/// Every entry (recursively) under `dir`, for leak assertions.
+fn dir_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p.clone());
+            }
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
+fn op_keys_are_capped_and_ties_beyond_the_cap_stay_stable() {
+    use crate::fields::{comparable_key, FieldSpec, MAX_KEY_BYTES};
+    use crate::Encoding;
+
+    // The key built from one enormous field is bounded, not O(field).
+    let giant = vec![b'k'; MAX_KEY_BYTES * 4];
+    let mut scratch = Vec::new();
+    let key = comparable_key(
+        &giant,
+        Encoding::Utf8,
+        None,
+        &FieldSpec::default(),
+        false,
+        &mut scratch,
+    );
+    assert_eq!(key.len(), MAX_KEY_BYTES);
+
+    // Lines that differ before the cap still sort by content; lines equal
+    // through the cap keep their original relative order (stable tie-break).
+    let prefix = "p".repeat(MAX_KEY_BYTES + 16);
+    let mut data = Vec::new();
+    data.extend_from_slice(format!("{prefix}1\n").as_bytes()); // line 0
+    data.extend_from_slice(format!("{prefix}0\n").as_bytes()); // line 1
+    data.extend_from_slice(b"aaa\n"); // line 2: differs early, sorts first
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let res = sort(
+        &doc,
+        &SortOptions {
+            spill_dir: spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut rd = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut order = Vec::new();
+    while let Some(ln) = rd.next_line().unwrap() {
+        order.push(ln);
+    }
+    assert_eq!(
+        order,
+        vec![2, 0, 1],
+        "early difference sorts by content; beyond-cap difference keeps file order"
+    );
+}
+
+#[test]
+fn sort_cleans_spill_dir_and_artifacts_when_a_callback_panics() {
+    let mut data = Vec::new();
+    for i in 0..20_000u64 {
+        data.extend_from_slice(format!("{},row\n", (i * 7919) % 20_000).as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = SortOptions {
+        budget_bytes: 4 * 1024, // spill early and often
+        spill_dir: parent.path().join("sort"),
+        ..Default::default()
+    };
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::sort::sort_with_progress(&doc, &opts, |done, _total| {
+            // Fires between scan batches, once runs are already on disk.
+            assert!(done < 10_000, "simulated consumer crash");
+        })
+    }));
+    assert!(
+        panicked.is_err(),
+        "the progress callback must have panicked"
+    );
+    assert_eq!(
+        dir_entries(&opts.spill_dir),
+        Vec::<std::path::PathBuf>::new(),
+        "a panicking sort must not strand runs or ordering/offset artifacts"
+    );
+}
+
+#[test]
+#[cfg(unix)] // truncates the file under a live mapping (Windows refuses)
+fn sort_cleans_spill_artifacts_when_the_scan_fails() {
+    let mut data = Vec::new();
+    for i in 0..50_000u64 {
+        data.extend_from_slice(format!("{i},row\n").as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (f, doc) = doc_from(&data);
+    // Shrink the source under the live document: the sort's base precheck
+    // fails after the spill dir and artifact files were already created.
+    f.as_file().set_len(16).unwrap();
+    let res = sort(
+        &doc,
+        &SortOptions {
+            spill_dir: parent.path().join("sort"),
+            ..Default::default()
+        },
+    );
+    assert!(res.is_err(), "sorting a shrunk-under-us file must fail");
+    assert_eq!(
+        dir_entries(&parent.path().join("sort")),
+        Vec::<std::path::PathBuf>::new(),
+        "a failed sort must remove everything it created"
+    );
+}
+
+#[test]
+fn group_cleans_spill_runs_when_the_emit_callback_panics() {
+    let mut data = Vec::new();
+    for i in 0..300u64 {
+        data.extend_from_slice(format!("key{i},1\n").as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        budget_bytes: 1, // every new key spills a run
+        spill_dir: parent.path().join("grp"),
+        ..Default::default()
+    };
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        group(&doc, &opts, |_row| panic!("simulated consumer crash"))
+    }));
+    assert!(panicked.is_err(), "emit must have panicked");
+    assert_eq!(
+        dir_entries(&opts.spill_dir),
+        Vec::<std::path::PathBuf>::new(),
+        "a panicking group must not strand its spilled runs"
+    );
+}

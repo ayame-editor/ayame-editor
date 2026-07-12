@@ -383,10 +383,9 @@ fn hit_at(buf: &[u8], index: &LineIndex, enc: Encoding, abs: usize, mlen: usize)
     let byte = abs as u64;
     let line = index.line_of_byte(buf, byte);
     let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-    let column = enc
-        .decode_line(&buf[ls as usize..byte as usize])
-        .chars()
-        .count() as u64;
+    // Streaming count: a match deep inside one enormous line must not
+    // materialize the whole decoded prefix just to compute its column (#201).
+    let column = enc.count_chars(&buf[ls as usize..byte as usize]);
     SearchHit {
         line,
         column,
