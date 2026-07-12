@@ -8,7 +8,9 @@ repository.workspace = true
 publish = false
 [dependencies]
 anyhow = { workspace = true }
+serde_json = { workspace = true }
 sha2 = "0.10"
+toml_edit = { workspace = true }
 
 [lints]
 workspace = true

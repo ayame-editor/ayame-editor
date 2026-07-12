@@ -4,6 +4,10 @@ All notable changes to Ayame Editor are tracked here.
 
 ## v0.6.0 - 2026-07-12
 
+- Hardened `cargo xtask release`: workspace versions are now read and edited
+  structurally, Cargo metadata is parsed as JSON, release phases are separated,
+  and GitHub Actions polling is pinned to the exact release commit instead of
+  whichever Release run happens to be newest. (#145)
 - Unified Web UI typography, control radii, shadows, syntax colors, and diff
   colors behind semantic design tokens shared with ayame-diff. Dark and black
   themes now define their own accent/status colors, inline deletions/additions
