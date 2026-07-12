@@ -721,6 +721,14 @@ fn write_selection_to_file(
         };
         for (i, line) in batch.iter().enumerate() {
             let no = start + i as u64;
+            // A view-capped line would export truncated data as if complete.
+            if line.truncated {
+                let _ = std::fs::remove_file(&stage);
+                return Err(bad_request(format!(
+                    "{} 行目が表示上限を超える長さのため選択保存できません。grep-lines / split で抽出してください",
+                    no + 1
+                )));
+            }
             let piece: String = if req.rect {
                 line.text
                     .chars()

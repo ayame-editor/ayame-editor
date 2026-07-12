@@ -8,7 +8,7 @@ use crate::document::Document;
 use crate::fields::{decoded_text_key_into, field_bytes, FieldSpec};
 use crate::Result;
 
-use super::common::unique_spill_dir;
+use super::common::{unique_spill_dir, SpillCleanup};
 use super::spill::{self, HeapEntry, Payload, RunReader};
 
 // ======================= group-by (hash aggregation) =========================
@@ -138,6 +138,9 @@ pub fn group(
 ) -> Result<GroupStats> {
     use std::collections::HashMap;
     let spill_dir = unique_spill_dir(&opts.spill_dir)?;
+    // Any exit before the final disarm — error or panic (including one in the
+    // caller's `emit`) — must leave no runs or spill directory behind (#201).
+    let mut cleanup = SpillCleanup::new(spill_dir.clone());
     let enc = doc.encoding();
 
     let mut map: HashMap<Vec<u8>, Acc> = HashMap::new();
@@ -198,6 +201,7 @@ pub fn group(
         }
     }
     let _ = fs::remove_dir(&spill_dir);
+    cleanup.disarm();
 
     Ok(GroupStats {
         groups,

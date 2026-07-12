@@ -9,7 +9,7 @@ use crate::encoding::Encoding;
 use crate::fields::{comparable_key, FieldSpec};
 use crate::Result;
 
-use super::common::{read_full, unique_spill_dir};
+use super::common::{read_full, unique_spill_dir, SpillCleanup};
 use super::spill::{self, HeapEntry, Payload, RunReader};
 
 /// How to sort.
@@ -102,6 +102,11 @@ where
         .unwrap_or("run");
     let ordering_path = opts.spill_dir.join(format!("{run_name}.ordering.bin"));
     let line_offsets_path = opts.spill_dir.join(format!("{run_name}.lines.bin"));
+    // Any exit before the final disarm — error or panic — must leave no runs,
+    // partial artifacts, or the spill directory behind (#201).
+    let mut cleanup = SpillCleanup::new(spill_dir.clone());
+    cleanup.register_file(ordering_path.clone());
+    cleanup.register_file(line_offsets_path.clone());
     let mut line_offsets = BufWriter::new(File::create(&line_offsets_path)?);
 
     // ---- phase 1: run generation ----------------------------------------
@@ -164,6 +169,7 @@ where
     }
     fs::rename(&ordering_tmp, &ordering_path)?;
     let _ = fs::remove_dir(&spill_dir);
+    cleanup.disarm();
 
     Ok(SortResult {
         ordering_path,

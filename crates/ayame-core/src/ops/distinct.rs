@@ -1,5 +1,5 @@
 use crate::document::Document;
-use crate::fields::{field_bytes, FieldSpec};
+use crate::fields::{capped, field_bytes, FieldSpec};
 use crate::Result;
 
 // ===================== DISTINCT (HyperLogLog) ================================
@@ -83,8 +83,14 @@ pub fn distinct(doc: &Document, opts: &DistinctOptions) -> Result<DistinctResult
     doc.try_for_each_raw_line(
         |_ln, raw| {
             // Distinctness is over the (unescaped) field bytes; identical bytes
-            // hash identically, so no decode is needed here.
-            let field = field_bytes(raw, opts.key_column, &opts.fields, &mut scratch);
+            // hash identically, so no decode is needed here. Capped like every
+            // other op key (see fields::MAX_KEY_BYTES).
+            let field = capped(field_bytes(
+                raw,
+                opts.key_column,
+                &opts.fields,
+                &mut scratch,
+            ));
             let mut h = std::collections::hash_map::DefaultHasher::new();
             field.hash(&mut h);
             hll.add(h.finish());

@@ -54,13 +54,72 @@ impl Encoding {
     }
 
     /// Decode a single line's bytes to a `String`, replacing malformed sequences.
-    /// Operates on small slices (one line), so allocation here is negligible.
+    ///
+    /// Allocates the whole decoded line — for *display* paths prefer
+    /// [`Encoding::decode_line_capped`], which bounds the allocation for the
+    /// pathological "one multi-gigabyte line" input (#201). This unbounded
+    /// form remains for fidelity-critical paths (saving, transforms) where
+    /// truncation would corrupt data.
     pub fn decode_line(self, bytes: &[u8]) -> String {
         if matches!(self, Encoding::Utf16Le | Encoding::Utf16Be) {
             return decode_utf16_line(bytes, self == Encoding::Utf16Le);
         }
         let (cow, _had_errors) = self.rs().decode_without_bom_handling(bytes);
         cow.into_owned()
+    }
+
+    /// Decode at most `max_bytes` of a line, returning the text and whether it
+    /// was cut short. The cut lands on a character boundary for UTF-8 and on a
+    /// code-unit boundary for UTF-16; a legacy multi-byte sequence split at the
+    /// cap decodes to one trailing replacement character, which the `true`
+    /// flag tells the caller to expect. This is what keeps viewport memory
+    /// proportional to the screen, not to the longest line in the file.
+    pub fn decode_line_capped(self, bytes: &[u8], max_bytes: usize) -> (String, bool) {
+        if bytes.len() <= max_bytes {
+            return (self.decode_line(bytes), false);
+        }
+        let mut cut = max_bytes;
+        match self {
+            Encoding::Utf16Le | Encoding::Utf16Be => cut &= !1,
+            Encoding::Utf8 | Encoding::Ascii => {
+                // Back off a split UTF-8 sequence (at most 3 continuation bytes).
+                while cut > 0 && bytes[cut] & 0xC0 == 0x80 {
+                    cut -= 1;
+                }
+            }
+            Encoding::ShiftJis | Encoding::EucJp => {}
+        }
+        (self.decode_line(&bytes[..cut]), true)
+    }
+
+    /// Count the decoded characters of `bytes` in constant memory (streaming
+    /// decode through a fixed buffer). Used to compute character columns for
+    /// matches deep inside one enormous line without materializing the whole
+    /// decoded prefix (#201).
+    pub fn count_chars(self, bytes: &[u8]) -> u64 {
+        // Valid UTF-8 (the overwhelmingly common case) counts without decoding.
+        if matches!(self, Encoding::Utf8 | Encoding::Ascii) {
+            if let Ok(s) = std::str::from_utf8(bytes) {
+                return s.chars().count() as u64;
+            }
+        }
+        let mut decoder = self.rs().new_decoder_without_bom_handling();
+        let mut out = [0u8; 8192];
+        let mut total = 0u64;
+        let mut input = bytes;
+        loop {
+            let last = input.is_empty();
+            let (result, read, written, _had_errors) =
+                decoder.decode_to_utf8(input, &mut out, last);
+            // The decoder emits valid UTF-8 (malformed input becomes U+FFFD).
+            total += std::str::from_utf8(&out[..written])
+                .map(|s| s.chars().count() as u64)
+                .unwrap_or(0);
+            input = &input[read..];
+            if last && result == encoding_rs::CoderResult::InputEmpty {
+                return total;
+            }
+        }
     }
 
     /// Encode a query string into this encoding's bytes for raw-byte searching.
@@ -371,6 +430,34 @@ mod tests {
         assert_eq!(bom, 0);
         assert_eq!(enc, Encoding::ShiftJis);
         assert_eq!(enc.decode_line(&cow), "日本語テキストのサンプルです。");
+    }
+
+    #[test]
+    fn decode_line_capped_cuts_on_a_utf8_char_boundary() {
+        let s = "あ".repeat(10); // 30 bytes, 3 per char
+        let (text, truncated) = Encoding::Utf8.decode_line_capped(s.as_bytes(), 10);
+        assert!(truncated);
+        assert_eq!(text, "あああ", "the cut backs off a split character");
+        let (full, truncated) = Encoding::Utf8.decode_line_capped(s.as_bytes(), 30);
+        assert!(!truncated);
+        assert_eq!(full, s);
+    }
+
+    #[test]
+    fn count_chars_matches_a_full_decode() {
+        let utf8 = "abcあいうえおxyz日本語";
+        assert_eq!(
+            Encoding::Utf8.count_chars(utf8.as_bytes()),
+            utf8.chars().count() as u64
+        );
+        // Well past the streaming buffer, in a legacy encoding.
+        let big = format!("{}終", "字".repeat(20_000));
+        let (sjis, _, err) = encoding_rs::SHIFT_JIS.encode(&big);
+        assert!(!err);
+        assert_eq!(
+            Encoding::ShiftJis.count_chars(&sjis),
+            Encoding::ShiftJis.decode_line(&sjis).chars().count() as u64
+        );
     }
 
     #[test]
