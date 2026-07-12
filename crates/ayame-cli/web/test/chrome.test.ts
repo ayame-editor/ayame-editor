@@ -128,4 +128,15 @@ describe("application chrome", () => {
     expect(css).toContain("height: var(--control-h)");
     expect(css).toContain("min-width: var(--cmd-min-width)");
   });
+
+  it("shares gutter spacing and keeps find controls border-consistent (#194)", () => {
+    const css = read("style.css");
+    const padding = "padding: 0 var(--gutter-pad-end) 0 var(--gutter-pad-start)";
+    const block = (selector: string) =>
+      css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
+
+    expect(block(".ln")).toContain(padding);
+    expect(block(".grep-ln")).toContain(padding);
+    expect(block(".replace-btn")).not.toMatch(/border\s*:/);
+  });
 });

@@ -57,6 +57,8 @@
   --radius-control: 6px;
   --control-h: 34px;
   --cmd-min-width: 46px;
+  --gutter-pad-start: 8px;
+  --gutter-pad-end: 20px;
   --desk:
     radial-gradient(46vw 42vh at 12% 84%, rgba(122,92,192,.12), transparent 60%),
     radial-gradient(42vw 40vh at 88% 14%, rgba(185,139,214,.10), transparent 60%),
@@ -565,7 +567,6 @@ html.replace-open .find-group .replace-row { display: flex; }
   padding: 0 9px;
   font-size: var(--fs-ui-sm);
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
 }
 
 /* ---- main area ------------------------------------------------------- */
@@ -854,7 +855,7 @@ html.replace-open .find-group .replace-row { display: flex; }
   /* The whole gutter→text gap lives inside the padding (border box), so
      getBoundingClientRect().width in gutterPixels() measures the true text
      origin — a margin here would be excluded and shift the caret 8px left. */
-  padding: 0 20px 0 8px;
+  padding: 0 var(--gutter-pad-end) 0 var(--gutter-pad-start);
   text-align: right;
   color: var(--gutter-fg);
   background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
@@ -1678,7 +1679,8 @@ html.saving .caret.extra { visibility: hidden; }
 }
 .grep-hit {
   display: grid;
-  grid-template-columns: 7ch minmax(0, 1fr);
+  grid-template-columns:
+    calc(7ch + var(--gutter-pad-start) + var(--gutter-pad-end)) minmax(0, 1fr);
   width: 100%;
   min-height: var(--line-height);
   text-align: left;
@@ -1693,7 +1695,7 @@ html.saving .caret.extra { visibility: hidden; }
 }
 .grep-hit:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .grep-ln {
-  padding: 0 10px 0 6px;
+  padding: 0 var(--gutter-pad-end) 0 var(--gutter-pad-start);
   text-align: right;
   color: var(--gutter-fg);
   background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
