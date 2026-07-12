@@ -105,9 +105,19 @@ describe("application chrome", () => {
     }
     expect(doc.querySelector('#selection-menu [data-menu-action="copy"]')).toBeNull();
     expect(doc.querySelector('#selection-menu [data-menu-action="cut"]')).toBeNull();
-    expect(menus).toContain('export const APP_MENUS = ["file", "edit", "selection", "view", "help"]');
+    expect(menus).toContain(
+      'export const APP_MENUS = ["file", "edit", "selection", "view", "help"]',
+    );
     expect(menus).toContain("onMenubarKeydown");
-    for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Escape"]) {
+    for (const key of [
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+      "Escape",
+    ]) {
       expect(menus).toContain(`"${key}"`);
     }
   });
@@ -118,5 +128,52 @@ describe("application chrome", () => {
     expect(css).toContain("--modal-body-padding: 14px 16px 16px");
     expect(css.match(/width:\s*min\([^;]+,\s*(?:92|96)vw\)/g)).toBeNull();
     expect(css).toMatch(/#statusbar button\.seg-btn\s*\{[^}]*text-decoration:\s*underline dotted/s);
+  });
+
+  it("keeps component chrome in its owning rules without dead Iris overrides (#158)", () => {
+    const css = read("style.css");
+    expect(css).not.toContain("Iris skin");
+    expect(css).not.toContain(".menu-button");
+    expect(css.match(/(?:^|\n)button\s*\{[^}]*border-radius:/gs)).toHaveLength(1);
+    expect(css.match(/\.field\s*\{[^}]*border-radius:/gs)).toHaveLength(1);
+    expect(css.match(/\.field:focus-within\s*\{/g)).toHaveLength(1);
+    expect(css.match(/\.modal-panel\s*\{[^}]*border-radius:/gs)).toHaveLength(1);
+    expect(css.indexOf(".set-hint {")).toBeGreaterThan(css.indexOf(".settings-body"));
+
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const menuButtons = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")];
+    expect(menuButtons.length).toBeGreaterThan(0);
+    expect(menuButtons.every((button) => Boolean(button.textContent?.trim()))).toBe(true);
+  });
+
+  it("uses one input and command-button size across dialogs (#150, #151)", () => {
+    const css = read("style.css");
+    const controls = [
+      ".opener-path input",
+      ".set-row select",
+      '.set-row input[type="text"]',
+      ".keymap-input",
+      ".palette-input",
+      "#prompt-input",
+      '.form-row input[type="text"]',
+      ".form-row select",
+    ];
+    const sharedStart = css.indexOf(`${controls.join(",\n")} {`);
+    const focusStart = css.indexOf(
+      `${controls.map((selector) => `${selector}:focus`).join(",\n")} {`,
+    );
+    expect(sharedStart).toBeGreaterThan(0);
+    expect(css.slice(sharedStart, css.indexOf("}", sharedStart))).toContain(
+      "height: var(--control-h)",
+    );
+    expect(focusStart).toBeGreaterThan(sharedStart);
+    expect(css.slice(focusStart, css.indexOf("}", focusStart))).toContain(
+      "box-shadow: var(--control-focus-ring)",
+    );
+
+    expect(
+      css.match(/(?:\.opener-path|\.[\w-]+-actions) \.cmd\s*\{[^}]*(?:height|min-width):/gs),
+    ).toBeNull();
+    expect(css.match(/(?:^|\n)button\s*\{[^}]*border-radius:/gs)).toHaveLength(1);
   });
 });
