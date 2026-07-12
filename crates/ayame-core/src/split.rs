@@ -184,6 +184,9 @@ fn write_part_bytes(doc: &Document, start: u64, end: u64, first: bool, tmp: &Pat
         w.write_all(span)?;
         s = span_end;
     }
+    // The spans were copied straight out of the mmap; refuse to finalize a
+    // part built from zero-fill if the source shrank mid-split.
+    doc.verify_base()?;
     w.flush()?;
     w.get_ref().sync_all()?;
     Ok(())

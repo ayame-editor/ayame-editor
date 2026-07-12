@@ -103,6 +103,9 @@ impl From<ayame_core::Error> for ApiError {
     fn from(e: ayame_core::Error) -> ApiError {
         use ayame_core::Error;
         let (status, code) = match &e {
+            // The mapped file shrank/rotated underneath us; the client must
+            // reload the document, same recovery as an edit conflict.
+            Error::BaseFileChanged(_) => (StatusCode::CONFLICT, "base_changed"),
             Error::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Error::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
             Error::Search(_) => (StatusCode::BAD_REQUEST, "search"),

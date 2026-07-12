@@ -197,7 +197,7 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
         largest: !has_flag(&flags, &["--min", "--smallest", "--asc"]),
         n,
     };
-    let lines = ayame_core::ops::top_n(&doc, &topts);
+    let lines = ayame_core::ops::top_n(&doc, &topts)?;
     if let Some(outp) = first_opt(&opts, &["--out-order"]) {
         let file = std::fs::File::create(outp).with_context(|| format!("creating '{outp}'"))?;
         let mut w = BufWriter::new(file);
@@ -254,7 +254,7 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
             fields: field_spec(&opts, &flags),
             precision,
         },
-    );
+    )?;
     if has_flag(&flags, &["--json"]) {
         println!(
             "{}",

@@ -356,7 +356,8 @@ fn top_n_largest_and_smallest() {
             n: 3,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert_eq!(
         top.iter().map(|&l| val(l)).collect::<Vec<_>>(),
         vec!["999", "998", "997"]
@@ -371,7 +372,8 @@ fn top_n_largest_and_smallest() {
             n: 2,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert_eq!(
         bot.iter().map(|&l| val(l)).collect::<Vec<_>>(),
         vec!["0", "1"]
@@ -392,7 +394,8 @@ fn distinct_estimate_is_close() {
             key_column: Some(1),
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     let err = (res.estimate as f64 - 5000.0).abs() / 5000.0;
     assert!(
         err < 0.05,
@@ -476,6 +479,7 @@ fn numeric_sort_and_top_push_invalid_values_to_the_end_for_largest() {
         fields: FieldSpec::default(),
     };
     let top: Vec<_> = top_n(&doc, &top_opts)
+        .unwrap()
         .into_iter()
         .map(|line| doc.line(line).unwrap())
         .collect();

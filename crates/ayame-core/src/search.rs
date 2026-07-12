@@ -568,6 +568,7 @@ fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
         {
             2
         }
+        Encoding::ShiftJis => 1,
         Encoding::EucJp => match b {
             0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
             0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))

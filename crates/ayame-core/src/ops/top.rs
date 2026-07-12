@@ -2,6 +2,7 @@ use std::collections::BinaryHeap;
 
 use crate::document::Document;
 use crate::fields::{comparable_key_into, FieldSpec};
+use crate::Result;
 
 // ============================ TOP-N ==========================================
 
@@ -31,10 +32,10 @@ impl Default for TopOptions {
 /// Return the line numbers of the top `n` rows by key, in display order
 /// (largest-first for `largest`, smallest-first otherwise). Memory is `O(n)` —
 /// a bounded heap, no sort of the whole input.
-pub fn top_n(doc: &Document, opts: &TopOptions) -> Vec<u64> {
+pub fn top_n(doc: &Document, opts: &TopOptions) -> Result<Vec<u64>> {
     use std::cmp::Reverse;
     if opts.n == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let enc = doc.encoding();
     let n = opts.n;
@@ -46,34 +47,38 @@ pub fn top_n(doc: &Document, opts: &TopOptions) -> Vec<u64> {
     let mut min_heap: BinaryHeap<Reverse<(Vec<u8>, u64)>> = BinaryHeap::new();
     let mut max_heap: BinaryHeap<(Vec<u8>, u64)> = BinaryHeap::new();
 
-    doc.for_each_raw_line(|ln, raw| {
-        comparable_key_into(
-            raw,
-            enc,
-            opts.key_column,
-            &opts.fields,
-            opts.numeric,
-            &mut field_scratch,
-            &mut key_scratch,
-        );
-        if opts.largest {
-            if min_heap.len() < n {
-                min_heap.push(Reverse((key_scratch.clone(), ln)));
-            } else if matches!(min_heap.peek(), Some(Reverse((mk, _))) if key_scratch.as_slice() > mk.as_slice())
+    doc.try_for_each_raw_line(
+        |ln, raw| {
+            comparable_key_into(
+                raw,
+                enc,
+                opts.key_column,
+                &opts.fields,
+                opts.numeric,
+                &mut field_scratch,
+                &mut key_scratch,
+            );
+            if opts.largest {
+                if min_heap.len() < n {
+                    min_heap.push(Reverse((key_scratch.clone(), ln)));
+                } else if matches!(min_heap.peek(), Some(Reverse((mk, _))) if key_scratch.as_slice() > mk.as_slice())
+                {
+                    min_heap.pop();
+                    min_heap.push(Reverse((key_scratch.clone(), ln)));
+                }
+            } else if max_heap.len() < n {
+                max_heap.push((key_scratch.clone(), ln));
+            } else if matches!(max_heap.peek(), Some((mk, _)) if key_scratch.as_slice() < mk.as_slice())
             {
-                min_heap.pop();
-                min_heap.push(Reverse((key_scratch.clone(), ln)));
+                max_heap.pop();
+                max_heap.push((key_scratch.clone(), ln));
             }
-        } else if max_heap.len() < n {
-            max_heap.push((key_scratch.clone(), ln));
-        } else if matches!(max_heap.peek(), Some((mk, _)) if key_scratch.as_slice() < mk.as_slice())
-        {
-            max_heap.pop();
-            max_heap.push((key_scratch.clone(), ln));
-        }
-    });
+            Ok(())
+        },
+        |_| {},
+    )?;
 
-    if opts.largest {
+    Ok(if opts.largest {
         let mut v: Vec<(Vec<u8>, u64)> = min_heap.into_iter().map(|Reverse(x)| x).collect();
         v.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))); // largest key first
         v.into_iter().map(|(_, ln)| ln).collect()
@@ -81,5 +86,5 @@ pub fn top_n(doc: &Document, opts: &TopOptions) -> Vec<u64> {
         let mut v: Vec<(Vec<u8>, u64)> = max_heap.into_iter().collect();
         v.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))); // smallest key first
         v.into_iter().map(|(_, ln)| ln).collect()
-    }
+    })
 }

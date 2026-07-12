@@ -197,6 +197,10 @@ fn write_ordered_lines_raw<W: Write>(
             progress(emitted);
         }
     }
+    // Every emitted line was copied out of the source mmap; fail the whole
+    // sort rather than publish output containing zero-fill from a source
+    // that shrank while we were writing.
+    doc.verify_base()?;
     progress(emitted);
     Ok(())
 }

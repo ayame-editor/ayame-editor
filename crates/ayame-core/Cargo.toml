@@ -18,6 +18,11 @@ serde_json = { workspace = true }
 unicode-normalization.workspace = true
 csv-core = "0.1"
 
+# SIGBUS absorption for mmaps whose backing file may shrink underneath us
+# (mapfault.rs). Already in the lockfile via memmap2.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 # SHA-256 for the data-integrity checksum harness (tests/common). Already in the
