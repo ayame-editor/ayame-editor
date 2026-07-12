@@ -23,13 +23,11 @@ use rayon::prelude::*;
 use super::common::read_full;
 use crate::Result;
 
-/// Stack width for a decoded payload — comfortably above every [`Payload`]
-/// (`u64` = 8, `Acc` = 40). A generic `[0u8; P::LEN]` is not allowed, so
-/// [`RunReader::next_record`] reads into `P::LEN` of a buffer this wide instead.
-const MAX_PAYLOAD_LEN: usize = 64;
-
 /// A fixed-width value stored next to a key in a spill run. `sort` uses `u64`
-/// (the line number); `group` uses its `Acc`.
+/// (the line number, 8 bytes); `group` uses its `Acc` (which carries an exact
+/// sum expansion, a few hundred bytes). A generic `[0u8; P::LEN]` is not
+/// allowed on stable, so [`RunReader`] keeps one `P::LEN`-sized buffer that
+/// every `next_record` call reuses.
 pub(super) trait Payload: Copy + Send + Sync {
     /// Serialized width in bytes (constant for the type).
     const LEN: usize;
@@ -74,6 +72,8 @@ pub(super) fn write_run<P: Payload>(
 /// Streams `(key, payload)` records back out of a run written by [`write_run`].
 pub(super) struct RunReader<P> {
     r: BufReader<File>,
+    /// Exactly `P::LEN` bytes, reused for every record.
+    payload_buf: Vec<u8>,
     _payload: PhantomData<P>,
 }
 
@@ -81,6 +81,7 @@ impl<P: Payload> RunReader<P> {
     pub(super) fn open(path: &Path) -> Result<RunReader<P>> {
         Ok(RunReader {
             r: BufReader::new(File::open(path)?),
+            payload_buf: vec![0u8; P::LEN],
             _payload: PhantomData,
         })
     }
@@ -92,10 +93,8 @@ impl<P: Payload> RunReader<P> {
         }
         let mut key = vec![0u8; u32::from_le_bytes(len_b) as usize];
         self.r.read_exact(&mut key)?;
-        debug_assert!(P::LEN <= MAX_PAYLOAD_LEN, "payload wider than the buffer");
-        let mut payload = [0u8; MAX_PAYLOAD_LEN];
-        self.r.read_exact(&mut payload[..P::LEN])?;
-        Ok(Some((key, P::read_from(&payload[..P::LEN]))))
+        self.r.read_exact(&mut self.payload_buf)?;
+        Ok(Some((key, P::read_from(&self.payload_buf))))
     }
 }
 

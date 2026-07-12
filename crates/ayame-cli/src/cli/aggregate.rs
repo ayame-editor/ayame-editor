@@ -146,16 +146,9 @@ fn temp_sibling(path: &Path) -> PathBuf {
 fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std::io::Result<()> {
     let key = String::from_utf8_lossy(&row.key);
     if has_value {
-        if row.numeric_count > 0 {
-            writeln!(
-                w,
-                "{key}\t{}\t{}\t{}\t{}\t{}",
-                row.count,
-                row.sum,
-                row.min,
-                row.max,
-                row.avg().unwrap()
-            )
+        // min/max/avg are all Some exactly when numeric_count > 0.
+        if let (Some(min), Some(max), Some(avg)) = (row.min, row.max, row.avg()) {
+            writeln!(w, "{key}\t{}\t{}\t{min}\t{max}\t{avg}", row.count, row.sum,)
         } else {
             writeln!(w, "{key}\t{}\t\t\t\t", row.count)
         }

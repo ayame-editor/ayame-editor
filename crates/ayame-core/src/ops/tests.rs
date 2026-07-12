@@ -728,3 +728,103 @@ fn group_cleans_spill_runs_when_the_emit_callback_panics() {
         "a panicking group must not strand its spilled runs"
     );
 }
+
+// ===================== #197: deterministic float aggregation ==================
+
+/// Group `data` by column 1 with a numeric value in column 2 and collect the
+/// rows, using the given spill budget.
+fn group_rows(data: &[u8], budget: usize) -> Vec<GroupRow> {
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        value_column: Some(2),
+        budget_bytes: budget,
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    group(&doc, &opts, |r| rows.push(r.clone())).unwrap();
+    rows
+}
+
+#[test]
+fn group_sum_is_correctly_rounded_and_budget_independent() {
+    // Rounding-hostile values: ten 0.1s (exact sum rounds to 1.0, while naive
+    // sequential f64 addition yields 0.999...9), and 2^53 + 1 + 1 (naive
+    // addition loses both 1s to rounding; the exact sum keeps them).
+    let mut data = Vec::new();
+    for _ in 0..10 {
+        data.extend_from_slice(b"a,0.1\n");
+    }
+    data.extend_from_slice(b"b,9007199254740992\n"); // 2^53
+    data.extend_from_slice(b"b,1\n");
+    data.extend_from_slice(b"b,1\n");
+
+    // budget=1 spills a partial-aggregate run on every new key, so the spill
+    // path combines many partial sums; the default budget never spills.
+    let spilled = group_rows(&data, 1);
+    let in_memory = group_rows(&data, usize::MAX);
+
+    for (s, m) in spilled.iter().zip(&in_memory) {
+        assert_eq!(s.key, m.key);
+        assert_eq!(
+            s.sum.to_bits(),
+            m.sum.to_bits(),
+            "sum for {:?} must not depend on the spill budget",
+            String::from_utf8_lossy(&s.key)
+        );
+    }
+    assert_eq!(spilled[0].sum, 1.0, "fsum of ten 0.1s is exactly 1.0");
+    assert_eq!(
+        spilled[1].sum, 9007199254740994.0,
+        "2^53 + 1 + 1 must not lose the low bits to intermediate rounding"
+    );
+}
+
+#[test]
+fn group_ignores_non_finite_value_strings() {
+    let data = b"a,5\na,NaN\na,inf\na,-infinity\na,1e999\na,zzz\n";
+    let rows = group_rows(data, usize::MAX);
+    assert_eq!(rows.len(), 1);
+    let r = &rows[0];
+    assert_eq!(r.count, 6, "every row is counted");
+    assert_eq!(r.numeric_count, 1, "only the finite value aggregates");
+    assert_eq!(r.sum, 5.0);
+    assert_eq!(r.min, Some(5.0));
+    assert_eq!(r.max, Some(5.0));
+    assert_eq!(r.avg(), Some(5.0));
+}
+
+#[test]
+fn group_without_numeric_values_reports_no_min_max() {
+    let data = b"a,x\na,y\nb,3\n";
+    let rows = group_rows(data, usize::MAX);
+    let a = &rows[0];
+    assert_eq!(a.count, 2);
+    assert_eq!(a.numeric_count, 0);
+    assert_eq!(
+        (a.min, a.max, a.avg()),
+        (None, None, None),
+        "an all-non-numeric group must not leak the ±inf sentinels"
+    );
+    assert_eq!(a.sum, 0.0, "the empty sum is zero");
+    let b = &rows[1];
+    assert_eq!((b.min, b.max), (Some(3.0), Some(3.0)));
+}
+
+#[test]
+fn exact_sum_handles_cancellation_across_spill_boundaries() {
+    // Alternating huge positive/negative values that cancel exactly, plus a
+    // tiny residue that naive accumulation loses in the giants' shadow.
+    let mut data = Vec::new();
+    for _ in 0..100 {
+        data.extend_from_slice(b"k,1e300\n");
+        data.extend_from_slice(b"k,-1e300\n");
+    }
+    data.extend_from_slice(b"k,0.5\n");
+    let spilled = group_rows(&data, 1);
+    let in_memory = group_rows(&data, usize::MAX);
+    assert_eq!(spilled[0].sum.to_bits(), in_memory[0].sum.to_bits());
+    assert_eq!(spilled[0].sum, 0.5);
+}

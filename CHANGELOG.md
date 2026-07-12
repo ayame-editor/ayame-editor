@@ -4,6 +4,12 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- group-by aggregates are now deterministic and clean: `sum`/`avg` accumulate
+  through an exact (correctly-rounded, order-independent) summation, so the
+  result no longer changes with the spill budget or loses low bits past 2^53;
+  non-finite value strings (`NaN`, `inf`, `1e999`…) no longer poison a group's
+  aggregates; and `min`/`max` report nothing instead of leaking the internal
+  `±inf` sentinels when a group has no numeric values. (#197)
 - The bounded-memory contract now survives files with no (or absurdly distant)
   newlines: view APIs decode at most 4 MiB per line (`Line.truncated` /
   `EditLine.truncated` report the cut, `ayame line` and sorted outputs still
