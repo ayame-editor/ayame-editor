@@ -1,9 +1,9 @@
 cask "ayame" do
   arch arm: "aarch64", intel: "x86_64"
 
-  version "0.7.4"
-  sha256 arm:   "0fc1a58b2ca70dbe371ff688cce8917ed8391c02c05bcb8dc76c81f6b257cacf",
-         intel: "954682b53f6f14fef000d6174c27d77a5ad90f0d203b4c395f55051e40c6bb5c"
+  version "0.7.5"
+  sha256 arm:   "08e682ed0a89dd3345f143fdc1a3552ab197713f8a6640e3a54b87b69668416c",
+         intel: "d505b3130ce2621198bbfb8eb030ffcf73873d5e6b7faee1a9e26e720e4dc18b"
 
   url "https://github.com/hjosugi/ayame-editor/releases/download/v#{version}/ayame-v#{version}-macos-#{arch}.zip"
   name "Ayame Editor"

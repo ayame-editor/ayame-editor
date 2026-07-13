@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.7.5 - 2026-07-14
 
 - All four data ops now share one key normalization (#198): keys decode in the
   document encoding and NFC-normalize before comparison, so a composed `café`
