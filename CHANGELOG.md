@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## v0.7.4
+## v0.7.4 - 2026-07-13
 
 - Hardened the local editor UI with a same-origin Content Security Policy,
   MIME-sniffing protection, and frame denial on every response. The policy
