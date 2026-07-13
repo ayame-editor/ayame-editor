@@ -28,7 +28,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // the crash-recovery prompt.
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--cache-dir"],
+        &["--encoding", "--stride", "--cache-dir", "--scratch-dir"],
         &["--no-cache", "--recover"],
     )?;
     let recover_pending = has_flag(&flags, &["--recover"]);

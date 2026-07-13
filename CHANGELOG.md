@@ -2,6 +2,16 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Worker scratch and sort spill no longer default to `env::temp_dir()` — on
+  Linux that is usually tmpfs (RAM), so materializing a dirty multi-GB file or
+  spilling a large sort there could ENOSPC/OOM, contradicting the
+  bounded-memory design. They now default to a disk-backed `scratch/` under
+  the per-user cache root, and serve/gui gained `--scratch-dir` (plus
+  `$AYAME_SCRATCH_DIR`); `--cache-dir` also relocates scratch. `sort`/`group`
+  still take `--spill-dir`. (#140)
+
 ## v0.7.5 - 2026-07-14
 
 - All four data ops now share one key normalization (#198): keys decode in the

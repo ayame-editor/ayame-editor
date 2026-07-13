@@ -51,7 +51,14 @@ const MAX_VIEW: u64 = 20_000;
 pub fn cmd_serve(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
+        &[
+            "--encoding",
+            "--stride",
+            "--host",
+            "--port",
+            "--cache-dir",
+            "--scratch-dir",
+        ],
         &["--no-cache", "--allow-remote"],
     )?;
     let host = first_opt(&opts, &["--host"])
@@ -95,6 +102,7 @@ pub(crate) fn build_state(
     opts: &std::collections::HashMap<String, String>,
     flags: &std::collections::HashSet<String>,
 ) -> Result<AppState> {
+    configure_scratch(opts);
     let open_options = open_opts(opts, flags)?;
     let doc = match pos.first() {
         Some(path) => {
@@ -125,6 +133,20 @@ pub(crate) fn build_state(
         }
     };
     Ok(AppState::new(doc, open_options))
+}
+
+/// Pin the scratch/spill base for this process from the flags, so worker
+/// materialization and sort spill land on disk, not tmpfs (#140). Explicit
+/// `--scratch-dir` wins; otherwise `--cache-dir/scratch` keeps scratch on the
+/// same (disk-backed) volume as the index cache. With neither, the lazy
+/// default in `temp_paths` applies (`AYAME_SCRATCH_DIR`, else the per-user
+/// cache root, else the OS temp dir).
+fn configure_scratch(opts: &std::collections::HashMap<String, String>) {
+    if let Some(dir) = first_opt(opts, &["--scratch-dir"]) {
+        crate::temp_paths::set_scratch_base(std::path::PathBuf::from(dir));
+    } else if let Some(cache) = first_opt(opts, &["--cache-dir"]) {
+        crate::temp_paths::set_scratch_base(std::path::Path::new(cache).join("scratch"));
+    }
 }
 
 /// Build the axum router. Every endpoint is a thin wrapper over `ayame-core`;

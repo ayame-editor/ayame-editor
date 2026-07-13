@@ -32,9 +32,11 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
     let reverse = has_flag(&flags, &["--reverse", "-r"]);
     let budget_bytes = parse_budget(&opts)?;
     let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
-    let spill_dir = custom_spill
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("ayame-sort-{}", std::process::id())));
+    // Default spill onto the disk-backed scratch base, not tmpfs, so a large
+    // external-merge sort cannot ENOSPC/OOM on Linux's RAM-backed /tmp (#140).
+    let spill_dir = custom_spill.clone().unwrap_or_else(|| {
+        crate::temp_paths::scratch_base().join(format!("ayame-sort-{}", std::process::id()))
+    });
 
     let sopts = SortOptions {
         key_column: key_columns.first().copied(),
