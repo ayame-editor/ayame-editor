@@ -6,6 +6,15 @@
 text files from a terminal. Commands are designed to stream or use bounded
 memory so they remain useful on files that are too large for ordinary editors.
 
+<div class="doc-jump-grid">
+  <a class="doc-jump" href="#commands">Inspect and read files</a>
+  <a class="doc-jump" href="#transform-options">Search and transform</a>
+  <a class="doc-jump" href="#sort-and-group-options">Sort and aggregate</a>
+  <a class="doc-jump" href="#serve-options">Open the web editor</a>
+  <a class="doc-jump" href="#update-and-remove">Update or remove</a>
+  <a class="doc-jump" href="#examples">Copy an example</a>
+</div>
+
 ## Usage
 
 ```sh
@@ -15,7 +24,7 @@ ayame <COMMAND> [OPTIONS]
 No arguments open the native desktop window in GUI builds. Plain CLI builds
 print help.
 
-## Commands
+## Commands { #commands }
 
 | Command | Purpose |
 | --- | --- |
@@ -69,7 +78,7 @@ command. See [Migrating comparison workflows to ayame-diff](MIGRATING_TO_AYAME_D
 | `--quote <C>` | CSV quote character. Default: `"`. |
 | `--numeric` | Treat keys as numbers for `sort` and `top`. |
 
-## Sort and Group Options
+## Sort and Group Options { #sort-and-group-options }
 
 | Option | Notes |
 | --- | --- |
@@ -77,7 +86,7 @@ command. See [Migrating comparison workflows to ayame-diff](MIGRATING_TO_AYAME_D
 | `--budget <SIZE>` | In-memory budget before spilling to disk for `sort` / `group`. Default: 256MiB. Accepts sizes like `512MiB` or `2GiB`. |
 | `--spill-dir <DIR>` | Directory for external-merge spill files (`sort` / `group`). |
 
-## Transform Options
+## Transform Options { #transform-options }
 
 | Option | Notes |
 | --- | --- |
@@ -114,7 +123,7 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 | `--max <N>` | Limit printed matches. |
 | `--start-byte <N>` | Begin at a byte offset for worker/API resume. |
 
-## Serve Options
+## Serve Options { #serve-options }
 
 `ayame serve` binds to `127.0.0.1:8777` by default.
 
@@ -146,7 +155,7 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 stays free for piping. Add `--json` to any subcommand for the structured form on
 stdout.
 
-## Update and Remove
+## Update and Remove { #update-and-remove }
 
 | Command | Options |
 | --- | --- |
@@ -174,7 +183,7 @@ Ayame follows the `grep` convention:
 `search --json` always exits `0` — machine callers read match status from the
 `hits` array rather than the exit code.
 
-## Examples
+## Examples { #examples }
 
 ```sh
 ayame stat huge.csv

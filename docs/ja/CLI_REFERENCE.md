@@ -6,6 +6,15 @@
 ファイルの端末処理を行えます。各コマンドはストリーミングまたは bounded memory
 で動くようにしてあり、通常のエディタで開けないサイズのファイルも扱えます。
 
+<div class="doc-jump-grid">
+  <a class="doc-jump" href="#commands">調べる・読み出す</a>
+  <a class="doc-jump" href="#transform-options">検索・変換する</a>
+  <a class="doc-jump" href="#sort-and-group-options">ソート・集計する</a>
+  <a class="doc-jump" href="#serve-options">Web エディタを開く</a>
+  <a class="doc-jump" href="#update-and-remove">更新・削除する</a>
+  <a class="doc-jump" href="#examples">実行例を見る</a>
+</div>
+
 ## 使い方
 
 ```sh
@@ -15,7 +24,7 @@ ayame <COMMAND> [OPTIONS]
 引数なしの場合、GUI build ではネイティブウィンドウを開きます。CLI build では
 ヘルプを表示します。
 
-## コマンド
+## コマンド { #commands }
 
 | コマンド | 目的 |
 | --- | --- |
@@ -69,7 +78,7 @@ ayame <COMMAND> [OPTIONS]
 | `--quote <C>` | CSV quote character。既定は `"`. |
 | `--numeric` | `sort` / `top` のキーを数値として扱う。 |
 
-## sort / group オプション
+## sort / group オプション { #sort-and-group-options }
 
 | オプション | メモ |
 | --- | --- |
@@ -77,7 +86,7 @@ ayame <COMMAND> [OPTIONS]
 | `--budget <SIZE>` | ディスクへ spill する前のメモリ上限 (`sort` / `group`)。既定 256MiB。`512MiB` や `2GiB` の形式。 |
 | `--spill-dir <DIR>` | external-merge spill ファイルの出力先 (`sort` / `group`)。 |
 
-## 変換オプション
+## 変換オプション { #transform-options }
 
 | オプション | メモ |
 | --- | --- |
@@ -114,7 +123,7 @@ ayame <COMMAND> [OPTIONS]
 | `--max <N>` | 表示件数を制限。 |
 | `--start-byte <N>` | worker/API resume 用の開始 byte offset。 |
 
-## serve オプション
+## serve オプション { #serve-options }
 
 `ayame serve` は既定で `127.0.0.1:8777` に bind します。
 
@@ -145,7 +154,7 @@ ayame <COMMAND> [OPTIONS]
 `clear` の人間向けレポートは stderr に出力し、stdout はパイプ用に空けます。どの
 サブコマンドも `--json` を付けると構造化した結果を stdout に出力します。
 
-## update / remove
+## update / remove { #update-and-remove }
 
 | コマンド | オプション |
 | --- | --- |
@@ -171,7 +180,7 @@ binary として置き換えられます。Windows では実行中の exe を直
 
 `search --json` は常に `0` で終了します (一致有無は `hits` 配列で判断)。
 
-## 例
+## 例 { #examples }
 
 ```sh
 ayame stat huge.csv
