@@ -29,6 +29,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'none'; conn
 const CSP: HeaderName = HeaderName::from_static("content-security-policy");
 const X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
 const X_FRAME_OPTIONS: HeaderName = HeaderName::from_static("x-frame-options");
+const REFERRER_POLICY: HeaderName = HeaderName::from_static("referrer-policy");
 
 /// What Host/Origin values this server instance answers to.
 pub(super) struct NetPolicy {
@@ -147,6 +148,10 @@ pub(super) async fn harden_response(req: Request, next: Next) -> Response {
     headers.insert(CSP, HeaderValue::from_static(CONTENT_SECURITY_POLICY));
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // The UI is same-origin-only, so referrers have no legitimate consumer —
+    // and API URLs carry absolute file paths in their query strings, which
+    // must never leak into an outbound Referer (#192 follow-up).
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     response
 }
 
