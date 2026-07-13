@@ -190,12 +190,23 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
         largest: !has_flag(&flags, &["--min", "--smallest", "--asc"]),
         n,
     };
-    let lines = ayame_core::ops::top_n(&doc, &topts)?;
+    let rows = ayame_core::ops::top_n(&doc, &topts)?;
+    // Rows render through their byte ranges: in CSV mode a record can span
+    // physical lines (#199), so `record` is not a viewport line number.
+    let row_text = |row: &ayame_core::TopRow| -> Option<String> {
+        let bytes = doc.raw_byte_range(row.start, row.raw_end)?;
+        let trimmed = bytes
+            .strip_suffix(b"\r\n")
+            .or_else(|| bytes.strip_suffix(b"\n"))
+            .or_else(|| bytes.strip_suffix(b"\r"))
+            .unwrap_or(bytes);
+        Some(doc.encoding().decode_line(trimmed))
+    };
     if let Some(outp) = first_opt(&opts, &["--out-order"]) {
         let file = std::fs::File::create(outp).with_context(|| format!("creating '{outp}'"))?;
         let mut w = BufWriter::new(file);
-        for ln in lines {
-            w.write_all(&ln.to_le_bytes())?;
+        for row in &rows {
+            w.write_all(&row.record.to_le_bytes())?;
         }
         w.flush()?;
         eprintln!("top ordering -> {outp}");
@@ -203,7 +214,7 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
     }
     if has_flag(&flags, &["--json"]) {
         // Top-N is bounded by `n`, so materializing the selected rows is cheap.
-        let rows: Vec<String> = lines.iter().filter_map(|&ln| doc.line(ln)).collect();
+        let rows: Vec<String> = rows.iter().filter_map(row_text).collect();
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({ "rows": rows }))?
@@ -212,12 +223,13 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
     }
     let stdout = std::io::stdout();
     let mut w = BufWriter::new(stdout.lock());
-    for ln in lines {
-        if let Some(text) = doc.line(ln) {
+    for row in &rows {
+        if let Some(text) = row_text(row) {
             writeln!(w, "{text}")?;
         }
     }
     w.flush()?;
+    doc.verify_base()?;
     Ok(())
 }
 

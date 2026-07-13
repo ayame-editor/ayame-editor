@@ -345,7 +345,14 @@ fn top_n_largest_and_smallest() {
         data.extend_from_slice(format!("{},x\n", (i * 7) % 1000).as_bytes());
     }
     let (_f, doc) = doc_from(&data);
-    let val = |ln: u64| doc.line(ln).unwrap().split(',').next().unwrap().to_string();
+    let val = |row: &TopRow| {
+        doc.line(row.record)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap()
+            .to_string()
+    };
 
     let top = top_n(
         &doc,
@@ -359,7 +366,7 @@ fn top_n_largest_and_smallest() {
     )
     .unwrap();
     assert_eq!(
-        top.iter().map(|&l| val(l)).collect::<Vec<_>>(),
+        top.iter().map(val).collect::<Vec<_>>(),
         vec!["999", "998", "997"]
     );
 
@@ -374,10 +381,7 @@ fn top_n_largest_and_smallest() {
         },
     )
     .unwrap();
-    assert_eq!(
-        bot.iter().map(|&l| val(l)).collect::<Vec<_>>(),
-        vec!["0", "1"]
-    );
+    assert_eq!(bot.iter().map(val).collect::<Vec<_>>(), vec!["0", "1"]);
 }
 
 #[test]
@@ -481,7 +485,7 @@ fn numeric_sort_and_top_push_invalid_values_to_the_end_for_largest() {
     let top: Vec<_> = top_n(&doc, &top_opts)
         .unwrap()
         .into_iter()
-        .map(|line| doc.line(line).unwrap())
+        .map(|row| doc.line(row.record).unwrap())
         .collect();
     assert_eq!(top, vec!["10", "3"]);
 }
@@ -827,4 +831,150 @@ fn exact_sum_handles_cancellation_across_spill_boundaries() {
     let in_memory = group_rows(&data, usize::MAX);
     assert_eq!(spilled[0].sum.to_bits(), in_memory[0].sum.to_bits());
     assert_eq!(spilled[0].sum, 0.5);
+}
+
+// ============ #199: RFC-4180 records with quoted embedded newlines ===========
+
+fn csv_spec() -> FieldSpec {
+    FieldSpec {
+        csv: true,
+        ..Default::default()
+    }
+}
+
+/// The issue's exact failure input: `"a","x\ny","b"` grouped/sorted on
+/// column 2 must be ONE record whose field is `x\ny` — not two broken
+/// "lines" keyed `"a","x` and `y","b`.
+#[test]
+fn csv_quoted_newlines_group_as_single_records() {
+    let data = b"\"a\",\"x\ny\",\"b\"\n\"c\",\"z\",\"d\"\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: Some(2),
+        fields: csv_spec(),
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    group(&doc, &opts, |r| {
+        rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count))
+    })
+    .unwrap();
+    assert_eq!(rows, vec![("x\ny".into(), 1), ("z".into(), 1)]);
+}
+
+#[test]
+fn csv_quoted_newlines_sort_records_byte_exactly() {
+    // Records: (key b) with an embedded newline, then (key a). Sorting by
+    // column 1 must move the multi-line record as one intact unit.
+    let rec_b = b"\"b\",\"x\ny\"\n";
+    let rec_a = b"\"a\",\"plain\"\n";
+    let mut data = Vec::new();
+    data.extend_from_slice(rec_b);
+    data.extend_from_slice(rec_a);
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let res = sort(
+        &doc,
+        &SortOptions {
+            key_column: Some(1),
+            fields: csv_spec(),
+            spill_dir: spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res.line_count, 2, "two logical records, not three lines");
+
+    let offsets = LineOffsetReader::open(&res.line_offsets_path).unwrap();
+    let mut ordering = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut out = Vec::new();
+    while let Some(rec) = ordering.next_line().unwrap() {
+        let (s, e) = offsets.raw_range(rec).unwrap();
+        out.extend_from_slice(doc.raw_byte_range(s, e).unwrap());
+    }
+    let mut expect = Vec::new();
+    expect.extend_from_slice(rec_a);
+    expect.extend_from_slice(rec_b);
+    assert_eq!(out, expect, "records reorder byte-exactly, newline intact");
+}
+
+#[test]
+fn csv_quoted_newlines_count_as_one_for_distinct_and_top() {
+    let data = b"\"a\",\"x\ny\"\n\"b\",\"x\ny\"\n";
+    let (_f, doc) = doc_from(data);
+
+    let d = distinct(
+        &doc,
+        &DistinctOptions {
+            key_column: Some(2),
+            fields: csv_spec(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        d.estimate, 1,
+        "both records share the same multi-line field"
+    );
+
+    let rows = top_n(
+        &doc,
+        &TopOptions {
+            key_column: Some(1),
+            fields: csv_spec(),
+            n: 1,
+            largest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = rows[0];
+    let bytes = doc.raw_byte_range(row.start, row.raw_end).unwrap();
+    assert_eq!(
+        bytes, b"\"b\",\"x\ny\"\n",
+        "the selected row spans its whole multi-line record"
+    );
+}
+
+#[test]
+fn csv_unclosed_quote_is_bounded_not_runaway() {
+    // One stray unclosed quote followed by thousands of plain lines: the
+    // record merger must cap, not fuse the rest of the file into one record.
+    let mut data = b"\"unclosed,oops\n".to_vec();
+    for i in 0..10_000u64 {
+        data.extend_from_slice(format!("k{i},v\n").as_bytes());
+    }
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        fields: csv_spec(),
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut groups = 0u64;
+    group(&doc, &opts, |_| groups += 1).unwrap();
+    assert!(
+        groups > 5_000,
+        "the cap must release lines after the runaway record, got {groups} groups"
+    );
+}
+
+#[test]
+fn non_csv_mode_still_treats_quoted_newlines_as_separate_lines() {
+    // Without --csv the physical-line semantics are unchanged.
+    let data = b"\"a\",\"x\ny\",\"b\"\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: None,
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = 0u64;
+    group(&doc, &opts, |_| rows += 1).unwrap();
+    assert_eq!(rows, 2, "two physical lines remain two keys without csv");
 }

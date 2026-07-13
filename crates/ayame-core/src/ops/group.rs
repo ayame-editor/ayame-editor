@@ -269,8 +269,12 @@ pub fn group(
 
     let mut field_scratch = Vec::new();
     let mut key_scratch = Vec::new();
-    doc.try_for_each_raw_line(
-        |_ln, raw| {
+    // Logical records (RFC-4180 in CSV mode), so a quoted field containing a
+    // newline keys as one record instead of two broken "lines" (#199).
+    super::common::try_for_each_record(
+        doc,
+        &opts.fields,
+        |_record_no, raw, _start, _raw_end| {
             decoded_text_key_into(
                 raw,
                 enc,
