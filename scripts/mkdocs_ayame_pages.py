@@ -8,7 +8,15 @@ FAVICON_RE = re.compile(r'<link rel="shortcut icon" href="((?:\.\./)*?)img/favic
 
 
 def on_post_page(output: str, **_: object) -> str:
-    """Use the editor SVG favicon instead of the mkdocs default .ico."""
+    """Apply small document-level details that the stock theme cannot express."""
+
+    page = _.get("page")
+    src_uri = getattr(getattr(page, "file", None), "src_uri", "")
+    is_japanese = src_uri.startswith("ja/") or src_uri == (
+        "adr/0001-diff-extraction-and-deprecation.md"
+    )
+    language = "ja" if is_japanese else "en"
+    output = output.replace("<body", f'<body data-ay-language="{language}"', 1)
 
     def favicon(match: re.Match[str]) -> str:
         prefix = match.group(1)
