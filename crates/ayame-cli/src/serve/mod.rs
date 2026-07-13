@@ -627,6 +627,10 @@ mod tests {
             headers.contains("x-frame-options: deny"),
             "headers: {headers}"
         );
+        assert!(
+            headers.contains("referrer-policy: no-referrer"),
+            "headers: {headers}"
+        );
 
         let _ = std::fs::remove_file(&f);
     }
