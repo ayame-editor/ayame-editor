@@ -102,15 +102,13 @@ pub(crate) fn comparable_key_into(
             .unwrap_or(f64::NEG_INFINITY);
         out.extend_from_slice(&f64_order_key(v));
     } else {
-        let decoded = enc.decode_line(field);
-        if decoded.is_ascii() {
-            out.extend_from_slice(decoded.as_bytes());
-        } else {
-            out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
-        }
+        normalized_key_into(field, enc, out);
     }
 }
 
+/// Decoded, NFC-normalized text key for a field — used by group (and, via
+/// [`normalized_key_into`], every other op) so Unicode-equivalent keys land in
+/// the same group across sort/top/group/distinct (#198).
 pub(crate) fn decoded_text_key_into(
     raw: &[u8],
     enc: Encoding,
@@ -121,16 +119,27 @@ pub(crate) fn decoded_text_key_into(
 ) {
     out.clear();
     let field = capped(field_bytes(raw, col, spec, field_scratch));
-    out.extend_from_slice(enc.decode_line(field).as_bytes());
+    normalized_key_into(field, enc, out);
+}
+
+/// THE key normalization, shared by every data op: decode the field in the
+/// document's encoding, then NFC-normalize (ASCII skips the normalizer — it is
+/// already NFC). `café` composed (U+00E9) and decomposed (`e`+U+0301) build
+/// identical key bytes, so sort/top ordering, group buckets, and distinct
+/// counts all agree on what "the same key" means (#198).
+pub(crate) fn normalized_key_into(field: &[u8], enc: Encoding, out: &mut Vec<u8>) {
+    let decoded = enc.decode_line(field);
+    if decoded.is_ascii() {
+        out.extend_from_slice(decoded.as_bytes());
+    } else {
+        out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
+    }
 }
 
 fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {
-    let decoded = enc.decode_line(field);
-    if decoded.is_ascii() {
-        decoded.into_bytes()
-    } else {
-        decoded.nfc().collect::<String>().into_bytes()
-    }
+    let mut out = Vec::new();
+    normalized_key_into(field, enc, &mut out);
+    out
 }
 
 /// Extract the key/value field from a line. Returns a borrow of `raw` for the

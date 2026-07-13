@@ -2,6 +2,15 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- All four data ops now share one key normalization (#198): keys decode in the
+  document encoding and NFC-normalize before comparison, so a composed `café`
+  (U+00E9) and its decomposed form (`e`+U+0301) sort together, land in the
+  same group bucket, and count as one distinct value. group previously skipped
+  normalization and distinct hashed raw bytes, so the same data produced
+  different groupings per op.
+
 ## v0.7.4 - 2026-07-13
 
 - Hardened the local editor UI with a same-origin Content Security Policy,
