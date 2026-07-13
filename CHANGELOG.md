@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.7.3 - 2026-07-13
 
 - Data ops now understand RFC-4180 records (#199): with `--csv`, a quoted
   field containing a newline keys as ONE record for sort/group/distinct/top
