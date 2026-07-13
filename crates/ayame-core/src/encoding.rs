@@ -27,8 +27,9 @@ pub enum Encoding {
     /// decodes to replacement characters instead of derailing anything (#196).
     #[serde(rename = "iso-2022-jp")]
     Iso2022Jp,
-    /// Detected but not supported for indexing yet.
+    /// UTF-16LE input, indexed with aligned 16-bit newline scanning.
     Utf16Le,
+    /// UTF-16BE input, indexed with aligned 16-bit newline scanning.
     Utf16Be,
 }
 
@@ -45,7 +46,7 @@ impl Encoding {
         }
     }
 
-    /// True for encodings the indexer cannot yet handle (multi-byte newline unit).
+    /// True when newline scanning must use aligned 16-bit code units.
     pub fn is_wide(self) -> bool {
         matches!(self, Encoding::Utf16Le | Encoding::Utf16Be)
     }

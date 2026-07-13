@@ -11,14 +11,15 @@ Runs on macOS, Windows, and Linux.
 > removes its `diff` / `sortdiff` implementations and two-file comparison UI.
 > See the [migration guide](docs/MIGRATING_TO_AYAME_DIFF.md).
 
-![Ayame Editor main window](docs/assets/screenshot-main.png)
-
 ## Features
 
 - View, search, and edit huge files without loading the whole file into memory.
-- Supports UTF-8, Shift_JIS, EUC-JP, and ASCII.
+- Supports UTF-8, UTF-16LE/BE (with or without a BOM), Shift_JIS, EUC-JP,
+  ISO-2022-JP, and ASCII.
 - Run search, replace, sort, folder grep, and file splitting from the GUI.
-- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`, `sort`, `replace`, `case`, `split`, `group`, `top`, `distinct`, `gen`, `serve`, `cache`, `update`, and `remove`.
+- Use CLI commands such as `stat`, `head`, `tail`, `line`, `lines`, `search`,
+  `sort`, `replace`, `case`, `grep-lines`, `split`, `group`, `top`, `distinct`,
+  `gen`, `serve`, `gui`, `cache`, `update`, and `remove`.
 - Includes tabs, rectangular selection, multi-cursor editing, and tail-follow mode.
 - Customizable themes, fonts, wrapping, whitespace display, and key bindings.
 

@@ -65,7 +65,7 @@ COMMANDS:
     version                       Show version
 
 COMMON OPTIONS:
-    --encoding <ENC>   Force encoding: utf8 | utf-16le | utf-16be | shift_jis | euc-jp | ascii
+    --encoding <ENC>   Force encoding: utf8 | utf-16le | utf-16be | shift_jis | euc-jp | iso-2022-jp | ascii
     --stride <N>       Lines per index checkpoint (default 4096)
     --no-cache         Do not read/write the persistent index cache
     --cache-dir <DIR>  Override the index-cache directory

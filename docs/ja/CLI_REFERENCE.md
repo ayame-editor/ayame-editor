@@ -49,7 +49,7 @@ ayame <COMMAND> [OPTIONS]
 
 | オプション | 対象 | メモ |
 | --- | --- | --- |
-| `--encoding <ENC>` | ファイルを開くコマンド | `utf8`, `shift_jis`, `euc-jp`, `ascii` を指定。 |
+| `--encoding <ENC>` | ファイルを開くコマンド | `utf8`, `utf-16le`, `utf-16be`, `shift_jis`, `euc-jp`, `iso-2022-jp`, `ascii` を指定。 |
 | `--stride <N>` | ファイルを開くコマンド | sparse index checkpoint の行間隔。既定は 4096。 |
 | `--no-cache` | ファイルを開くコマンド | persistent index cache を読み書きしない。 |
 | `--cache-dir <DIR>` | ファイルを開くコマンド | index cache directory を上書き。 |

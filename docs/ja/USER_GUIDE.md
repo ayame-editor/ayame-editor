@@ -41,9 +41,9 @@ binary が `/nix/store` から動いている場合、Ayame は Nix 管理とみ
 をインストールしてください。
 
 ネイティブアプリは、ウィンドウ表示後に standalone release の更新を確認し、更新が
-ある場合はインストール前に確認します。不要な場合は `設定` -> `起動時に更新を確認`
-をオフにしてください。Nix、Homebrew、Scoop など package manager 管理の install
-は自己変更せず、package manager 側で更新します。
+ある場合はインストール前に確認します。不要な場合は `編集` -> `設定` を開き、
+`起動時に更新を確認` をオフにしてください。Nix、Homebrew、Scoop など package
+manager 管理の install は自己変更せず、package manager 側で更新します。
 
 ## ファイルを開く
 
@@ -65,20 +65,6 @@ ayame serve path/to/file.log --port 8777
 
 その後 `http://127.0.0.1:8777/` を開きます。
 
-## スクリーンショット
-
-### メインウィンドウ
-
-![Ayame Editor main window](../assets/screenshot-main.png)
-
-### 設定とテーマ
-
-![Ayame Editor settings dialog](../assets/screenshot-settings.png)
-
-### ツール
-
-![Ayame Editor tools menu](../assets/screenshot-tools.png)
-
 ## CLI コマンド
 
 ```sh
@@ -91,6 +77,7 @@ ayame search huge.log 'ERROR' -i --max 50
 ayame sort huge.csv --out sorted.csv
 ayame replace huge.log ERROR WARN --out fixed.log
 ayame case huge.csv lower --out lower.csv
+ayame grep-lines huge.log 'ERROR' -i --out errors.log
 ayame split huge.csv --lines 1000000
 ayame group huge.csv -k 3 --value 5
 ayame top huge.csv -k 2 -n 100 --numeric
@@ -113,7 +100,11 @@ ayame serve huge.csv --port 8777
 ## 主な機能
 
 - 巨大ファイルを全体読み込みせず、必要な範囲だけ表示します。
-- UTF-8、Shift_JIS、EUC-JP、ASCII の読み込みに対応します。文字化けした場合は文字コードを指定して開き直せます。
+- UTF-8、UTF-16LE/BE（BOM あり / なし）、Shift_JIS、EUC-JP、
+  ISO-2022-JP、ASCII の読み込みに対応します。文字化けした場合は文字コードを
+  指定して開き直せます。
+- LF、CRLF、旧 Mac の CR-only 改行を検出します。CR-only の UTF-16 ファイルには
+  対応していません。
 - 検索、正規表現検索、単語単位検索、大文字小文字を無視した検索に対応します。
 - 編集、元に戻す / やり直し、矩形選択、マルチカーソル、選択範囲の保存ができます。
 - ソート、置換、フォルダ内検索、grep して保存 (一致行だけを別ファイルへ書き出し)、分割、ケース変換を GUI から実行できます。
@@ -123,10 +114,11 @@ ayame serve huge.csv --port 8777
 
 ## 既定ショートカット
 
-`Ctrl` は macOS では `Cmd` として入力できます。キー設定は
-`設定` -> `キー設定` から変更できます。
+`Ctrl` は macOS では `Cmd` として入力できます。キー設定は `編集` -> `設定` ->
+`キー設定` から変更できます。`ヘルプ` -> `キーボードショートカット` から直接
+開くこともできます。
 
-### キー設定できる操作
+### ショートカットとキー設定できる操作
 
 | 操作 | 既定ショートカット |
 | --- | --- |
@@ -135,7 +127,8 @@ ayame serve huge.csv --port 8777
 | 開く | `Ctrl+O` |
 | 保存 | `Ctrl+S` |
 | 名前を付けて保存 | `Ctrl+Shift+S` |
-| タブを閉じる | `Ctrl+W`, `Alt+W` |
+| タブを閉じる | `Ctrl+W` |
+| 次のタブ / 前のタブ | `Ctrl+PageDown`, `Ctrl+PageUp` |
 | コマンドパレット | `Ctrl+Shift+P` |
 | 検索 | `Ctrl+F` |
 | 置換 | `Ctrl+H` |
@@ -148,20 +141,19 @@ ayame serve huge.csv --port 8777
 | 行を複製 | `Ctrl+Shift+D` |
 | 行を上下に移動 | `Alt+↑`, `Alt+↓` |
 | 行を削除 | `Ctrl+Shift+K` |
-| コピー / 切り取り | `Ctrl+C`, `Ctrl+X` |
+| コピー / 切り取り / 貼り付け | `Ctrl+C`, `Ctrl+X`, `Ctrl+V` |
 | 検索オプション: 大文字小文字 / 単語 / 正規表現 | `Alt+C`, `Alt+W`, `Alt+R` |
 | 一時ファイルへソートして新しいタブで開く | 未設定 |
-| 別ファイルとの差分 | 未設定 |
 | 現在のファイルを分割 | 未設定 |
 | フォルダ内検索 | 未設定 |
 | grep して保存 (一致行の書き出し) | 未設定 |
-| 選択範囲を大文字 / 小文字へ変換 | 未設定 |
+| 選択範囲を upper/lower/camel/Pascal/snake/kebab/constant case へ変換 | 未設定 |
 | 設定 | 未設定 |
 | キー設定 | 未設定 |
 | 検索バーやダイアログを閉じる | `Esc` |
 
-未設定の操作は `設定` -> `キー設定` に表示されます。よく使う場合は任意の
-ショートカットを割り当ててください。
+未設定の操作は `編集` -> `設定` -> `キー設定` に表示されます。よく使う場合は
+任意のショートカットを割り当ててください。
 
 ### メニュー / ステータス操作
 
@@ -170,10 +162,13 @@ ayame serve huge.csv --port 8777
 
 | 操作 | 開き方 |
 | --- | --- |
-| 末尾に追従 (`tail -f`) | `表示` -> `末尾に追従`、status tail button、または command palette |
-| 空白・改行を表示 | `表示` -> `空白・改行を表示` または command palette |
-| 全角空白を下線で表示 | `表示` -> `全角空白を下線で表示` または command palette |
-| 折り返し | `表示` -> `折り返し` または command palette |
-| 文字コード / 改行コードを変換して保存 | `ファイル` -> `文字コード / 改行コード...`、または status の文字コード / 改行コード segment |
-| 別の文字コードで開き直す | `文字コード / 改行コード...` を開き、encoding を選んで `Reopen` |
-| 選択箇所をファイルに保存 | 選択範囲の context menu |
+| 末尾に追従 (`tail -f`) | `表示` -> `末尾に追従`、ステータスバーの tail ボタン、またはコマンドパレット |
+| 空白・改行を表示 | `表示` -> `空白・改行を表示` またはコマンドパレット |
+| 全角空白を下線で表示 | `表示` -> `全角空白を下線で表示` またはコマンドパレット |
+| 折り返し | `表示` -> `折り返し` またはコマンドパレット |
+| 文字コード / 改行コードを変換して保存 | `ファイル` -> `文字コード / 改行コード...`、またはステータスバーの文字コード / 改行コード表示 |
+| 別の文字コードで開き直す | `文字コード / 改行コード...` を開き、文字コードを選んで `開き直す` |
+| 選択箇所をファイルに保存 | 選択範囲のコンテキストメニュー |
+| 切り取り / コピー / 貼り付け / すべて選択 | `編集` メニュー |
+| 設定 | `編集` -> `設定` |
+| キー設定 | `編集` -> `設定` -> `キー設定`、または `ヘルプ` -> `キーボードショートカット` |

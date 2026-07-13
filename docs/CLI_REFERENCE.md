@@ -49,7 +49,7 @@ command. See [Migrating comparison workflows to ayame-diff](MIGRATING_TO_AYAME_D
 
 | Option | Applies to | Notes |
 | --- | --- | --- |
-| `--encoding <ENC>` | file-opening commands | Force `utf8`, `shift_jis`, `euc-jp`, or `ascii`. |
+| `--encoding <ENC>` | file-opening commands | Force `utf8`, `utf-16le`, `utf-16be`, `shift_jis`, `euc-jp`, `iso-2022-jp`, or `ascii`. |
 | `--stride <N>` | file-opening commands | Lines per sparse-index checkpoint. Default: 4096. |
 | `--no-cache` | file-opening commands | Disable persistent index-cache reads and writes. |
 | `--cache-dir <DIR>` | file-opening commands | Override the index-cache directory. |

@@ -11,14 +11,15 @@ macOS、Windows、Linux で動作します。
 > Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
 > 削除します。[移行ガイド](docs/ja/MIGRATING_TO_AYAME_DIFF.md)をご覧ください。
 
-![Ayame Editor main window](docs/assets/screenshot-main.png)
-
 ## 主な機能
 
 - 巨大ファイルを全体読み込みせずに表示・検索・編集できます。
-- UTF-8、Shift_JIS、EUC-JP、ASCII に対応します。
+- UTF-8、UTF-16LE/BE（BOM あり / なし）、Shift_JIS、EUC-JP、
+  ISO-2022-JP、ASCII に対応します。
 - GUI では検索、置換、ソート、フォルダ内検索、ファイル分割を実行できます。
-- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`sort`、`replace`、`case`、`split`、`group`、`top`、`distinct`、`gen`、`serve`、`cache`、`update`、`remove` などを使えます。
+- CLI では `stat`、`head`、`tail`、`line`、`lines`、`search`、`sort`、
+  `replace`、`case`、`grep-lines`、`split`、`group`、`top`、`distinct`、
+  `gen`、`serve`、`gui`、`cache`、`update`、`remove` などを使えます。
 - タブ、矩形選択、マルチカーソル、tail -f 風の末尾追従を備えています。
 - テーマ、フォント、折り返し、空白表示、キー設定を変更できます。
 

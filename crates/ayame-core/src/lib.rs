@@ -25,7 +25,7 @@
 //! ## Layout
 //!
 //! * [`index`] — the sparse, parallel-built line index.
-//! * [`encoding`] — encoding (UTF-8 / Shift_JIS / EUC-JP) and EOL detection.
+//! * [`encoding`] — UTF-8, UTF-16, Japanese legacy encoding, and EOL detection.
 //! * [`search`] — streaming literal/regex search.
 //! * [`document`] — [`Document`], the immutable mmap-backed base handle.
 //!   Editing can be layered above it with a patch/WAL model without copying the

@@ -43,16 +43,10 @@ Keep English and Japanese docs in sync when changing user-facing behavior:
 - Build the docs with `mkdocs build --strict --site-dir site` when MkDocs is
   installed.
 
-If a change affects the UI layout, refresh screenshots under `docs/assets/`.
-The current set is:
-
-- `screenshot-main.png`
-- `screenshot-settings.png`
-- `screenshot-tools.png`
-- `screenshot-diff.png`
-
-They were captured from `ayame serve` against a small CSV fixture at a 1440px
-wide browser viewport.
+If documentation includes UI screenshots, capture them from the current
+`ayame serve` build against a small CSV fixture at a 1440px-wide browser
+viewport. Refresh or remove a screenshot as soon as its controls no longer
+match the current UI.
 
 ## Architecture Touch Points
 

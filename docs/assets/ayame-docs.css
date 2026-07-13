@@ -203,7 +203,7 @@ body > .container > .row > [role="main"] {
   overflow: hidden;
   border: 1px solid rgba(23, 33, 47, .18);
   border-radius: 8px;
-  background: #101a27 url("screenshot-main.png") center / cover no-repeat;
+  background: linear-gradient(135deg, #101a27, #26344c 58%, #59427e);
   box-shadow: 0 18px 42px rgba(23, 33, 47, .18);
 }
 
