@@ -67,6 +67,7 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
             &doc,
             &res.ordering_path,
             &res.line_offsets_path,
+            res.line_count,
             Path::new(outp),
             |done| progress.report(sort_work.saturating_add(done), progress_total),
         )
@@ -76,18 +77,31 @@ pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
         let stdout = std::io::stdout();
         let mut w = std::io::BufWriter::new(stdout.lock());
         let mut rd = OrderingReader::open(&res.ordering_path)?;
+        // Records resolve through the dense offsets table, never through the
+        // line index: in CSV mode one record can span physical lines (#199).
+        let offsets = LineOffsetReader::open(&res.line_offsets_path)?;
         let mut emitted = 0u64;
         while let Some(ln) = rd.next_line()? {
-            // Sorted output is data, not display: decode the full line.
-            if let Some(text) = doc.line_full(ln) {
-                writeln!(w, "{text}")?;
-            }
+            let (start, end) = offsets
+                .raw_range(ln)
+                .with_context(|| format!("missing dense offset for record {ln}"))?;
+            let bytes = doc
+                .raw_byte_range(start, end)
+                .with_context(|| format!("invalid raw record range {start}..{end}"))?;
+            let trimmed = bytes
+                .strip_suffix(b"\r\n")
+                .or_else(|| bytes.strip_suffix(b"\n"))
+                .or_else(|| bytes.strip_suffix(b"\r"))
+                .unwrap_or(bytes);
+            // Sorted output is data, not display: decode the full record.
+            writeln!(w, "{}", doc.encoding().decode_line(trimmed))?;
             emitted += 1;
             if emitted.is_multiple_of(8192) {
                 progress.report(sort_work.saturating_add(emitted), progress_total);
             }
         }
         w.flush()?;
+        doc.verify_base()?;
         progress.report(progress_total, progress_total);
         None
     };
@@ -118,11 +132,19 @@ fn write_sorted_text(
     doc: &Document,
     ordering_path: &Path,
     line_offsets_path: &Path,
+    record_total: u64,
     out_path: &Path,
     mut progress: impl FnMut(u64),
 ) -> Result<()> {
     write_sorted_output(doc, ordering_path, out_path, |doc, ordering_path, w| {
-        write_ordered_lines_raw(doc, ordering_path, line_offsets_path, w, &mut progress)
+        write_ordered_lines_raw(
+            doc,
+            ordering_path,
+            line_offsets_path,
+            record_total,
+            w,
+            &mut progress,
+        )
     })
 }
 
@@ -172,24 +194,31 @@ fn write_ordered_lines_raw<W: Write>(
     doc: &Document,
     ordering_path: &Path,
     line_offsets_path: &Path,
+    record_total: u64,
     w: &mut W,
     mut progress: impl FnMut(u64),
 ) -> Result<()> {
     w.write_all(doc.prefix_bytes())?; // keep the BOM, if any
-    let total = doc.line_count();
+                                      // Record numbering, not physical lines: a CSV record can span lines
+                                      // (#199), so totals come from the sort result. The FILE's final physical
+                                      // line still tells us whether the final record carried a terminator.
+    let total = record_total;
+    let physical_total = doc.line_count();
     let mut rd = OrderingReader::open(ordering_path)?;
     let offsets = LineOffsetReader::open(line_offsets_path)?;
-    let final_unterminated =
-        total > 0 && doc.line_terminator(total - 1).is_none_or(|t| t.is_empty());
+    let final_unterminated = physical_total > 0
+        && doc
+            .line_terminator(physical_total - 1)
+            .is_none_or(|t| t.is_empty());
     let mut emitted = 0u64;
     while let Some(ln) = rd.next_line()? {
         emitted += 1;
         let (start, end) = offsets
             .raw_range(ln)
-            .with_context(|| format!("missing dense line offset for line {ln}"))?;
+            .with_context(|| format!("missing dense offset for record {ln}"))?;
         let bytes = doc
             .raw_byte_range(start, end)
-            .with_context(|| format!("invalid raw line range {start}..{end}"))?;
+            .with_context(|| format!("invalid raw record range {start}..{end}"))?;
         w.write_all(bytes)?;
         if final_unterminated && ln == total - 1 && emitted < total {
             w.write_all(doc.default_terminator())?;

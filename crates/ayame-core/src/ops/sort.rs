@@ -120,15 +120,20 @@ where
 
     let mut scratch = Vec::new();
     report_progress(&mut progress, 0, progress_total);
-    doc.try_for_each_raw_line_with_offsets(
-        |line_no, raw, raw_start, raw_end| {
+    // Logical records: physical lines, or RFC-4180 records (quoted fields may
+    // span lines) in CSV mode — one key, one offsets entry, one ordering slot
+    // per record, so a record with an embedded newline sorts as a unit (#199).
+    super::common::try_for_each_record(
+        doc,
+        &opts.fields,
+        |record_no, raw, raw_start, raw_end| {
             let mut offset_record = [0u8; 16];
             offset_record[..8].copy_from_slice(&raw_start.to_le_bytes());
             offset_record[8..].copy_from_slice(&raw_end.to_le_bytes());
             line_offsets.write_all(&offset_record)?;
             let key = sort_key(raw, enc, opts, &mut scratch);
             buffered_bytes += key.len() + 40; // key + Vec/tuple overhead estimate
-            buffer.push((key, line_no));
+            buffer.push((key, record_no));
             if buffered_bytes >= opts.budget_bytes {
                 spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
                 buffered_bytes = 0;

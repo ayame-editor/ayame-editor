@@ -21,7 +21,7 @@ pub use group::{group, GroupOptions, GroupRow, GroupStats};
 pub use sort::{
     sort, sort_with_progress, LineOffsetReader, OrderingReader, SortOptions, SortResult,
 };
-pub use top::{top_n, TopOptions};
+pub use top::{top_n, TopOptions, TopRow};
 
 #[cfg(test)]
 mod tests;

@@ -2,6 +2,18 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Data ops now understand RFC-4180 records (#199): with `--csv`, a quoted
+  field containing a newline keys as ONE record for sort/group/distinct/top
+  instead of two broken "lines" — Excel/pandas exports with embedded newlines
+  finally aggregate correctly. Multi-line records are merged by quote parity
+  as zero-copy slices of the mmap, sort's ordering/offset artifacts are
+  record-numbered (a sorted multi-line record moves byte-exactly as one unit),
+  top selections carry their full byte range, and a stray unclosed quote is
+  capped (4096 lines / 8 MiB per record) instead of fusing the rest of the
+  file into a single record. Non-CSV mode is unchanged.
+
 ## v0.7.2 - 2026-07-13
 
 - Fixed three encoding/EOL detection failures (#196): ASCII-heavy UTF-16

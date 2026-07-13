@@ -80,8 +80,11 @@ pub fn distinct(doc: &Document, opts: &DistinctOptions) -> Result<DistinctResult
     use std::hash::{Hash, Hasher};
     let mut hll = Hll::new(opts.precision.clamp(4, 18));
     let mut scratch = Vec::new();
-    doc.try_for_each_raw_line(
-        |_ln, raw| {
+    // Logical records (RFC-4180 in CSV mode; #199).
+    super::common::try_for_each_record(
+        doc,
+        &opts.fields,
+        |_record_no, raw, _start, _raw_end| {
             // Distinctness is over the (unescaped) field bytes; identical bytes
             // hash identically, so no decode is needed here. Capped like every
             // other op key (see fields::MAX_KEY_BYTES).
