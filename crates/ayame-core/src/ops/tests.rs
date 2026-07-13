@@ -978,3 +978,71 @@ fn non_csv_mode_still_treats_quoted_newlines_as_separate_lines() {
     group(&doc, &opts, |_| rows += 1).unwrap();
     assert_eq!(rows, 2, "two physical lines remain two keys without csv");
 }
+
+// ============== #198: one key normalization across all four ops ==============
+
+/// "café" composed (U+00E9) vs decomposed ("e"+U+0301): every op must agree
+/// they are the same key. group used to bucket them separately and distinct
+/// hashed raw bytes, while sort/top already NFC-normalized.
+#[test]
+fn unicode_equivalent_keys_agree_across_all_ops() {
+    let data = "caf\u{e9},1\ncafe\u{301},2\n";
+    let (_f, doc) = doc_from(data.as_bytes());
+
+    // group: one bucket holding both rows, keyed by the composed (NFC) form.
+    let spill = tempfile::tempdir().unwrap();
+    let mut rows = Vec::new();
+    group(
+        &doc,
+        &GroupOptions {
+            key_column: Some(1),
+            spill_dir: spill.path().join("grp"),
+            ..Default::default()
+        },
+        |r| rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count)),
+    )
+    .unwrap();
+    assert_eq!(rows, vec![("caf\u{e9}".to_string(), 2)]);
+
+    // distinct: one value, not two byte-variants.
+    let d = distinct(
+        &doc,
+        &DistinctOptions {
+            key_column: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(d.estimate, 1);
+
+    // sort: equal keys fall back to the stable original order.
+    let sort_spill = tempfile::tempdir().unwrap();
+    let res = sort(
+        &doc,
+        &SortOptions {
+            key_column: Some(1),
+            spill_dir: sort_spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut rd = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut order = Vec::new();
+    while let Some(ln) = rd.next_line().unwrap() {
+        order.push(ln);
+    }
+    assert_eq!(order, vec![0, 1]);
+
+    // top: equal keys, stable tie-break selects the earlier record.
+    let rows = top_n(
+        &doc,
+        &TopOptions {
+            key_column: Some(1),
+            n: 1,
+            largest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows[0].record, 0);
+}

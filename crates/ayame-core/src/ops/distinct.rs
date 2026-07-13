@@ -1,5 +1,5 @@
 use crate::document::Document;
-use crate::fields::{capped, field_bytes, FieldSpec};
+use crate::fields::{capped, field_bytes, normalized_key_into, FieldSpec};
 use crate::Result;
 
 // ===================== DISTINCT (HyperLogLog) ================================
@@ -78,24 +78,29 @@ impl Hll {
 /// Estimate the number of distinct values of the configured field.
 pub fn distinct(doc: &Document, opts: &DistinctOptions) -> Result<DistinctResult> {
     use std::hash::{Hash, Hasher};
+    let enc = doc.encoding();
     let mut hll = Hll::new(opts.precision.clamp(4, 18));
     let mut scratch = Vec::new();
+    let mut key_scratch = Vec::new();
     // Logical records (RFC-4180 in CSV mode; #199).
     super::common::try_for_each_record(
         doc,
         &opts.fields,
         |_record_no, raw, _start, _raw_end| {
-            // Distinctness is over the (unescaped) field bytes; identical bytes
-            // hash identically, so no decode is needed here. Capped like every
-            // other op key (see fields::MAX_KEY_BYTES).
+            // Distinctness is over the decoded, NFC-normalized key — the SAME
+            // normalization sort/top/group use, so Unicode-equivalent values
+            // count as one here too instead of hashing as raw byte variants
+            // (#198). Capped like every other op key (fields::MAX_KEY_BYTES).
             let field = capped(field_bytes(
                 raw,
                 opts.key_column,
                 &opts.fields,
                 &mut scratch,
             ));
+            key_scratch.clear();
+            normalized_key_into(field, enc, &mut key_scratch);
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            field.hash(&mut h);
+            key_scratch.hash(&mut h);
             hll.add(h.finish());
             Ok(())
         },
