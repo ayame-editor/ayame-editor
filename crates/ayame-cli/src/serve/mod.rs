@@ -188,6 +188,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/grep", post(ops::api_grep))
         .route("/api/find", get(ops::api_find))
         .route("/api/linebyte", get(ops::api_linebyte))
+        .layer(axum::middleware::from_fn(security::harden_response))
         .layer(axum::middleware::from_fn_with_state(
             policy,
             security::guard,
@@ -543,14 +544,19 @@ mod tests {
         (addr, state)
     }
 
-    /// Minimal raw HTTP/1.1 client (avoids extra dev-dependencies): returns
-    /// (status, body-ish text — headers stripped, chunk framing tolerated).
-    async fn send(addr: SocketAddr, raw: String) -> (u16, String) {
+    /// Minimal raw HTTP/1.1 client (avoids extra dev-dependencies).
+    async fn send_full(addr: SocketAddr, raw: String) -> String {
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
         s.write_all(raw.as_bytes()).await.unwrap();
         let mut buf = Vec::new();
         s.read_to_end(&mut buf).await.unwrap();
-        let text = String::from_utf8_lossy(&buf).to_string();
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    /// Return (status, body-ish text), stripping headers and tolerating chunk
+    /// framing for tests that only care about the API payload.
+    async fn send(addr: SocketAddr, raw: String) -> (u16, String) {
+        let text = send_full(addr, raw).await;
         let status = text
             .split_whitespace()
             .nth(1)
@@ -592,6 +598,37 @@ mod tests {
             body.len(),
             String::from_utf8_lossy(body)
         )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn responses_include_browser_security_headers() {
+        let f = scratch_file("security-headers.txt", b"hello\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+
+        let response = send_full(addr, get("/", &host)).await;
+        let headers = response
+            .split_once("\r\n\r\n")
+            .map(|(head, _)| head.to_ascii_lowercase())
+            .unwrap_or_default();
+        assert!(
+            headers.contains("content-security-policy: default-src 'self'"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("frame-ancestors 'none'"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("x-content-type-options: nosniff"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("x-frame-options: deny"),
+            "headers: {headers}"
+        );
+
+        let _ = std::fs::remove_file(&f);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

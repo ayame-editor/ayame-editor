@@ -2,6 +2,14 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## v0.7.4
+
+- Hardened the local editor UI with a same-origin Content Security Policy,
+  MIME-sniffing protection, and frame denial on every response. The policy
+  keeps the app's runtime layout styles and local `data:` wallpaper images
+  working while blocking foreign scripts, connections, embedding, objects,
+  forms, and workers. (#192)
+
 ## v0.7.3 - 2026-07-13
 
 - Data ops now understand RFC-4180 records (#199): with `--csv`, a quoted
