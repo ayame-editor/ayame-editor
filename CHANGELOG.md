@@ -12,6 +12,17 @@ All notable changes to Ayame Editor are tracked here.
   `$AYAME_SCRATCH_DIR`); `--cache-dir` also relocates scratch. `sort`/`group`
   still take `--spill-dir`. (#140)
 
+## Unreleased
+
+- The native desktop app now cleans up its scratch on exit and reaps dead
+  sessions' leftovers on startup (#138). Graceful shutdown cleanup (uploads,
+  untitled buffers, unsaved sort results, in-place aside files, clean-session
+  WAL) was CLI `serve`-only; the GUI leaked all of it every session — up to
+  several GiB, and Windows %TEMP% is never auto-swept. The window close path
+  now runs the same cleanup, and startup reaps `ayame-*` scratch left by
+  crashed/killed prior processes whose PID is no longer alive (own and
+  live-sibling sessions are spared).
+
 ## v0.7.5 - 2026-07-14
 
 - All four data ops now share one key normalization (#198): keys decode in the
