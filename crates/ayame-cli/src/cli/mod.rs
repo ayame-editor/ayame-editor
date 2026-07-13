@@ -23,7 +23,8 @@ pub(crate) mod sort;
 mod transform;
 mod update;
 
-#[cfg(feature = "gui")]
+// Used by both the gui startup path and temp_paths' disk-backed scratch
+// default (#140), so it is not gui-gated.
 pub(crate) use args::default_cache_dir;
 pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
 pub(crate) use formatting::{commas, human_bytes};
@@ -69,6 +70,9 @@ COMMON OPTIONS:
     --stride <N>       Lines per index checkpoint (default 4096)
     --no-cache         Do not read/write the persistent index cache
     --cache-dir <DIR>  Override the index-cache directory
+    --scratch-dir <DIR> Where serve/gui put worker scratch and sort spill
+                       (default: a disk-backed cache location, never tmpfs;
+                       also $AYAME_SCRATCH_DIR). sort/group take --spill-dir.
     --json             Machine-readable output on stdout
                        (stat/search/split/group/top/distinct/cache)
     -V, --version      Show version

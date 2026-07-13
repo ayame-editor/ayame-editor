@@ -1556,6 +1556,8 @@ mod tests {
             name.starts_with("app.sorted") && name.ends_with("log"),
             "unexpected name {name}"
         );
-        assert!(p.starts_with(std::env::temp_dir()));
+        // The scratch home is the (disk-backed) scratch base, not necessarily
+        // the OS temp dir since #140.
+        assert!(p.starts_with(crate::temp_paths::scratch_base()));
     }
 }

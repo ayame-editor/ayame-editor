@@ -33,8 +33,9 @@ pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
     };
     let budget_bytes = parse_budget(&opts)?;
     let custom_spill = first_opt(&opts, &["--spill-dir"]).map(PathBuf::from);
+    // Disk-backed scratch base by default, not tmpfs (#140).
     let spill_dir = custom_spill.clone().unwrap_or_else(|| {
-        std::env::temp_dir().join(format!("ayame-group-{}", std::process::id()))
+        crate::temp_paths::scratch_base().join(format!("ayame-group-{}", std::process::id()))
     });
 
     let gopts = GroupOptions {
