@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { charLenOf, updateCount, utf16IndexOfCol } from "../src/search.js";
+import {
+  charLenOf,
+  COUNT_DEBOUNCE_MS,
+  scheduleCount,
+  updateCount,
+  utf16IndexOfCol,
+} from "../src/search.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -20,8 +26,11 @@ function deferredResponse() {
 
 afterEach(async () => {
   state.query = "";
+  state.regexError = false;
+  state.lastMatch = null;
   document.body.innerHTML = '<span id="find-count"></span>';
   await updateCount();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -62,5 +71,52 @@ describe("search count request generation (#123)", () => {
     await oldCount;
     expect(state.searchHits).toEqual([{ byte: 2 }]);
     expect(document.getElementById("find-count")?.textContent).toBe("1 matches");
+  });
+});
+
+describe("live incremental count while typing (#162)", () => {
+  it("debounces a burst of keystrokes into a single count request", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<span id="find-count"></span>';
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ hits: [{ byte: 0 }, { byte: 5 }, { byte: 9 }], truncated: false }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Three quick keystrokes; each schedules a debounced refresh.
+    state.regexError = false;
+    state.lastMatch = null;
+    state.query = "a";
+    scheduleCount();
+    state.query = "ab";
+    scheduleCount();
+    state.query = "abc";
+    scheduleCount();
+    expect(fetchMock).not.toHaveBeenCalled(); // nothing fired yet — coalesced
+
+    await vi.advanceTimersByTimeAsync(COUNT_DEBOUNCE_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("q=abc");
+    expect(document.getElementById("find-count")?.textContent).toBe("3 matches");
+  });
+
+  it("does not query for an empty or invalid-regex query", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<span id="find-count"></span>';
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ hits: [], truncated: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    state.query = "";
+    state.regexError = false;
+    scheduleCount();
+    state.query = "a(";
+    state.regexError = true;
+    scheduleCount();
+
+    await vi.advanceTimersByTimeAsync(COUNT_DEBOUNCE_MS);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

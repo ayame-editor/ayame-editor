@@ -259,11 +259,41 @@ export async function selectNextOccurrence() {
 
 let countRequestToken = 0;
 let countRequestController: AbortController | null = null;
+let countDebounceTimer = 0;
 
-export async function updateCount() {
-  const token = ++countRequestToken;
+// Live incremental-search feedback is debounced so a fast typist doesn't fire a
+// /api/search per keystroke; 120ms keeps the count feeling immediate.
+export const COUNT_DEBOUNCE_MS = 120;
+
+// Invalidate any in-flight count request so its late response is ignored.
+function abortPendingCount() {
+  countRequestToken++;
   countRequestController?.abort();
   countRequestController = null;
+}
+
+// Refresh the match count as the query changes while typing, coalescing bursts
+// of keystrokes into one request. An empty or invalid-regex query has nothing
+// to count, so we only drop any pending request and leave the label as
+// setQueryFromInput set it (empty, or the regex-error message).
+export function scheduleCount() {
+  clearTimeout(countDebounceTimer);
+  countDebounceTimer = 0;
+  if (!state.query || state.regexError) {
+    abortPendingCount();
+    return;
+  }
+  countDebounceTimer = setTimeout(() => {
+    countDebounceTimer = 0;
+    updateCount();
+  }, COUNT_DEBOUNCE_MS);
+}
+
+export async function updateCount() {
+  clearTimeout(countDebounceTimer);
+  countDebounceTimer = 0;
+  abortPendingCount();
+  const token = countRequestToken;
   if (!state.query) {
     $("find-count").textContent = "";
     state.searchHits = null;

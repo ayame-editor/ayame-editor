@@ -65,6 +65,7 @@ import {
   hideGrep,
   replaceAll,
   replaceCurrent,
+  scheduleCount,
   selectNextOccurrence,
   setReplaceRow,
   showSearchHistory,
@@ -125,6 +126,7 @@ export function setQueryFromInput() {
   state.searchTruncated = false;
   buildMatcher();
   $("find-count").textContent = state.regexError ? t("find.regexError") : "";
+  scheduleCount(); // keep the "N / total" label in sync with the live highlights
   scheduleRender();
 }
 
