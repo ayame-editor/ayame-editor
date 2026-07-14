@@ -665,6 +665,9 @@ export function renderTabs(list) {
           disabled: state.tabs.length < 2,
           action: async () => {
             // Snapshot ids first — closeTab mutates state.tabs as it runs.
+            // Close sequentially: each closeTab settles the edit queue,
+            // POSTs, and re-renders; firing N of them concurrently races
+            // docGen bumps and briefly "opens" intermediate tabs.
             const others = state.tabs.filter((o) => o.id !== tab.id).map((o) => o.id);
             await closeTabsSequentially(others);
           },
