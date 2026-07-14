@@ -4,6 +4,8 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+## v0.7.6 - 2026-07-14
+
 - Worker scratch and sort spill no longer default to `env::temp_dir()` — on
   Linux that is usually tmpfs (RAM), so materializing a dirty multi-GB file or
   spilling a large sort there could ENOSPC/OOM, contradicting the
