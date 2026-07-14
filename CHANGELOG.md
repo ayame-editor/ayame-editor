@@ -11,6 +11,14 @@ All notable changes to Ayame Editor are tracked here.
   the per-user cache root, and serve/gui gained `--scratch-dir` (plus
   `$AYAME_SCRATCH_DIR`); `--cache-dir` also relocates scratch. `sort`/`group`
   still take `--spill-dir`. (#140)
+- Declared a minimum supported Rust version (1.95) and added a pinned-toolchain
+  CI job that enforces it. The build script's TS→JS step depends on oxc 0.138,
+  whose `oxc_transformer` needs Rust 1.95's `if let` match guards but
+  under-declares its own floor as 1.94; on a slightly older stable toolchain
+  the build failed with a cryptic `error[E0658]: if let guards are
+  experimental` deep inside the dependency. cargo now reports "requires rustc
+  1.95" up front, and the `msrv` CI job (which the floating-`stable` job can't
+  substitute for) fails if a future dependency raises the real minimum. (#195)
 
 ## v0.7.5 - 2026-07-14
 
