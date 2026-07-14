@@ -30,14 +30,7 @@ export function humanBytes(n) {
     v /= 1024;
     i++;
   }
-  const value =
-    i === 0
-      ? n.toLocaleString(currentLocale())
-      : v.toLocaleString(currentLocale(), {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-  return `${value} ${u[i]}`;
+  return i === 0 ? `${n} B` : `${v.toFixed(2)} ${u[i]}`;
 }
 
 export function escapeRegExp(s) {

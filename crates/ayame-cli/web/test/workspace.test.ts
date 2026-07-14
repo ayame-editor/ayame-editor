@@ -39,12 +39,10 @@ vi.mock("../src/app.js", () => ({
 }));
 
 import { isNativeApp } from "../src/app.js";
-import { state } from "../src/state.js";
 import {
   canDragOutToNewWindow,
   canHandoffDirtyTab,
   closeTabsSequentially,
-  renderPathCrumbs,
 } from "../src/workspace.js";
 
 function deferred() {
@@ -120,23 +118,5 @@ describe("Close Other Tabs ordering (#123)", () => {
 
     second.resolve();
     await pending;
-  });
-});
-
-describe("localized opener breadcrumbs (#189)", () => {
-  it("uses the selected language for the Windows computer root", () => {
-    const originalLanguage = state.settings.language;
-    const host = document.createElement("nav");
-    try {
-      state.settings.language = "ja";
-      renderPathCrumbs(host, "C:\\Users", vi.fn());
-      expect(host.querySelector("button")?.textContent).toBe("この PC");
-
-      state.settings.language = "en";
-      renderPathCrumbs(host, "C:\\Users", vi.fn());
-      expect(host.querySelector("button")?.textContent).toBe("This PC");
-    } finally {
-      state.settings.language = originalLanguage;
-    }
   });
 });

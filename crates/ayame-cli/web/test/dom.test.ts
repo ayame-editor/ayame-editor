@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   commas,
   displayPath,
-  humanBytes,
   isAbsolutePath,
   isUntitled,
   joinPath,
@@ -11,21 +10,14 @@ import {
 } from "../src/dom.js";
 import { state } from "../src/state.js";
 
-describe("localized number helpers (#176, #189)", () => {
-  it("formats grouped numbers and byte decimals with the active UI locale", () => {
+describe("localized number helpers (#176)", () => {
+  it("formats grouped numbers with the active UI locale", () => {
     const originalLanguage = state.settings.language;
     const localeSpy = vi.spyOn(Number.prototype, "toLocaleString");
     try {
       state.settings.language = "ja";
       commas(1_234);
       expect(localeSpy).toHaveBeenLastCalledWith("ja");
-
-      state.settings.language = "en";
-      humanBytes(1_536);
-      expect(localeSpy).toHaveBeenLastCalledWith("en", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
     } finally {
       localeSpy.mockRestore();
       state.settings.language = originalLanguage;

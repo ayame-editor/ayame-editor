@@ -7,7 +7,7 @@ vi.mock("../src/selection.js", () => ({
 vi.mock("../src/menus.js", () => ({ updateStatusPos: vi.fn() }));
 vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
 
-import { ensureData, fillEofRow, formatLineNo } from "../src/editor.js";
+import { ensureData, formatLineNo } from "../src/editor.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -39,25 +39,6 @@ describe("line-number formatting (#49)", () => {
     delete state.settings.lineNumberCommas;
     expect(formatLineNo(1000)).toBe("1,000");
     state.settings.lineNumberCommas = true;
-  });
-});
-
-describe("localized EOF marker (#189)", () => {
-  it("uses the selected UI language", () => {
-    const originalLanguage = state.settings.language;
-    const row = document.createElement("div");
-    row.append(document.createElement("span"), document.createElement("span"));
-    try {
-      state.settings.language = "ja";
-      fillEofRow(row);
-      expect(row.lastChild?.textContent).toBe("[ファイル末尾]");
-
-      state.settings.language = "en";
-      fillEofRow(row);
-      expect(row.lastChild?.textContent).toBe("[EOF]");
-    } finally {
-      state.settings.language = originalLanguage;
-    }
   });
 });
 
