@@ -210,7 +210,7 @@ export function fillEofRow(row) {
   row.firstChild.textContent = "";
   const tx = row.lastChild;
   tx.className = "tx";
-  tx.textContent = "[EOF]";
+  tx.textContent = t("editor.eofMarker");
 }
 
 // Character width of the monospace content font, for a rough fallback only
