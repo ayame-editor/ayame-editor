@@ -1292,7 +1292,8 @@ html.saving .caret.extra { visibility: hidden; }
   font-family: var(--ui);
 }
 .opener-row:hover { background: var(--bg-active-line); }
-.opener-row.picked {
+.opener-row.picked,
+.opener-row.active {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }

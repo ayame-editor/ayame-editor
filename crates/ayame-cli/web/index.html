@@ -276,13 +276,16 @@
         <div class="opener-path">
           <span id="opener-input-label" class="opener-input-label" data-i18n="dialog.open.path">パス</span>
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder" />
+                 placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder"
+                 aria-controls="opener-recent opener-list" />
           <button id="opener-open" class="cmd" data-i18n="menu.open">開く</button>
         </div>
 
-        <div id="opener-recent" class="opener-recent hidden"></div>
+        <div id="opener-recent" class="opener-recent hidden" role="listbox" tabindex="0"
+             aria-label="最近使ったファイル" data-i18n-aria-label="dialog.open.recent"></div>
         <div id="opener-cwd" class="opener-cwd" title=""></div>
-        <div id="opener-list" class="opener-list"></div>
+        <div id="opener-list" class="opener-list" role="listbox" tabindex="0"
+             aria-label="ファイルを開く" data-i18n-aria-label="dialog.open.title"></div>
         <div id="opener-msg" class="opener-msg"></div>
 
         <div id="opener-hint" class="opener-hint" data-i18n="dialog.open.hintOpen">

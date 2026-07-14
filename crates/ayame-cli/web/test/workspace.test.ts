@@ -39,10 +39,17 @@ vi.mock("../src/app.js", () => ({
 }));
 
 import { isNativeApp } from "../src/app.js";
+import { state } from "../src/state.js";
 import {
+  browseRow,
   canDragOutToNewWindow,
   canHandoffDirtyTab,
   closeTabsSequentially,
+  moveOpenerSelection,
+  onOpenerInputKeydown,
+  onOpenerListKeydown,
+  recentRow,
+  resetOpenerSelection,
 } from "../src/workspace.js";
 
 function deferred() {
@@ -118,5 +125,78 @@ describe("Close Other Tabs ordering (#123)", () => {
 
     second.resolve();
     await pending;
+  });
+});
+
+describe("opener keyboard navigation (#185)", () => {
+  it("moves from the path input through both option lists and activates with Enter", () => {
+    const originalMode = state.openerMode;
+    document.body.innerHTML = `
+      <input id="opener-input" />
+      <div id="opener-recent" role="listbox" tabindex="0"></div>
+      <div id="opener-list" role="listbox" tabindex="0"></div>
+    `;
+    const recent = recentRow("/tmp/recent.log");
+    document.getElementById("opener-recent")?.append(recent);
+
+    const file = browseRow(
+      { name: "app.log", path: "/tmp/app.log", is_dir: false, size: 12 },
+      false,
+    );
+    const activate = vi.fn();
+    file.addEventListener("click", activate);
+    document.getElementById("opener-list")?.append(file);
+    state.openerMode = "folder"; // the row's normal file click is intentionally inert in this mode
+
+    try {
+      resetOpenerSelection();
+      const fromInput = { key: "ArrowDown", preventDefault: vi.fn() };
+      onOpenerInputKeydown(fromInput);
+      expect(fromInput.preventDefault).toHaveBeenCalled();
+      expect(recent.getAttribute("aria-selected")).toBe("true");
+      expect(document.activeElement?.id).toBe("opener-recent");
+      expect(document.getElementById("opener-recent")?.getAttribute("aria-activedescendant")).toBe(
+        recent.id,
+      );
+
+      moveOpenerSelection(1);
+      expect(file.getAttribute("aria-selected")).toBe("true");
+      expect(document.activeElement?.id).toBe("opener-list");
+      expect(document.getElementById("opener-list")?.getAttribute("aria-activedescendant")).toBe(
+        file.id,
+      );
+      expect(document.getElementById("opener-recent")?.hasAttribute("aria-activedescendant")).toBe(
+        false,
+      );
+
+      const enter = { key: "Enter", preventDefault: vi.fn() };
+      onOpenerListKeydown(enter);
+      expect(enter.preventDefault).toHaveBeenCalled();
+      expect(activate).toHaveBeenCalledOnce();
+    } finally {
+      state.openerMode = originalMode;
+      document.body.textContent = "";
+      resetOpenerSelection();
+    }
+  });
+
+  it("closes an ordinary opener with Escape", () => {
+    const originalStat = state.stat;
+    document.body.innerHTML = `
+      <div id="opener" class="modal" aria-hidden="false"></div>
+      <div id="opener-recent" role="listbox"></div>
+      <div id="opener-list" role="listbox"></div>
+    `;
+    state.stat = { open: true };
+    const escape = { key: "Escape", preventDefault: vi.fn() };
+    try {
+      onOpenerListKeydown(escape);
+      expect(escape.preventDefault).toHaveBeenCalled();
+      expect(document.getElementById("opener")?.classList.contains("hidden")).toBe(true);
+      expect(document.getElementById("opener")?.getAttribute("aria-hidden")).toBe("true");
+    } finally {
+      state.stat = originalStat;
+      document.body.textContent = "";
+    }
   });
 });
