@@ -22,7 +22,9 @@ export function commas(n) {
   return n.toLocaleString(currentLocale());
 }
 
-export function humanBytes(n) {
+// `locale` picks the decimal separator for the two-fraction-digit sizes; pass
+// currentLocale() so the opener/status size follows the selected language.
+export function humanBytes(n, locale = "en-US") {
   const u = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
   let v = n,
     i = 0;
@@ -30,7 +32,9 @@ export function humanBytes(n) {
     v /= 1024;
     i++;
   }
-  return i === 0 ? `${n} B` : `${v.toFixed(2)} ${u[i]}`;
+  if (i === 0) return `${n} ${u[0]}`;
+  const num = v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${num} ${u[i]}`;
 }
 
 export function escapeRegExp(s) {

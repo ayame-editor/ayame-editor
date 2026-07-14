@@ -1,7 +1,7 @@
 // Ayame Editor — menus module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayName, displayShortcut, humanBytes, setModalOpen } from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
-import { applyStaticI18n, t } from "./i18n.js";
+import { applyStaticI18n, currentLocale, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
 import { grepToFile, saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
 import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
@@ -595,7 +595,8 @@ export function updateStatusMeta() {
   $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
   $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
   const lines = s.view_lines ?? s.lines;
-  const encoding = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
+  const encoding =
+    s.bom_bytes > 0 ? t("status.encWithBom", { enc: enc(s.encoding) }) : enc(s.encoding);
   const lineEnding = eol(s.eol);
   $("st-enc").textContent = encoding;
   $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: encoding }));
@@ -615,9 +616,9 @@ export function updateStatusMeta() {
   $("st-index").textContent = t("status.indexOk");
   $("st-index").title = t("status.indexDetail", {
     lines: commas(lines),
-    bytes: humanBytes(s.bytes),
+    bytes: humanBytes(s.bytes, currentLocale()),
     checkpoints: commas(s.checkpoints),
-    indexBytes: humanBytes(s.index_bytes),
+    indexBytes: humanBytes(s.index_bytes, currentLocale()),
     indexMs: s.index_ms,
   });
   // Keep the active tab's unsaved-dot (and the tabs model behind
@@ -644,7 +645,12 @@ export function enc(e) {
 }
 
 export function eol(e) {
-  return { lf: "LF", crlf: "CRLF", cr: "CR", mixed: "Mixed", none: "None" }[e] || String(e);
+  // LF/CRLF/CR are universal; "混在"/"なし" (Mixed/None) are words, so localize.
+  return (
+    { lf: "LF", crlf: "CRLF", cr: "CR", mixed: t("status.eolMixed"), none: t("status.eolNone") }[
+      e
+    ] || String(e)
+  );
 }
 
 export function updateStatusPos() {

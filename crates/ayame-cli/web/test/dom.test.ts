@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   commas,
   displayPath,
+  humanBytes,
   isAbsolutePath,
   isUntitled,
   joinPath,
@@ -46,6 +47,15 @@ describe("path helpers", () => {
 
   it("builds clickable crumbs for Windows drives", () => {
     expect(pathCrumbs("C:\\Users\\me").map((c) => c.label)).toEqual(["C:", "Users", "me"]);
+  });
+
+  it("formats byte sizes with the locale's decimal separator (#189)", () => {
+    // Small sizes stay integer bytes, no separator either way.
+    expect(humanBytes(512, "en-US")).toBe("512 B");
+    // Scaled sizes carry two fraction digits in the selected locale's format.
+    expect(humanBytes(1536, "en-US")).toBe("1.50 KiB");
+    expect(humanBytes(1536, "de-DE")).toBe("1,50 KiB");
+    expect(humanBytes(5 * 1024 * 1024, "en-US")).toBe("5.00 MiB");
   });
 
   it("recognizes untitled scratch buffers in both dir-name generations", () => {
