@@ -226,11 +226,11 @@ export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string
   host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+    crumbs = [{ label: t("dialog.open.computer"), path: DRIVES_DIR }];
   } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
     // Windows: a "PC" root crumb in front of the drive, so other drives are
     // one click away (the drive list is also the ".." of every drive root).
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+    crumbs = [{ label: t("dialog.open.computer"), path: DRIVES_DIR }, ...crumbs];
   }
   for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) {

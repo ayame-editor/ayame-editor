@@ -1,4 +1,6 @@
 // Ayame Editor — dom module. Type-stripped to JS at build time (build.rs, oxc).
+import { currentLocale } from "./i18n.js";
+
 type AyameElement = HTMLElement & {
   checked: boolean;
   disabled: boolean;
@@ -17,7 +19,7 @@ export function $<T extends HTMLElement = AyameElement>(id: string): T {
 }
 
 export function commas(n) {
-  return n.toLocaleString("en-US");
+  return n.toLocaleString(currentLocale());
 }
 
 export function humanBytes(n) {
@@ -28,7 +30,14 @@ export function humanBytes(n) {
     v /= 1024;
     i++;
   }
-  return i === 0 ? `${n} B` : `${v.toFixed(2)} ${u[i]}`;
+  const value =
+    i === 0
+      ? n.toLocaleString(currentLocale())
+      : v.toLocaleString(currentLocale(), {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+  return `${value} ${u[i]}`;
 }
 
 export function escapeRegExp(s) {

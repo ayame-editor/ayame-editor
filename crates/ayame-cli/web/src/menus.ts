@@ -595,7 +595,8 @@ export function updateStatusMeta() {
   $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
   $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
   const lines = s.view_lines ?? s.lines;
-  const encoding = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
+  const encoding =
+    s.bom_bytes > 0 ? t("status.encodingBom", { encoding: enc(s.encoding) }) : enc(s.encoding);
   const lineEnding = eol(s.eol);
   $("st-enc").textContent = encoding;
   $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: encoding }));
@@ -644,7 +645,15 @@ export function enc(e) {
 }
 
 export function eol(e) {
-  return { lf: "LF", crlf: "CRLF", cr: "CR", mixed: "Mixed", none: "None" }[e] || String(e);
+  return (
+    {
+      lf: "LF",
+      crlf: "CRLF",
+      cr: "CR",
+      mixed: t("status.eolMixed"),
+      none: t("status.eolNone"),
+    }[e] || String(e)
+  );
 }
 
 export function updateStatusPos() {

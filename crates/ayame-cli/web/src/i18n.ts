@@ -148,15 +148,19 @@ export const MESSAGES = {
       "{lines} 行 / {bytes} / インデックス {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "文字コードを変換して保存",
     "status.encodingValue": "文字コード: {value}",
+    "status.encodingBom": "{encoding} (BOM 付き)",
     "status.zoomTitle": "表示倍率（クリックで100%に戻す）",
     "status.zoomValue": "表示倍率: {value}",
     "status.eolTitle": "改行コードを変換して保存",
     "status.eolValue": "改行コード: {value}",
+    "status.eolMixed": "混在",
+    "status.eolNone": "なし",
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
     "status.tailFileChanged": "ファイルが外部で変更されました — 追従を停止しました",
     // -- editor (clipboard, edits, caps) --
     "editor.label": "エディタ",
+    "editor.eof": "[ファイル末尾]",
     "editor.copied": "コピーしました",
     "editor.copyError": "コピーエラー",
     "editor.pasteBlocked": "ここからは貼り付けできません — Ctrl+V を使ってください",
@@ -209,6 +213,7 @@ export const MESSAGES = {
     "dialog.open.namePlaceholder": "保存するファイル名、またはフルパス",
     "dialog.open.folderPlaceholder": "検索するフォルダのパス",
     "dialog.open.folder": "フォルダ",
+    "dialog.open.computer": "この PC",
     "dialog.open.up": "上の階層へ",
     "dialog.open.hintOpen":
       "ここへファイルをドラッグ＆ドロップしても開けます。大きなファイルはパス指定の方が高速です。",
@@ -391,6 +396,23 @@ export const MESSAGES = {
     "error.loadErrorMsg": "読み込みエラー: {msg}",
     "error.saveError": "保存エラー",
     "error.serverUnreachable": "サーバに接続できません",
+    "error.serverUnknown": "サーバエラー: {message}",
+    "error.server.badRequest": "リクエストが正しくありません。",
+    "error.server.invalidInput": "入力が正しくありません。",
+    "error.server.exists": "対象はすでに存在します。",
+    "error.server.conflict": "操作中に文書が変更されました。もう一度お試しください。",
+    "error.server.baseChanged": "元のファイルが外部で変更されました。再読み込みしてください。",
+    "error.server.notFound": "要求された項目が見つかりません。",
+    "error.server.tooLarge": "リクエストが大きすぎます。",
+    "error.server.timeout": "操作がタイムアウトしました。",
+    "error.server.workerFailed": "ワーカープロセスでエラーが発生しました。",
+    "error.server.unsupported": "この操作には対応していません。",
+    "error.server.search": "検索条件が正しくありません。",
+    "error.server.io": "ファイルの入出力エラーが発生しました。",
+    "error.server.corrupted": "データの破損を検出しました。",
+    "error.server.canceled": "操作はキャンセルされました。",
+    "error.server.internal": "内部エラーが発生しました。",
+    "error.server.generic": "サーバエラーが発生しました。",
     "error.newBuffer": "新規バッファを作成できません: {msg}",
     // -- theme JSON --
     "theme.cannotOpen": "テーマを開けません",
@@ -524,14 +546,18 @@ export const MESSAGES = {
       "{lines} lines / {bytes} / {checkpoints} index checkpoints ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "Convert Encoding and Save",
     "status.encodingValue": "Encoding: {value}",
+    "status.encodingBom": "{encoding} (BOM)",
     "status.zoomTitle": "Zoom level (click to reset to 100%)",
     "status.zoomValue": "Zoom level: {value}",
     "status.eolTitle": "Convert Line Endings and Save",
     "status.eolValue": "Line endings: {value}",
+    "status.eolMixed": "Mixed",
+    "status.eolNone": "None",
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
     "status.tailFileChanged": "The file changed externally. Tail following stopped.",
     "editor.label": "Editor",
+    "editor.eof": "[EOF]",
     "editor.copied": "Copied",
     "editor.copyError": "Copy error",
     "editor.pasteBlocked": "Cannot paste from here. Use Ctrl+V.",
@@ -582,6 +608,7 @@ export const MESSAGES = {
     "dialog.open.namePlaceholder": "File name to save, or a full path",
     "dialog.open.folderPlaceholder": "Path of the folder to search",
     "dialog.open.folder": "Folder",
+    "dialog.open.computer": "This PC",
     "dialog.open.up": "Up One Level",
     "dialog.open.hintOpen":
       "Drag and drop a file here to open it. For large files, entering a path is faster.",
@@ -748,6 +775,23 @@ export const MESSAGES = {
     "error.loadErrorMsg": "Load error: {msg}",
     "error.saveError": "Save error",
     "error.serverUnreachable": "Cannot connect to the server",
+    "error.serverUnknown": "Server error: {message}",
+    "error.server.badRequest": "The request is invalid.",
+    "error.server.invalidInput": "The input is invalid.",
+    "error.server.exists": "The target already exists.",
+    "error.server.conflict": "The document changed during the operation. Please try again.",
+    "error.server.baseChanged": "The original file changed externally. Reload it and try again.",
+    "error.server.notFound": "The requested item was not found.",
+    "error.server.tooLarge": "The request is too large.",
+    "error.server.timeout": "The operation timed out.",
+    "error.server.workerFailed": "The worker process failed.",
+    "error.server.unsupported": "This operation is not supported.",
+    "error.server.search": "The search request is invalid.",
+    "error.server.io": "A file I/O error occurred.",
+    "error.server.corrupted": "Data corruption was detected.",
+    "error.server.canceled": "The operation was canceled.",
+    "error.server.internal": "An internal error occurred.",
+    "error.server.generic": "A server error occurred.",
     "error.newBuffer": "Cannot create a new buffer: {msg}",
     "theme.cannotOpen": "Could not open the theme.",
     "theme.missingColor": "Missing color.",
@@ -758,28 +802,34 @@ export const MESSAGES = {
 };
 
 // ---- server boundary ----------------------------------------------------
-// API failures are `{code, message}`. English uses a stable code translation;
-// Japanese and unknown codes keep the server detail. No control flow or
-// localization depends on matching human message text (#81.2).
-export const SERVER_CODE_EN = {
-  bad_request: "The request is invalid.",
-  invalid_input: "The input is invalid.",
-  exists: "The target already exists.",
-  conflict: "The document changed during the operation. Please try again.",
-  not_found: "The requested item was not found.",
-  too_large: "The request is too large.",
-  timeout: "The operation timed out.",
-  worker_failed: "The worker process failed.",
-  unsupported: "This operation is not supported.",
-  search: "The search request is invalid.",
-  io: "A file I/O error occurred.",
-  internal: "An internal error occurred.",
+// API failures are `{code, message}`. Stable codes map to ordinary MESSAGES
+// keys so adding a locale remains data-only; unknown codes keep the server
+// detail behind a localized label. No localization matches human text (#81.2).
+export const SERVER_CODE_KEYS = {
+  bad_request: "error.server.badRequest",
+  invalid_input: "error.server.invalidInput",
+  exists: "error.server.exists",
+  conflict: "error.server.conflict",
+  base_changed: "error.server.baseChanged",
+  not_found: "error.server.notFound",
+  too_large: "error.server.tooLarge",
+  timeout: "error.server.timeout",
+  worker_failed: "error.server.workerFailed",
+  unsupported: "error.server.unsupported",
+  search: "error.server.search",
+  io: "error.server.io",
+  corrupted: "error.server.corrupted",
+  canceled: "error.server.canceled",
+  internal: "error.server.internal",
+  error: "error.server.generic",
 };
 
 export function serverMessage(error) {
   const raw = String(error && typeof error === "object" ? error.message : (error ?? ""));
   const code = error && typeof error === "object" ? error.code : undefined;
-  if (currentLocale() === "en" && code && SERVER_CODE_EN[code]) return SERVER_CODE_EN[code];
+  const key = code && SERVER_CODE_KEYS[code];
+  if (key) return t(key);
+  if (code) return t("error.serverUnknown", { message: raw || String(code) });
   return raw;
 }
 
