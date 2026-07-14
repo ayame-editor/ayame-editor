@@ -51,6 +51,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         None
     };
 
+    // Keep a handle for exit cleanup: spawn_background moves `state` into the
+    // server thread, but the window's event loop must drop this session's
+    // scratch/WAL on close (#138).
+    let cleanup_state = state.clone();
     // Bring the editor up behind the window and learn its loopback address.
     let addr = crate::serve::spawn_background(state)?;
     let url = format!("http://{addr}/");
@@ -393,6 +397,14 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             #[cfg(target_os = "macos")]
             Event::UserEvent(GuiEvent::Language(lang)) => {
                 macos_menu = setup_macos_menu(&proxy, Some(UiLocale::from_setting(&lang)));
+            }
+            // Fires once, after any `ControlFlow::Exit`, before the loop tears
+            // the process down — the single choke point where every close path
+            // (window button, menu quit, close-confirm timeout) converges, so
+            // this session's scratch/WAL/aside files are dropped exactly here
+            // instead of leaking every session (#138).
+            Event::LoopDestroyed => {
+                crate::serve::cleanup_session(&cleanup_state);
             }
             _ => {}
         }

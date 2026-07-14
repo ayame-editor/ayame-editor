@@ -103,6 +103,9 @@ pub(crate) fn build_state(
     flags: &std::collections::HashSet<String>,
 ) -> Result<AppState> {
     configure_scratch(opts);
+    // Reap scratch that crashed/killed prior sessions left behind before we
+    // start piling on our own (#138). Safe: only dead PIDs' dirs are removed.
+    crate::temp_paths::sweep_stale_scratch();
     let open_options = open_opts(opts, flags)?;
     let doc = match pos.first() {
         Some(path) => {
@@ -269,14 +272,20 @@ async fn serve(
         })
         .await
         .context("server error");
-    // Graceful shutdown: drop the scratch this process accumulated (uploads,
-    // untitled buffers, unsaved sort results, in-place save aside files).
-    // Crash logs of CLEAN sessions go too; dirty ones stay on disk — they are
-    // the recovery artifact the next process offers to replay.
+    cleanup_session(&state);
+    result
+}
+
+/// Drop everything this process accumulated on disk: uploads, untitled
+/// buffers, unsaved sort results, in-place save aside files, and the crash
+/// logs of CLEAN sessions (dirty ones stay — they are the recovery artifact
+/// the next process offers to replay). Called on CLI `serve` graceful
+/// shutdown AND on GUI window close, so the desktop mode stops leaking
+/// scratch every session (#138).
+pub(crate) fn cleanup_session(state: &SharedState) {
     state.cleanup_wal_files();
     state.cleanup_aside_files();
     workspace::cleanup_temp_dirs();
-    result
 }
 
 fn resolve_bind_addr(host: &str, port: u16) -> Result<SocketAddr> {

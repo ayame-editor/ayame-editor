@@ -84,8 +84,14 @@ pub(crate) fn create_private_temp_dir(kind: &str) -> std::io::Result<PathBuf> {
     // The disk-backed base may not exist yet (first run); create the tree so a
     // fresh cache/scratch location works without the user pre-making it.
     std::fs::create_dir_all(&base)?;
+    let pid = std::process::id();
     for attempt in 0..1000u32 {
-        let dir = base.join(format!("ayame-{kind}-{}-{attempt}", unique_component()));
+        // The `p{pid}` segment lets a later process's startup sweep tell whose
+        // leftovers these are and whether that owner is still alive (#138).
+        let dir = base.join(format!(
+            "ayame-{kind}-p{pid}-{}-{attempt}",
+            unique_component()
+        ));
         match create_private_dir(&dir) {
             Ok(()) => return Ok(dir),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -96,6 +102,59 @@ pub(crate) fn create_private_temp_dir(kind: &str) -> std::io::Result<PathBuf> {
         std::io::ErrorKind::AlreadyExists,
         format!("could not create a unique private ayame-{kind} directory"),
     ))
+}
+
+/// Remove scratch directories left behind by *dead* prior processes.
+///
+/// Graceful exits (CLI `serve` shutdown, GUI window close) delete their own
+/// scratch, but a crash or `kill -9` leaves `ayame-*-p<pid>-*` dirs behind —
+/// on Linux under tmpfs, on Windows under `%LOCALAPPDATA%` which is never
+/// auto-swept — up to several GiB per abandoned session (#138). At startup we
+/// reap any whose owning PID is no longer alive. Our own live PID (and any
+/// still-running sibling window) is spared, so concurrent sessions are safe.
+/// Best-effort: unreadable entries and mapped-file refusals are ignored.
+pub(crate) fn sweep_stale_scratch() {
+    sweep_stale_scratch_in(&scratch_base());
+}
+
+/// Sweep body over an explicit base (so it is testable without the global).
+fn sweep_stale_scratch_in(base: &Path) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return; // nothing created yet, or base unreadable — nothing to sweep
+    };
+    let me = std::process::id();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(pid) = owner_pid(name) else { continue };
+        if pid == me || process_is_alive(pid) {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
+}
+
+/// Parse the `p<pid>` owner segment out of an `ayame-<kind>-p<pid>-<rest>` name.
+fn owner_pid(name: &str) -> Option<u32> {
+    if !name.starts_with("ayame-") {
+        return None;
+    }
+    name.split('-')
+        .find_map(|seg| seg.strip_prefix('p').and_then(|d| d.parse::<u32>().ok()))
+}
+
+/// Is `pid` a live process? Linux/Android answer via `/proc`; elsewhere we
+/// cannot cheaply tell without extra syscalls, so we assume alive and let the
+/// per-session exit cleanup handle those platforms rather than risk deleting a
+/// concurrent session's scratch.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn process_is_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
 }
 
 fn clean_component(kind: &str) -> String {
@@ -158,6 +217,43 @@ mod tests {
         // No env override and no discoverable cache/home: the OS temp dir is
         // the last resort, not a crash.
         assert_eq!(resolve_scratch_base(None, None), std::env::temp_dir());
+    }
+
+    #[test]
+    fn owner_pid_parses_only_ayame_scratch_names() {
+        assert_eq!(owner_pid("ayame-srv-sort-p1234-abcd-0"), Some(1234));
+        assert_eq!(owner_pid("ayame-uploads-p7-deadbeef-3"), Some(7));
+        assert_eq!(owner_pid("not-ours-p999-x"), None); // wrong prefix
+        assert_eq!(owner_pid("ayame-srv-noPidHere-x"), None);
+    }
+
+    #[test]
+    fn sweep_removes_dead_owners_but_spares_our_own() {
+        let base = std::env::temp_dir().join(format!("ayame-sweep-t138-{}", unique_component()));
+        std::fs::create_dir_all(&base).unwrap();
+        let me = std::process::id();
+        // A dir owned by us, and one owned by an almost-certainly-dead PID.
+        let mine = base.join(format!("ayame-srv-x-p{me}-{}-0", unique_component()));
+        let dead = base.join(format!(
+            "ayame-srv-x-p{}-{}-0",
+            u32::MAX,
+            unique_component()
+        ));
+        let unrelated = base.join("keep-me-not-ayame");
+        for d in [&mine, &dead, &unrelated] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+
+        sweep_stale_scratch_in(&base);
+
+        assert!(mine.is_dir(), "our own live session's scratch must survive");
+        assert!(unrelated.is_dir(), "non-ayame dirs are never touched");
+        // On Linux the dead PID is verifiably gone via /proc; elsewhere the
+        // sweep conservatively spares it (see process_is_alive).
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        assert!(!dead.exists(), "a dead owner's scratch must be reaped");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
