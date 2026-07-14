@@ -3,6 +3,7 @@ name = "ayame-core"
 description = "Memory-mapped, sparsely-indexed engine for editing extremely large text files."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 [dependencies]

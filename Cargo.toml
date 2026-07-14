@@ -5,6 +5,16 @@ members = ["crates/ayame-core", "crates/ayame-cli", "xtask"]
 [workspace.package]
 version = "0.7.5"
 edition = "2021"
+# Minimum supported Rust version. The build.rs TS->JS transform depends on
+# oxc 0.138, whose `oxc_transformer` uses `if let` match guards — stable only
+# since Rust 1.95. oxc under-declares its own `rust-version` as 1.94.0, so on
+# an older stable cargo can't warn and the build fails with a cryptic
+# `error[E0658]: if let guards are experimental` deep inside the dependency
+# (see #195). Declaring the real floor here makes cargo fail fast with a clear
+# "requires rustc 1.95" message, and the `msrv` CI job gates it so a future
+# dependency bump that raises the real minimum can't slip past the floating
+# `stable` toolchain unnoticed.
+rust-version = "1.95"
 license = "0BSD"
 repository = "https://github.com/hjosugi/ayame-editor"
 
