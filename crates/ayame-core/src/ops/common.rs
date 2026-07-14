@@ -108,7 +108,7 @@ pub(super) fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<bool> {
                 if filled == 0 {
                     return Ok(false);
                 }
-                return Err(Error::Search("truncated spill record".into()));
+                return Err(Error::Corrupted("truncated spill record".into()));
             }
             Ok(n) => filled += n,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -201,5 +201,21 @@ impl Drop for SpillCleanup {
             let _ = std::fs::remove_file(f);
         }
         let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for #111: a truncated spill record is engine/storage
+    /// corruption, not a "search error" blamed on the user's query.
+    #[test]
+    fn truncated_spill_record_is_corruption() {
+        let data = [1u8, 2, 3];
+        let mut r = &data[..];
+        let mut buf = [0u8; 8];
+        let err = read_full(&mut r, &mut buf).unwrap_err();
+        assert!(matches!(err, Error::Corrupted(_)), "got {err:?}");
     }
 }

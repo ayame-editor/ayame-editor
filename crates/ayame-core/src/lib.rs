@@ -87,6 +87,16 @@ pub enum Error {
     InvalidInput(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    /// A non-overwriting writer found its output target already present.
+    /// Structured (not a `Conflict` string) so callers can key overwrite
+    /// flows off the variant instead of re-synthesizing it from messages.
+    #[error("'{}' already exists; choose another path", path.display())]
+    TargetExists { path: std::path::PathBuf },
+    /// On-disk data produced by the engine itself failed to read back
+    /// (e.g. a truncated spill record). This is an engine/storage failure,
+    /// never a problem with the user's query or input.
+    #[error("data corruption: {0}")]
+    Corrupted(String),
     #[error("unsupported: {0}")]
     UnsupportedFeature(String),
 }
