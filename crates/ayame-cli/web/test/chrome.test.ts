@@ -92,6 +92,29 @@ describe("application chrome", () => {
     expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
   });
 
+  it("gives controls stable names and hides decorative icons from assistive technology (#182)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+
+    for (const id of ["find", "replace-input", "palette-input"]) {
+      const input = doc.querySelector(`#${id}`);
+      expect(input?.getAttribute("aria-label"), id).toBeTruthy();
+      expect(input?.getAttribute("data-i18n-aria-label"), id).toBeTruthy();
+    }
+    expect(doc.querySelector('label[for="opener-input"]')?.id).toBe("opener-input-label");
+    expect(doc.querySelector('label[for="prompt-input"]')?.id).toBe("prompt-label");
+
+    const findCount = doc.querySelector("#find-count");
+    expect(findCount?.getAttribute("role")).toBe("status");
+    expect(findCount?.getAttribute("aria-live")).toBe("polite");
+    expect(findCount?.getAttribute("aria-atomic")).toBe("true");
+
+    for (const icon of doc.querySelectorAll("svg.ay-icon")) {
+      expect(icon.getAttribute("aria-hidden")).toBe("true");
+      expect(icon.getAttribute("focusable")).toBe("false");
+    }
+    expect(doc.querySelector("#tools-menu-button")?.hasAttribute("role")).toBe(false);
+  });
+
   it("removes the editor-owned diff UI while keeping folder search standalone (#104)", () => {
     const html = read("index.html");
     const css = read("style.css");
