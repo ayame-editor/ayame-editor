@@ -442,18 +442,6 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
 }
 
-/// Errors from non-overwriting output writers. Core reports an existing target
-/// as `Conflict`; preserve that distinction as the stable `exists` code so the
-/// web overwrite flow never has to inspect localized message text (#81.2).
-fn output_error(e: ayame_core::Error) -> ApiError {
-    match e {
-        ayame_core::Error::Conflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, "exists", message)
-        }
-        other => ApiError::from(other),
-    }
-}
-
 fn default_save_copy_path(path: &Path) -> PathBuf {
     default_suffix_path(path, "edited")
 }

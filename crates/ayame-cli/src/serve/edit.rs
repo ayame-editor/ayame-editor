@@ -278,7 +278,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(super::output_error)?;
+        .map_err(ApiError::from)?;
         // Refresh the active tab from the converted file. Skipped (switched =
         // false) if edits landed while the rewrite was streaming, so no newer
         // edit is dropped — the client then falls back to a normal open.
@@ -303,7 +303,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(super::output_error)?;
+        .map_err(ApiError::from)?;
         let mut switched = false;
         if req.switch_to_saved {
             switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;

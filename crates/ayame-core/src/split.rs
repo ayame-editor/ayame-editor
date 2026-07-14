@@ -108,10 +108,7 @@ where
         for part in 1..=count {
             let target = dir.join(part_file_name(&stem, &ext, part, width));
             if target.exists() {
-                return Err(Error::Conflict(format!(
-                    "'{}' already exists; choose another output directory",
-                    target.display()
-                )));
+                return Err(Error::TargetExists { path: target });
             }
             let end = (start + lines_per_file).min(total);
             write_part(doc, start, end, part == 1, &target)?;

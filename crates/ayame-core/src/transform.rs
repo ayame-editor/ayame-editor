@@ -1022,10 +1022,9 @@ fn is_shift_jis_lead(b: u8) -> bool {
 
 fn ensure_new_target(target: &Path) -> Result<()> {
     if target.exists() {
-        return Err(Error::Conflict(format!(
-            "'{}' already exists; choose another output path",
-            target.display()
-        )));
+        return Err(Error::TargetExists {
+            path: target.to_path_buf(),
+        });
     }
     Ok(())
 }
@@ -1521,7 +1520,7 @@ mod tests {
         std::fs::write(&out, b"old contents").unwrap();
         // Without overwrite: conflict, the old file is untouched.
         let err = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap_err();
-        assert!(matches!(err, Error::Conflict(_)), "got {err:?}");
+        assert!(matches!(err, Error::TargetExists { .. }), "got {err:?}");
         assert_eq!(std::fs::read(&out).unwrap(), b"old contents");
         // With overwrite: the picked file is replaced.
         let mut ow = grep_opts("needle");

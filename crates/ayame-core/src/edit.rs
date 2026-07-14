@@ -1303,10 +1303,9 @@ impl EditSession {
     ) -> Result<SaveResult> {
         let target = target.as_ref();
         if target.exists() && !overwrite {
-            return Err(Error::Conflict(format!(
-                "'{}' already exists; choose another save path",
-                target.display()
-            )));
+            return Err(Error::TargetExists {
+                path: target.to_path_buf(),
+            });
         }
         let tmp = temp_path(target);
         let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -1388,10 +1387,9 @@ impl EditSession {
         overwrite: bool,
     ) -> Result<SaveResult> {
         if target.exists() && !overwrite {
-            return Err(Error::Conflict(format!(
-                "'{}' already exists; choose another save path",
-                target.display()
-            )));
+            return Err(Error::TargetExists {
+                path: target.to_path_buf(),
+            });
         }
         self.write_stream(doc, target, overwrite)?;
         let bytes = std::fs::metadata(target)?.len();
