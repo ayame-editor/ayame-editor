@@ -18,7 +18,7 @@ use tokio::time::Duration;
 
 use crate::temp_paths;
 
-use super::state::DirtySnapshotCache;
+use super::state::{lock_recover, DirtySnapshotCache};
 use super::{bad_request, default_suffix_path, edit, internal, workspace, ApiError, SharedState};
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
@@ -66,12 +66,12 @@ impl ArtifactOperation {
             },
             done: self.done.load(AtomicOrdering::Relaxed),
             canceled: self.canceled.load(AtomicOrdering::Relaxed),
-            message: self.message.lock().unwrap().clone(),
+            message: lock_recover(&self.message).clone(),
         }
     }
 
     fn set_message(&self, message: impl Into<String>) {
-        *self.message.lock().unwrap() = Some(message.into());
+        *lock_recover(&self.message) = Some(message.into());
     }
 }
 
@@ -1028,10 +1028,7 @@ fn register_operation(
         return Err(bad_request("invalid operation id"));
     }
     let op = Arc::new(ArtifactOperation::new(id.to_string(), kind, total_lines));
-    operations()
-        .lock()
-        .unwrap()
-        .insert(id.to_string(), op.clone());
+    lock_recover(operations()).insert(id.to_string(), op.clone());
     Ok(Some(op))
 }
 
@@ -1045,7 +1042,10 @@ struct OperationGuard(String);
 impl Drop for OperationGuard {
     fn drop(&mut self) {
         if let Some(map) = ARTIFACT_OPS.get() {
-            map.lock().unwrap().remove(&self.0);
+            // Recover from poisoning rather than unwrapping: this Drop can fire
+            // while unwinding a panicking request, where a second panic would
+            // abort the whole process instead of failing one request (#106).
+            lock_recover(map).remove(&self.0);
         }
     }
 }
@@ -1064,9 +1064,7 @@ fn tracked_operation(
 }
 
 fn lookup_operation(id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
-    operations()
-        .lock()
-        .unwrap()
+    lock_recover(operations())
         .get(id)
         .cloned()
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "operation not found"))
@@ -1537,15 +1535,33 @@ mod tests {
             let (op, _guard) = tracked_operation(Some(&id), "sort", 100).unwrap();
             assert!(op.is_some(), "an op id must register a handle");
             assert!(
-                operations().lock().unwrap().contains_key(&id),
+                lock_recover(operations()).contains_key(&id),
                 "the op is tracked while the guard lives"
             );
         }
         // Guard dropped at end of scope: the op must no longer leak in the map.
         assert!(
-            !operations().lock().unwrap().contains_key(&id),
+            !lock_recover(operations()).contains_key(&id),
             "the op must be evicted once the worker call returns"
         );
+    }
+
+    #[test]
+    fn poisoned_message_lock_does_not_panic_status_or_set() {
+        // A worker that panics while holding an op's `message` lock must not
+        // wedge every later status poll (or worse, abort during a Drop) — the
+        // accessors recover from poisoning (#106).
+        let op = ArtifactOperation::new("poison-probe".to_string(), "sort", 10);
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = op.message.lock().unwrap();
+            panic!("poison the message lock");
+        }));
+        assert!(poisoned.is_err(), "the probe must have poisoned the lock");
+        assert!(op.message.is_poisoned());
+
+        // Both accessors must keep working through the poison, not unwrap-panic.
+        op.set_message("still writable");
+        assert_eq!(op.status().message.as_deref(), Some("still writable"));
     }
 
     #[test]
