@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
 use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
@@ -27,6 +27,15 @@ pub(super) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
 /// Lock a `RwLock` for writing, recovering from poisoning. See [`read_lock`].
 pub(super) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
     lock.write().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Lock a `Mutex`, recovering from poisoning. See [`read_lock`] for the "a
+/// poisoned lock must not take down every later request" rationale. This matters
+/// most when the lock is taken inside a `Drop` that can run while unwinding a
+/// panicking request: `.lock().unwrap()` there would double-panic into a process
+/// abort, the opposite of "stability is a feature" (#106).
+pub(super) fn lock_recover<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// State of a tab that is open but not currently focused. The focused tab's
