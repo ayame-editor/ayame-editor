@@ -12,6 +12,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
 
 env:
@@ -136,6 +137,80 @@ jobs:
           else
             (cd "$out_dir" && shasum -a 256 "$out_name") > "$out.sha256"
           fi
+
+      # SignPath Foundation provides free cloud code signing for accepted OSS
+      # projects. The unsigned Windows executable must first be stored as a
+      # GitHub Actions artifact so SignPath can verify its build provenance.
+      # With no SIGNPATH_* secrets this lane remains fully backward-compatible
+      # and publishes the existing unsigned executable. A partial configuration
+      # fails explicitly instead of silently publishing something unexpected.
+      - name: Resolve SignPath configuration
+        id: signpath
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          $names = @(
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG"
+          )
+          $missing = @($names | Where-Object {
+            [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
+          })
+          if ($missing.Count -eq $names.Count) {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "SignPath is not configured; publishing the unsigned Windows executable."
+          } elseif ($missing.Count -gt 0) {
+            throw "Incomplete SignPath configuration; missing: $($missing -join ', ')"
+          } else {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Stage unsigned Windows executable for SignPath
+        id: signpath-unsigned
+        if: runner.os == 'Windows' && steps.signpath.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ayame-signpath-unsigned-${{ matrix.target }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: Sign Windows executable with SignPath
+        if: runner.os == 'Windows' && steps.signpath.outputs.enabled == 'true'
+        uses: SignPath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.signpath-unsigned.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          wait-for-completion: true
+          output-artifact-directory: signpath/signed
+
+      - name: Replace Windows executable with signed artifact
+        if: runner.os == 'Windows' && steps.signpath.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $destination = @(Get-ChildItem -Path dist -Filter *.exe)
+          $signed = @(Get-ChildItem -Path signpath/signed -Filter *.exe -Recurse)
+          if ($destination.Count -ne 1) {
+            throw "Expected exactly one staged Windows executable, found $($destination.Count)."
+          }
+          if ($signed.Count -ne 1) {
+            throw "Expected exactly one SignPath-signed executable, found $($signed.Count)."
+          }
+          Copy-Item -LiteralPath $signed[0].FullName -Destination $destination[0].FullName -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination[0].FullName).Hash.ToLowerInvariant()
+          "$hash  $($destination[0].Name)" |
+            Out-File -FilePath "$($destination[0].FullName).sha256" -Encoding ascii
+
       - uses: actions/upload-artifact@v6
         with:
           name: ayame-${{ matrix.suffix }}
@@ -167,7 +242,7 @@ jobs:
             gh release create "$tag" dist/* \
               --title "$tag" \
               --target "$GITHUB_SHA" \
-              --notes "Ayame ${tag}: native desktop app (Windows .exe, macOS .app, Linux binary). Linux needs WebKitGTK at runtime; Windows/macOS use the built-in system webview."
+              --notes "Ayame ${tag}: native desktop app (Windows .exe, macOS .app, Linux binary). Linux needs WebKitGTK at runtime; Windows/macOS use the built-in system webview. Code signing policy: https://github.com/hjosugi/ayame-editor/blob/main/docs/PACKAGING.md#windows-code-signing"
           else
             gh release upload "$tag" dist/* --clobber
           fi
