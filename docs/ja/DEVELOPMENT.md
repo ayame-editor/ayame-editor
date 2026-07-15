@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../DEVELOPMENT.md) | [日本語](DEVELOPMENT.md)
+
 # 開発手順
 
 *English: [../DEVELOPMENT.md](../DEVELOPMENT.md)*

@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../CLI_REFERENCE.md) | [日本語](CLI_REFERENCE.md)
+
 # CLI リファレンス
 
 *English: [../CLI_REFERENCE.md](../CLI_REFERENCE.md)*

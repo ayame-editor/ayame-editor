@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](index.md) | [日本語](ja/index.md)
+
 <div class="doc-family">
   <span>Need to compare files instead of editing them?</span>
   <a href="MIGRATING_TO_AYAME_DIFF/">Read the migration guide →</a>

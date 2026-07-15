@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../ARCHITECTURE.md) | [日本語](ARCHITECTURE.md)
+
 # アーキテクチャ
 
 *English: [../ARCHITECTURE.md](../ARCHITECTURE.md)*

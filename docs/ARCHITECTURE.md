@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](ARCHITECTURE.md) | [日本語](ja/ARCHITECTURE.md)
+
 # Architecture
 
 *日本語版: [ja/ARCHITECTURE.md](ja/ARCHITECTURE.md)*

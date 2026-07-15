@@ -1,3 +1,6 @@
+<!-- i18n: language-switcher -->
+[English](../index.md) | [日本語](index.md)
+
 <div class="doc-family">
   <span>編集ではなく、2つのファイルを比較したいですか？</span>
   <a href="MIGRATING_TO_AYAME_DIFF/">移行ガイドを見る →</a>
