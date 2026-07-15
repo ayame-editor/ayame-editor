@@ -8,8 +8,10 @@ use crate::{Error, Result};
 
 /// Default in-memory budget (bytes) before an out-of-core op spills to disk.
 /// Shared by [`SortOptions`](super::SortOptions) and
-/// [`GroupOptions`](super::GroupOptions) so the two never drift apart.
-pub(super) const DEFAULT_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+/// [`GroupOptions`](super::GroupOptions) so the two never drift apart, and
+/// re-exported at the crate root so the `ayame` CLI's `--budget` default
+/// (`cli::fields::parse_budget`) stays in lockstep with the op defaults (#105).
+pub const DEFAULT_BUDGET_BYTES: usize = 256 * 1024 * 1024;
 
 /// Runaway-record guards for [`try_for_each_csv_record`]: one stray unclosed
 /// quote must not fuse the rest of the file into a single record. When either

@@ -55,6 +55,7 @@ pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_L
 pub use ops::{
     DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats,
     LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions, TopRow,
+    DEFAULT_BUDGET_BYTES,
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
 pub use split::{
