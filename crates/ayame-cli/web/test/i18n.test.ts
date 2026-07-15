@@ -4,7 +4,14 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { I18N_ATTR_MAP, MESSAGES, SERVER_CODE_KEYS, serverMessage } from "../src/i18n.js";
+import {
+  applyStaticI18n,
+  I18N_ATTR_MAP,
+  localeDir,
+  MESSAGES,
+  SERVER_CODE_KEYS,
+  serverMessage,
+} from "../src/i18n.js";
 import { state } from "../src/state.js";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -108,6 +115,53 @@ describe("localized server errors (#176)", () => {
       );
     } finally {
       state.settings.language = originalLanguage;
+    }
+  });
+});
+
+describe("writing direction (#190)", () => {
+  it("declares a direction for every shipped locale", () => {
+    for (const [locale, table] of Object.entries(MESSAGES)) {
+      expect(["ltr", "rtl"], `${locale} language.dir`).toContain(table["language.dir"]);
+    }
+  });
+
+  it("reads localeDir from the block and defaults to ltr", () => {
+    expect(localeDir("ja")).toBe("ltr");
+    expect(localeDir("en")).toBe("ltr");
+    expect(localeDir("unknown")).toBe("ltr");
+  });
+
+  it("normalizes any non-rtl value to ltr", () => {
+    const original = MESSAGES.en["language.dir"];
+    try {
+      // @ts-expect-error probing the defensive branch with a bogus value
+      MESSAGES.en["language.dir"] = "sideways";
+      expect(localeDir("en")).toBe("ltr");
+      MESSAGES.en["language.dir"] = "rtl";
+      expect(localeDir("en")).toBe("rtl");
+    } finally {
+      MESSAGES.en["language.dir"] = original;
+    }
+  });
+
+  it("mirrors the active locale's direction onto <html> lang/dir", () => {
+    const originalLanguage = state.settings.language;
+    const originalDir = MESSAGES.ja["language.dir"];
+    try {
+      state.settings.language = "ja";
+      applyStaticI18n();
+      expect(document.documentElement.lang).toBe("ja");
+      expect(document.documentElement.dir).toBe("ltr");
+
+      // An RTL locale (declared via data alone) flips document.dir.
+      MESSAGES.ja["language.dir"] = "rtl";
+      applyStaticI18n();
+      expect(document.documentElement.dir).toBe("rtl");
+    } finally {
+      MESSAGES.ja["language.dir"] = originalDir;
+      state.settings.language = originalLanguage;
+      applyStaticI18n();
     }
   });
 });
