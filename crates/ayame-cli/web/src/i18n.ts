@@ -247,6 +247,10 @@ export const MESSAGES = {
     // option label. Every MESSAGES block must define "language.name".
     "language.name": "日本語",
     "language.auto": "自動",
+    // Writing direction of this language: "ltr" or "rtl". Part of the block so
+    // adding an RTL language (ar/he) stays data-only; localeDir() reads it and
+    // applyStaticI18n() mirrors it onto document.dir.
+    "language.dir": "ltr",
     // Weekday names for the 新規ファイル名 template, indexed by Date.getDay()
     // (0 = Sunday). Part of this language block; en is the fallback.
     weekday: {
@@ -639,6 +643,7 @@ export const MESSAGES = {
     "settings.language": "Language",
     "language.name": "English",
     "language.auto": "Auto",
+    "language.dir": "ltr",
     weekday: {
       short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
@@ -871,6 +876,13 @@ export function localeLabel(code) {
   return (MESSAGES[code] && MESSAGES[code]["language.name"]) || code;
 }
 
+// Writing direction of a locale, read from its own "language.dir" block entry;
+// "ltr" is the default for any locale that omits it (or unknown codes). Kept
+// separate from t() so it never runs through placeholder substitution.
+export function localeDir(locale) {
+  return (MESSAGES[locale] && MESSAGES[locale]["language.dir"]) === "rtl" ? "rtl" : "ltr";
+}
+
 // Weekday names for the 新規ファイル名 template ({ddd} short / {dddd} long),
 // indexed by Date.getDay() (0 = Sunday). Lives in each MESSAGES block so it is
 // part of "adding a language"; a block without a weekday table falls back to en.
@@ -891,9 +903,10 @@ export function t(key, vars = null) {
 
 // Static HTML is declaratively tagged: data-i18n (textContent) plus
 // data-i18n-title / data-i18n-placeholder / data-i18n-aria-label for
-// attributes. index.html ships with the Japanese literals in place (the ja
-// default before JS runs); applyStaticI18n() re-assigns every tagged node for
-// the active locale — including ja, so keys and markup can never drift apart.
+// attributes. index.html ships with the Japanese literals in place and
+// lang="ja" dir="ltr" (the ja default before JS runs); applyStaticI18n()
+// re-assigns every tagged node plus <html> lang/dir for the active locale —
+// including ja, so keys and markup can never drift apart.
 export const I18N_ATTR_MAP = [
   ["data-i18n-title", "title"],
   ["data-i18n-placeholder", "placeholder"],
@@ -901,7 +914,9 @@ export const I18N_ATTR_MAP = [
 ];
 
 export function applyStaticI18n() {
-  document.documentElement.lang = currentLocale();
+  const locale = currentLocale();
+  document.documentElement.lang = locale;
+  document.documentElement.dir = localeDir(locale);
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     el.textContent = t(el.getAttribute("data-i18n"));
   });
