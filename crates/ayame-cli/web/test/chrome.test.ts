@@ -51,7 +51,9 @@ describe("application chrome", () => {
     expect(actions("#selection-menu")).not.toEqual(
       expect.arrayContaining(["cut", "copy", "paste", "selectAll"]),
     );
-    expect(doc.querySelector('#edit-menu [data-menu-action="paste"] [data-i18n="menu.paste"]')).not.toBeNull();
+    expect(
+      doc.querySelector('#edit-menu [data-menu-action="paste"] [data-i18n="menu.paste"]'),
+    ).not.toBeNull();
     expect(read("src/menus.ts")).toContain("paste: { run: pasteFromClipboard, editorOnly: true }");
   });
 
@@ -90,6 +92,25 @@ describe("application chrome", () => {
     const menus = read("src/menus.ts");
     expect(menus).toContain('setAttribute("aria-pressed", String(pressed))');
     expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
+  });
+
+  it("exposes opener rows as keyboard-navigable listbox options (#185)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    expect(doc.querySelector("#opener-input")?.getAttribute("aria-controls")).toBe(
+      "opener-recent opener-list",
+    );
+    for (const id of ["opener-recent", "opener-list"]) {
+      const list = doc.querySelector(`#${id}`);
+      expect(list?.getAttribute("role")).toBe("listbox");
+      expect(list?.getAttribute("tabindex")).toBe("0");
+    }
+
+    const workspace = read("src/workspace.ts");
+    expect(workspace).toContain('row.setAttribute("role", "option")');
+    expect(workspace).toContain('owner?.setAttribute("aria-activedescendant", active.id)');
+    expect(workspace).toContain(
+      '$("opener-input").addEventListener("keydown", onOpenerInputKeydown)',
+    );
   });
 
   it("gives controls stable names and hides decorative icons from assistive technology (#182)", () => {

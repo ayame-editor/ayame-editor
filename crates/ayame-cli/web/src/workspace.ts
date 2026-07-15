@@ -46,6 +46,118 @@ import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
 
+let openerActiveIndex = -1;
+let openerOptionSeq = 0;
+
+export function openerOptions(): HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      "#opener-recent .opener-row, #opener-list .opener-row",
+    ),
+  ];
+}
+
+export function resetOpenerSelection() {
+  openerActiveIndex = -1;
+  for (const id of ["opener-recent", "opener-list"]) {
+    document.getElementById(id)?.removeAttribute("aria-activedescendant");
+  }
+  for (const row of openerOptions()) {
+    row.classList.remove("active");
+    row.setAttribute("aria-selected", "false");
+  }
+}
+
+function setOpenerActiveIndex(index, focusList = false) {
+  const options = openerOptions();
+  if (!options.length) {
+    resetOpenerSelection();
+    return null;
+  }
+  openerActiveIndex = (index + options.length) % options.length;
+  const active = options[openerActiveIndex];
+  for (const row of options) {
+    const selected = row === active;
+    row.classList.toggle("active", selected);
+    row.setAttribute("aria-selected", String(selected));
+  }
+  for (const id of ["opener-recent", "opener-list"]) {
+    document.getElementById(id)?.removeAttribute("aria-activedescendant");
+  }
+  const owner = active.closest<HTMLElement>('[role="listbox"]');
+  owner?.setAttribute("aria-activedescendant", active.id);
+  if (focusList) owner?.focus();
+  active.scrollIntoView?.({ block: "nearest" });
+  return active;
+}
+
+export function moveOpenerSelection(delta, focusList = true) {
+  const options = openerOptions();
+  if (!options.length) return null;
+  const next =
+    openerActiveIndex < 0 ? (delta < 0 ? options.length - 1 : 0) : openerActiveIndex + delta;
+  return setOpenerActiveIndex(next, focusList);
+}
+
+function prepareOpenerOption(row: HTMLElement) {
+  row.id = `opener-option-${++openerOptionSeq}`;
+  row.tabIndex = -1;
+  row.setAttribute("role", "option");
+  row.setAttribute("aria-selected", "false");
+  row.addEventListener("mouseenter", () => {
+    const index = openerOptions().indexOf(row);
+    if (index >= 0) setOpenerActiveIndex(index);
+  });
+}
+
+export function onOpenerListFocus(e) {
+  const owner = e.currentTarget as HTMLElement;
+  const options = openerOptions();
+  const active = options[openerActiveIndex];
+  if (active && owner.contains(active)) return;
+  const first = options.findIndex((row) => owner.contains(row));
+  if (first >= 0) setOpenerActiveIndex(first);
+}
+
+export function onOpenerListKeydown(e) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    hideOpener();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    moveOpenerSelection(e.key === "ArrowDown" ? 1 : -1);
+    return;
+  }
+  if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    const options = openerOptions();
+    if (options.length) setOpenerActiveIndex(e.key === "Home" ? 0 : options.length - 1, true);
+    return;
+  }
+  if (e.key === "Enter" || e.key === " ") {
+    const active = openerOptions()[openerActiveIndex];
+    if (active) {
+      e.preventDefault();
+      active.click();
+    }
+  }
+}
+
+export function onOpenerInputKeydown(e) {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    moveOpenerSelection(e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    commitOpener();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    hideOpener();
+  }
+}
+
 export function openerVisible() {
   return !$("opener").classList.contains("hidden");
 }
@@ -150,6 +262,7 @@ export function configureOpener(mode, title?) {
 }
 
 export function hideOpener() {
+  resetOpenerSelection();
   if (state.openerMode === "save") {
     finishSaveDialog(null);
     return;
@@ -212,6 +325,7 @@ export function renderBrowse(res) {
   }
   for (const ent of res.entries) list.append(browseRow(ent, false));
   list.scrollTop = 0;
+  resetOpenerSelection();
 }
 
 // The server's virtual drive-list level ("PC" in Windows Explorer terms);
@@ -258,6 +372,7 @@ export function browseRow(ent, isUp) {
   const row = document.createElement("button");
   row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
   row.type = "button";
+  prepareOpenerOption(row);
   // The kind ("フォルダ" / "ファイル") moved from visible text into the icon;
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
@@ -336,12 +451,14 @@ export function renderRecentFiles() {
   // saving or picking a folder target.
   const list = state.openerMode === "open" ? loadRecentFiles() : [];
   box.textContent = "";
+  resetOpenerSelection();
   if (!list.length) {
     box.classList.add("hidden");
     return;
   }
   const head = document.createElement("div");
   head.className = "opener-recent-head";
+  head.setAttribute("aria-hidden", "true");
   head.textContent = t("dialog.open.recent");
   box.append(head);
   for (const path of list) box.append(recentRow(path));
@@ -352,6 +469,7 @@ export function recentRow(path) {
   const row = document.createElement("button");
   row.className = "opener-row recent";
   row.type = "button";
+  prepareOpenerOption(row);
   row.title = path;
   row.setAttribute("aria-label", `${t("dialog.open.recent")}: ${pathBaseName(path) || path}`);
   const ic = document.createElement("span");
@@ -927,15 +1045,11 @@ export function initWorkspace() {
   });
   $("opener-close").addEventListener("click", hideOpener);
   $("opener-open").addEventListener("click", commitOpener);
-  $("opener-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitOpener();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      hideOpener();
-    }
-  });
+  $("opener-input").addEventListener("keydown", onOpenerInputKeydown);
+  for (const id of ["opener-recent", "opener-list"]) {
+    $(id).addEventListener("focus", onOpenerListFocus);
+    $(id).addEventListener("keydown", onOpenerListKeydown);
+  }
   // Click on the dim backdrop (outside the panel) closes the dialog.
   $("opener").addEventListener("click", (e) => {
     if (e.target === $("opener")) hideOpener();
