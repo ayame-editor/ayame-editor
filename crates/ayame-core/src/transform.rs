@@ -496,6 +496,10 @@ where
         out.flush()?;
         out.get_ref().sync_all()?;
         drop(out);
+        // Belt and braces: every chunk verified the base already, but the
+        // prefix bytes above were read here — check once more before the
+        // rename makes the output visible.
+        doc.verify_base()?;
         rename_over(&tmp, target)?;
         fsync_parent(target);
         let bytes = std::fs::metadata(target)?.len();
@@ -554,6 +558,12 @@ where
         report_shared_progress(progress, start, total);
     }
 
+    // The transformed bytes came out of the mmap; abort (removing the temp
+    // file) rather than publish output derived from a shrunk source.
+    if let Err(e) = doc.verify_base() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     w.flush()?;
     w.get_ref().sync_all()?;
     drop(w);
@@ -716,6 +726,9 @@ where
         }
         start += advanced;
     }
+    // Fail the chunk (the caller removes the whole chunk dir) rather than
+    // merge bytes read through a mapping whose file shrank mid-transform.
+    doc.verify_base()?;
     w.flush()?;
     Ok(ReplaceChunkResult {
         idx: chunk.idx,
@@ -1009,10 +1022,9 @@ fn is_shift_jis_lead(b: u8) -> bool {
 
 fn ensure_new_target(target: &Path) -> Result<()> {
     if target.exists() {
-        return Err(Error::Conflict(format!(
-            "'{}' already exists; choose another output path",
-            target.display()
-        )));
+        return Err(Error::TargetExists {
+            path: target.to_path_buf(),
+        });
     }
     Ok(())
 }
@@ -1508,7 +1520,7 @@ mod tests {
         std::fs::write(&out, b"old contents").unwrap();
         // Without overwrite: conflict, the old file is untouched.
         let err = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap_err();
-        assert!(matches!(err, Error::Conflict(_)), "got {err:?}");
+        assert!(matches!(err, Error::TargetExists { .. }), "got {err:?}");
         assert_eq!(std::fs::read(&out).unwrap(), b"old contents");
         // With overwrite: the picked file is replaced.
         let mut ow = grep_opts("needle");

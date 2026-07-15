@@ -47,6 +47,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "次の一致を選択",
     "menu.copy": "コピー",
     "menu.cut": "切り取り",
+    "menu.paste": "貼り付け",
     "menu.caseUpper": "大文字に変換",
     "menu.caseLower": "小文字に変換",
     "menu.caseCamel": "camelCase に変換",
@@ -74,7 +75,6 @@ export const MESSAGES = {
       "Ayame Editor\n巨大なテキスト・ログ・CSV/TSVファイル向けのデスクトップエディタです。\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "ソート",
     "menu.sortTitle": "行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます",
-    "menu.diff": "2ファイル差分（非推奨）",
     "menu.split": "ファイルを分割",
     "menu.splitTitle": "行数を指定して複数ファイルに分割します (例: 100万行ずつ)",
     "menu.grep": "フォルダ内検索",
@@ -88,7 +88,7 @@ export const MESSAGES = {
     "toolbar.applyThemeTitle": "このJSONをテーマとして適用",
     "toolbar.applyKeymap": "キー設定適用",
     "toolbar.applyKeymapTitle": "このJSONをキー設定として適用",
-    "toolbar.toolsTitle": "ソート・差分・分割",
+    "toolbar.toolsTitle": "ソート・分割",
     "toolbar.newTab": "新規タブ",
     // -- tabs --
     "tab.close": "タブを閉じる",
@@ -147,8 +147,14 @@ export const MESSAGES = {
     "status.indexDetail":
       "{lines} 行 / {bytes} / インデックス {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "文字コードを変換して保存",
+    "status.encodingValue": "文字コード: {value}",
     "status.zoomTitle": "表示倍率（クリックで100%に戻す）",
+    "status.zoomValue": "表示倍率: {value}",
     "status.eolTitle": "改行コードを変換して保存",
+    "status.eolValue": "改行コード: {value}",
+    "status.encWithBom": "{enc} (BOM)",
+    "status.eolMixed": "混在",
+    "status.eolNone": "なし",
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
     "status.tailFileChanged": "ファイルが外部で変更されました — 追従を停止しました",
@@ -173,9 +179,9 @@ export const MESSAGES = {
     "editor.reloadError": "再読込エラー",
     "editor.savingWaitInput": "保存中です — 完了後に入力します",
     "editor.savingWait": "保存中です — 完了までお待ちください",
+    "editor.eofMarker": "[EOF]",
     // -- editor context menu --
     "ctx.menu": "コンテキストメニュー",
-    "ctx.paste": "貼り付け",
     "ctx.saveSelection": "選択箇所をファイルに保存…",
     "ctx.saveSelectionTitle":
       "選択した行だけを別ファイルへ書き出します。コピーの行数上限はありません",
@@ -222,6 +228,7 @@ export const MESSAGES = {
     "dialog.open.dirError": "ディレクトリを開けません: {msg}",
     "dialog.open.enterFileName": "保存するファイル名を入力してください",
     "dialog.open.pickFolderFirst": "保存先のドライブ・フォルダを選択してください",
+    "dialog.open.thisPc": "PC",
     // -- settings --
     "settings.theme": "テーマ",
     "settings.themeMonoPaper": "Mono Paper (単色)",
@@ -328,28 +335,6 @@ export const MESSAGES = {
     "dialog.split.running": "分割実行中…",
     "dialog.split.done": "{count} 個に分割しました: 最初のファイル {path}",
     "dialog.split.error": "分割エラー",
-    // -- diff view --
-    "dialog.diff.title": "差分",
-    "dialog.diff.deprecated":
-      "この差分機能は非推奨です。姉妹プロジェクト ayame-diff への移行を推奨します。",
-    "dialog.diff.current": "現在",
-    "dialog.diff.compareTo": "比較先",
-    "dialog.diff.currentFile": "現在のファイル",
-    "dialog.diff.compareFile": "比較先ファイル",
-    "dialog.diff.added": "追加",
-    "dialog.diff.deleted": "削除",
-    "dialog.diff.changed": "変更",
-    "dialog.diff.none": "差分はありません",
-    "dialog.diff.promptPath": "比較先ファイルパス",
-    "dialog.diff.computing": "差分を計算中…",
-    "dialog.diff.error": "差分エラー",
-    "dialog.diff.hunks": "差分: {n} hunk",
-    "dialog.diff.hunkHeader":
-      "{kind}  現在: {oldStart} ({oldLen} 行)  比較先: {newStart} ({newLen} 行)",
-    "dialog.diff.unsavedIncluded": "未保存編集込み",
-    "dialog.diff.hunkTruncated": "このhunkは先頭 {n} 行だけ表示しています",
-    "dialog.diff.summary": "{hunks} hunk / +{added}  -{deleted}  ~{modified}",
-    "dialog.diff.omitted": "{n} hunk 省略",
     // -- folder search (grep) --
     "dialog.grep.query": "検索語",
     "dialog.grep.queryPlaceholder": "検索する文字列 / 正規表現",
@@ -411,6 +396,23 @@ export const MESSAGES = {
     "error.loadErrorMsg": "読み込みエラー: {msg}",
     "error.saveError": "保存エラー",
     "error.serverUnreachable": "サーバに接続できません",
+    "error.serverUnknown": "サーバエラー: {message}",
+    "error.server.badRequest": "リクエストが正しくありません。",
+    "error.server.invalidInput": "入力が正しくありません。",
+    "error.server.exists": "対象はすでに存在します。",
+    "error.server.conflict": "操作中に文書が変更されました。もう一度お試しください。",
+    "error.server.baseChanged": "元のファイルが外部で変更されました。再読み込みしてください。",
+    "error.server.notFound": "要求された項目が見つかりません。",
+    "error.server.tooLarge": "リクエストが大きすぎます。",
+    "error.server.timeout": "操作がタイムアウトしました。",
+    "error.server.workerFailed": "ワーカープロセスでエラーが発生しました。",
+    "error.server.unsupported": "この操作には対応していません。",
+    "error.server.search": "検索条件が正しくありません。",
+    "error.server.io": "ファイルの入出力エラーが発生しました。",
+    "error.server.corrupted": "データの破損を検出しました。",
+    "error.server.canceled": "操作はキャンセルされました。",
+    "error.server.internal": "内部エラーが発生しました。",
+    "error.server.generic": "サーバエラーが発生しました。",
     "error.newBuffer": "新規バッファを作成できません: {msg}",
     // -- theme JSON --
     "theme.cannotOpen": "テーマを開けません",
@@ -447,6 +449,7 @@ export const MESSAGES = {
     "menu.selectNextOccurrence": "Select Next Occurrence",
     "menu.copy": "Copy",
     "menu.cut": "Cut",
+    "menu.paste": "Paste",
     "menu.caseUpper": "Transform to Uppercase",
     "menu.caseLower": "Transform to Lowercase",
     "menu.caseCamel": "Transform to camelCase",
@@ -474,7 +477,6 @@ export const MESSAGES = {
       "Ayame Editor\nA desktop editor for huge text, log, CSV, and TSV files.\n\nhttps://github.com/hjosugi/ayame-editor",
     "menu.sort": "Sort",
     "menu.sortTitle": "Sort into a temporary result and open it in a new tab.",
-    "menu.diff": "Two-file Diff (deprecated)",
     "menu.split": "Split File",
     "menu.splitTitle": "Split into multiple files by line count.",
     "menu.grep": "Search Folder",
@@ -487,7 +489,7 @@ export const MESSAGES = {
     "toolbar.applyThemeTitle": "Apply this JSON as a theme",
     "toolbar.applyKeymap": "Apply Key Bindings",
     "toolbar.applyKeymapTitle": "Apply this JSON as key bindings",
-    "toolbar.toolsTitle": "Sort, Diff, Split",
+    "toolbar.toolsTitle": "Sort and Split",
     "toolbar.newTab": "New Tab",
     "tab.close": "Close Tab",
     "tab.copyPath": "Copy Path",
@@ -543,8 +545,14 @@ export const MESSAGES = {
     "status.indexDetail":
       "{lines} lines / {bytes} / {checkpoints} index checkpoints ({indexBytes}, {indexMs} ms)",
     "status.encTitle": "Convert Encoding and Save",
+    "status.encodingValue": "Encoding: {value}",
     "status.zoomTitle": "Zoom level (click to reset to 100%)",
+    "status.zoomValue": "Zoom level: {value}",
     "status.eolTitle": "Convert Line Endings and Save",
+    "status.eolValue": "Line endings: {value}",
+    "status.encWithBom": "{enc} (BOM)",
+    "status.eolMixed": "Mixed",
+    "status.eolNone": "None",
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
     "status.tailFileChanged": "The file changed externally. Tail following stopped.",
@@ -569,8 +577,8 @@ export const MESSAGES = {
     "editor.reloadError": "Reload error",
     "editor.savingWaitInput": "Saving. Input will continue after it finishes.",
     "editor.savingWait": "Saving. Please wait until it finishes.",
+    "editor.eofMarker": "[EOF]",
     "ctx.menu": "Context Menu",
-    "ctx.paste": "Paste",
     "ctx.saveSelection": "Save Selection to File...",
     "ctx.saveSelectionTitle":
       "Write only the selected lines to another file. The clipboard line limit does not apply.",
@@ -615,6 +623,7 @@ export const MESSAGES = {
     "dialog.open.dirError": "Cannot open directory: {msg}",
     "dialog.open.enterFileName": "Enter a file name to save.",
     "dialog.open.pickFolderFirst": "Choose a destination drive and folder first.",
+    "dialog.open.thisPc": "PC",
     "settings.theme": "Theme",
     "settings.themeMonoPaper": "Mono Paper (Solid)",
     "settings.themeDark": "Dark",
@@ -713,27 +722,6 @@ export const MESSAGES = {
     "dialog.split.running": "Splitting...",
     "dialog.split.done": "Split into {count} files: first file {path}",
     "dialog.split.error": "Split error",
-    "dialog.diff.title": "Diff",
-    "dialog.diff.deprecated":
-      "This diff feature is deprecated. Please migrate to the sister project ayame-diff.",
-    "dialog.diff.current": "Current",
-    "dialog.diff.compareTo": "Compare To",
-    "dialog.diff.currentFile": "Current File",
-    "dialog.diff.compareFile": "Comparison File",
-    "dialog.diff.added": "Added",
-    "dialog.diff.deleted": "Deleted",
-    "dialog.diff.changed": "Changed",
-    "dialog.diff.none": "No differences",
-    "dialog.diff.promptPath": "Comparison File Path",
-    "dialog.diff.computing": "Computing diff...",
-    "dialog.diff.error": "Diff error",
-    "dialog.diff.hunks": "Diff: {n} hunk(s)",
-    "dialog.diff.hunkHeader":
-      "{kind}  Current: {oldStart} ({oldLen} lines)  Compare To: {newStart} ({newLen} lines)",
-    "dialog.diff.unsavedIncluded": "includes unsaved edits",
-    "dialog.diff.hunkTruncated": "This hunk shows only the first {n} lines.",
-    "dialog.diff.summary": "{hunks} hunk(s) / +{added}  -{deleted}  ~{modified}",
-    "dialog.diff.omitted": "{n} hunk(s) omitted",
     "dialog.grep.query": "Search Term",
     "dialog.grep.queryPlaceholder": "String or regular expression to search for",
     "dialog.grep.dir": "Target Folder",
@@ -787,6 +775,23 @@ export const MESSAGES = {
     "error.loadErrorMsg": "Load error: {msg}",
     "error.saveError": "Save error",
     "error.serverUnreachable": "Cannot connect to the server",
+    "error.serverUnknown": "Server error: {message}",
+    "error.server.badRequest": "The request is invalid.",
+    "error.server.invalidInput": "The input is invalid.",
+    "error.server.exists": "The target already exists.",
+    "error.server.conflict": "The document changed during the operation. Please try again.",
+    "error.server.baseChanged": "The original file changed externally. Reload it and try again.",
+    "error.server.notFound": "The requested item was not found.",
+    "error.server.tooLarge": "The request is too large.",
+    "error.server.timeout": "The operation timed out.",
+    "error.server.workerFailed": "The worker process failed.",
+    "error.server.unsupported": "This operation is not supported.",
+    "error.server.search": "The search request is invalid.",
+    "error.server.io": "A file I/O error occurred.",
+    "error.server.corrupted": "Data corruption was detected.",
+    "error.server.canceled": "The operation was canceled.",
+    "error.server.internal": "An internal error occurred.",
+    "error.server.generic": "A server error occurred.",
     "error.newBuffer": "Cannot create a new buffer: {msg}",
     "theme.cannotOpen": "Could not open the theme.",
     "theme.missingColor": "Missing color.",
@@ -797,28 +802,34 @@ export const MESSAGES = {
 };
 
 // ---- server boundary ----------------------------------------------------
-// API failures are `{code, message}`. English uses a stable code translation;
-// Japanese and unknown codes keep the server detail. No control flow or
-// localization depends on matching human message text (#81.2).
-export const SERVER_CODE_EN = {
-  bad_request: "The request is invalid.",
-  invalid_input: "The input is invalid.",
-  exists: "The target already exists.",
-  conflict: "The document changed during the operation. Please try again.",
-  not_found: "The requested item was not found.",
-  too_large: "The request is too large.",
-  timeout: "The operation timed out.",
-  worker_failed: "The worker process failed.",
-  unsupported: "This operation is not supported.",
-  search: "The search request is invalid.",
-  io: "A file I/O error occurred.",
-  internal: "An internal error occurred.",
+// API failures are `{code, message}`. Stable codes map to ordinary MESSAGES
+// keys so adding a locale remains data-only; unknown codes keep the server
+// detail behind a localized label. No localization matches human text (#81.2).
+export const SERVER_CODE_KEYS = {
+  bad_request: "error.server.badRequest",
+  invalid_input: "error.server.invalidInput",
+  exists: "error.server.exists",
+  conflict: "error.server.conflict",
+  base_changed: "error.server.baseChanged",
+  not_found: "error.server.notFound",
+  too_large: "error.server.tooLarge",
+  timeout: "error.server.timeout",
+  worker_failed: "error.server.workerFailed",
+  unsupported: "error.server.unsupported",
+  search: "error.server.search",
+  io: "error.server.io",
+  corrupted: "error.server.corrupted",
+  canceled: "error.server.canceled",
+  internal: "error.server.internal",
+  error: "error.server.generic",
 };
 
 export function serverMessage(error) {
   const raw = String(error && typeof error === "object" ? error.message : (error ?? ""));
   const code = error && typeof error === "object" ? error.code : undefined;
-  if (currentLocale() === "en" && code && SERVER_CODE_EN[code]) return SERVER_CODE_EN[code];
+  const key = code && SERVER_CODE_KEYS[code];
+  if (key) return t(key);
+  if (code) return t("error.serverUnknown", { message: raw || String(code) });
   return raw;
 }
 

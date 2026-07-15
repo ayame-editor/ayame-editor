@@ -345,7 +345,14 @@ fn top_n_largest_and_smallest() {
         data.extend_from_slice(format!("{},x\n", (i * 7) % 1000).as_bytes());
     }
     let (_f, doc) = doc_from(&data);
-    let val = |ln: u64| doc.line(ln).unwrap().split(',').next().unwrap().to_string();
+    let val = |row: &TopRow| {
+        doc.line(row.record)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap()
+            .to_string()
+    };
 
     let top = top_n(
         &doc,
@@ -356,9 +363,10 @@ fn top_n_largest_and_smallest() {
             n: 3,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert_eq!(
-        top.iter().map(|&l| val(l)).collect::<Vec<_>>(),
+        top.iter().map(val).collect::<Vec<_>>(),
         vec!["999", "998", "997"]
     );
 
@@ -371,11 +379,9 @@ fn top_n_largest_and_smallest() {
             n: 2,
             ..Default::default()
         },
-    );
-    assert_eq!(
-        bot.iter().map(|&l| val(l)).collect::<Vec<_>>(),
-        vec!["0", "1"]
-    );
+    )
+    .unwrap();
+    assert_eq!(bot.iter().map(val).collect::<Vec<_>>(), vec!["0", "1"]);
 }
 
 #[test]
@@ -392,7 +398,8 @@ fn distinct_estimate_is_close() {
             key_column: Some(1),
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     let err = (res.estimate as f64 - 5000.0).abs() / 5000.0;
     assert!(
         err < 0.05,
@@ -476,8 +483,9 @@ fn numeric_sort_and_top_push_invalid_values_to_the_end_for_largest() {
         fields: FieldSpec::default(),
     };
     let top: Vec<_> = top_n(&doc, &top_opts)
+        .unwrap()
         .into_iter()
-        .map(|line| doc.line(line).unwrap())
+        .map(|row| doc.line(row.record).unwrap())
         .collect();
     assert_eq!(top, vec!["10", "3"]);
 }
@@ -573,4 +581,468 @@ fn reverse_sort_with_spill_is_stable_and_descending() {
         prev = Some((key, orig));
     }
     assert_eq!(prev.unwrap().0, 0, "the smallest key must sort last");
+}
+
+// ===================== #201: bounded keys & spill cleanup =====================
+
+/// Every entry (recursively) under `dir`, for leak assertions.
+fn dir_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p.clone());
+            }
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
+fn op_keys_are_capped_and_ties_beyond_the_cap_stay_stable() {
+    use crate::fields::{comparable_key, FieldSpec, MAX_KEY_BYTES};
+    use crate::Encoding;
+
+    // The key built from one enormous field is bounded, not O(field).
+    let giant = vec![b'k'; MAX_KEY_BYTES * 4];
+    let mut scratch = Vec::new();
+    let key = comparable_key(
+        &giant,
+        Encoding::Utf8,
+        None,
+        &FieldSpec::default(),
+        false,
+        &mut scratch,
+    );
+    assert_eq!(key.len(), MAX_KEY_BYTES);
+
+    // Lines that differ before the cap still sort by content; lines equal
+    // through the cap keep their original relative order (stable tie-break).
+    let prefix = "p".repeat(MAX_KEY_BYTES + 16);
+    let mut data = Vec::new();
+    data.extend_from_slice(format!("{prefix}1\n").as_bytes()); // line 0
+    data.extend_from_slice(format!("{prefix}0\n").as_bytes()); // line 1
+    data.extend_from_slice(b"aaa\n"); // line 2: differs early, sorts first
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let res = sort(
+        &doc,
+        &SortOptions {
+            spill_dir: spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut rd = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut order = Vec::new();
+    while let Some(ln) = rd.next_line().unwrap() {
+        order.push(ln);
+    }
+    assert_eq!(
+        order,
+        vec![2, 0, 1],
+        "early difference sorts by content; beyond-cap difference keeps file order"
+    );
+}
+
+#[test]
+fn sort_cleans_spill_dir_and_artifacts_when_a_callback_panics() {
+    let mut data = Vec::new();
+    for i in 0..20_000u64 {
+        data.extend_from_slice(format!("{},row\n", (i * 7919) % 20_000).as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = SortOptions {
+        budget_bytes: 4 * 1024, // spill early and often
+        spill_dir: parent.path().join("sort"),
+        ..Default::default()
+    };
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::sort::sort_with_progress(&doc, &opts, |done, _total| {
+            // Fires between scan batches, once runs are already on disk.
+            assert!(done < 10_000, "simulated consumer crash");
+        })
+    }));
+    assert!(
+        panicked.is_err(),
+        "the progress callback must have panicked"
+    );
+    assert_eq!(
+        dir_entries(&opts.spill_dir),
+        Vec::<std::path::PathBuf>::new(),
+        "a panicking sort must not strand runs or ordering/offset artifacts"
+    );
+}
+
+#[test]
+#[cfg(unix)] // truncates the file under a live mapping (Windows refuses)
+fn sort_cleans_spill_artifacts_when_the_scan_fails() {
+    let mut data = Vec::new();
+    for i in 0..50_000u64 {
+        data.extend_from_slice(format!("{i},row\n").as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (f, doc) = doc_from(&data);
+    // Shrink the source under the live document: the sort's base precheck
+    // fails after the spill dir and artifact files were already created.
+    f.as_file().set_len(16).unwrap();
+    let res = sort(
+        &doc,
+        &SortOptions {
+            spill_dir: parent.path().join("sort"),
+            ..Default::default()
+        },
+    );
+    assert!(res.is_err(), "sorting a shrunk-under-us file must fail");
+    assert_eq!(
+        dir_entries(&parent.path().join("sort")),
+        Vec::<std::path::PathBuf>::new(),
+        "a failed sort must remove everything it created"
+    );
+}
+
+#[test]
+fn group_cleans_spill_runs_when_the_emit_callback_panics() {
+    let mut data = Vec::new();
+    for i in 0..300u64 {
+        data.extend_from_slice(format!("key{i},1\n").as_bytes());
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        budget_bytes: 1, // every new key spills a run
+        spill_dir: parent.path().join("grp"),
+        ..Default::default()
+    };
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        group(&doc, &opts, |_row| panic!("simulated consumer crash"))
+    }));
+    assert!(panicked.is_err(), "emit must have panicked");
+    assert_eq!(
+        dir_entries(&opts.spill_dir),
+        Vec::<std::path::PathBuf>::new(),
+        "a panicking group must not strand its spilled runs"
+    );
+}
+
+// ===================== #197: deterministic float aggregation ==================
+
+/// Group `data` by column 1 with a numeric value in column 2 and collect the
+/// rows, using the given spill budget.
+fn group_rows(data: &[u8], budget: usize) -> Vec<GroupRow> {
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        value_column: Some(2),
+        budget_bytes: budget,
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    group(&doc, &opts, |r| rows.push(r.clone())).unwrap();
+    rows
+}
+
+#[test]
+fn group_sum_is_correctly_rounded_and_budget_independent() {
+    // Rounding-hostile values: ten 0.1s (exact sum rounds to 1.0, while naive
+    // sequential f64 addition yields 0.999...9), and 2^53 + 1 + 1 (naive
+    // addition loses both 1s to rounding; the exact sum keeps them).
+    let mut data = Vec::new();
+    for _ in 0..10 {
+        data.extend_from_slice(b"a,0.1\n");
+    }
+    data.extend_from_slice(b"b,9007199254740992\n"); // 2^53
+    data.extend_from_slice(b"b,1\n");
+    data.extend_from_slice(b"b,1\n");
+
+    // budget=1 spills a partial-aggregate run on every new key, so the spill
+    // path combines many partial sums; the default budget never spills.
+    let spilled = group_rows(&data, 1);
+    let in_memory = group_rows(&data, usize::MAX);
+
+    for (s, m) in spilled.iter().zip(&in_memory) {
+        assert_eq!(s.key, m.key);
+        assert_eq!(
+            s.sum.to_bits(),
+            m.sum.to_bits(),
+            "sum for {:?} must not depend on the spill budget",
+            String::from_utf8_lossy(&s.key)
+        );
+    }
+    assert_eq!(spilled[0].sum, 1.0, "fsum of ten 0.1s is exactly 1.0");
+    assert_eq!(
+        spilled[1].sum, 9007199254740994.0,
+        "2^53 + 1 + 1 must not lose the low bits to intermediate rounding"
+    );
+}
+
+#[test]
+fn group_ignores_non_finite_value_strings() {
+    let data = b"a,5\na,NaN\na,inf\na,-infinity\na,1e999\na,zzz\n";
+    let rows = group_rows(data, usize::MAX);
+    assert_eq!(rows.len(), 1);
+    let r = &rows[0];
+    assert_eq!(r.count, 6, "every row is counted");
+    assert_eq!(r.numeric_count, 1, "only the finite value aggregates");
+    assert_eq!(r.sum, 5.0);
+    assert_eq!(r.min, Some(5.0));
+    assert_eq!(r.max, Some(5.0));
+    assert_eq!(r.avg(), Some(5.0));
+}
+
+#[test]
+fn group_without_numeric_values_reports_no_min_max() {
+    let data = b"a,x\na,y\nb,3\n";
+    let rows = group_rows(data, usize::MAX);
+    let a = &rows[0];
+    assert_eq!(a.count, 2);
+    assert_eq!(a.numeric_count, 0);
+    assert_eq!(
+        (a.min, a.max, a.avg()),
+        (None, None, None),
+        "an all-non-numeric group must not leak the ±inf sentinels"
+    );
+    assert_eq!(a.sum, 0.0, "the empty sum is zero");
+    let b = &rows[1];
+    assert_eq!((b.min, b.max), (Some(3.0), Some(3.0)));
+}
+
+#[test]
+fn exact_sum_handles_cancellation_across_spill_boundaries() {
+    // Alternating huge positive/negative values that cancel exactly, plus a
+    // tiny residue that naive accumulation loses in the giants' shadow.
+    let mut data = Vec::new();
+    for _ in 0..100 {
+        data.extend_from_slice(b"k,1e300\n");
+        data.extend_from_slice(b"k,-1e300\n");
+    }
+    data.extend_from_slice(b"k,0.5\n");
+    let spilled = group_rows(&data, 1);
+    let in_memory = group_rows(&data, usize::MAX);
+    assert_eq!(spilled[0].sum.to_bits(), in_memory[0].sum.to_bits());
+    assert_eq!(spilled[0].sum, 0.5);
+}
+
+// ============ #199: RFC-4180 records with quoted embedded newlines ===========
+
+fn csv_spec() -> FieldSpec {
+    FieldSpec {
+        csv: true,
+        ..Default::default()
+    }
+}
+
+/// The issue's exact failure input: `"a","x\ny","b"` grouped/sorted on
+/// column 2 must be ONE record whose field is `x\ny` — not two broken
+/// "lines" keyed `"a","x` and `y","b`.
+#[test]
+fn csv_quoted_newlines_group_as_single_records() {
+    let data = b"\"a\",\"x\ny\",\"b\"\n\"c\",\"z\",\"d\"\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: Some(2),
+        fields: csv_spec(),
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = Vec::new();
+    group(&doc, &opts, |r| {
+        rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count))
+    })
+    .unwrap();
+    assert_eq!(rows, vec![("x\ny".into(), 1), ("z".into(), 1)]);
+}
+
+#[test]
+fn csv_quoted_newlines_sort_records_byte_exactly() {
+    // Records: (key b) with an embedded newline, then (key a). Sorting by
+    // column 1 must move the multi-line record as one intact unit.
+    let rec_b = b"\"b\",\"x\ny\"\n";
+    let rec_a = b"\"a\",\"plain\"\n";
+    let mut data = Vec::new();
+    data.extend_from_slice(rec_b);
+    data.extend_from_slice(rec_a);
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let res = sort(
+        &doc,
+        &SortOptions {
+            key_column: Some(1),
+            fields: csv_spec(),
+            spill_dir: spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res.line_count, 2, "two logical records, not three lines");
+
+    let offsets = LineOffsetReader::open(&res.line_offsets_path).unwrap();
+    let mut ordering = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut out = Vec::new();
+    while let Some(rec) = ordering.next_line().unwrap() {
+        let (s, e) = offsets.raw_range(rec).unwrap();
+        out.extend_from_slice(doc.raw_byte_range(s, e).unwrap());
+    }
+    let mut expect = Vec::new();
+    expect.extend_from_slice(rec_a);
+    expect.extend_from_slice(rec_b);
+    assert_eq!(out, expect, "records reorder byte-exactly, newline intact");
+}
+
+#[test]
+fn csv_quoted_newlines_count_as_one_for_distinct_and_top() {
+    let data = b"\"a\",\"x\ny\"\n\"b\",\"x\ny\"\n";
+    let (_f, doc) = doc_from(data);
+
+    let d = distinct(
+        &doc,
+        &DistinctOptions {
+            key_column: Some(2),
+            fields: csv_spec(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        d.estimate, 1,
+        "both records share the same multi-line field"
+    );
+
+    let rows = top_n(
+        &doc,
+        &TopOptions {
+            key_column: Some(1),
+            fields: csv_spec(),
+            n: 1,
+            largest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = rows[0];
+    let bytes = doc.raw_byte_range(row.start, row.raw_end).unwrap();
+    assert_eq!(
+        bytes, b"\"b\",\"x\ny\"\n",
+        "the selected row spans its whole multi-line record"
+    );
+}
+
+#[test]
+fn csv_unclosed_quote_is_bounded_not_runaway() {
+    // One stray unclosed quote followed by thousands of plain lines: the
+    // record merger must cap, not fuse the rest of the file into one record.
+    let mut data = b"\"unclosed,oops\n".to_vec();
+    for i in 0..10_000u64 {
+        data.extend_from_slice(format!("k{i},v\n").as_bytes());
+    }
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(&data);
+    let opts = GroupOptions {
+        key_column: Some(1),
+        fields: csv_spec(),
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut groups = 0u64;
+    group(&doc, &opts, |_| groups += 1).unwrap();
+    assert!(
+        groups > 5_000,
+        "the cap must release lines after the runaway record, got {groups} groups"
+    );
+}
+
+#[test]
+fn non_csv_mode_still_treats_quoted_newlines_as_separate_lines() {
+    // Without --csv the physical-line semantics are unchanged.
+    let data = b"\"a\",\"x\ny\",\"b\"\n";
+    let spill = tempfile::tempdir().unwrap();
+    let (_f, doc) = doc_from(data);
+    let opts = GroupOptions {
+        key_column: None,
+        spill_dir: spill.path().join("grp"),
+        ..Default::default()
+    };
+    let mut rows = 0u64;
+    group(&doc, &opts, |_| rows += 1).unwrap();
+    assert_eq!(rows, 2, "two physical lines remain two keys without csv");
+}
+
+// ============== #198: one key normalization across all four ops ==============
+
+/// "café" composed (U+00E9) vs decomposed ("e"+U+0301): every op must agree
+/// they are the same key. group used to bucket them separately and distinct
+/// hashed raw bytes, while sort/top already NFC-normalized.
+#[test]
+fn unicode_equivalent_keys_agree_across_all_ops() {
+    let data = "caf\u{e9},1\ncafe\u{301},2\n";
+    let (_f, doc) = doc_from(data.as_bytes());
+
+    // group: one bucket holding both rows, keyed by the composed (NFC) form.
+    let spill = tempfile::tempdir().unwrap();
+    let mut rows = Vec::new();
+    group(
+        &doc,
+        &GroupOptions {
+            key_column: Some(1),
+            spill_dir: spill.path().join("grp"),
+            ..Default::default()
+        },
+        |r| rows.push((String::from_utf8_lossy(&r.key).into_owned(), r.count)),
+    )
+    .unwrap();
+    assert_eq!(rows, vec![("caf\u{e9}".to_string(), 2)]);
+
+    // distinct: one value, not two byte-variants.
+    let d = distinct(
+        &doc,
+        &DistinctOptions {
+            key_column: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(d.estimate, 1);
+
+    // sort: equal keys fall back to the stable original order.
+    let sort_spill = tempfile::tempdir().unwrap();
+    let res = sort(
+        &doc,
+        &SortOptions {
+            key_column: Some(1),
+            spill_dir: sort_spill.path().join("sort"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut rd = OrderingReader::open(&res.ordering_path).unwrap();
+    let mut order = Vec::new();
+    while let Some(ln) = rd.next_line().unwrap() {
+        order.push(ln);
+    }
+    assert_eq!(order, vec![0, 1]);
+
+    // top: equal keys, stable tie-break selects the earlier record.
+    let rows = top_n(
+        &doc,
+        &TopOptions {
+            key_column: Some(1),
+            n: 1,
+            largest: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows[0].record, 0);
 }

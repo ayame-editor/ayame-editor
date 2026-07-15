@@ -3,10 +3,32 @@
 //! Data ops share the same field model: fast raw delimiter splitting by default,
 //! RFC-4180 field parsing when requested, and decoded text keys only when an op
 //! actually needs text ordering or display.
+//!
+//! Key material is bounded: only the first [`MAX_KEY_BYTES`] of a field feed a
+//! sort/group/top/distinct key. Without the cap, a file with no newlines is one
+//! line whose whole-line key would allocate the file's size and break the
+//! bounded-memory contract (#201).
 
 use unicode_normalization::UnicodeNormalization;
 
 use crate::encoding::Encoding;
+
+/// Longest field prefix (raw bytes) contributing to an op key.
+///
+/// Semantics for fields longer than this: sort/top compare on the prefix and
+/// fall back to their stable tie-break (original line order) beyond it; group
+/// and distinct treat keys equal in the first 64 KiB as the same key. Real
+/// keys of that size are pathological (a minified blob in a key column); the
+/// documented prefix behavior is the price of never allocating `O(line)` per
+/// record.
+pub(crate) const MAX_KEY_BYTES: usize = 64 * 1024;
+
+/// Bound a field to the key-material cap on a whole-byte boundary. A legacy
+/// multi-byte character split at the cap decodes to a replacement character,
+/// which is deterministic — identical long fields still build identical keys.
+pub(crate) fn capped(field: &[u8]) -> &[u8] {
+    &field[..field.len().min(MAX_KEY_BYTES)]
+}
 
 /// How a key/value field is located within a line.
 #[derive(Clone, Copy, Debug)]
@@ -44,7 +66,7 @@ pub(crate) fn comparable_key(
     numeric: bool,
     scratch: &mut Vec<u8>,
 ) -> Vec<u8> {
-    let field = field_bytes(raw, col, spec, scratch);
+    let field = capped(field_bytes(raw, col, spec, scratch));
     if numeric {
         let v = enc
             .decode_line(field)
@@ -69,7 +91,7 @@ pub(crate) fn comparable_key_into(
     out: &mut Vec<u8>,
 ) {
     out.clear();
-    let field = field_bytes(raw, col, spec, field_scratch);
+    let field = capped(field_bytes(raw, col, spec, field_scratch));
     if numeric {
         let v = enc
             .decode_line(field)
@@ -80,15 +102,13 @@ pub(crate) fn comparable_key_into(
             .unwrap_or(f64::NEG_INFINITY);
         out.extend_from_slice(&f64_order_key(v));
     } else {
-        let decoded = enc.decode_line(field);
-        if decoded.is_ascii() {
-            out.extend_from_slice(decoded.as_bytes());
-        } else {
-            out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
-        }
+        normalized_key_into(field, enc, out);
     }
 }
 
+/// Decoded, NFC-normalized text key for a field — used by group (and, via
+/// [`normalized_key_into`], every other op) so Unicode-equivalent keys land in
+/// the same group across sort/top/group/distinct (#198).
 pub(crate) fn decoded_text_key_into(
     raw: &[u8],
     enc: Encoding,
@@ -98,17 +118,28 @@ pub(crate) fn decoded_text_key_into(
     out: &mut Vec<u8>,
 ) {
     out.clear();
-    let field = field_bytes(raw, col, spec, field_scratch);
-    out.extend_from_slice(enc.decode_line(field).as_bytes());
+    let field = capped(field_bytes(raw, col, spec, field_scratch));
+    normalized_key_into(field, enc, out);
+}
+
+/// THE key normalization, shared by every data op: decode the field in the
+/// document's encoding, then NFC-normalize (ASCII skips the normalizer — it is
+/// already NFC). `café` composed (U+00E9) and decomposed (`e`+U+0301) build
+/// identical key bytes, so sort/top ordering, group buckets, and distinct
+/// counts all agree on what "the same key" means (#198).
+pub(crate) fn normalized_key_into(field: &[u8], enc: Encoding, out: &mut Vec<u8>) {
+    let decoded = enc.decode_line(field);
+    if decoded.is_ascii() {
+        out.extend_from_slice(decoded.as_bytes());
+    } else {
+        out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
+    }
 }
 
 fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {
-    let decoded = enc.decode_line(field);
-    if decoded.is_ascii() {
-        decoded.into_bytes()
-    } else {
-        decoded.nfc().collect::<String>().into_bytes()
-    }
+    let mut out = Vec::new();
+    normalized_key_into(field, enc, &mut out);
+    out
 }
 
 /// Extract the key/value field from a line. Returns a borrow of `raw` for the
@@ -178,6 +209,12 @@ fn csv_nth_field(raw: &[u8], delim: u8, quote: u8, col: usize, out: &mut Vec<u8>
         input = &input[nin..];
         if idx == col {
             out.extend_from_slice(&buf[..nout]);
+            // Key material is capped anyway; stop copying (and parsing) once
+            // the scratch holds a full cap's worth, so one enormous quoted
+            // field cannot make this scratch `O(line)` (#201).
+            if out.len() >= MAX_KEY_BYTES {
+                break;
+            }
         }
         match res {
             csv_core::ReadFieldResult::InputEmpty => {

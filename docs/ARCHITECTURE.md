@@ -78,7 +78,7 @@ Important modules:
 | `assets.rs` | Serves embedded HTML, CSS, TypeScript modules, favicon, logo, and background assets. |
 | `state.rs` | Workspace lock, active document, tabs, edit session, WAL setup/recovery, save snapshots, and cleanup. |
 | `edit.rs` | Viewport lines, replace range/batch/rectangle, undo/redo, save, selection save, revert, reopen encoding, and WAL recovery endpoints. |
-| `ops.rs` | Search, grep, find, diff, sort-save, replace-save, case-save, and split-save endpoints. |
+| `ops.rs` | Search, grep, find, sort-save, replace-save, case-save, and split-save endpoints. |
 | `workspace.rs` | Open/new/upload/browse/tabs operations and scratch-file cleanup. |
 | `security.rs` | Loopback defaults, Host/Origin checks, remote-bind guard, DNS-rebinding and CSRF protection. |
 
@@ -93,7 +93,7 @@ The main endpoint groups are:
 | Endpoint group | Purpose |
 | --- | --- |
 | `/api/stat`, `/api/lines`, `/api/linebyte` | File metadata and viewport navigation. |
-| `/api/search`, `/api/find`, `/api/grep`, `/api/diff` | Search and comparison. |
+| `/api/search`, `/api/find`, `/api/grep` | Search. |
 | `/api/edit/*` | Replace, save, undo/redo, revert, recover, and reopen with another encoding. |
 | `/api/sort/save`, `/api/replace/save`, `/api/case/save`, `/api/split/save` | Long-running file operations exposed from the GUI. |
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | Workspace and tab management. |

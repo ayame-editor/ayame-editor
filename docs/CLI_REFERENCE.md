@@ -9,6 +9,15 @@
 text files from a terminal. Commands are designed to stream or use bounded
 memory so they remain useful on files that are too large for ordinary editors.
 
+<div class="doc-jump-grid">
+  <a class="doc-jump" href="#commands">Inspect and read files</a>
+  <a class="doc-jump" href="#transform-options">Search and transform</a>
+  <a class="doc-jump" href="#sort-and-group-options">Sort and aggregate</a>
+  <a class="doc-jump" href="#serve-options">Open the web editor</a>
+  <a class="doc-jump" href="#update-and-remove">Update or remove</a>
+  <a class="doc-jump" href="#examples">Copy an example</a>
+</div>
+
 ## Usage
 
 ```sh
@@ -18,7 +27,7 @@ ayame <COMMAND> [OPTIONS]
 No arguments open the native desktop window in GUI builds. Plain CLI builds
 print help.
 
-## Commands
+## Commands { #commands }
 
 | Command | Purpose |
 | --- | --- |
@@ -28,9 +37,7 @@ print help.
 | `line <FILE> <N>` | Print one 1-based line. |
 | `lines <FILE> <START> <COUNT>` | Print COUNT lines from START, both 1-based. |
 | `search <FILE> <PATTERN>` | Search with literal, regex, ignore-case, whole-word, and max-result options. |
-| `diff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `text`. Compare two files with line hunks or side-by-side output. |
 | `sort <FILE>` | External merge sort with memory-bounded spill files. |
-| `sortdiff <OLD> <NEW>` | **Deprecated** → [ayame-diff](https://github.com/hjosugi/ayame-diff) `sorted`. Sort both files, then diff the sorted outputs. `sort-diff` is also accepted. |
 | `replace <FILE> <FIND> <REPL>` | Streaming replace to a new output file. |
 | `case <FILE> <MODE>` | Streaming case conversion (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) to a new output file. |
 | `grep-lines <FILE> <PATTERN>` | Extract only the matching lines to a new output file. |
@@ -46,11 +53,15 @@ print help.
 | `remove` | Remove the installed Ayame binary or app bundle. |
 | `version` | Print the Ayame version. |
 
+The former `diff`, `sortdiff`, and `sort-diff` commands were removed in v0.7.0.
+For one release they return an error naming the corresponding ayame-diff
+command. See [Migrating comparison workflows to ayame-diff](MIGRATING_TO_AYAME_DIFF.md).
+
 ## Common Options
 
 | Option | Applies to | Notes |
 | --- | --- | --- |
-| `--encoding <ENC>` | file-opening commands | Force `utf8`, `shift_jis`, `euc-jp`, or `ascii`. |
+| `--encoding <ENC>` | file-opening commands | Force `utf8`, `utf-16le`, `utf-16be`, `shift_jis`, `euc-jp`, `iso-2022-jp`, or `ascii`. |
 | `--stride <N>` | file-opening commands | Lines per sparse-index checkpoint. Default: 4096. |
 | `--no-cache` | file-opening commands | Disable persistent index-cache reads and writes. |
 | `--cache-dir <DIR>` | file-opening commands | Override the index-cache directory. |
@@ -70,7 +81,7 @@ print help.
 | `--quote <C>` | CSV quote character. Default: `"`. |
 | `--numeric` | Treat keys as numbers for `sort` and `top`. |
 
-## Sort and Group Options
+## Sort and Group Options { #sort-and-group-options }
 
 | Option | Notes |
 | --- | --- |
@@ -78,7 +89,7 @@ print help.
 | `--budget <SIZE>` | In-memory budget before spilling to disk for `sort` / `group`. Default: 256MiB. Accepts sizes like `512MiB` or `2GiB`. |
 | `--spill-dir <DIR>` | Directory for external-merge spill files (`sort` / `group`). |
 
-## Transform Options
+## Transform Options { #transform-options }
 
 | Option | Notes |
 | --- | --- |
@@ -115,7 +126,7 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 | `--max <N>` | Limit printed matches. |
 | `--start-byte <N>` | Begin at a byte offset for worker/API resume. |
 
-## Serve Options
+## Serve Options { #serve-options }
 
 `ayame serve` binds to `127.0.0.1:8777` by default.
 
@@ -147,7 +158,7 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 stays free for piping. Add `--json` to any subcommand for the structured form on
 stdout.
 
-## Update and Remove
+## Update and Remove { #update-and-remove }
 
 | Command | Options |
 | --- | --- |
@@ -175,7 +186,7 @@ Ayame follows the `grep` convention:
 `search --json` always exits `0` — machine callers read match status from the
 `hits` array rather than the exit code.
 
-## Examples
+## Examples { #examples }
 
 ```sh
 ayame stat huge.csv
@@ -184,9 +195,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

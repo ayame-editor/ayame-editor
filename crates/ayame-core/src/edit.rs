@@ -82,6 +82,29 @@ impl Clone for EditSession {
     }
 }
 
+impl EditSession {
+    /// Clone only the content needed to render a stable read-only view.
+    ///
+    /// Unlike [`Clone`], this deliberately omits undo/redo records, WAL state,
+    /// and pending WAL errors. Viewport requests only need the sparse overlay
+    /// and generation metadata, so copying history here would make scrolling
+    /// cost proportional to up to 256 prior edit transactions.
+    #[must_use]
+    pub fn view_clone(&self) -> EditSession {
+        EditSession {
+            events: self.events.clone(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            revision: self.revision,
+            content_gen: self.content_gen,
+            next_gen: self.next_gen,
+            saved_gen: self.saved_gen,
+            wal: None,
+            wal_error: None,
+        }
+    }
+}
+
 pub(crate) const HISTORY_LIMIT: usize = 256;
 
 /// One undo/redo generation: the inverse steps of a single edit transaction,
@@ -306,6 +329,11 @@ pub struct EditLine {
     pub edited: bool,
     pub inserted: bool,
     pub original_line: Option<u64>,
+    /// True when `text` shows only the first [`Document::MAX_VIEW_LINE_BYTES`]
+    /// of a longer original line (#201). Such a line is display-only: splicing
+    /// edits into it are refused (they would rebuild the line from truncated
+    /// text), and exports must not persist its text.
+    pub truncated: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -648,6 +676,7 @@ impl EditSession {
                         edited: true,
                         inserted: true,
                         original_line: None,
+                        truncated: false,
                     });
                 }
                 logical_pos += 1;
@@ -668,6 +697,7 @@ impl EditSession {
                                 edited: true,
                                 inserted: false,
                                 original_line: Some(anchor),
+                                truncated: false,
                             });
                         } else {
                             push_original_view_lines(
@@ -703,13 +733,17 @@ impl EditSession {
 
     pub fn line(&self, doc: &Document, logical: u64) -> Option<EditLine> {
         match self.locate(logical, doc.line_count())? {
-            LineRef::Original(orig) => Some(EditLine {
-                number: logical,
-                text: doc.line(orig)?,
-                edited: false,
-                inserted: false,
-                original_line: Some(orig),
-            }),
+            LineRef::Original(orig) => {
+                let (text, truncated) = doc.line_view(orig)?;
+                Some(EditLine {
+                    number: logical,
+                    text,
+                    edited: false,
+                    inserted: false,
+                    original_line: Some(orig),
+                    truncated,
+                })
+            }
             LineRef::Replaced(orig) => {
                 let text = self.events.get(&orig)?.replacement.clone()?;
                 Some(EditLine {
@@ -718,6 +752,7 @@ impl EditSession {
                     edited: true,
                     inserted: false,
                     original_line: Some(orig),
+                    truncated: false,
                 })
             }
             LineRef::Inserted { anchor, index } => {
@@ -728,16 +763,29 @@ impl EditSession {
                     edited: true,
                     inserted: true,
                     original_line: None,
+                    truncated: false,
                 })
             }
         }
     }
 
-    /// Current (overlay-resolved) text of a logical line.
+    /// Current (overlay-resolved) text of a logical line, for rebuilding the
+    /// line around a splice. Refuses lines past the view cap: rebuilding one
+    /// from truncated text would silently drop the rest of the line (#201),
+    /// which is strictly worse than the error.
     fn line_text(&self, doc: &Document, logical: u64) -> Result<String> {
-        self.line(doc, logical)
-            .map(|l| l.text)
-            .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))
+        let line = self
+            .line(doc, logical)
+            .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))?;
+        if line.truncated {
+            return Err(Error::UnsupportedFeature(format!(
+                "line {} is longer than {} bytes and cannot be edited in place; \
+                 use replace / grep-lines / case transforms for such lines",
+                logical + 1,
+                Document::MAX_VIEW_LINE_BYTES
+            )));
+        }
+        Ok(line.text)
     }
 
     pub fn replace_line(&mut self, doc: &Document, logical: u64, text: String) -> Result<()> {
@@ -771,7 +819,14 @@ impl EditSession {
             .ok_or_else(|| Error::InvalidInput(format!("line {} is out of range", logical + 1)))?
         {
             LineRef::Original(orig) | LineRef::Replaced(orig) => {
-                let replacement = if doc.line(orig).as_deref() == Some(text.as_str()) {
+                // The no-op shortcut compares against the *view* text, so it
+                // must not fire for lines past the view cap: the capped text
+                // could coincidentally equal the replacement while the real
+                // line differs beyond the cap (#201).
+                let over_cap = doc
+                    .line_byte_len(orig)
+                    .is_some_and(|len| len > Document::MAX_VIEW_LINE_BYTES as u64);
+                let replacement = if !over_cap && doc.line(orig).as_deref() == Some(text.as_str()) {
                     None
                 } else {
                     Some(text)
@@ -1248,10 +1303,9 @@ impl EditSession {
     ) -> Result<SaveResult> {
         let target = target.as_ref();
         if target.exists() && !overwrite {
-            return Err(Error::Conflict(format!(
-                "'{}' already exists; choose another save path",
-                target.display()
-            )));
+            return Err(Error::TargetExists {
+                path: target.to_path_buf(),
+            });
         }
         let tmp = temp_path(target);
         let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -1311,6 +1365,12 @@ impl EditSession {
         w.flush()?;
         w.get_ref().sync_all()?;
         drop(w);
+        // The converted bytes were decoded from the mmap; if the base file
+        // shrank mid-save they contain zero-fill — abort before publishing.
+        if let Err(e) = doc.verify_base() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         commit_temp_file(&tmp, target, overwrite)?;
         let bytes = std::fs::metadata(target)?.len();
         Ok(SaveResult {
@@ -1327,10 +1387,9 @@ impl EditSession {
         overwrite: bool,
     ) -> Result<SaveResult> {
         if target.exists() && !overwrite {
-            return Err(Error::Conflict(format!(
-                "'{}' already exists; choose another save path",
-                target.display()
-            )));
+            return Err(Error::TargetExists {
+                path: target.to_path_buf(),
+            });
         }
         self.write_stream(doc, target, overwrite)?;
         let bytes = std::fs::metadata(target)?.len();
@@ -1440,6 +1499,13 @@ impl EditSession {
         w.flush()?;
         w.get_ref().sync_all()?;
         drop(w);
+        // Untouched runs were copied straight out of the mmap; if the base
+        // file shrank mid-save those copies are zero-fill — abort before the
+        // temp file replaces anything.
+        if let Err(e) = doc.verify_base() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         commit_temp_file(&tmp, target, overwrite)
     }
 
@@ -1681,12 +1747,16 @@ fn push_original_view_lines(
         }
         let advanced = batch.len() as u64;
         for (line_no, raw) in batch {
+            let (text, truncated) = doc
+                .encoding()
+                .decode_line_capped(raw, Document::MAX_VIEW_LINE_BYTES);
             out.push(EditLine {
                 number: logical,
-                text: doc.encoding().decode_line(raw),
+                text,
                 edited: false,
                 inserted: false,
                 original_line: Some(line_no),
+                truncated,
             });
             logical += 1;
         }
@@ -1903,6 +1973,48 @@ mod tests {
         assert_eq!(st.replaced_lines, 1);
         assert_eq!(st.inserted_lines, 1);
         assert_eq!(st.deleted_lines, 1);
+    }
+
+    /// Issue #201: lines past the view cap are display-only in a session —
+    /// splices are refused (they would rebuild the line from truncated text),
+    /// while whole-line delete/replace and the untouched-span save keep
+    /// working with bounded memory and full byte fidelity.
+    #[test]
+    fn over_cap_lines_are_view_only_but_deletable_and_replaceable() {
+        let mut data = b"short\n".to_vec();
+        data.extend(std::iter::repeat_n(
+            b'x',
+            Document::MAX_VIEW_LINE_BYTES + 1024,
+        ));
+        data.extend_from_slice(b"\ntail\n");
+        let (_f, doc) = doc_from(&data);
+        let mut edits = EditSession::default();
+
+        let lines = edits.lines(&doc, 0, 3);
+        assert!(!lines[0].truncated);
+        assert!(lines[1].truncated);
+        assert_eq!(lines[1].text.len(), Document::MAX_VIEW_LINE_BYTES);
+        assert!(!lines[2].truncated);
+
+        // Splicing into the truncated line must refuse, not corrupt.
+        let err = edits.replace_range(&doc, 1, 0, 1, 0, "typed").unwrap_err();
+        assert!(
+            matches!(err, Error::UnsupportedFeature(_)),
+            "expected a clean refusal, got {err:?}"
+        );
+
+        // Whole-line replacement never reads the old text: allowed.
+        edits.replace_line(&doc, 1, "replaced".into()).unwrap();
+        assert_eq!(edits.lines(&doc, 1, 1)[0].text, "replaced");
+        assert!(edits.undo());
+
+        // Deleting the giant line and saving copies only untouched spans —
+        // no decode of the giant line, and byte-exact remaining content.
+        edits.delete_line(&doc, 1).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let target = out.path().join("saved.txt");
+        edits.save_to_path(&doc, &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"short\ntail\n");
     }
 
     #[test]
@@ -2570,6 +2682,28 @@ mod tests {
         // edit #43 (0-based), exactly like the old snapshot history did.
         assert_eq!(texts(&edits, &doc), vec!["v43"]);
         assert!(edits.is_dirty());
+    }
+
+    #[test]
+    fn view_clone_keeps_content_without_copying_history() {
+        let (_f, doc) = doc_from(b"seed\nsecond\n");
+        let mut edits = EditSession::default();
+        for k in 0..300u32 {
+            edits.replace_line(&doc, 0, format!("value-{k}")).unwrap();
+        }
+        edits
+            .insert_line_before(&doc, 1, "inserted".into())
+            .unwrap();
+        assert_eq!(edits.undo.len(), HISTORY_LIMIT);
+
+        let view = edits.view_clone();
+        assert!(view.undo.is_empty());
+        assert!(view.redo.is_empty());
+        assert_eq!(view.revision, edits.revision);
+        assert_eq!(view.content_gen, edits.content_gen);
+        assert_eq!(view.saved_gen, edits.saved_gen);
+        assert_eq!(view.total_lines(&doc), edits.total_lines(&doc));
+        assert_eq!(texts(&view, &doc), texts(&edits, &doc));
     }
 
     #[test]

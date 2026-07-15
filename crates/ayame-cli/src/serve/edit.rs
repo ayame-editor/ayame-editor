@@ -37,7 +37,7 @@ pub(super) async fn api_lines(
     let snapshot = state.read(|ws| {
         // An empty workspace has no lines; answer with an empty page rather
         // than an error so the viewport can render nothing gracefully.
-        ws.doc().map(|doc| (doc.clone(), ws.edits.clone()))
+        ws.doc().map(|doc| (doc.clone(), ws.edits.view_clone()))
     });
     let Some((doc, edits)) = snapshot else {
         return Json(LinesResponse {
@@ -278,7 +278,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(super::output_error)?;
+        .map_err(ApiError::from)?;
         // Refresh the active tab from the converted file. Skipped (switched =
         // false) if edits landed while the rewrite was streaming, so no newer
         // edit is dropped — the client then falls back to a normal open.
@@ -303,7 +303,7 @@ pub(super) async fn api_edit_save(
         })
         .await
         .map_err(internal)?
-        .map_err(super::output_error)?;
+        .map_err(ApiError::from)?;
         let mut switched = false;
         if req.switch_to_saved {
             switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
@@ -721,6 +721,14 @@ fn write_selection_to_file(
         };
         for (i, line) in batch.iter().enumerate() {
             let no = start + i as u64;
+            // A view-capped line would export truncated data as if complete.
+            if line.truncated {
+                let _ = std::fs::remove_file(&stage);
+                return Err(bad_request(format!(
+                    "{} 行目が表示上限を超える長さのため選択保存できません。grep-lines / split で抽出してください",
+                    no + 1
+                )));
+            }
             let piece: String = if req.rect {
                 line.text
                     .chars()

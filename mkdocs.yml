@@ -6,14 +6,38 @@ repo_name: hjosugi/ayame-editor
 edit_uri: edit/main/docs/
 
 theme:
-  name: mkdocs
-  nav_style: light
-  navigation_depth: 3
-  highlightjs: true
-  hljs_languages:
-    - rust
-    - powershell
-    - yaml
+  name: material
+  language: en
+  logo: assets/favicon.svg
+  favicon: assets/favicon.svg
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.footer
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
 
 plugins:
   - search:
@@ -23,30 +47,57 @@ plugins:
 
 markdown_extensions:
   - admonition
-  - fenced_code
+  - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
 
 extra_css:
   - assets/ayame-docs.css
 
-hooks:
-  - scripts/mkdocs_ayame_pages.py
+extra:
+  generator: false
+  alternate:
+    - name: English
+      link: /ayame-editor/
+      lang: en
+    - name: 日本語
+      link: /ayame-editor/ja/
+      lang: ja
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hjosugi/ayame-editor
 
 nav:
   - Home: index.md
-  - User Guide: USER_GUIDE.md
-  - CLI Reference: CLI_REFERENCE.md
-  - Architecture: ARCHITECTURE.md
-  - Data Integrity: DATA_INTEGRITY.md
-  - Packaging: PACKAGING.md
-  - Developer Guide: DEVELOPMENT.md
+  - Using Ayame:
+      - User Guide: USER_GUIDE.md
+      - CLI Reference: CLI_REFERENCE.md
+      - Migrating to ayame-diff: MIGRATING_TO_AYAME_DIFF.md
+  - Internals:
+      - Architecture: ARCHITECTURE.md
+      - Data Integrity: DATA_INTEGRITY.md
+  - Development:
+      - Packaging: PACKAGING.md
+      - Developer Guide: DEVELOPMENT.md
   - 日本語:
-      - ホーム: ja/index.md
-      - ユーザー向け: ja/USER_GUIDE.md
-      - CLI リファレンス: ja/CLI_REFERENCE.md
-      - アーキテクチャ: ja/ARCHITECTURE.md
-      - データ完全性: ja/DATA_INTEGRITY.md
-      - 配布: ja/PACKAGING.md
-      - 開発者向け: ja/DEVELOPMENT.md
+      - はじめに:
+          - ホーム: ja/index.md
+      - 使いかた:
+          - ユーザー向け: ja/USER_GUIDE.md
+          - CLI リファレンス: ja/CLI_REFERENCE.md
+          - ayame-diff への移行: ja/MIGRATING_TO_AYAME_DIFF.md
+      - しくみ:
+          - アーキテクチャ: ja/ARCHITECTURE.md
+          - データ完全性: ja/DATA_INTEGRITY.md
+      - 開発・配布:
+          - 配布: ja/PACKAGING.md
+          - 開発者向け: ja/DEVELOPMENT.md

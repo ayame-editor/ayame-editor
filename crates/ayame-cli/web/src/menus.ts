@@ -1,7 +1,7 @@
 // Ayame Editor — menus module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayName, displayShortcut, humanBytes, setModalOpen } from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
-import { applyStaticI18n, t } from "./i18n.js";
+import { applyStaticI18n, currentLocale, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
 import { grepToFile, saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
 import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
@@ -29,7 +29,6 @@ import {
 } from "./edits.js";
 import {
   buildMatcher,
-  diffFile,
   flashCount,
   findStep,
   grepFolder,
@@ -63,7 +62,8 @@ import {
 
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
 
-export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"];
+export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
+const DROPDOWN_MENUS = [...APP_MENUS, "tools"];
 
 export const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -73,7 +73,7 @@ export const MENU_ID_ACTIONS = [
 ];
 
 export function fileMenuVisible() {
-  return APP_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
+  return DROPDOWN_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
 }
 
 export function showAppMenu(id) {
@@ -116,7 +116,7 @@ export function showAppMenu(id) {
 
 export function hideFileMenu(focusButton = false) {
   let focused = false;
-  for (const id of APP_MENUS) {
+  for (const id of DROPDOWN_MENUS) {
     const menu = $(`${id}-menu`);
     const button = $(`${id}-menu-button`);
     const wasOpen = !menu.classList.contains("hidden");
@@ -339,7 +339,8 @@ export function paletteMatches(item, query) {
 
 export function renderCommandPalette() {
   const list = $("palette-list");
-  const query = $("palette-input").value;
+  const input = $("palette-input");
+  const query = input.value;
   const visible = paletteItems.filter((item) => paletteMatches(item, query));
   paletteIndex = Math.max(0, Math.min(paletteIndex, visible.length - 1));
   list.textContent = "";
@@ -347,6 +348,7 @@ export function renderCommandPalette() {
   visible.forEach((item, index) => {
     const row = document.createElement("button");
     row.type = "button";
+    row.id = `palette-option-${index}`;
     row.className = "palette-row";
     row.classList.toggle("active", index === paletteIndex);
     row.setAttribute("role", "option");
@@ -367,7 +369,10 @@ export function renderCommandPalette() {
     frag.append(row);
   });
   list.append(frag);
-  list.querySelector(".palette-row.active")?.scrollIntoView({ block: "nearest" });
+  const active = list.querySelector(".palette-row.active");
+  if (active) input.setAttribute("aria-activedescendant", active.id);
+  else input.removeAttribute("aria-activedescendant");
+  active?.scrollIntoView({ block: "nearest" });
 }
 
 export function showCommandPalette() {
@@ -376,6 +381,7 @@ export function showCommandPalette() {
   paletteItems = commandPaletteItems();
   paletteIndex = 0;
   $("palette-input").value = "";
+  $("palette-input").setAttribute("aria-expanded", "true");
   setModalOpen($("command-palette"), true);
   renderCommandPalette();
   queueMicrotask(() => $("palette-input").focus());
@@ -383,6 +389,8 @@ export function showCommandPalette() {
 
 export function hideCommandPalette() {
   setModalOpen($("command-palette"), false);
+  $("palette-input").setAttribute("aria-expanded", "false");
+  $("palette-input").removeAttribute("aria-activedescendant");
   focusEditor();
 }
 
@@ -444,12 +452,10 @@ export function hideCtxMenu() {
 
 export function runCtxAction(action) {
   hideCtxMenu();
-  // Only the two context-menu-specific actions live here; everything else
-  // (cut / copy / selectAll / find / replace / sortSave / diffFile /
-  // splitFile) shares the menu dispatcher.
+  // Only saveSelection is context-menu-specific; clipboard and editor actions
+  // share the normal menu dispatcher.
   let out;
-  if (action === "paste") out = pasteFromClipboard();
-  else if (action === "saveSelection") out = saveSelectionToFile();
+  if (action === "saveSelection") out = saveSelectionToFile();
   else out = runMenuAction(action);
   // A context-menu click leaves focus on the (now hidden) menu item, killing
   // keyboard input after cut/copy etc. Put focus back in the editor once the
@@ -573,6 +579,8 @@ export function updateStatusMeta() {
     }
     $("st-edit").title = "";
     $("st-index").title = "";
+    $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: "—" }));
+    $("st-eol").setAttribute("aria-label", t("status.eolValue", { value: "—" }));
     $("st-pos").textContent = t("status.line0");
     $("undo-edit").disabled = true;
     $("redo-edit").disabled = true;
@@ -587,8 +595,13 @@ export function updateStatusMeta() {
   $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
   $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
   const lines = s.view_lines ?? s.lines;
-  $("st-enc").textContent = s.bom_bytes > 0 ? `${enc(s.encoding)} (BOM)` : enc(s.encoding);
-  $("st-eol").textContent = eol(s.eol);
+  const encoding =
+    s.bom_bytes > 0 ? t("status.encWithBom", { enc: enc(s.encoding) }) : enc(s.encoding);
+  const lineEnding = eol(s.eol);
+  $("st-enc").textContent = encoding;
+  $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: encoding }));
+  $("st-eol").textContent = lineEnding;
+  $("st-eol").setAttribute("aria-label", t("status.eolValue", { value: lineEnding }));
   // Deliberately terse: the bar shows state, the tooltip carries the numbers.
   $("st-edit").textContent = s.dirty ? t("status.unsaved") : t("status.saved");
   $("st-edit").title = s.dirty
@@ -603,9 +616,9 @@ export function updateStatusMeta() {
   $("st-index").textContent = t("status.indexOk");
   $("st-index").title = t("status.indexDetail", {
     lines: commas(lines),
-    bytes: humanBytes(s.bytes),
+    bytes: humanBytes(s.bytes, currentLocale()),
     checkpoints: commas(s.checkpoints),
-    indexBytes: humanBytes(s.index_bytes),
+    indexBytes: humanBytes(s.index_bytes, currentLocale()),
     indexMs: s.index_ms,
   });
   // Keep the active tab's unsaved-dot (and the tabs model behind
@@ -632,7 +645,12 @@ export function enc(e) {
 }
 
 export function eol(e) {
-  return { lf: "LF", crlf: "CRLF", cr: "CR", mixed: "Mixed", none: "None" }[e] || String(e);
+  // LF/CRLF/CR are universal; "混在"/"なし" (Mixed/None) are words, so localize.
+  return (
+    { lf: "LF", crlf: "CRLF", cr: "CR", mixed: t("status.eolMixed"), none: t("status.eolNone") }[
+      e
+    ] || String(e)
+  );
 }
 
 export function updateStatusPos() {
@@ -673,14 +691,22 @@ function optButtonLit(key): boolean {
 // Sync the lit state of the three find-bar option buttons to `state` without
 // toggling anything — used on init so "Match Case" reflects the default.
 export function refreshFindOptButtons() {
-  $("opt-case").classList.toggle("on", optButtonLit("ci"));
-  $("opt-word").classList.toggle("on", optButtonLit("word"));
-  $("opt-regex").classList.toggle("on", optButtonLit("regex"));
+  for (const [id, key] of [
+    ["opt-case", "ci"],
+    ["opt-word", "word"],
+    ["opt-regex", "regex"],
+  ]) {
+    const pressed = optButtonLit(key);
+    $(id).classList.toggle("on", pressed);
+    $(id).setAttribute("aria-pressed", String(pressed));
+  }
 }
 
 export function toggleOpt(key, id) {
   state[key] = !state[key];
-  $(id).classList.toggle("on", optButtonLit(key));
+  const pressed = optButtonLit(key);
+  $(id).classList.toggle("on", pressed);
+  $(id).setAttribute("aria-pressed", String(pressed));
   state.lastMatch = null;
   state.searchHits = null;
   state.searchTruncated = false;
@@ -709,6 +735,7 @@ export const ACTIONS: Record<
   deleteLine: { run: deleteLines },
   copy: { run: copySelection, globalShortcut: true, editorOnly: true },
   cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
+  paste: { run: pasteFromClipboard, editorOnly: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
   },
@@ -726,7 +753,6 @@ export const ACTIONS: Record<
   help: { run: showHelp, globalShortcut: true },
   about: { run: showAbout, globalShortcut: true },
   sortSave: { run: sortSave, globalShortcut: true },
-  diffFile: { run: diffFile, globalShortcut: true },
   splitFile: { run: splitFile, globalShortcut: true },
   grepFolder: { run: grepFolder, globalShortcut: true },
   grepSave: { run: grepToFile, globalShortcut: true },
@@ -779,7 +805,6 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "searchRegex",
   "searchWord",
   "sortSave",
-  "diffFile",
   "splitFile",
   "grepFolder",
   "grepSave",
@@ -823,7 +848,7 @@ export function runMenuAction(action) {
 window.__ayameMenu = runMenuAction;
 
 export function initMenuBar() {
-  for (const id of APP_MENUS) {
+  for (const id of DROPDOWN_MENUS) {
     const button = $(`${id}-menu-button`);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -831,9 +856,11 @@ export function initMenuBar() {
       if (open) hideFileMenu();
       else showAppMenu(id);
     });
-    button.addEventListener("pointerenter", () => {
-      if (fileMenuVisible()) showAppMenu(id);
-    });
+    if (APP_MENUS.includes(id)) {
+      button.addEventListener("pointerenter", () => {
+        if (fileMenuVisible()) showAppMenu(id);
+      });
+    }
   }
   document.querySelectorAll("[data-menu-action]").forEach((item) => {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));

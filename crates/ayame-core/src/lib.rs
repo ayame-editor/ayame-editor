@@ -25,7 +25,7 @@
 //! ## Layout
 //!
 //! * [`index`] — the sparse, parallel-built line index.
-//! * [`encoding`] — encoding (UTF-8 / Shift_JIS / EUC-JP) and EOL detection.
+//! * [`encoding`] — UTF-8, UTF-16, Japanese legacy encoding, and EOL detection.
 //! * [`search`] — streaming literal/regex search.
 //! * [`document`] — [`Document`], the immutable mmap-backed base handle.
 //!   Editing can be layered above it with a patch/WAL model without copying the
@@ -40,6 +40,7 @@ mod fields;
 mod fsync;
 pub mod grep;
 pub mod index;
+mod mapfault;
 pub mod ops;
 pub mod search;
 pub mod split;
@@ -53,7 +54,7 @@ pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
 pub use ops::{
     DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats,
-    LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions,
+    LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions, TopRow,
 };
 pub use search::{SearchHit, SearchOptions, SearchResult};
 pub use split::{
@@ -74,12 +75,28 @@ pub use wal::{LoggedOp, RecoveryInfo, WalWriter};
 pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// The mmapped base file shrank or was replaced by another process while
+    /// we were reading it. The document view is no longer trustworthy and the
+    /// caller must reopen/reindex the file. This is the recoverable form of
+    /// what used to be a SIGBUS process abort.
+    #[error("base file changed on disk (truncated or replaced), reopen required: {0}")]
+    BaseFileChanged(String),
     #[error("search error: {0}")]
     Search(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    /// A non-overwriting writer found its output target already present.
+    /// Structured (not a `Conflict` string) so callers can key overwrite
+    /// flows off the variant instead of re-synthesizing it from messages.
+    #[error("'{}' already exists; choose another path", path.display())]
+    TargetExists { path: std::path::PathBuf },
+    /// On-disk data produced by the engine itself failed to read back
+    /// (e.g. a truncated spill record). This is an engine/storage failure,
+    /// never a problem with the user's query or input.
+    #[error("data corruption: {0}")]
+    Corrupted(String),
     #[error("unsupported: {0}")]
     UnsupportedFeature(String),
 }

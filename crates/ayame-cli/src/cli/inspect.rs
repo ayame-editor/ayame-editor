@@ -48,10 +48,25 @@ pub(crate) fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
         .parse()
         .context("-n must be a number")?;
     let lines = if tail { doc.tail(n) } else { doc.head(n) };
+    let mut truncated = 0u64;
     for l in lines {
+        truncated += l.truncated as u64;
         println!("{}", l.text);
     }
+    note_truncated_lines(truncated);
     Ok(())
+}
+
+/// One stderr note (never stdout — that is the data) when display lines were
+/// cut at the view cap, so a silent-looking cut is at least announced.
+fn note_truncated_lines(count: u64) {
+    if count > 0 {
+        eprintln!(
+            "note: {count} line(s) exceeded {} bytes and were truncated for display; \
+             use 'ayame line' for one full line or grep-lines/split to extract data",
+            ayame_core::Document::MAX_VIEW_LINE_BYTES
+        );
+    }
 }
 
 pub(crate) fn cmd_line(args: &[String]) -> Result<()> {
@@ -64,7 +79,9 @@ pub(crate) fn cmd_line(args: &[String]) -> Result<()> {
     if n == 0 {
         bail!("line numbers are 1-based");
     }
-    match doc.line(n - 1) {
+    // Explicit single-line extraction wants the whole line, however long —
+    // O(line) memory by deliberate contract (the view APIs stay capped).
+    match doc.line_full(n - 1) {
         Some(t) => println!("{t}"),
         None => bail!(
             "line {n} out of range (file has {} lines)",
@@ -87,9 +104,12 @@ pub(crate) fn cmd_lines(args: &[String]) -> Result<()> {
         .parse()
         .context("COUNT must be a number")?;
     let start0 = start.saturating_sub(1);
+    let mut truncated = 0u64;
     for l in doc.lines(start0, count) {
+        truncated += l.truncated as u64;
         println!("{}\t{}", l.number + 1, l.text);
     }
+    note_truncated_lines(truncated);
     Ok(())
 }
 

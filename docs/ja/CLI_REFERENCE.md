@@ -9,6 +9,15 @@
 ファイルの端末処理を行えます。各コマンドはストリーミングまたは bounded memory
 で動くようにしてあり、通常のエディタで開けないサイズのファイルも扱えます。
 
+<div class="doc-jump-grid">
+  <a class="doc-jump" href="#commands">調べる・読み出す</a>
+  <a class="doc-jump" href="#transform-options">検索・変換する</a>
+  <a class="doc-jump" href="#sort-and-group-options">ソート・集計する</a>
+  <a class="doc-jump" href="#serve-options">Web エディタを開く</a>
+  <a class="doc-jump" href="#update-and-remove">更新・削除する</a>
+  <a class="doc-jump" href="#examples">実行例を見る</a>
+</div>
+
 ## 使い方
 
 ```sh
@@ -18,7 +27,7 @@ ayame <COMMAND> [OPTIONS]
 引数なしの場合、GUI build ではネイティブウィンドウを開きます。CLI build では
 ヘルプを表示します。
 
-## コマンド
+## コマンド { #commands }
 
 | コマンド | 目的 |
 | --- | --- |
@@ -28,9 +37,7 @@ ayame <COMMAND> [OPTIONS]
 | `line <FILE> <N>` | 1-based の 1 行を表示。 |
 | `lines <FILE> <START> <COUNT>` | START から COUNT 行を表示。どちらも 1-based。 |
 | `search <FILE> <PATTERN>` | リテラル、正規表現、大文字小文字無視、単語単位、件数制限つき検索。 |
-| `diff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `text`。行単位または side-by-side の差分。 |
 | `sort <FILE>` | メモリ制限つき external merge sort。 |
-| `sortdiff <OLD> <NEW>` | **非推奨** → [ayame-diff](https://github.com/hjosugi/ayame-diff) の `sorted`。両ファイルをソートしてから差分。`sort-diff` も利用可。 |
 | `replace <FILE> <FIND> <REPL>` | ストリーミング置換を新しいファイルへ書き出し。 |
 | `case <FILE> <MODE>` | 大文字小文字変換 (`upper`, `lower`, `camel`, `pascal`, `snake`, `kebab`, `constant`) を新しいファイルへ書き出し。 |
 | `grep-lines <FILE> <PATTERN>` | 一致した行だけを新しいファイルへ書き出し。 |
@@ -46,11 +53,15 @@ ayame <COMMAND> [OPTIONS]
 | `remove` | インストール済みの Ayame binary / app bundle を削除。 |
 | `version` | バージョンを表示。 |
 
+従来の `diff`、`sortdiff`、`sort-diff` コマンドは v0.7.0 で削除しました。
+1 リリースの間は、対応する ayame-diff コマンドを示すエラーを返します。
+[比較ワークフローの ayame-diff 移行ガイド](MIGRATING_TO_AYAME_DIFF.md)も参照してください。
+
 ## 共通オプション
 
 | オプション | 対象 | メモ |
 | --- | --- | --- |
-| `--encoding <ENC>` | ファイルを開くコマンド | `utf8`, `shift_jis`, `euc-jp`, `ascii` を指定。 |
+| `--encoding <ENC>` | ファイルを開くコマンド | `utf8`, `utf-16le`, `utf-16be`, `shift_jis`, `euc-jp`, `iso-2022-jp`, `ascii` を指定。 |
 | `--stride <N>` | ファイルを開くコマンド | sparse index checkpoint の行間隔。既定は 4096。 |
 | `--no-cache` | ファイルを開くコマンド | persistent index cache を読み書きしない。 |
 | `--cache-dir <DIR>` | ファイルを開くコマンド | index cache directory を上書き。 |
@@ -70,7 +81,7 @@ ayame <COMMAND> [OPTIONS]
 | `--quote <C>` | CSV quote character。既定は `"`. |
 | `--numeric` | `sort` / `top` のキーを数値として扱う。 |
 
-## sort / group オプション
+## sort / group オプション { #sort-and-group-options }
 
 | オプション | メモ |
 | --- | --- |
@@ -78,7 +89,7 @@ ayame <COMMAND> [OPTIONS]
 | `--budget <SIZE>` | ディスクへ spill する前のメモリ上限 (`sort` / `group`)。既定 256MiB。`512MiB` や `2GiB` の形式。 |
 | `--spill-dir <DIR>` | external-merge spill ファイルの出力先 (`sort` / `group`)。 |
 
-## 変換オプション
+## 変換オプション { #transform-options }
 
 | オプション | メモ |
 | --- | --- |
@@ -115,7 +126,7 @@ ayame <COMMAND> [OPTIONS]
 | `--max <N>` | 表示件数を制限。 |
 | `--start-byte <N>` | worker/API resume 用の開始 byte offset。 |
 
-## serve オプション
+## serve オプション { #serve-options }
 
 `ayame serve` は既定で `127.0.0.1:8777` に bind します。
 
@@ -146,7 +157,7 @@ ayame <COMMAND> [OPTIONS]
 `clear` の人間向けレポートは stderr に出力し、stdout はパイプ用に空けます。どの
 サブコマンドも `--json` を付けると構造化した結果を stdout に出力します。
 
-## update / remove
+## update / remove { #update-and-remove }
 
 | コマンド | オプション |
 | --- | --- |
@@ -172,7 +183,7 @@ binary として置き換えられます。Windows では実行中の exe を直
 
 `search --json` は常に `0` で終了します (一致有無は `hits` 配列で判断)。
 
-## 例
+## 例 { #examples }
 
 ```sh
 ayame stat huge.csv
@@ -181,9 +192,7 @@ ayame tail huge.log -n 200
 ayame line huge.log 500000
 ayame lines huge.log 500000 50
 ayame search huge.log 'ERROR' -i --max 50
-ayame diff old.csv new.csv --side-by-side --width 180
 ayame sort huge.csv -k 1 --csv --out sorted.csv
-ayame sortdiff old.csv new.csv -k 1 --summary
 ayame replace huge.log ERROR WARN --out fixed.log --jobs 0
 ayame case huge.csv lower --out lower.csv
 ayame grep-lines huge.log 'ERROR' -i --out errors.log

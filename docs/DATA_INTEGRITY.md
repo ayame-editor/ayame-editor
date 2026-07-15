@@ -59,6 +59,25 @@ transaction. On restart:
 - A **stale** log, whose base file changed underneath it, is refused so edits
   are never applied to the wrong content.
 
+## Scratch and spill placement
+
+Out-of-core work needs disk: dirty sessions materialize a worker input, the
+external-merge sort spills runs, and uploads stage bytes. These go to a
+**disk-backed scratch base**, never RAM-backed tmpfs, so a huge operation
+cannot OOM/ENOSPC the way it would under Linux's default `/tmp`. Resolution
+order:
+
+1. `--scratch-dir DIR` (serve/gui) or `$AYAME_SCRATCH_DIR`.
+2. `--cache-dir DIR/scratch` when a cache dir is given.
+3. Otherwise a `scratch/` subdir of the per-user cache root (the same
+   disk-backed location the index cache uses: `~/.cache/ayame`,
+   `~/Library/Caches/ayame`, `%LOCALAPPDATA%\ayame`).
+4. The OS temp dir only when no home/cache location is discoverable at all.
+
+`sort`/`group` also accept `--spill-dir` to point the spill somewhere explicit
+(e.g. the same volume as a very large input). Put the scratch base on a volume
+with room for the answer plus its spill.
+
 ## Known non-guarantees
 
 Honesty about the edges is part of the guarantee:

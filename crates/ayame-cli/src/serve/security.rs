@@ -17,9 +17,19 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+
+/// The editor is a self-contained same-origin app. Runtime layout updates use
+/// inline style properties, and custom wallpaper images are stored as `data:`
+/// URLs; everything else can stay locked to this server.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'none'";
+
+const CSP: HeaderName = HeaderName::from_static("content-security-policy");
+const X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
+const X_FRAME_OPTIONS: HeaderName = HeaderName::from_static("x-frame-options");
+const REFERRER_POLICY: HeaderName = HeaderName::from_static("referrer-policy");
 
 /// What Host/Origin values this server instance answers to.
 pub(super) struct NetPolicy {
@@ -127,6 +137,22 @@ pub(super) async fn guard(
         return *resp;
     }
     next.run(req).await
+}
+
+/// Add browser hardening to every response. Applying this at the router layer
+/// keeps the HTML entry point and every embedded asset under one policy, while
+/// API responses harmlessly receive the same defence-in-depth headers.
+pub(super) async fn harden_response(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert(CSP, HeaderValue::from_static(CONTENT_SECURITY_POLICY));
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // The UI is same-origin-only, so referrers have no legitimate consumer —
+    // and API URLs carry absolute file paths in their query strings, which
+    // must never leak into an outbound Referer (#192 follow-up).
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    response
 }
 
 /// The pure part of the guard, shared with the unit tests.

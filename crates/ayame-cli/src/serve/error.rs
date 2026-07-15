@@ -103,10 +103,18 @@ impl From<ayame_core::Error> for ApiError {
     fn from(e: ayame_core::Error) -> ApiError {
         use ayame_core::Error;
         let (status, code) = match &e {
+            // The mapped file shrank/rotated underneath us; the client must
+            // reload the document, same recovery as an edit conflict.
+            Error::BaseFileChanged(_) => (StatusCode::CONFLICT, "base_changed"),
             Error::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            // Structured variant: the web overwrite flow keys off "exists".
+            Error::TargetExists { .. } => (StatusCode::CONFLICT, "exists"),
             Error::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
             Error::Search(_) => (StatusCode::BAD_REQUEST, "search"),
             Error::UnsupportedFeature(_) => (StatusCode::BAD_REQUEST, "unsupported"),
+            // Engine/storage failure (e.g. truncated spill record): a
+            // 500-class server fault, never blamed on the user's input.
+            Error::Corrupted(_) => (StatusCode::INTERNAL_SERVER_ERROR, "corrupted"),
             Error::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io"),
         };
         ApiError {

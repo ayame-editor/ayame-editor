@@ -4,6 +4,148 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+## v0.7.6 - 2026-07-14
+
+- Worker scratch and sort spill no longer default to `env::temp_dir()` — on
+  Linux that is usually tmpfs (RAM), so materializing a dirty multi-GB file or
+  spilling a large sort there could ENOSPC/OOM, contradicting the
+  bounded-memory design. They now default to a disk-backed `scratch/` under
+  the per-user cache root, and serve/gui gained `--scratch-dir` (plus
+  `$AYAME_SCRATCH_DIR`); `--cache-dir` also relocates scratch. `sort`/`group`
+  still take `--spill-dir`. (#140)
+- Declared a minimum supported Rust version (1.95) and added a pinned-toolchain
+  CI job that enforces it. The build script's TS→JS step depends on oxc 0.138,
+  whose `oxc_transformer` needs Rust 1.95's `if let` match guards but
+  under-declares its own floor as 1.94; on a slightly older stable toolchain
+  the build failed with a cryptic `error[E0658]: if let guards are
+  experimental` deep inside the dependency. cargo now reports "requires rustc
+  1.95" up front, and the `msrv` CI job (which the floating-`stable` job can't
+  substitute for) fails if a future dependency raises the real minimum. (#195)
+
+## Unreleased
+
+- The native desktop app now cleans up its scratch on exit and reaps dead
+  sessions' leftovers on startup (#138). Graceful shutdown cleanup (uploads,
+  untitled buffers, unsaved sort results, in-place aside files, clean-session
+  WAL) was CLI `serve`-only; the GUI leaked all of it every session — up to
+  several GiB, and Windows %TEMP% is never auto-swept. The window close path
+  now runs the same cleanup, and startup reaps `ayame-*` scratch left by
+  crashed/killed prior processes whose PID is no longer alive (own and
+  live-sibling sessions are spared).
+
+## v0.7.5 - 2026-07-14
+
+- All four data ops now share one key normalization (#198): keys decode in the
+  document encoding and NFC-normalize before comparison, so a composed `café`
+  (U+00E9) and its decomposed form (`e`+U+0301) sort together, land in the
+  same group bucket, and count as one distinct value. group previously skipped
+  normalization and distinct hashed raw bytes, so the same data produced
+  different groupings per op.
+
+## v0.7.4 - 2026-07-13
+
+- Hardened the local editor UI with a same-origin Content Security Policy,
+  MIME-sniffing protection, and frame denial on every response. The policy
+  keeps the app's runtime layout styles and local `data:` wallpaper images
+  working while blocking foreign scripts, connections, embedding, objects,
+  forms, and workers. (#192)
+
+## v0.7.3 - 2026-07-13
+
+- Data ops now understand RFC-4180 records (#199): with `--csv`, a quoted
+  field containing a newline keys as ONE record for sort/group/distinct/top
+  instead of two broken "lines" — Excel/pandas exports with embedded newlines
+  finally aggregate correctly. Multi-line records are merged by quote parity
+  as zero-copy slices of the mmap, sort's ordering/offset artifacts are
+  record-numbered (a sorted multi-line record moves byte-exactly as one unit),
+  top selections carry their full byte range, and a stray unclosed quote is
+  capped (4096 lines / 8 MiB per record) instead of fusing the rest of the
+  file into a single record. Non-CSV mode is unchanged.
+
+## v0.7.2 - 2026-07-13
+
+- Fixed three encoding/EOL detection failures (#196): ASCII-heavy UTF-16
+  without a BOM is now detected by NUL-byte parity instead of short-circuiting
+  to UTF-8 (which rendered interleaved NULs and built garbage sort keys);
+  ISO-2022-JP is a first-class encoding — detected by its JIS escape sequences
+  (deliberately not by the `ESC ( B` designation that also appears in colored
+  terminal logs), decoded, searchable (always through the decoded-text plan,
+  since raw-byte scans both miss mid-run matches and false-positive on escape
+  bytes), and available to convert-save and `--encoding`; and classic-Mac
+  CR-only files finally split into lines — the line index can now terminate on
+  lone `\r`, so `stat` no longer reports "1 line" next to "line ending CR",
+  and sort/group/split/tail-follow see real records. Cached indexes remember
+  their newline strategy, so an LF index cached by an older build cannot serve
+  a CR-only file.
+
+## v0.7.1 - 2026-07-13
+
+- group-by aggregates are now deterministic and clean: `sum`/`avg` accumulate
+  through an exact (correctly-rounded, order-independent) summation, so the
+  result no longer changes with the spill budget or loses low bits past 2^53;
+  non-finite value strings (`NaN`, `inf`, `1e999`…) no longer poison a group's
+  aggregates; and `min`/`max` report nothing instead of leaking the internal
+  `±inf` sentinels when a group has no numeric values. (#197)
+- The bounded-memory contract now survives files with no (or absurdly distant)
+  newlines: view APIs decode at most 4 MiB per line (`Line.truncated` /
+  `EditLine.truncated` report the cut, `ayame line` and sorted outputs still
+  decode in full), op keys for sort/group/top/distinct are built from at most
+  the first 64 KiB of a field (longer fields fall back to sort's stable
+  original-order tie-break), and a match's character column is computed with a
+  streaming counter instead of decoding the whole line prefix. In-place edits
+  of over-cap lines are refused with a clear error instead of silently
+  truncating them, and selection export refuses truncated lines. (#201)
+- sort/group no longer strand spill runs, partial `*.ordering.bin` /
+  `*.lines.bin` artifacts, or their private spill directory when an operation
+  fails or a callback panics mid-run — cleanup now runs in a drop guard
+  covering every exit path. (#201)
+- The editor no longer dies with an uncatchable `SIGBUS` when another process
+  truncates (or rotates a shorter file over) a file it has memory-mapped. A
+  process-wide fault absorber (`ayame-core::mapfault`) turns the fault into a
+  sticky per-mapping flag; every read path — viewport, search, sort/group/
+  distinct/top scans, grep's per-file maps, and the spill offset tables —
+  now surfaces a clean "base file changed on disk" error (HTTP 409 in the web
+  UI) and requires a reopen, instead of aborting the whole process. Save,
+  split, sort and transform verify the base file before committing output, so
+  bytes read through a shrunk mapping can never be laundered into a saved
+  file. (#200)
+
+## v0.7.0 - 2026-07-12
+
+- **Breaking:** removed the `diff` / `sortdiff` implementations, `/api/diff`,
+  the Web two-file diff view, native/menu commands, diff-only CSS and tests.
+  Comparison now lives in [ayame-diff](https://github.com/hjosugi/ayame-diff):
+  replace `ayame diff OLD NEW` with `ayame-diff text OLD NEW`, and replace
+  `ayame sortdiff OLD NEW` with `ayame-diff sorted OLD NEW`. The old CLI names
+  return an actionable migration error for this release. (#94–#104)
+- Improved keyboard and assistive-technology support: search toggles expose
+  their labels and pressed state, status controls announce their values, the
+  command palette tracks its active option, all major controls have a visible
+  theme-aware focus ring, and persistent motion stops when the OS requests
+  reduced motion. (#156, #171, #183)
+- Made each visual theme own its syntax palette, with genuinely monochrome
+  highlighting in Mono Paper, and removed duplicate menu entries and the
+  double-bound encoding conversion action. (#154, #181)
+
+## v0.6.1 - 2026-07-12
+
+- Stopped `/api/lines` viewport reads from deep-cloning up to 256 undo/redo
+  generations on every scroll or edit refresh. Read snapshots now copy only the
+  sparse overlay and required generation metadata while preserving identical
+  rendered content. (#139)
+
+## v0.6.0 - 2026-07-12
+
+- Hardened `cargo xtask release`: workspace versions are now read and edited
+  structurally, Cargo metadata is parsed as JSON, release phases are separated,
+  and GitHub Actions polling is pinned to the exact release commit instead of
+  whichever Release run happens to be newest. (#145)
+- Unified Web UI typography, control radii, shadows, syntax colors, and diff
+  colors behind semantic design tokens shared with ayame-diff. Dark and black
+  themes now define their own accent/status colors, inline deletions/additions
+  use distinct red/green word tokens, and the default runtime monospace stack
+  retains Japanese CJK fallbacks. Added token-drift tests. (#131, #132, #133,
+  #134, #135)
 - Deprecated the `diff` and `sortdiff` subcommands (#94). They now print a
   notice pointing to the sister project
   [ayame-diff](https://github.com/hjosugi/ayame-diff), whose `text` / `sorted`

@@ -58,15 +58,14 @@ import {
 } from "./edits.js";
 import {
   buildMatcher,
-  diffVisible,
   findStep,
   flashCount,
   grepVisible,
-  hideDiff,
   hideFind,
   hideGrep,
   replaceAll,
   replaceCurrent,
+  scheduleCount,
   selectNextOccurrence,
   setReplaceRow,
   showSearchHistory,
@@ -93,7 +92,6 @@ export function anyModalOpen() {
     settingsVisible() ||
     keymapVisible() ||
     commandPaletteVisible() ||
-    diffVisible() ||
     grepVisible() ||
     openerVisible() ||
     convertVisible() ||
@@ -106,7 +104,6 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
   [fileMenuVisible, () => hideFileMenu(true)],
   [keymapVisible, hideKeymap],
   [commandPaletteVisible, hideCommandPalette],
-  [diffVisible, hideDiff],
   [grepVisible, hideGrep],
   [settingsVisible, hideSettings],
   [convertVisible, hideConvert],
@@ -129,6 +126,7 @@ export function setQueryFromInput() {
   state.searchTruncated = false;
   buildMatcher();
   $("find-count").textContent = state.regexError ? t("find.regexError") : "";
+  scheduleCount(); // keep the "N / total" label in sync with the live highlights
   scheduleRender();
 }
 
@@ -204,7 +202,6 @@ export function initEvents() {
     hideFileMenu();
     saveCopy();
   });
-  $("convert-save-item").addEventListener("click", showConvert);
   $("convert-close").addEventListener("click", hideConvert);
   $("convert-cancel").addEventListener("click", hideConvert);
   $("convert-enc").addEventListener("change", syncConvertBom);
@@ -246,10 +243,6 @@ export function initEvents() {
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
-  $("diff-close").addEventListener("click", hideDiff);
-  $("diff-modal").addEventListener("click", (e) => {
-    if (e.target === $("diff-modal")) hideDiff();
-  });
   $("grep-close").addEventListener("click", hideGrep);
   $("grep-modal").addEventListener("click", (e) => {
     if (e.target === $("grep-modal")) hideGrep();

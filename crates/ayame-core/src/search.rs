@@ -96,6 +96,23 @@ impl MatchPlan {
         if query.is_empty() {
             return Err(error("empty query".into()));
         }
+        if enc == Encoding::Iso2022Jp {
+            // Stateful 7-bit JIS: raw-byte scanning is wrong in both directions
+            // — an encoded needle carries designation escapes that a mid-run
+            // hit lacks (misses), and ASCII needle bytes also occur inside JIS
+            // code pairs (false hits). Decode lines and match on text, whatever
+            // the query flags say.
+            let pat = if regex {
+                query.to_string()
+            } else {
+                regex::escape(query)
+            };
+            let re = regex::RegexBuilder::new(&pat)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| error(format!("invalid regex: {e}")))?;
+            return Ok(MatchPlan::DecodeLine(re));
+        }
         if !regex && case_sensitive {
             // Fast path: encode the needle into the file's encoding and scan bytes.
             // For legacy multi-byte encodings the call sites boundary-validate
@@ -383,10 +400,9 @@ fn hit_at(buf: &[u8], index: &LineIndex, enc: Encoding, abs: usize, mlen: usize)
     let byte = abs as u64;
     let line = index.line_of_byte(buf, byte);
     let (ls, _le) = index.line_range(buf, line).unwrap_or((byte, byte));
-    let column = enc
-        .decode_line(&buf[ls as usize..byte as usize])
-        .chars()
-        .count() as u64;
+    // Streaming count: a match deep inside one enormous line must not
+    // materialize the whole decoded prefix just to compute its column (#201).
+    let column = enc.count_chars(&buf[ls as usize..byte as usize]);
     SearchHit {
         line,
         column,
@@ -550,6 +566,8 @@ fn decoded_char_span(
 ) -> (usize, usize) {
     if enc.is_wide() {
         utf16_char_span(text, char_start, char_len)
+    } else if enc == Encoding::Iso2022Jp {
+        crate::encoding::iso2022jp_char_span(raw, char_start, char_len)
     } else {
         legacy_char_span(enc, raw, char_start, char_len)
     }
@@ -562,15 +580,13 @@ fn decoded_char_span(
 fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
     let b = raw[i];
     match enc {
-        Encoding::ShiftJis => {
+        Encoding::ShiftJis
             if matches!(b, 0x81..=0x9F | 0xE0..=0xFC)
-                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC))
-            {
-                2
-            } else {
-                1
-            }
+                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC)) =>
+        {
+            2
         }
+        Encoding::ShiftJis => 1,
         Encoding::EucJp => match b {
             0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
             0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))

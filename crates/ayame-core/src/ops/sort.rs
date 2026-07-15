@@ -9,7 +9,7 @@ use crate::encoding::Encoding;
 use crate::fields::{comparable_key, FieldSpec};
 use crate::Result;
 
-use super::common::{read_full, unique_spill_dir};
+use super::common::{read_full, unique_spill_dir, SpillCleanup};
 use super::spill::{self, HeapEntry, Payload, RunReader};
 
 /// How to sort.
@@ -102,6 +102,11 @@ where
         .unwrap_or("run");
     let ordering_path = opts.spill_dir.join(format!("{run_name}.ordering.bin"));
     let line_offsets_path = opts.spill_dir.join(format!("{run_name}.lines.bin"));
+    // Any exit before the final disarm — error or panic — must leave no runs,
+    // partial artifacts, or the spill directory behind (#201).
+    let mut cleanup = SpillCleanup::new(spill_dir.clone());
+    cleanup.register_file(ordering_path.clone());
+    cleanup.register_file(line_offsets_path.clone());
     let mut line_offsets = BufWriter::new(File::create(&line_offsets_path)?);
 
     // ---- phase 1: run generation ----------------------------------------
@@ -115,15 +120,20 @@ where
 
     let mut scratch = Vec::new();
     report_progress(&mut progress, 0, progress_total);
-    doc.try_for_each_raw_line_with_offsets(
-        |line_no, raw, raw_start, raw_end| {
+    // Logical records: physical lines, or RFC-4180 records (quoted fields may
+    // span lines) in CSV mode — one key, one offsets entry, one ordering slot
+    // per record, so a record with an embedded newline sorts as a unit (#199).
+    super::common::try_for_each_record(
+        doc,
+        &opts.fields,
+        |record_no, raw, raw_start, raw_end| {
             let mut offset_record = [0u8; 16];
             offset_record[..8].copy_from_slice(&raw_start.to_le_bytes());
             offset_record[8..].copy_from_slice(&raw_end.to_le_bytes());
             line_offsets.write_all(&offset_record)?;
             let key = sort_key(raw, enc, opts, &mut scratch);
             buffered_bytes += key.len() + 40; // key + Vec/tuple overhead estimate
-            buffer.push((key, line_no));
+            buffer.push((key, record_no));
             if buffered_bytes >= opts.budget_bytes {
                 spill_bytes += spill_run(&mut buffer, opts.reverse, &spill_dir, &mut runs)?;
                 buffered_bytes = 0;
@@ -164,6 +174,7 @@ where
     }
     fs::rename(&ordering_tmp, &ordering_path)?;
     let _ = fs::remove_dir(&spill_dir);
+    cleanup.disarm();
 
     Ok(SortResult {
         ordering_path,
@@ -239,18 +250,24 @@ impl OrderingReader {
 /// dense table is memory-mapped, so it consumes virtual address space but no
 /// heap proportional to the document's line count.
 pub struct LineOffsetReader {
+    // Declared before `mmap` so it deregisters while the range is still mapped.
+    watch: crate::mapfault::MapWatch,
     mmap: Option<Mmap>,
 }
 
 impl LineOffsetReader {
     pub fn open(path: &Path) -> Result<LineOffsetReader> {
         let file = File::open(path)?;
+        // SAFETY(mmap): the offsets file lives in a temp/spill directory that
+        // an external cleaner may truncate; `watch` absorbs the SIGBUS and
+        // `raw_range` degrades to `None` (a "missing offset" error upstream).
         let mmap = if file.metadata()?.len() == 0 {
             None
         } else {
             Some(unsafe { Mmap::map(&file)? })
         };
-        Ok(LineOffsetReader { mmap })
+        let watch = crate::mapfault::MapWatch::watch(mmap.as_deref().unwrap_or(&[]));
+        Ok(LineOffsetReader { watch, mmap })
     }
 
     pub fn raw_range(&self, line: u64) -> Option<(u64, u64)> {
@@ -258,6 +275,9 @@ impl LineOffsetReader {
         let record = self.mmap.as_deref()?.get(start..start.checked_add(16)?)?;
         let raw_start = u64::from_le_bytes(record[0..8].try_into().ok()?);
         let raw_end = u64::from_le_bytes(record[8..16].try_into().ok()?);
+        if self.watch.faulted() {
+            return None;
+        }
         Some((raw_start, raw_end))
     }
 }

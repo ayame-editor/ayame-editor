@@ -51,7 +51,14 @@ const MAX_VIEW: u64 = 20_000;
 pub fn cmd_serve(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--host", "--port", "--cache-dir"],
+        &[
+            "--encoding",
+            "--stride",
+            "--host",
+            "--port",
+            "--cache-dir",
+            "--scratch-dir",
+        ],
         &["--no-cache", "--allow-remote"],
     )?;
     let host = first_opt(&opts, &["--host"])
@@ -95,6 +102,10 @@ pub(crate) fn build_state(
     opts: &std::collections::HashMap<String, String>,
     flags: &std::collections::HashSet<String>,
 ) -> Result<AppState> {
+    configure_scratch(opts);
+    // Reap scratch that crashed/killed prior sessions left behind before we
+    // start piling on our own (#138). Safe: only dead PIDs' dirs are removed.
+    crate::temp_paths::sweep_stale_scratch();
     let open_options = open_opts(opts, flags)?;
     let doc = match pos.first() {
         Some(path) => {
@@ -125,6 +136,20 @@ pub(crate) fn build_state(
         }
     };
     Ok(AppState::new(doc, open_options))
+}
+
+/// Pin the scratch/spill base for this process from the flags, so worker
+/// materialization and sort spill land on disk, not tmpfs (#140). Explicit
+/// `--scratch-dir` wins; otherwise `--cache-dir/scratch` keeps scratch on the
+/// same (disk-backed) volume as the index cache. With neither, the lazy
+/// default in `temp_paths` applies (`AYAME_SCRATCH_DIR`, else the per-user
+/// cache root, else the OS temp dir).
+fn configure_scratch(opts: &std::collections::HashMap<String, String>) {
+    if let Some(dir) = first_opt(opts, &["--scratch-dir"]) {
+        crate::temp_paths::set_scratch_base(std::path::PathBuf::from(dir));
+    } else if let Some(cache) = first_opt(opts, &["--cache-dir"]) {
+        crate::temp_paths::set_scratch_base(std::path::Path::new(cache).join("scratch"));
+    }
 }
 
 /// Build the axum router. Every endpoint is a thin wrapper over `ayame-core`;
@@ -187,8 +212,8 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/search", get(ops::api_search))
         .route("/api/grep", post(ops::api_grep))
         .route("/api/find", get(ops::api_find))
-        .route("/api/diff", get(ops::api_diff))
         .route("/api/linebyte", get(ops::api_linebyte))
+        .layer(axum::middleware::from_fn(security::harden_response))
         .layer(axum::middleware::from_fn_with_state(
             policy,
             security::guard,
@@ -247,14 +272,20 @@ async fn serve(
         })
         .await
         .context("server error");
-    // Graceful shutdown: drop the scratch this process accumulated (uploads,
-    // untitled buffers, unsaved sort results, in-place save aside files).
-    // Crash logs of CLEAN sessions go too; dirty ones stay on disk — they are
-    // the recovery artifact the next process offers to replay.
+    cleanup_session(&state);
+    result
+}
+
+/// Drop everything this process accumulated on disk: uploads, untitled
+/// buffers, unsaved sort results, in-place save aside files, and the crash
+/// logs of CLEAN sessions (dirty ones stay — they are the recovery artifact
+/// the next process offers to replay). Called on CLI `serve` graceful
+/// shutdown AND on GUI window close, so the desktop mode stops leaking
+/// scratch every session (#138).
+pub(crate) fn cleanup_session(state: &SharedState) {
     state.cleanup_wal_files();
     state.cleanup_aside_files();
     workspace::cleanup_temp_dirs();
-    result
 }
 
 fn resolve_bind_addr(host: &str, port: u16) -> Result<SocketAddr> {
@@ -420,18 +451,6 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
 }
 
-/// Errors from non-overwriting output writers. Core reports an existing target
-/// as `Conflict`; preserve that distinction as the stable `exists` code so the
-/// web overwrite flow never has to inspect localized message text (#81.2).
-fn output_error(e: ayame_core::Error) -> ApiError {
-    match e {
-        ayame_core::Error::Conflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, "exists", message)
-        }
-        other => ApiError::from(other),
-    }
-}
-
 fn default_save_copy_path(path: &Path) -> PathBuf {
     default_suffix_path(path, "edited")
 }
@@ -544,14 +563,19 @@ mod tests {
         (addr, state)
     }
 
-    /// Minimal raw HTTP/1.1 client (avoids extra dev-dependencies): returns
-    /// (status, body-ish text — headers stripped, chunk framing tolerated).
-    async fn send(addr: SocketAddr, raw: String) -> (u16, String) {
+    /// Minimal raw HTTP/1.1 client (avoids extra dev-dependencies).
+    async fn send_full(addr: SocketAddr, raw: String) -> String {
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
         s.write_all(raw.as_bytes()).await.unwrap();
         let mut buf = Vec::new();
         s.read_to_end(&mut buf).await.unwrap();
-        let text = String::from_utf8_lossy(&buf).to_string();
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    /// Return (status, body-ish text), stripping headers and tolerating chunk
+    /// framing for tests that only care about the API payload.
+    async fn send(addr: SocketAddr, raw: String) -> (u16, String) {
+        let text = send_full(addr, raw).await;
         let status = text
             .split_whitespace()
             .nth(1)
@@ -593,6 +617,41 @@ mod tests {
             body.len(),
             String::from_utf8_lossy(body)
         )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn responses_include_browser_security_headers() {
+        let f = scratch_file("security-headers.txt", b"hello\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+
+        let response = send_full(addr, get("/", &host)).await;
+        let headers = response
+            .split_once("\r\n\r\n")
+            .map(|(head, _)| head.to_ascii_lowercase())
+            .unwrap_or_default();
+        assert!(
+            headers.contains("content-security-policy: default-src 'self'"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("frame-ancestors 'none'"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("x-content-type-options: nosniff"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("x-frame-options: deny"),
+            "headers: {headers}"
+        );
+        assert!(
+            headers.contains("referrer-policy: no-referrer"),
+            "headers: {headers}"
+        );
+
+        let _ = std::fs::remove_file(&f);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -13,7 +13,7 @@ import {
   setModalOpen,
 } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
-import { serverMessage, t } from "./i18n.js";
+import { currentLocale, serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
 import {
   confirmCloseLastTab,
@@ -45,6 +45,118 @@ import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
+
+let openerActiveIndex = -1;
+let openerOptionSeq = 0;
+
+export function openerOptions(): HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      "#opener-recent .opener-row, #opener-list .opener-row",
+    ),
+  ];
+}
+
+export function resetOpenerSelection() {
+  openerActiveIndex = -1;
+  for (const id of ["opener-recent", "opener-list"]) {
+    document.getElementById(id)?.removeAttribute("aria-activedescendant");
+  }
+  for (const row of openerOptions()) {
+    row.classList.remove("active");
+    row.setAttribute("aria-selected", "false");
+  }
+}
+
+function setOpenerActiveIndex(index, focusList = false) {
+  const options = openerOptions();
+  if (!options.length) {
+    resetOpenerSelection();
+    return null;
+  }
+  openerActiveIndex = (index + options.length) % options.length;
+  const active = options[openerActiveIndex];
+  for (const row of options) {
+    const selected = row === active;
+    row.classList.toggle("active", selected);
+    row.setAttribute("aria-selected", String(selected));
+  }
+  for (const id of ["opener-recent", "opener-list"]) {
+    document.getElementById(id)?.removeAttribute("aria-activedescendant");
+  }
+  const owner = active.closest<HTMLElement>('[role="listbox"]');
+  owner?.setAttribute("aria-activedescendant", active.id);
+  if (focusList) owner?.focus();
+  active.scrollIntoView?.({ block: "nearest" });
+  return active;
+}
+
+export function moveOpenerSelection(delta, focusList = true) {
+  const options = openerOptions();
+  if (!options.length) return null;
+  const next =
+    openerActiveIndex < 0 ? (delta < 0 ? options.length - 1 : 0) : openerActiveIndex + delta;
+  return setOpenerActiveIndex(next, focusList);
+}
+
+function prepareOpenerOption(row: HTMLElement) {
+  row.id = `opener-option-${++openerOptionSeq}`;
+  row.tabIndex = -1;
+  row.setAttribute("role", "option");
+  row.setAttribute("aria-selected", "false");
+  row.addEventListener("mouseenter", () => {
+    const index = openerOptions().indexOf(row);
+    if (index >= 0) setOpenerActiveIndex(index);
+  });
+}
+
+export function onOpenerListFocus(e) {
+  const owner = e.currentTarget as HTMLElement;
+  const options = openerOptions();
+  const active = options[openerActiveIndex];
+  if (active && owner.contains(active)) return;
+  const first = options.findIndex((row) => owner.contains(row));
+  if (first >= 0) setOpenerActiveIndex(first);
+}
+
+export function onOpenerListKeydown(e) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    hideOpener();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    moveOpenerSelection(e.key === "ArrowDown" ? 1 : -1);
+    return;
+  }
+  if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    const options = openerOptions();
+    if (options.length) setOpenerActiveIndex(e.key === "Home" ? 0 : options.length - 1, true);
+    return;
+  }
+  if (e.key === "Enter" || e.key === " ") {
+    const active = openerOptions()[openerActiveIndex];
+    if (active) {
+      e.preventDefault();
+      active.click();
+    }
+  }
+}
+
+export function onOpenerInputKeydown(e) {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    moveOpenerSelection(e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    commitOpener();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    hideOpener();
+  }
+}
 
 export function openerVisible() {
   return !$("opener").classList.contains("hidden");
@@ -109,29 +221,6 @@ export function showFolderDialog(title, startDir): Promise<string | null> {
   });
 }
 
-// Pick one file without opening it in the editor. Used by tools such as the
-// browser build's two-file diff, where a real path is needed as an input.
-export function showFileDialog(title, startDir): Promise<string | null> {
-  return new Promise((resolve) => {
-    configureOpener("file", title);
-    state.openerResolve = resolve;
-    $("opener-input").value = "";
-    setModalOpen($("opener"), true);
-    browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
-    queueMicrotask(() => $("opener-input").focus());
-  });
-}
-
-export function finishFileDialog(value) {
-  const resolve = state.openerResolve;
-  state.openerResolve = null;
-  state.openerMode = "open";
-  setModalOpen($("opener"), false);
-  configureOpener("open");
-  focusEditor();
-  if (resolve) resolve(value);
-}
-
 export function finishFolderDialog(value) {
   const resolve = state.openerResolve;
   state.openerResolve = null;
@@ -173,16 +262,13 @@ export function configureOpener(mode, title?) {
 }
 
 export function hideOpener() {
+  resetOpenerSelection();
   if (state.openerMode === "save") {
     finishSaveDialog(null);
     return;
   }
   if (state.openerMode === "folder") {
     finishFolderDialog(null);
-    return;
-  }
-  if (state.openerMode === "file") {
-    finishFileDialog(null);
     return;
   }
   // The opener doubles as the welcome screen: don't let it close while there is
@@ -239,6 +325,7 @@ export function renderBrowse(res) {
   }
   for (const ent of res.entries) list.append(browseRow(ent, false));
   list.scrollTop = 0;
+  resetOpenerSelection();
 }
 
 // The server's virtual drive-list level ("PC" in Windows Explorer terms);
@@ -253,11 +340,11 @@ export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string
   host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+    crumbs = [{ label: t("dialog.open.thisPc"), path: DRIVES_DIR }];
   } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
     // Windows: a "PC" root crumb in front of the drive, so other drives are
     // one click away (the drive list is also the ".." of every drive root).
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+    crumbs = [{ label: t("dialog.open.thisPc"), path: DRIVES_DIR }, ...crumbs];
   }
   for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) {
@@ -285,6 +372,7 @@ export function browseRow(ent, isUp) {
   const row = document.createElement("button");
   row.className = "opener-row" + (ent.is_dir ? " dir" : "") + (isUp ? " up" : "");
   row.type = "button";
+  prepareOpenerOption(row);
   // The kind ("フォルダ" / "ファイル") moved from visible text into the icon;
   // keep it for screen readers via the row's accessible name.
   row.setAttribute(
@@ -302,7 +390,7 @@ export function browseRow(ent, isUp) {
   nm.textContent = isUp ? t("dialog.open.up") : ent.name;
   const sz = document.createElement("span");
   sz.className = "sz";
-  sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
+  sz.textContent = ent.is_dir ? "" : humanBytes(ent.size, currentLocale());
   row.append(ic, nm, sz);
   row.addEventListener("click", () => {
     if (ent.is_dir) browse(ent.path);
@@ -310,8 +398,7 @@ export function browseRow(ent, isUp) {
       $("opener-input").value = ent.name;
       markPickedFile(ent.name);
       $("opener-input").focus();
-    } else if (state.openerMode === "file") finishFileDialog(ent.path);
-    else if (state.openerMode === "open") openPath(ent.path);
+    } else if (state.openerMode === "open") openPath(ent.path);
     // folder mode: files are not selectable targets — ignore the click.
   });
   row.addEventListener("dblclick", () => {
@@ -364,12 +451,14 @@ export function renderRecentFiles() {
   // saving or picking a folder target.
   const list = state.openerMode === "open" ? loadRecentFiles() : [];
   box.textContent = "";
+  resetOpenerSelection();
   if (!list.length) {
     box.classList.add("hidden");
     return;
   }
   const head = document.createElement("div");
   head.className = "opener-recent-head";
+  head.setAttribute("aria-hidden", "true");
   head.textContent = t("dialog.open.recent");
   box.append(head);
   for (const path of list) box.append(recentRow(path));
@@ -380,6 +469,7 @@ export function recentRow(path) {
   const row = document.createElement("button");
   row.className = "opener-row recent";
   row.type = "button";
+  prepareOpenerOption(row);
   row.title = path;
   row.setAttribute("aria-label", `${t("dialog.open.recent")}: ${pathBaseName(path) || path}`);
   const ic = document.createElement("span");
@@ -446,12 +536,6 @@ export async function commitOpener() {
   if (state.openerMode === "save") {
     const target = await saveDialogTarget();
     if (target) finishSaveDialog(target);
-    return;
-  }
-  if (state.openerMode === "file") {
-    const raw = $("opener-input").value.trim();
-    if (!raw) return;
-    finishFileDialog(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
     return;
   }
   // Like save mode: a typed relative name means "in the folder being
@@ -699,6 +783,9 @@ export function renderTabs(list) {
           disabled: state.tabs.length < 2,
           action: async () => {
             // Snapshot ids first — closeTab mutates state.tabs as it runs.
+            // Close sequentially: each closeTab settles the edit queue,
+            // POSTs, and re-renders; firing N of them concurrently races
+            // docGen bumps and briefly "opens" intermediate tabs.
             const others = state.tabs.filter((o) => o.id !== tab.id).map((o) => o.id);
             await closeTabsSequentially(others);
           },
@@ -958,15 +1045,11 @@ export function initWorkspace() {
   });
   $("opener-close").addEventListener("click", hideOpener);
   $("opener-open").addEventListener("click", commitOpener);
-  $("opener-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitOpener();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      hideOpener();
-    }
-  });
+  $("opener-input").addEventListener("keydown", onOpenerInputKeydown);
+  for (const id of ["opener-recent", "opener-list"]) {
+    $(id).addEventListener("focus", onOpenerListFocus);
+    $(id).addEventListener("keydown", onOpenerListKeydown);
+  }
   // Click on the dim backdrop (outside the panel) closes the dialog.
   $("opener").addEventListener("click", (e) => {
     if (e.target === $("opener")) hideOpener();

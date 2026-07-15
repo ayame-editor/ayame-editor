@@ -14,9 +14,11 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
+use toml_edit::{value, DocumentMut};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -161,15 +163,32 @@ fn repo_root() -> Result<PathBuf> {
 }
 
 fn workspace_version(root: &Path) -> Result<String> {
-    let text = std::fs::read_to_string(root.join("Cargo.toml"))?;
-    for line in text.lines() {
-        if let Some(v) = line.strip_prefix("version = \"") {
-            if let Some(v) = v.strip_suffix('"') {
-                return Ok(v.to_string());
-            }
-        }
+    let manifest = root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)?;
+    let document = text
+        .parse::<DocumentMut>()
+        .with_context(|| format!("parsing {}", manifest.display()))?;
+    document["workspace"]["package"]["version"]
+        .as_str()
+        .map(str::to_owned)
+        .context("workspace.package.version not found in Cargo.toml")
+}
+
+fn set_workspace_version(root: &Path, next: &str) -> Result<()> {
+    let manifest = root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)?;
+    let mut document = text
+        .parse::<DocumentMut>()
+        .with_context(|| format!("parsing {}", manifest.display()))?;
+    let version = document["workspace"]["package"]["version"]
+        .as_str()
+        .context("workspace.package.version not found in Cargo.toml")?;
+    if version == next {
+        return Ok(());
     }
-    bail!("workspace version not found in Cargo.toml");
+    document["workspace"]["package"]["version"] = value(next);
+    std::fs::write(&manifest, document.to_string())
+        .with_context(|| format!("writing {}", manifest.display()))
 }
 
 fn bumped(current: &str, how: &str) -> Result<String> {
@@ -211,64 +230,9 @@ fn typegen(args: &[String]) -> Result<()> {
 
 fn release(args: &[String]) -> Result<()> {
     let opts = parse_opts(args)?;
-    let root = repo_root()?;
+    let (root, branch) = release_preflight(&opts)?;
 
-    say("preflight");
-    let branch = capture("git", &["branch", "--show-current"])?;
-    if branch != "main" && !opts.yes {
-        bail!("not on main (on '{branch}'); pass --yes to release from a branch");
-    }
-    if !capture("git", &["status", "--porcelain"])?.is_empty() {
-        bail!("working tree is not clean — commit or stash first");
-    }
-    run("git", &["fetch", "origin", "--tags", "--quiet"])?;
-    let upstream = format!("origin/{branch}");
-    if Command::new("git")
-        .args(["rev-parse", "--verify", "-q", &upstream])
-        .current_dir(&root)
-        .output()?
-        .status
-        .success()
-    {
-        let behind = capture(
-            "git",
-            &["rev-list", "--count", &format!("HEAD..{upstream}")],
-        )?;
-        if behind != "0" {
-            bail!("HEAD is {behind} commit(s) behind {upstream} — pull first");
-        }
-    }
-
-    let _dry_run_restore = if opts.dry_run && opts.bump.is_some() {
-        Some(RestoreFiles::capture(&[
-            root.join("Cargo.toml"),
-            root.join("Cargo.lock"),
-        ])?)
-    } else {
-        None
-    };
-
-    let mut version = workspace_version(&root)?;
-    if let Some(how) = &opts.bump {
-        let next = bumped(&version, how)?;
-        say(&format!("bump {version} -> {next}"));
-        let manifest = root.join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest)?;
-        let old = format!("version = \"{version}\"");
-        let new = format!("version = \"{next}\"");
-        if !text.contains(&old) {
-            bail!("could not find `{old}` in Cargo.toml");
-        }
-        std::fs::write(&manifest, text.replacen(&old, &new, 1))?;
-        run("cargo", &["build", "--quiet"])?; // refresh Cargo.lock
-        if opts.dry_run {
-            say("dry-run: applying the bump temporarily; files will be restored");
-        } else {
-            run("git", &["add", "Cargo.toml", "Cargo.lock"])?;
-            run("git", &["commit", "-m", &format!("release: v{next}")])?;
-        }
-        version = next;
-    }
+    let (version, _dry_run_restore) = prepare_release_version(&root, &opts)?;
     let tag = format!("v{version}");
     if Command::new("git")
         .args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])
@@ -281,85 +245,7 @@ fn release(args: &[String]) -> Result<()> {
     }
 
     if !opts.skip_gate {
-        say("gate: fmt / clippy / test");
-        run("cargo", &["fmt", "--all", "--check"])?;
-        run(
-            "cargo",
-            &[
-                "clippy",
-                "--all-targets",
-                "--locked",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        )?;
-        run(
-            "cargo",
-            &[
-                "clippy",
-                "--all-targets",
-                "--locked",
-                "--features",
-                "ayame-cli/gui",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        )?;
-        run("cargo", &["test", "--locked"])?;
-
-        // The web UI ships inside the binary, so its gates belong in the
-        // release gate too — not only in CI. Skipping them here is exactly why
-        // tagged releases used to land on main with red CI (stale api.d.ts,
-        // unformatted TypeScript). typegen is pure Rust and always runs; the
-        // npm-driven frontend gates run when a Node toolchain is present.
-        say("gate: type bindings drift");
-        run(
-            "cargo",
-            &[
-                "run",
-                "--locked",
-                "-p",
-                "ayame-cli",
-                "--features",
-                "typegen",
-                "--",
-                "typegen",
-                "--check",
-            ],
-        )?;
-        if command_exists("npm") {
-            say("gate: frontend (tsc / vitest / oxfmt / oxlint)");
-            let web = "crates/ayame-cli/web";
-            run("npm", &["ci", "--prefix", web])?;
-            run("npm", &["run", "typecheck", "--prefix", web])?;
-            run("npm", &["test", "--prefix", web])?;
-            run("npm", &["run", "fmt:check", "--prefix", web])?;
-            run("npm", &["run", "lint", "--prefix", web])?;
-        } else {
-            say("gate: frontend SKIPPED (npm not available) — CI still enforces it");
-        }
-
-        say("gate: release builds");
-        run("cargo", &["build", "--release", "--locked"])?;
-        run(
-            "cargo",
-            &[
-                "build",
-                "--release",
-                "--locked",
-                "--features",
-                "ayame-cli/gui",
-            ],
-        )?;
-        let crash = root.join("scripts/crash-isolation-test.sh");
-        if crash.exists() && command_exists("bash") {
-            say("gate: crash isolation");
-            run("bash", &["scripts/crash-isolation-test.sh"])?;
-        } else if crash.exists() {
-            say("gate: crash isolation SKIPPED (bash not available)");
-        }
+        run_release_gate(&root)?;
     }
 
     say("artifact: dist/ + sha256");
@@ -401,32 +287,7 @@ fn release(args: &[String]) -> Result<()> {
         }
     }
 
-    run("git", &["tag", &tag])?;
-    run("git", &["push", "origin", &branch, &tag])?;
-
-    if command_exists("gh") {
-        say("waiting for the Release workflow");
-        std::thread::sleep(std::time::Duration::from_secs(10));
-        let run_id = capture(
-            "gh",
-            &[
-                "run",
-                "list",
-                "--workflow=Release",
-                "--limit",
-                "1",
-                "--json",
-                "databaseId",
-                "--jq",
-                ".[0].databaseId",
-            ],
-        )?;
-        run("gh", &["run", "watch", &run_id, "--exit-status"])?;
-        say("published");
-        run("gh", &["release", "view", &tag])?;
-    } else {
-        say("gh not found — watch the Actions page manually");
-    }
+    publish_release(&branch, &tag)?;
 
     say("reminder: manual platform checks");
     println!("  - ayame            -> native window opens without a file");
@@ -435,6 +296,201 @@ fn release(args: &[String]) -> Result<()> {
     println!("  - dirty save / save-as / close-with-unsaved-confirm");
     println!("  - macOS/Windows: menu, shortcuts, icon, drag&drop (issue #3)");
     Ok(())
+}
+
+fn publish_release(branch: &str, tag: &str) -> Result<()> {
+    let release_commit = capture("git", &["rev-parse", "HEAD"])?;
+    run("git", &["tag", tag])?;
+    run("git", &["push", "origin", branch, tag])?;
+
+    if command_exists("gh") {
+        say("waiting for the Release workflow");
+        let run_id = wait_for_release_run(&release_commit, 60, Duration::from_secs(2))?;
+        run("gh", &["run", "watch", &run_id, "--exit-status"])?;
+        say("published");
+        run("gh", &["release", "view", tag])?;
+    } else {
+        say("gh not found — watch the Actions page manually");
+    }
+    Ok(())
+}
+
+fn prepare_release_version(root: &Path, opts: &Opts) -> Result<(String, Option<RestoreFiles>)> {
+    let restore = if opts.dry_run && opts.bump.is_some() {
+        Some(RestoreFiles::capture(&[
+            root.join("Cargo.toml"),
+            root.join("Cargo.lock"),
+        ])?)
+    } else {
+        None
+    };
+
+    let mut version = workspace_version(root)?;
+    if let Some(how) = &opts.bump {
+        let next = bumped(&version, how)?;
+        say(&format!("bump {version} -> {next}"));
+        set_workspace_version(root, &next)?;
+        run("cargo", &["build", "--quiet"])?; // refresh Cargo.lock
+        if opts.dry_run {
+            say("dry-run: applying the bump temporarily; files will be restored");
+        } else {
+            run("git", &["add", "Cargo.toml", "Cargo.lock"])?;
+            run("git", &["commit", "-m", &format!("release: v{next}")])?;
+        }
+        version = next;
+    }
+    Ok((version, restore))
+}
+
+fn run_release_gate(root: &Path) -> Result<()> {
+    say("gate: fmt / clippy / test");
+    run("cargo", &["fmt", "--all", "--check"])?;
+    run(
+        "cargo",
+        &[
+            "clippy",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
+    run(
+        "cargo",
+        &[
+            "clippy",
+            "--all-targets",
+            "--locked",
+            "--features",
+            "ayame-cli/gui",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
+    run("cargo", &["test", "--locked"])?;
+
+    // The web UI ships inside the binary, so its gates belong in the release
+    // gate too. Type generation is pure Rust and always runs; npm-driven gates
+    // run when their toolchain is present.
+    say("gate: type bindings drift");
+    run(
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "ayame-cli",
+            "--features",
+            "typegen",
+            "--",
+            "typegen",
+            "--check",
+        ],
+    )?;
+    if command_exists("npm") {
+        say("gate: frontend (tsc / vitest / oxfmt / oxlint)");
+        let web = "crates/ayame-cli/web";
+        run("npm", &["ci", "--prefix", web])?;
+        run("npm", &["run", "typecheck", "--prefix", web])?;
+        run("npm", &["test", "--prefix", web])?;
+        run("npm", &["run", "fmt:check", "--prefix", web])?;
+        run("npm", &["run", "lint", "--prefix", web])?;
+    } else {
+        say("gate: frontend SKIPPED (npm not available) — CI still enforces it");
+    }
+
+    say("gate: release builds");
+    run("cargo", &["build", "--release", "--locked"])?;
+    run(
+        "cargo",
+        &[
+            "build",
+            "--release",
+            "--locked",
+            "--features",
+            "ayame-cli/gui",
+        ],
+    )?;
+    let crash = root.join("scripts/crash-isolation-test.sh");
+    if crash.exists() && command_exists("bash") {
+        say("gate: crash isolation");
+        run("bash", &["scripts/crash-isolation-test.sh"])?;
+    } else if crash.exists() {
+        say("gate: crash isolation SKIPPED (bash not available)");
+    }
+    Ok(())
+}
+
+fn release_preflight(opts: &Opts) -> Result<(PathBuf, String)> {
+    let root = repo_root()?;
+    say("preflight");
+    let branch = capture("git", &["branch", "--show-current"])?;
+    if branch != "main" && !opts.yes {
+        bail!("not on main (on '{branch}'); pass --yes to release from a branch");
+    }
+    if !capture("git", &["status", "--porcelain"])?.is_empty() {
+        bail!("working tree is not clean — commit or stash first");
+    }
+    run("git", &["fetch", "origin", "--tags", "--quiet"])?;
+    let upstream = format!("origin/{branch}");
+    if Command::new("git")
+        .args(["rev-parse", "--verify", "-q", &upstream])
+        .current_dir(&root)
+        .output()?
+        .status
+        .success()
+    {
+        let behind = capture(
+            "git",
+            &["rev-list", "--count", &format!("HEAD..{upstream}")],
+        )?;
+        if behind != "0" {
+            bail!("HEAD is {behind} commit(s) behind {upstream} — pull first");
+        }
+    }
+    Ok((root, branch))
+}
+
+fn wait_for_release_run(commit: &str, attempts: usize, delay: Duration) -> Result<String> {
+    for attempt in 0..attempts {
+        let json = capture(
+            "gh",
+            &[
+                "run",
+                "list",
+                "--workflow=Release",
+                "--event=push",
+                "--commit",
+                commit,
+                "--limit",
+                "20",
+                "--json",
+                "databaseId,headSha",
+            ],
+        )?;
+        if let Some(id) = release_run_id(&json, commit)? {
+            return Ok(id.to_string());
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    bail!("Release workflow for commit {commit} did not appear after {attempts} polls")
+}
+
+fn release_run_id(json: &str, commit: &str) -> Result<Option<u64>> {
+    let runs: serde_json::Value =
+        serde_json::from_str(json).context("parsing `gh run list` JSON")?;
+    let runs = runs
+        .as_array()
+        .context("`gh run list` did not return a JSON array")?;
+    Ok(runs.iter().find_map(|run| {
+        (run.get("headSha").and_then(serde_json::Value::as_str) == Some(commit))
+            .then(|| run.get("databaseId").and_then(serde_json::Value::as_u64))
+            .flatten()
+    }))
 }
 
 /// Build the shippable gui binary and copy it into dist/ with a checksum —
@@ -465,12 +521,8 @@ fn build_artifact(root: &Path, version: &str) -> Result<PathBuf> {
             "ayame-cli/gui",
         ],
     )?;
-    let target_dir = capture("cargo", &["metadata", "--format-version=1", "--no-deps"])?
-        .split("\"target_directory\":\"")
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .map(|s| s.replace("\\\\", "\\"))
-        .context("could not read target_directory from cargo metadata")?;
+    let metadata = capture("cargo", &["metadata", "--format-version=1", "--no-deps"])?;
+    let target_dir = target_directory_from_metadata(&metadata)?;
     let ext = if host.contains("windows") { ".exe" } else { "" };
     let src = PathBuf::from(&target_dir).join(format!("release/ayame{ext}"));
     let dist = root.join("dist");
@@ -492,6 +544,16 @@ fn build_artifact(root: &Path, version: &str) -> Result<PathBuf> {
     )?;
     println!("   built {}", out.display());
     Ok(out)
+}
+
+fn target_directory_from_metadata(metadata: &str) -> Result<PathBuf> {
+    let value: serde_json::Value =
+        serde_json::from_str(metadata).context("parsing cargo metadata JSON")?;
+    value
+        .get("target_directory")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .context("cargo metadata has no string target_directory")
 }
 
 fn smoke(bin: &Path) -> Result<()> {
@@ -539,14 +601,19 @@ fn smoke(bin: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn restore_files_rolls_back_changes() {
+    fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ayame-xtask-restore-{}-{:?}",
+            "ayame-xtask-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn restore_files_rolls_back_changes() {
+        let dir = temp_dir("restore");
         let first = dir.join("Cargo.toml");
         let second = dir.join("Cargo.lock");
         std::fs::write(&first, b"original manifest").unwrap();
@@ -559,5 +626,56 @@ mod tests {
         assert_eq!(std::fs::read(&first).unwrap(), b"original manifest");
         assert_eq!(std::fs::read(&second).unwrap(), b"original lock");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn workspace_version_is_anchored_to_workspace_package() {
+        let dir = temp_dir("manifest");
+        let manifest = dir.join("Cargo.toml");
+        std::fs::write(
+            &manifest,
+            r#"[package]
+name = "decoy"
+version = "9.9.9"
+
+[workspace]
+
+[workspace.package]
+version = "1.2.3" # release version
+
+[dependencies]
+decoy = { version = "1.2.3" }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(workspace_version(&dir).unwrap(), "1.2.3");
+        set_workspace_version(&dir, "2.0.0").unwrap();
+        assert_eq!(workspace_version(&dir).unwrap(), "2.0.0");
+        let updated = std::fs::read_to_string(&manifest).unwrap();
+        assert!(updated.contains("version = \"9.9.9\""));
+        assert!(updated.contains("decoy = { version = \"1.2.3\" }"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cargo_metadata_is_parsed_as_json() {
+        let metadata = r#"{"target_directory":"C:\\work\\target","packages":[]}"#;
+        assert_eq!(
+            target_directory_from_metadata(metadata).unwrap(),
+            PathBuf::from(r"C:\work\target")
+        );
+        assert!(target_directory_from_metadata(r#"{"packages":[]}"#).is_err());
+    }
+
+    #[test]
+    fn release_run_is_selected_by_exact_commit() {
+        let json = r#"[
+          {"databaseId": 11, "headSha": "other"},
+          {"databaseId": 22, "headSha": "abc123"},
+          {"databaseId": 33, "headSha": "abc1234"}
+        ]"#;
+        assert_eq!(release_run_id(json, "abc123").unwrap(), Some(22));
+        assert_eq!(release_run_id(json, "missing").unwrap(), None);
     }
 }

@@ -99,6 +99,15 @@ fn transform_ts(path: &Path, source: &str) -> String {
         path.display(),
         parser_ret.diagnostics
     );
+    // oxc recovers from many syntax errors without panicking and would emit
+    // best-effort JS; tsc only gates CI, so recoverable parse errors must
+    // fail the cargo build here or broken modules ship inside the binary.
+    assert!(
+        parser_ret.diagnostics.is_empty(),
+        "TypeScript syntax errors in {}: {:?}",
+        path.display(),
+        parser_ret.diagnostics
+    );
     let mut program = parser_ret.program;
     let scoping = SemanticBuilder::new()
         .with_enum_eval(true)

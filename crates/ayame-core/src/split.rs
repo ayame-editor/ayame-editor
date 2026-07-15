@@ -108,10 +108,7 @@ where
         for part in 1..=count {
             let target = dir.join(part_file_name(&stem, &ext, part, width));
             if target.exists() {
-                return Err(Error::Conflict(format!(
-                    "'{}' already exists; choose another output directory",
-                    target.display()
-                )));
+                return Err(Error::TargetExists { path: target });
             }
             let end = (start + lines_per_file).min(total);
             write_part(doc, start, end, part == 1, &target)?;
@@ -184,6 +181,9 @@ fn write_part_bytes(doc: &Document, start: u64, end: u64, first: bool, tmp: &Pat
         w.write_all(span)?;
         s = span_end;
     }
+    // The spans were copied straight out of the mmap; refuse to finalize a
+    // part built from zero-fill if the source shrank mid-split.
+    doc.verify_base()?;
     w.flush()?;
     w.get_ref().sync_all()?;
     Ok(())

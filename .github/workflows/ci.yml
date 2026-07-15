@@ -10,6 +10,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Regression guard for #195. The `test` job installs the *floating* `stable`
+  # toolchain, which is always fresh enough to build, so it can never catch
+  # "we actually require a newer Rust than we admit to." This job pins the
+  # declared MSRV (Cargo.toml `rust-version`) and compiles the whole workspace
+  # — including ayame-cli's build.rs, which pulls oxc — on exactly that
+  # toolchain. If a dependency bump raises the real minimum above the declared
+  # floor, this fails and forces a conscious `rust-version` bump instead of
+  # silently stranding contributors on a slightly older stable.
+  msrv:
+    name: msrv (rust 1.95)
+    runs-on: ubuntu-latest
+    env:
+      MSRV: "1.95.0"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust ${{ env.MSRV }}
+        run: |
+          rustup toolchain install "$MSRV" --profile minimal
+          rustup default "$MSRV"
+      # Keep this in lockstep with the declared MSRV: `cargo check` compiles the
+      # library, binaries, and build scripts (so oxc_transformer is exercised)
+      # without linking, which is enough to surface an E0658-class MSRV break.
+      - name: cargo check on MSRV
+        run: cargo check --workspace --locked
+
   test:
     name: fmt, clippy, test
     runs-on: ubuntu-latest

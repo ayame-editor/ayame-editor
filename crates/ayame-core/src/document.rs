@@ -8,8 +8,24 @@
 //! that is a memory map plus a single newline-scan to build the index — never a
 //! full read into the heap. Every later operation (stat, viewport, search) is
 //! bounded by the size of the *answer*, not the file.
+//!
+//! ## When the base file shrinks underneath us
+//!
+//! Appends are followed incrementally ([`Document::refresh_tail`]), but if
+//! another process *truncates* the file or rotates a shorter one over the same
+//! inode, the pages past the new EOF vanish from the mapping and touching them
+//! raises `SIGBUS` — an uncatchable process abort, not an error. Every mapping
+//! here is therefore registered with [`crate::mapfault`], which absorbs such a
+//! fault (the read completes with zeros) and records it on the document's
+//! watch. Read paths check that flag — per scan batch, and before returning
+//! results — and surface [`Error::BaseFileChanged`] instead; the document is
+//! then permanently poisoned until the caller reopens the path. Ops that
+//! persist derived output (sort/save/split/transform) additionally call
+//! [`Document::verify_base`] before committing, so a torn read can never be
+//! laundered into an output file.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, UNIX_EPOCH};
 
 use memmap2::Mmap;
@@ -17,8 +33,9 @@ use serde::Serialize;
 
 use crate::encoding::{self, Encoding, Eol};
 use crate::index::{LineIndex, DEFAULT_STRIDE};
+use crate::mapfault::MapWatch;
 use crate::search::{self, SearchHit, SearchOptions, SearchResult};
-use crate::Result;
+use crate::{Error, Result};
 
 /// Options for [`Document::open`].
 #[derive(Clone, Debug, Default)]
@@ -38,6 +55,10 @@ pub struct OpenOptions {
 pub struct Line {
     pub number: u64,
     pub text: String,
+    /// True when `text` is only the first [`Document::MAX_VIEW_LINE_BYTES`]
+    /// of a longer line (see #201). Callers that persist text (rather than
+    /// display it) must not use a truncated line.
+    pub truncated: bool,
 }
 
 /// Summary metadata about an opened document.
@@ -75,7 +96,14 @@ pub struct Document {
     path: PathBuf,
     // The mapping must outlive every borrow of `buf()`; `_file` keeps the fd open.
     _file: std::fs::File,
+    // Declared before `mmap`: fields drop in declaration order, so the watch
+    // deregisters while its address range is still mapped (see mapfault.rs).
+    watch: MapWatch,
     mmap: Option<Mmap>,
+    /// Set once a read observed the base file shrunk or replaced (an absorbed
+    /// SIGBUS or a stat length mismatch). Sticky — the mapping may contain
+    /// zero-holes from then on, so every later read fails fast until reopen.
+    poisoned: AtomicBool,
     len: u64,
     base: u64,
     encoding: Encoding,
@@ -94,11 +122,14 @@ impl Document {
         let len = meta.len();
         let mtime = mtime_of(&meta);
         // Zero-length files cannot be mmap'd on some platforms; treat as empty.
+        // SAFETY(mmap): the file may shrink underneath this read-only map,
+        // which would SIGBUS; `watch` below absorbs that into a sticky flag.
         let mmap = if len == 0 {
             None
         } else {
             Some(unsafe { Mmap::map(&file)? })
         };
+        let watch = MapWatch::watch(mmap.as_deref().unwrap_or(&[]));
 
         let stride = opts.stride.unwrap_or(DEFAULT_STRIDE);
 
@@ -110,36 +141,50 @@ impl Document {
             let eol = encoding::detect_eol_for(&buf[base_us..], encoding);
 
             // Try the on-disk index cache for files large enough to be worth it.
-            // The index only depends on (bytes, stride) — not on the encoding —
-            // so the cache key is keyed on source identity + stride. Any miss,
-            // stale entry, or corruption falls back to a full rebuild.
+            // The index depends on (bytes, stride) and the newline strategy the
+            // encoding/EOL demand — a cached LF index must not serve a CR-only
+            // file (#196). Any miss, stale entry, or corruption falls back to a
+            // full rebuild.
             let t0 = Instant::now();
             let mut from_cache = false;
             let index = match opts.cache_dir.as_deref() {
                 Some(dir) if len >= CACHE_MIN_BYTES && !encoding.is_wide() => {
                     let key = cache::key(&path, len, mtime, stride);
                     match cache::load(dir, &key, len, mtime) {
-                        Some(idx) if idx.source_len() == len && idx.base() == base => {
+                        Some(idx)
+                            if idx.source_len() == len
+                                && idx.base() == base
+                                && idx.newline_code() == expected_newline_code(encoding, eol) =>
+                        {
                             from_cache = true;
                             idx
                         }
                         _ => {
-                            let idx = line_index_for(buf, base, stride, encoding);
+                            let idx = line_index_for(buf, base, stride, encoding, eol);
                             cache::store(dir, &key, len, mtime, &idx);
                             idx
                         }
                     }
                 }
-                _ => line_index_for(buf, base, stride, encoding),
+                _ => line_index_for(buf, base, stride, encoding, eol),
             };
             let index_ms = t0.elapsed().as_millis();
             (encoding, base, index, eol, index_ms, from_cache)
         };
 
+        // The whole-file scan above (detection + index build, possibly on
+        // rayon workers) read every page; if the file shrank while it ran,
+        // the index describes zero-holes — refuse to hand out that document.
+        if watch.faulted() {
+            return Err(Error::BaseFileChanged(path.display().to_string()));
+        }
+
         Ok(Document {
             path,
             _file: file,
+            watch,
             mmap,
+            poisoned: AtomicBool::new(false),
             len,
             base,
             encoding,
@@ -153,6 +198,41 @@ impl Document {
     #[inline]
     fn buf(&self) -> &[u8] {
         self.mmap.as_deref().unwrap_or(&[])
+    }
+
+    /// True while no read has hit a vanished page and no shrink was observed.
+    /// Cheap (two atomic loads); promotes an absorbed fault into `poisoned`.
+    fn base_ok(&self) -> bool {
+        if self.poisoned.load(Ordering::Relaxed) {
+            return false;
+        }
+        if self.watch.faulted() {
+            self.poisoned.store(true, Ordering::Relaxed);
+            return false;
+        }
+        true
+    }
+
+    fn base_changed(&self) -> Error {
+        Error::BaseFileChanged(self.path.display().to_string())
+    }
+
+    /// Confirm the mapped base is still intact: no read has faulted into a
+    /// truncated page so far, and the on-disk length (of the mapped inode) has
+    /// not shrunk below the mapped length. Long scans call this before
+    /// starting; writers of derived output (save/sort/split/transform) call it
+    /// again before committing, so bytes read through a shrunk mapping are
+    /// never published. A failure is permanent for this document — reopen the
+    /// path to recover.
+    pub fn verify_base(&self) -> Result<()> {
+        if !self.base_ok() {
+            return Err(self.base_changed());
+        }
+        if self._file.metadata()?.len() < self.len {
+            self.poisoned.store(true, Ordering::Relaxed);
+            return Err(self.base_changed());
+        }
+        Ok(())
     }
 
     #[inline]
@@ -185,6 +265,10 @@ impl Document {
     /// [`Unchanged`]: TailRefresh::Unchanged
     /// [`Reindex`]: TailRefresh::Reindex
     pub fn refresh_tail(&mut self) -> Result<TailRefresh> {
+        if !self.base_ok() {
+            // A read already hit a truncated page; the index cannot be trusted.
+            return Ok(TailRefresh::Reindex);
+        }
         let new_len = self._file.metadata()?.len();
         if new_len == self.len {
             return Ok(TailRefresh::Unchanged);
@@ -196,13 +280,22 @@ impl Document {
         }
         // Grew: an existing mapping has a fixed length, so re-map the fd to make
         // the appended bytes visible, then extend the index over the new range.
+        // SAFETY(mmap): shrink-during-scan is absorbed by `new_watch` below.
         let new_mmap = unsafe { Mmap::map(&self._file)? };
         if (new_mmap.len() as u64) < new_len {
             // A racing shrink between the stat and the map: treat as a reindex
             // rather than index bytes that may already be gone.
             return Ok(TailRefresh::Reindex);
         }
+        let new_watch = MapWatch::watch(&new_mmap);
         self.index.extend_tail(&new_mmap);
+        if new_watch.faulted() {
+            // Shrunk between the map and the scan. The index was extended over
+            // zero-holes, so poison this document; the caller must reopen.
+            self.poisoned.store(true, Ordering::Relaxed);
+            return Ok(TailRefresh::Reindex);
+        }
+        self.watch = new_watch;
         self.mmap = Some(new_mmap);
         self.len = new_len;
         Ok(TailRefresh::Grew)
@@ -217,12 +310,17 @@ impl Document {
     /// `None` means the file is unchanged or needs a full reindex (shrink,
     /// replacement, or growth from an empty file).
     pub fn follow_tail(&self) -> Result<Option<Document>> {
+        if !self.base_ok() {
+            // The shared base already hit a truncated page: needs a full reopen.
+            return Ok(None);
+        }
         let observed_len = self._file.metadata()?.len();
         if observed_len <= self.len || self.len == 0 {
             return Ok(None);
         }
 
         let file = self._file.try_clone()?;
+        // SAFETY(mmap): shrink-during-scan is absorbed by `watch` below.
         let mmap = unsafe { Mmap::map(&file)? };
         let mapped_len = mmap.len() as u64;
         if mapped_len <= self.len || mapped_len < observed_len {
@@ -231,14 +329,21 @@ impl Document {
             return Ok(None);
         }
 
+        let watch = MapWatch::watch(&mmap);
         let started = Instant::now();
         let mut index = self.index.clone();
         index.extend_tail(&mmap);
+        if watch.faulted() {
+            // Shrunk while we scanned the appended range; publish nothing.
+            return Ok(None);
+        }
 
         Ok(Some(Document {
             path: self.path.clone(),
             _file: file,
+            watch,
             mmap: Some(mmap),
+            poisoned: AtomicBool::new(false),
             len: mapped_len,
             base: self.base,
             encoding: self.encoding,
@@ -283,28 +388,108 @@ impl Document {
     }
 
     /// Raw bytes before the indexed content, currently just a BOM if present.
+    /// Empty once the document is poisoned (base file shrunk underneath us).
     pub fn prefix_bytes(&self) -> &[u8] {
+        if !self.base_ok() {
+            return &[];
+        }
         &self.buf()[..self.base as usize]
     }
 
-    /// Decoded text of line `i` (terminator stripped), or `None` if out of range.
+    /// Longest run of raw bytes the *view* APIs ([`Document::line`],
+    /// [`Document::lines`], [`Document::line_view`]) decode for one line. A
+    /// file with no newlines at all is a single line as long as the file, and
+    /// the bounded-memory contract ("proportional to the answer, never the
+    /// file") must hold even then (#201). Display needs at most a screenful;
+    /// anything needing full fidelity goes through [`Document::line_full`] or
+    /// the raw byte-range APIs, which never decode.
+    pub const MAX_VIEW_LINE_BYTES: usize = 4 * 1024 * 1024;
+
+    /// Decoded text of line `i` (terminator stripped), or `None` if out of
+    /// range — or if the base file shrank underneath the read (the document is
+    /// poisoned then; reopen to recover). Decoding is capped at
+    /// [`Document::MAX_VIEW_LINE_BYTES`]; use [`Document::line_view`] to learn
+    /// whether the cap was hit, or [`Document::line_full`] for full fidelity.
     pub fn line(&self, i: u64) -> Option<String> {
-        let buf = self.buf();
-        let (s, e) = self.index.line_range(buf, i)?;
-        Some(self.encoding.decode_line(&buf[s as usize..e as usize]))
+        self.line_view(i).map(|(text, _truncated)| text)
     }
 
-    /// Up to `count` decoded lines starting at `start`.
-    pub fn lines(&self, start: u64, count: u64) -> Vec<Line> {
+    /// Like [`Document::line`], but also reports whether the text was cut at
+    /// the view cap.
+    pub fn line_view(&self, i: u64) -> Option<(String, bool)> {
+        if !self.base_ok() {
+            return None;
+        }
         let buf = self.buf();
+        let (s, e) = self.index.line_range(buf, i)?;
+        let decoded = self
+            .encoding
+            .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
+        // Re-check after the read: if the range faulted into a truncated page,
+        // the text was decoded from zero-fill and must not be shown.
+        if !self.base_ok() {
+            return None;
+        }
+        Some(decoded)
+    }
+
+    /// Decoded text of line `i` with no length cap. Allocates the whole
+    /// decoded line — `O(line length)`, which for a file without newlines is
+    /// the whole file. Reserved for fidelity-critical consumers (re-encoding
+    /// artifacts, explicit single-line extraction) that must never truncate.
+    pub fn line_full(&self, i: u64) -> Option<String> {
+        if !self.base_ok() {
+            return None;
+        }
+        let buf = self.buf();
+        let (s, e) = self.index.line_range(buf, i)?;
+        let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
+        if !self.base_ok() {
+            return None;
+        }
+        Some(text)
+    }
+
+    /// Raw (undecoded, terminator-stripped) byte length of line `i`. Cheap —
+    /// two index lookups, no decode. Edit paths use this to refuse in-place
+    /// edits of lines beyond the view cap instead of rebuilding them from
+    /// truncated text.
+    pub fn line_byte_len(&self, i: u64) -> Option<u64> {
+        if !self.base_ok() {
+            return None;
+        }
         self.index
+            .line_range(self.buf(), i)
+            .map(|(s, e)| e.saturating_sub(s))
+    }
+
+    /// Up to `count` decoded lines starting at `start`, each capped at
+    /// [`Document::MAX_VIEW_LINE_BYTES`] (see [`Line::truncated`]). Empty once
+    /// the base file shrank underneath us (see [`Document::line`]).
+    pub fn lines(&self, start: u64, count: u64) -> Vec<Line> {
+        if !self.base_ok() {
+            return Vec::new();
+        }
+        let buf = self.buf();
+        let out: Vec<Line> = self
+            .index
             .line_ranges(buf, start, count)
             .into_iter()
-            .map(|(number, s, e)| Line {
-                number,
-                text: self.encoding.decode_line(&buf[s as usize..e as usize]),
+            .map(|(number, s, e)| {
+                let (text, truncated) = self
+                    .encoding
+                    .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
+                Line {
+                    number,
+                    text,
+                    truncated,
+                }
             })
-            .collect()
+            .collect();
+        if !self.base_ok() {
+            return Vec::new();
+        }
+        out
     }
 
     /// First `n` lines.
@@ -321,19 +506,38 @@ impl Document {
 
     /// Byte offset where line `i` starts (for resuming a search, etc.).
     pub fn line_start_byte(&self, i: u64) -> Option<u64> {
+        if !self.base_ok() {
+            return None;
+        }
         self.index.line_range(self.buf(), i).map(|(s, _)| s)
     }
 
-    /// Byte offset for decoded character column `col` on line `i`.
+    /// Byte offset for decoded character column `col` on line `i`. Columns
+    /// past the view cap of an over-long line resolve to `None` — the edit
+    /// layer refuses to splice such lines anyway (#201).
     pub fn line_col_byte(&self, i: u64, col: u64) -> Option<u64> {
+        if !self.base_ok() {
+            return None;
+        }
         let buf = self.buf();
         let (s, e) = self.index.line_range(buf, i)?;
         if matches!(self.encoding, Encoding::ShiftJis | Encoding::EucJp) {
             let off = legacy_col_offset(self.encoding, &buf[s as usize..e as usize], col)?;
             return Some(s + off as u64);
         }
-        let text = self.encoding.decode_line(&buf[s as usize..e as usize]);
+        if self.encoding == Encoding::Iso2022Jp {
+            // Stateful encoding: a re-encode round trip cannot recover mid-run
+            // byte offsets, so walk the designation escapes over the raw line.
+            let off = encoding::iso2022jp_col_offset(&buf[s as usize..e as usize], col)?;
+            return Some(s + off as u64);
+        }
+        let (text, truncated) = self
+            .encoding
+            .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
         let prefix: String = text.chars().take(col as usize).collect();
+        if truncated && prefix.chars().count() < col as usize {
+            return None;
+        }
         let encoded = self.encoding.encode_query(&prefix)?;
         Some(s + encoded.len() as u64)
     }
@@ -342,7 +546,14 @@ impl Document {
     /// `start`, as `(line_number, &bytes)`. Borrows the mmap, so callers copy
     /// out what they need to keep. Used by data ops that extract a sort/group key
     /// from a field without decoding the whole line.
+    ///
+    /// The borrowed bytes read as zero-fill (never fault) if the base file is
+    /// truncated while borrowed; callers that persist anything derived from
+    /// them must call [`Document::verify_base`] before committing.
     pub fn raw_line_ranges(&self, start: u64, count: u64) -> Vec<(u64, &[u8])> {
+        if !self.base_ok() {
+            return Vec::new();
+        }
         let buf = self.buf();
         self.index
             .line_ranges(buf, start, count)
@@ -357,44 +568,50 @@ impl Document {
     const SCAN_BATCH: u64 = 8192;
 
     /// Visit every line's raw (terminator-stripped) bytes with its line number,
-    /// in order. The shared full-document scan behind the data ops — callers no
-    /// longer reimplement the `raw_line_ranges` batch loop. See
-    /// [`Document::try_for_each_raw_line`] for the fallible / progress-reporting
-    /// variant.
+    /// in order. The scan stops early (silently) if the base file shrinks
+    /// underneath it — prefer [`Document::try_for_each_raw_line`], which
+    /// surfaces that as [`Error::BaseFileChanged`] instead.
     pub fn for_each_raw_line(&self, mut f: impl FnMut(u64, &[u8])) {
-        let total = self.line_count();
-        let mut start = 0u64;
-        while start < total {
-            let batch = self.raw_line_ranges(start, Self::SCAN_BATCH);
-            if batch.is_empty() {
-                break;
-            }
-            start += batch.len() as u64;
-            for (line_no, raw) in batch {
+        let _ = self.try_for_each_raw_line(
+            |line_no, raw| {
                 f(line_no, raw);
-            }
-        }
+                Ok(())
+            },
+            |_| {},
+        );
     }
 
     /// Like [`Document::for_each_raw_line`], but the per-line closure may fail
     /// (propagated, stopping the scan) and `on_batch` is called with the running
     /// line count after each batch — the seam ops like sort/group use to spill a
     /// run mid-scan and report coarse progress.
+    ///
+    /// Fails with [`Error::BaseFileChanged`] — checked once up front and again
+    /// after every batch — when the base file shrinks mid-scan, so a scan over
+    /// a concurrently truncated file can never silently produce partial or
+    /// zero-filled lines.
     pub fn try_for_each_raw_line(
         &self,
         mut f: impl FnMut(u64, &[u8]) -> Result<()>,
         mut on_batch: impl FnMut(u64),
     ) -> Result<()> {
+        self.verify_base()?;
         let total = self.line_count();
         let mut start = 0u64;
         while start < total {
             let batch = self.raw_line_ranges(start, Self::SCAN_BATCH);
             if batch.is_empty() {
+                if !self.base_ok() {
+                    return Err(self.base_changed());
+                }
                 break;
             }
             start += batch.len() as u64;
             for (line_no, raw) in batch {
                 f(line_no, raw)?;
+            }
+            if !self.base_ok() {
+                return Err(self.base_changed());
             }
             on_batch(start);
         }
@@ -410,6 +627,7 @@ impl Document {
         mut f: impl FnMut(u64, &[u8], u64, u64) -> Result<()>,
         mut on_batch: impl FnMut(u64),
     ) -> Result<()> {
+        self.verify_base()?;
         let buf = self.buf();
         let total = self.line_count();
         let mut start = 0u64;
@@ -429,6 +647,9 @@ impl Document {
                     raw_end,
                 )?;
             }
+            if !self.base_ok() {
+                return Err(self.base_changed());
+            }
             on_batch(start);
         }
         Ok(())
@@ -445,6 +666,9 @@ impl Document {
         start: u64,
         count: u64,
     ) -> Vec<(u64, &[u8], &[u8])> {
+        if !self.base_ok() {
+            return Vec::new();
+        }
         let buf = self.buf();
         self.index
             .line_ranges_with_terminator(buf, start, count)
@@ -461,6 +685,9 @@ impl Document {
 
     /// Raw bytes of line `i`, including its original line terminator if present.
     pub fn raw_line_with_terminator(&self, i: u64) -> Option<&[u8]> {
+        if !self.base_ok() {
+            return None;
+        }
         let buf = self.buf();
         let (s, _text_end, raw_end) = self.index.line_range_with_terminator(buf, i)?;
         Some(&buf[s as usize..raw_end as usize])
@@ -468,6 +695,9 @@ impl Document {
 
     /// Borrow an absolute raw byte range from the mapped file.
     pub fn raw_byte_range(&self, start: u64, end: u64) -> Option<&[u8]> {
+        if !self.base_ok() {
+            return None;
+        }
         if start > end || end > self.len {
             return None;
         }
@@ -481,6 +711,9 @@ impl Document {
     /// covers, so untouched runs can be copied out in one `write_all`.
     /// Returns `None` if the range is out of bounds; an empty range yields `b""`.
     pub fn raw_lines_span(&self, start: u64, end: u64) -> Option<&[u8]> {
+        if !self.base_ok() {
+            return None;
+        }
         let total = self.line_count();
         if start > end || end > total {
             return None;
@@ -500,6 +733,9 @@ impl Document {
 
     /// Original terminator bytes for line `i`, if the line has one.
     pub fn line_terminator(&self, i: u64) -> Option<&[u8]> {
+        if !self.base_ok() {
+            return None;
+        }
         let buf = self.buf();
         let (_s, text_end, raw_end) = self.index.line_range_with_terminator(buf, i)?;
         Some(&buf[text_end as usize..raw_end as usize])
@@ -519,14 +755,21 @@ impl Document {
     }
 
     pub fn search(&self, opts: &SearchOptions) -> Result<SearchResult> {
-        search::search(
+        self.verify_base()?;
+        let res = search::search(
             self.buf(),
             self.base,
             self.len,
             &self.index,
             self.encoding,
             opts,
-        )
+        )?;
+        // A truncation mid-scan reads as zero-fill; discard anything matched
+        // over it rather than reporting hits that no longer exist.
+        if !self.base_ok() {
+            return Err(self.base_changed());
+        }
+        Ok(res)
     }
 
     pub fn find_next(
@@ -537,6 +780,7 @@ impl Document {
         whole_word: bool,
         from_byte: u64,
     ) -> Result<Option<SearchHit>> {
+        self.verify_base()?;
         let opts = search::FindOptions {
             query: query.to_string(),
             regex,
@@ -544,14 +788,18 @@ impl Document {
             whole_word,
             byte: from_byte,
         };
-        search::find_next(
+        let hit = search::find_next(
             self.buf(),
             self.base,
             self.len,
             &self.index,
             self.encoding,
             &opts,
-        )
+        )?;
+        if !self.base_ok() {
+            return Err(self.base_changed());
+        }
+        Ok(hit)
     }
 
     pub fn find_prev(
@@ -562,6 +810,7 @@ impl Document {
         whole_word: bool,
         before_byte: u64,
     ) -> Result<Option<SearchHit>> {
+        self.verify_base()?;
         let opts = search::FindOptions {
             query: query.to_string(),
             regex,
@@ -569,17 +818,34 @@ impl Document {
             whole_word,
             byte: before_byte,
         };
-        search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)
+        let hit = search::find_prev(self.buf(), self.base, &self.index, self.encoding, &opts)?;
+        if !self.base_ok() {
+            return Err(self.base_changed());
+        }
+        Ok(hit)
     }
 }
 
-fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding) -> LineIndex {
+fn line_index_for(buf: &[u8], base: u64, stride: u64, encoding: Encoding, eol: Eol) -> LineIndex {
     match encoding {
         Encoding::Utf16Le => LineIndex::build_utf16_le(buf, base, stride),
         Encoding::Utf16Be => LineIndex::build_utf16_be(buf, base, stride),
-        Encoding::Utf8 | Encoding::ShiftJis | Encoding::EucJp | Encoding::Ascii => {
-            LineIndex::build(buf, base, stride)
-        }
+        // Classic-Mac files have no '\n' at all; index on lone '\r' so the
+        // line count agrees with the detected EOL instead of collapsing the
+        // whole file into one line (#196). (CR-only UTF-16 stays unsupported.)
+        _ if eol == Eol::Cr => LineIndex::build_cr(buf, base, stride),
+        _ => LineIndex::build(buf, base, stride),
+    }
+}
+
+/// The newline strategy `line_index_for` picks, as the index wire code — used
+/// to reject cached indexes built with a different strategy.
+fn expected_newline_code(encoding: Encoding, eol: Eol) -> u32 {
+    match encoding {
+        Encoding::Utf16Le => 1,
+        Encoding::Utf16Be => 2,
+        _ if eol == Eol::Cr => 3,
+        _ => 0,
     }
 }
 
@@ -597,15 +863,13 @@ fn legacy_col_offset(enc: Encoding, raw: &[u8], col: u64) -> Option<usize> {
 fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
     let b = raw[i];
     match enc {
-        Encoding::ShiftJis => {
+        Encoding::ShiftJis
             if matches!(b, 0x81..=0x9F | 0xE0..=0xFC)
-                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC))
-            {
-                2
-            } else {
-                1
-            }
+                && matches!(raw.get(i + 1).copied(), Some(0x40..=0x7E | 0x80..=0xFC)) =>
+        {
+            2
         }
+        Encoding::ShiftJis => 1,
         Encoding::EucJp => match b {
             0x8E if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xDF)) => 2,
             0x8F if matches!(raw.get(i + 1).copied(), Some(0xA1..=0xFE))
@@ -953,6 +1217,247 @@ mod tests {
         assert_eq!(followed.line_count(), 4);
         assert_eq!(followed.line(3).unwrap(), "line 3");
         assert_eq!(followed.byte_len(), std::fs::metadata(&path).unwrap().len());
+    }
+
+    /// One line per row, enough rows that the file spans many pages and many
+    /// scan batches — the shape needed to provoke reads past a truncation.
+    #[cfg(unix)]
+    fn write_many_lines(dir: &std::path::Path, name: &str) -> PathBuf {
+        let mut data = Vec::new();
+        for i in 0..200_000u64 {
+            data.extend_from_slice(format!("row {i} padding padding padding\n").as_bytes());
+        }
+        let path = dir.join(name);
+        std::fs::write(&path, &data).unwrap();
+        path
+    }
+
+    /// Issue #200: another process truncating the base file mid-scan used to
+    /// SIGBUS (an uncatchable abort). It must surface as `BaseFileChanged`.
+    #[test]
+    #[cfg(unix)]
+    fn truncation_mid_scan_surfaces_error_not_sigbus() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_many_lines(dir.path(), "shrink-mid-scan.log");
+        let mut doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let total = doc.line_count();
+
+        let mut truncated = false;
+        let res = doc.try_for_each_raw_line(
+            |ln, _raw| {
+                if !truncated && ln >= 100 {
+                    // Simulates `truncate`/logrotate in another process: the
+                    // fd-backed inode shrinks under the live mapping.
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_len(64)
+                        .unwrap();
+                    truncated = true;
+                }
+                Ok(())
+            },
+            |_| {},
+        );
+        assert!(truncated);
+        assert!(
+            matches!(res, Err(Error::BaseFileChanged(_))),
+            "a scan over a concurrently truncated file must fail cleanly, got {res:?}"
+        );
+
+        // The document is poisoned: every later read is a clean miss or error,
+        // never stale/zero-filled data.
+        assert!(doc.line(0).is_none());
+        assert!(doc.lines(total - 10, 10).is_empty());
+        assert!(doc.raw_lines_span(0, total).is_none());
+        assert!(matches!(
+            doc.search(&SearchOptions {
+                query: "row".into(),
+                ..SearchOptions::default()
+            }),
+            Err(Error::BaseFileChanged(_))
+        ));
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Reindex);
+    }
+
+    /// Viewport reads have no stat precheck; they rely on fault absorption.
+    /// Reading far pages after a truncation must degrade, not abort.
+    #[test]
+    #[cfg(unix)]
+    fn viewport_reads_after_truncation_degrade_not_abort() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_many_lines(dir.path(), "shrink-viewport.log");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let total = doc.line_count();
+
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(64)
+            .unwrap();
+
+        // Touches pages past the new EOF: absorbed fault → empty, and the
+        // document is poisoned for everything afterwards.
+        assert!(doc.lines(total - 5, 5).is_empty());
+        assert!(doc.line(0).is_none());
+        assert!(matches!(doc.verify_base(), Err(Error::BaseFileChanged(_))));
+    }
+
+    /// A shrink that happened before an operation starts is caught by the
+    /// cheap stat precheck, without touching (now unmapped) pages.
+    #[test]
+    #[cfg(unix)]
+    fn shrunk_file_fails_search_via_precheck() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_many_lines(dir.path(), "shrink-precheck.log");
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(64)
+            .unwrap();
+
+        assert!(matches!(
+            doc.search(&SearchOptions {
+                query: "row".into(),
+                ..SearchOptions::default()
+            }),
+            Err(Error::BaseFileChanged(_))
+        ));
+        assert!(matches!(
+            doc.try_for_each_raw_line(|_, _| Ok(()), |_| {}),
+            Err(Error::BaseFileChanged(_))
+        ));
+    }
+
+    /// Issue #201: a file with no newline is one line the size of the file.
+    /// View reads must stay capped; explicitly-full reads still work.
+    #[test]
+    fn single_line_file_views_are_capped_but_full_reads_are_not() {
+        let len = Document::MAX_VIEW_LINE_BYTES + 512 * 1024;
+        let mut data = vec![b'x'; len];
+        data[0] = b'H'; // prove we see the real bytes, not zeros
+        let f = write_temp(&data);
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.line_count(), 1);
+        assert_eq!(doc.line_byte_len(0), Some(len as u64));
+
+        let lines = doc.lines(0, 1);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].truncated);
+        assert_eq!(lines[0].text.len(), Document::MAX_VIEW_LINE_BYTES);
+        assert!(lines[0].text.starts_with('H'));
+
+        let (view, truncated) = doc.line_view(0).unwrap();
+        assert!(truncated);
+        assert_eq!(view.len(), Document::MAX_VIEW_LINE_BYTES);
+        assert_eq!(doc.line(0).unwrap().len(), Document::MAX_VIEW_LINE_BYTES);
+
+        let full = doc.line_full(0).unwrap();
+        assert_eq!(full.len(), len);
+
+        // Columns inside the cap resolve; columns beyond it refuse.
+        assert_eq!(doc.line_col_byte(0, 16), Some(16));
+        assert_eq!(
+            doc.line_col_byte(0, Document::MAX_VIEW_LINE_BYTES as u64 + 10),
+            None
+        );
+    }
+
+    #[test]
+    fn short_lines_are_never_flagged_truncated() {
+        let f = write_temp("short\n日本語の行\n".as_bytes());
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        for line in doc.lines(0, 2) {
+            assert!(!line.truncated, "line {:?} wrongly flagged", line.text);
+        }
+        assert_eq!(doc.line_full(1).as_deref(), doc.line(1).as_deref());
+    }
+
+    /// Issue #196: CR-only (classic Mac) files used to index as ONE line while
+    /// `stat()` simultaneously reported `Eol::Cr` — an internal contradiction.
+    #[test]
+    fn cr_only_file_line_count_matches_its_detected_eol() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("classic.mac");
+        std::fs::write(&path, b"alpha\rbeta\rgamma\r").unwrap();
+        let mut doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        assert_eq!(doc.stat().eol, Eol::Cr);
+        assert_eq!(doc.line_count(), 3, "CR terminators must split lines");
+        assert_eq!(doc.line(1).as_deref(), Some("beta"));
+        assert_eq!(doc.raw_line_with_terminator(0), Some(&b"alpha\r"[..]));
+        assert_eq!(doc.default_terminator(), b"\r");
+
+        // Tail-follow keeps splitting on CR for appended data.
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        f.write_all(b"delta\r").unwrap();
+        f.flush().unwrap();
+        assert_eq!(doc.refresh_tail().unwrap(), TailRefresh::Grew);
+        assert_eq!(doc.line_count(), 4);
+        assert_eq!(doc.line(3).as_deref(), Some("delta"));
+    }
+
+    /// Issue #196: ASCII-heavy UTF-16 without a BOM is valid UTF-8 byte-wise
+    /// and used to short-circuit to "UTF-8", rendering interleaved NULs.
+    #[test]
+    fn bomless_utf16_is_detected_and_indexed() {
+        let f = write_temp(&utf16_bytes("one\ntwo\nthree", true, false));
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Le);
+        assert_eq!(doc.line_count(), 3);
+        assert_eq!(doc.line(1).as_deref(), Some("two"));
+
+        let f = write_temp(&utf16_bytes("east\nwest", false, false));
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Utf16Be);
+        assert_eq!(doc.line(1).as_deref(), Some("west"));
+    }
+
+    /// Issue #196: ISO-2022-JP is 7-bit and used to be misdetected as UTF-8
+    /// (mojibake). It must detect, decode, and search through the text plan.
+    #[test]
+    fn iso2022jp_is_detected_decoded_and_searchable() {
+        let (bytes, _, err) =
+            encoding_rs::ISO_2022_JP.encode("最初の行\nsecond line\n三番目の行\n");
+        assert!(!err);
+        let f = write_temp(&bytes);
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+        assert_eq!(doc.encoding(), Encoding::Iso2022Jp);
+        assert_eq!(doc.line_count(), 3);
+        assert_eq!(doc.line(0).as_deref(), Some("最初の行"));
+
+        let hit = doc
+            .find_next("三番目", false, true, false, 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.line, 2);
+        let hit = doc
+            .find_next("second", false, true, false, 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.line, 1);
+
+        // The raw bytes contain "$B" (inside every designation escape), but
+        // the decoded text does not — a raw-byte scan would false-positive.
+        let res = doc
+            .search(&SearchOptions {
+                query: "$B".into(),
+                ..SearchOptions::default()
+            })
+            .unwrap();
+        assert!(
+            res.hits.is_empty(),
+            "escape-sequence bytes must not match as text: {:?}",
+            res.hits
+        );
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // the crash-recovery prompt.
     let (pos, opts, flags) = parse_checked(
         args,
-        &["--encoding", "--stride", "--cache-dir"],
+        &["--encoding", "--stride", "--cache-dir", "--scratch-dir"],
         &["--no-cache", "--recover"],
     )?;
     let recover_pending = has_flag(&flags, &["--recover"]);
@@ -51,6 +51,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         None
     };
 
+    // Keep a handle for exit cleanup: spawn_background moves `state` into the
+    // server thread, but the window's event loop must drop this session's
+    // scratch/WAL on close (#138).
+    let cleanup_state = state.clone();
     // Bring the editor up behind the window and learn its loopback address.
     let addr = crate::serve::spawn_background(state)?;
     let url = format!("http://{addr}/");
@@ -228,39 +232,35 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         #[cfg(target_os = "macos")]
         let _ = &macos_menu;
         match event {
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                if !shown {
-                    shown = true;
-                    window.set_visible(true);
-                    if start_maximized {
-                        window.set_maximized(true);
-                    }
-                    maybe_start_startup_update_check(
-                        &proxy,
-                        shown,
-                        update_check_enabled,
-                        &mut update_check_started,
-                    );
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) if !shown => {
+                shown = true;
+                window.set_visible(true);
+                if start_maximized {
+                    window.set_maximized(true);
                 }
+                maybe_start_startup_update_check(
+                    &proxy,
+                    shown,
+                    update_check_enabled,
+                    &mut update_check_started,
+                );
             }
             Event::WindowEvent {
                 event: WindowEvent::Moved(_) | WindowEvent::Resized(_),
                 ..
-            } => {
+            } if !window.is_maximized() => {
                 // Track the un-maximized geometry as it changes; maximized
                 // bounds are useless for restore and are skipped.
-                if !window.is_maximized() {
-                    let size = window.inner_size();
-                    if size.width > 0 && size.height > 0 {
-                        let pos = window.outer_position().ok();
-                        last_normal = Some(WindowState {
-                            x: pos.map(|p| p.x),
-                            y: pos.map(|p| p.y),
-                            width: size.width,
-                            height: size.height,
-                            maximized: false,
-                        });
-                    }
+                let size = window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    let pos = window.outer_position().ok();
+                    last_normal = Some(WindowState {
+                        x: pos.map(|p| p.x),
+                        y: pos.map(|p| p.y),
+                        width: size.width,
+                        height: size.height,
+                        maximized: false,
+                    });
                 }
             }
             Event::WindowEvent {
@@ -397,6 +397,14 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             #[cfg(target_os = "macos")]
             Event::UserEvent(GuiEvent::Language(lang)) => {
                 macos_menu = setup_macos_menu(&proxy, Some(UiLocale::from_setting(&lang)));
+            }
+            // Fires once, after any `ControlFlow::Exit`, before the loop tears
+            // the process down — the single choke point where every close path
+            // (window button, menu quit, close-confirm timeout) converges, so
+            // this session's scratch/WAL/aside files are dropped exactly here
+            // instead of leaking every session (#138).
+            Event::LoopDestroyed => {
+                crate::serve::cleanup_session(&cleanup_state);
             }
             _ => {}
         }
@@ -862,7 +870,6 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
         true,
         &[
             &item("sortSave", label("ソート", "Sort"), None),
-            &item("diffFile", label("2ファイル差分", "Diff Files"), None),
             &item("splitFile", label("ファイルを分割", "Split File"), None),
             &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
             &item("grepSave", label("grep して保存", "Grep to File"), None),

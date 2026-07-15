@@ -7,7 +7,7 @@ use anyhow::{bail, Result};
 
 #[cfg(feature = "gui")]
 use crate::gui;
-use crate::{diff, gen, serve};
+use crate::{gen, serve};
 
 mod aggregate;
 mod args;
@@ -23,12 +23,11 @@ pub(crate) mod sort;
 mod transform;
 mod update;
 
-#[cfg(feature = "gui")]
+// Used by both the gui startup path and temp_paths' disk-backed scratch
+// default (#140), so it is not gui-gated.
 pub(crate) use args::default_cache_dir;
 pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
-pub(crate) use common::{maybe_crash, temp_work_dir};
 pub(crate) use formatting::{commas, human_bytes};
-pub(crate) use sort::sort_document_to_utf8_file;
 #[cfg(feature = "gui")]
 pub(crate) use update::{
     check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport,
@@ -47,9 +46,7 @@ COMMANDS:
     line   <FILE> <N>             Print line N (1-based)
     lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
     search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, -w whole-word, --max N
-    diff   <OLD> <NEW>            Line/side-by-side diff with bounded resync windows
     sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
-    sortdiff <OLD> <NEW>          Sort both files, then diff the sorted outputs
     replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
     case   <FILE> <MODE>          Streaming case conversion to --out FILE (MODE =
                                   upper|lower|camel|pascal|snake|kebab|constant)
@@ -69,10 +66,13 @@ COMMANDS:
     version                       Show version
 
 COMMON OPTIONS:
-    --encoding <ENC>   Force encoding: utf8 | utf-16le | utf-16be | shift_jis | euc-jp | ascii
+    --encoding <ENC>   Force encoding: utf8 | utf-16le | utf-16be | shift_jis | euc-jp | iso-2022-jp | ascii
     --stride <N>       Lines per index checkpoint (default 4096)
     --no-cache         Do not read/write the persistent index cache
     --cache-dir <DIR>  Override the index-cache directory
+    --scratch-dir <DIR> Where serve/gui put worker scratch and sort spill
+                       (default: a disk-backed cache location, never tmpfs;
+                       also $AYAME_SCRATCH_DIR). sort/group take --spill-dir.
     --json             Machine-readable output on stdout
                        (stat/search/split/group/top/distinct/cache)
     -V, --version      Show version
@@ -141,14 +141,6 @@ REMOVE OPTIONS:
     --yes                 Remove without an interactive confirmation prompt
     --dry-run             Print the target without changing files
 
-DIFF OPTIONS:
-    --summary             print only counts
-    --max-hunks <N>       max hunks to print/store (default 200)
-    --max-lines <N>       max lines printed per side in one hunk (default 200)
-    --window <N>          resync search window in lines (default 128)
-    --side-by-side        print a two-column comparison
-    --width <N>           total side-by-side width (default 160)
-
 EXIT CODES:
     0   success (for search: at least one match)
     1   search completed but found no matches
@@ -163,7 +155,6 @@ EXAMPLES:
     ayame case huge.csv lower --out lower.csv
     ayame grep-lines huge.log 'ERROR' -i --out errors.log
     ayame split huge.csv --lines 1000000
-    ayame sortdiff old.csv new.csv -k 1 --summary
     ayame serve huge.csv --port 8777
 ";
 
@@ -244,9 +235,9 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
         "lines" => inspect::cmd_lines(rest).map(|_| 0),
         // `search` owns its exit code (0 = matched, 1 = no match in human mode).
         "search" => inspect::cmd_search(rest),
-        "diff" => diff::cmd_diff(rest).map(|_| 0),
+        "diff" => removed_comparison_command("diff", "text"),
         "sort" => sort::cmd_sort(rest).map(|_| 0),
-        "sortdiff" | "sort-diff" => diff::cmd_sortdiff(rest).map(|_| 0),
+        "sortdiff" | "sort-diff" => removed_comparison_command("sortdiff", "sorted"),
         "replace" => transform::cmd_replace(rest).map(|_| 0),
         "case" => transform::cmd_case(rest).map(|_| 0),
         "grep-lines" => transform::cmd_grep_lines(rest).map(|_| 0),
@@ -272,6 +263,17 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
             bail!("unknown command '{other}'");
         }
     }
+}
+
+/// Keep an actionable error for one release after removing the implementation.
+/// The names stay in `COMMANDS` so GUI builds do not mistake them for file paths.
+fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
+    bail!(
+        "`ayame {old_cmd}` was removed in Ayame Editor v0.7.0; use \
+         `ayame-diff {new_cmd} OLD NEW` instead. Install ayame-diff from \
+         https://github.com/hjosugi/ayame-diff/releases/latest or run \
+         `go install github.com/hjosugi/ayame-diff/cmd/ayame-diff@latest`"
+    )
 }
 
 #[cfg(feature = "gui")]
@@ -310,6 +312,23 @@ mod tests {
             "remove",
         ] {
             assert!(is_known_command(cmd), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn removed_diff_commands_point_to_their_replacements() {
+        for (command, replacement) in [
+            ("diff", "text"),
+            ("sortdiff", "sorted"),
+            ("sort-diff", "sorted"),
+        ] {
+            let error = run(vec![command.to_string()]).unwrap_err().to_string();
+            assert!(error.contains("removed in Ayame Editor v0.7.0"), "{error}");
+            assert!(
+                error.contains(&format!("ayame-diff {replacement}")),
+                "{error}"
+            );
+            assert!(error.contains("go install"), "{error}");
         }
     }
 

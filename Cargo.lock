@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "ayame-cli"
-version = "0.5.19"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -332,11 +332,12 @@ dependencies = [
 
 [[package]]
 name = "ayame-core"
-version = "0.5.19"
+version = "0.7.6"
 dependencies = [
  "chardetng",
  "csv-core",
  "encoding_rs",
+ "libc",
  "memchr",
  "memmap2",
  "rayon",
@@ -4095,6 +4096,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.3",
 ]
 
@@ -4106,6 +4108,12 @@ checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow 1.0.3",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tower"
@@ -5028,10 +5036,12 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.5.19"
+version = "0.7.6"
 dependencies = [
  "anyhow",
+ "serde_json",
  "sha2",
+ "toml_edit 0.25.12+spec-1.1.0",
 ]
 
 [[package]]
