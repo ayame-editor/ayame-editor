@@ -16,6 +16,7 @@ mod spill;
 mod top;
 
 pub use crate::fields::FieldSpec;
+pub use common::DEFAULT_BUDGET_BYTES;
 pub use distinct::{distinct, DistinctOptions, DistinctResult};
 pub use group::{group, GroupOptions, GroupRow, GroupStats};
 pub use sort::{

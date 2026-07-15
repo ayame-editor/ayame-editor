@@ -286,32 +286,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_table_covers_dispatch_names() {
-        for cmd in [
-            "stat",
-            "head",
-            "tail",
-            "line",
-            "lines",
-            "search",
-            "diff",
-            "sort",
-            "sortdiff",
-            "sort-diff",
-            "replace",
-            "case",
-            "split",
-            "group",
-            "top",
-            "distinct",
-            "gen",
-            "serve",
-            "typegen",
-            "cache",
-            "update",
-            "remove",
-        ] {
-            assert!(is_known_command(cmd), "{cmd}");
+    fn every_dispatched_command_is_a_known_command() {
+        // Derive the command names straight from run()'s dispatch instead of a
+        // hand-copied list. The previous hand-maintained copy had silently
+        // dropped `grep-lines` (#105), so it could not have caught that command
+        // going missing from `COMMANDS`. Reading the match arms out of this
+        // file's own source keeps the guard from ever drifting from the code it
+        // guards — add a subcommand and it is covered automatically.
+        let src = include_str!("mod.rs");
+        let start = src
+            .find("match cmd.as_str()")
+            .expect("run() dispatch match is present");
+        // Bound the scan to run()'s match block (its `    }\n}` close) so neither
+        // the helper fns below it nor this test's own source feed back in.
+        let end = src[start..]
+            .find("\n    }\n}")
+            .map_or(src.len(), |off| start + off);
+
+        let mut names = Vec::new();
+        for line in src[start..end].lines() {
+            if !line.trim_start().starts_with('"') || !line.contains("=>") {
+                continue;
+            }
+            let patterns = line.split("=>").next().unwrap_or("");
+            names.extend(patterns.split('"').skip(1).step_by(2));
+        }
+
+        assert!(
+            names.contains(&"grep-lines"),
+            "dispatch parsing missed grep-lines: {names:?}"
+        );
+        for name in names {
+            // `gui` is deliberately absent from COMMANDS: is_known_command()
+            // recognizes it through its own feature-gated case, not the table.
+            assert!(
+                is_known_command(name) || name == "gui",
+                "dispatched command {name:?} is not a known command"
+            );
         }
     }
 

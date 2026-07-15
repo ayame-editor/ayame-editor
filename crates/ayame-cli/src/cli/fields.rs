@@ -1,13 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
-use ayame_core::FieldSpec;
+use ayame_core::{FieldSpec, DEFAULT_BUDGET_BYTES};
 
 use super::args::{first_opt, has_flag};
 
 pub(crate) fn parse_key(opts: &HashMap<String, String>) -> Result<Option<usize>> {
     match first_opt(opts, &["--key", "-k"]) {
-        Some(s) => Ok(Some(s.parse().context("--key must be a number")?)),
+        Some(s) => {
+            let key: usize = s.parse().context("--key must be a number")?;
+            // 1-based, like `parse_keys`. Without this, `-k 0` slipped through and
+            // silently degraded to a whole-line key instead of erroring (#105).
+            anyhow::ensure!(key > 0, "--key columns are 1-based and must be at least 1");
+            Ok(Some(key))
+        }
         None => Ok(None),
     }
 }
@@ -29,11 +35,13 @@ pub(crate) fn parse_keys(opts: &HashMap<String, String>) -> Result<Vec<usize>> {
         .collect()
 }
 
-/// `--budget` memory bound for the spill-to-disk ops (default 256 MiB).
+/// `--budget` memory bound for the spill-to-disk ops. The default mirrors core's
+/// [`DEFAULT_BUDGET_BYTES`] (256 MiB) so the CLI never drifts from the op
+/// defaults used by `SortOptions`/`GroupOptions` (#105).
 pub(crate) fn parse_budget(opts: &HashMap<String, String>) -> Result<usize> {
     match first_opt(opts, &["--budget"]) {
         Some(s) => parse_size(s),
-        None => Ok(256 * 1024 * 1024),
+        None => Ok(DEFAULT_BUDGET_BYTES),
     }
 }
 
@@ -96,5 +104,24 @@ mod tests {
         ]);
         assert_eq!(parse_keys(&opts).unwrap(), vec![3, 1, 2]);
         assert_eq!(field_spec(&opts, &HashSet::new()).delimiter, b'\t');
+    }
+
+    #[test]
+    fn parse_key_rejects_zero_and_matches_parse_keys_validation() {
+        let zero = HashMap::from([("--key".to_string(), "0".to_string())]);
+        assert!(parse_key(&zero).is_err(), "-k 0 must be rejected");
+        // parse_keys already rejected 0; the single-key path now agrees.
+        assert!(parse_keys(&zero).is_err());
+
+        assert_eq!(
+            parse_key(&HashMap::from([("--key".to_string(), "2".to_string())])).unwrap(),
+            Some(2)
+        );
+        assert_eq!(parse_key(&HashMap::new()).unwrap(), None);
+    }
+
+    #[test]
+    fn budget_default_tracks_the_core_constant() {
+        assert_eq!(parse_budget(&HashMap::new()).unwrap(), DEFAULT_BUDGET_BYTES);
     }
 }
