@@ -152,18 +152,18 @@
           <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
           <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
-            <svg class="ay-icon"><use href="#i-undo"></use></svg>
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-undo"></use></svg>
           </button>
           <button id="redo-edit" class="ico" title="やり直す (Ctrl+Y)" aria-label="やり直す">
-            <svg class="ay-icon"><use href="#i-redo"></use></svg>
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-redo"></use></svg>
           </button>
         </div>
 
         <div class="tb-sep"></div>
 
         <div class="menu-shell">
-          <button id="tools-menu-button" class="cmd" role="menuitem" aria-haspopup="true" aria-expanded="false" title="ソート・分割" data-i18n-title="toolbar.toolsTitle">
-            <svg class="ay-icon"><use href="#i-tools"></use></svg><span class="btn-label" data-i18n="menu.tools">ツール</span>
+          <button id="tools-menu-button" class="cmd" aria-haspopup="true" aria-expanded="false" title="ソート・分割" data-i18n-title="toolbar.toolsTitle">
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-tools"></use></svg><span class="btn-label" data-i18n="menu.tools">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール" data-i18n-aria-label="menu.tools">
             <button class="menu-item" data-menu-action="sortSave" role="menuitem"
@@ -197,7 +197,7 @@
       <nav id="tabbar">
         <div id="tabs"></div>
         <button id="new-tab" class="tab-new" title="新規タブ (Ctrl+N)" aria-label="新規タブ">
-          <svg class="ay-icon"><use href="#i-plus"></use></svg>
+          <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-plus"></use></svg>
         </button>
       </nav>
 
@@ -220,22 +220,24 @@
             <div class="field find">
               <button id="find-expand" class="ico find-expand" title="置換を表示 (Ctrl+H)"
                       aria-label="置換を表示" aria-expanded="false"></button>
-              <svg class="ay-icon find-mag"><use href="#i-search"></use></svg>
-              <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)" />
-              <span id="find-count" class="find-count"></span>
+              <svg class="ay-icon find-mag" aria-hidden="true" focusable="false"><use href="#i-search"></use></svg>
+              <input id="find" type="text" autocomplete="off" placeholder="検索 (Ctrl+F)"
+                     aria-label="検索" data-i18n-aria-label="menu.find" />
+              <span id="find-count" class="find-count" role="status" aria-live="polite" aria-atomic="true"></span>
               <button id="opt-case" class="toggle" title="大文字小文字を区別 (Alt+C)" aria-label="大文字小文字を区別" data-i18n-aria-label="find.matchCase" aria-pressed="false">Aa</button>
               <button id="opt-word" class="toggle" title="単語単位 (Alt+W)" aria-label="単語単位" data-i18n-aria-label="find.wholeWord" aria-pressed="false">ab</button>
               <button id="opt-regex" class="toggle" title="正規表現 (Alt+R)" aria-label="正規表現" data-i18n-aria-label="find.regex" aria-pressed="false">.*</button>
               <button id="find-prev" class="ico" title="前の一致 (Shift+F3)" aria-label="前の一致">
-                <svg class="ay-icon"><use href="#i-up"></use></svg>
+                <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-up"></use></svg>
               </button>
               <button id="find-next" class="ico" title="次の一致 (F3)" aria-label="次の一致">
-                <svg class="ay-icon"><use href="#i-down"></use></svg>
+                <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-down"></use></svg>
               </button>
               <button id="find-close" class="ico" title="検索を閉じる (Esc)" aria-label="検索を閉じる" data-i18n-title="find.closeTitle" data-i18n-aria-label="find.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
             </div>
             <div class="field replace-row" role="group" aria-label="置換" data-i18n-aria-label="menu.replace">
-              <input id="replace-input" type="text" autocomplete="off" placeholder="置換後" data-i18n-placeholder="find.replaceWith" />
+              <input id="replace-input" type="text" autocomplete="off" placeholder="置換後"
+                     aria-label="置換後" data-i18n-placeholder="find.replaceWith" data-i18n-aria-label="find.replaceWith" />
               <button id="replace-one" class="cmd replace-btn" title="現在の一致を置換して次へ" data-i18n="menu.replace" data-i18n-title="find.replaceOneTitle">置換</button>
               <button id="replace-all" class="cmd replace-btn" title="すべての一致を置換 (元に戻せます)" data-i18n="find.replaceAll" data-i18n-title="find.replaceAllTitle">すべて置換</button>
             </div>
@@ -274,7 +276,7 @@
         </div>
 
         <div class="opener-path">
-          <span id="opener-input-label" class="opener-input-label" data-i18n="dialog.open.path">パス</span>
+          <label id="opener-input-label" class="opener-input-label" for="opener-input" data-i18n="dialog.open.path">パス</label>
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder"
                  aria-controls="opener-recent opener-list" />
@@ -550,7 +552,7 @@
           <button id="prompt-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="prompt-body">
-          <span class="prompt-label" id="prompt-label"></span>
+          <label class="prompt-label" id="prompt-label" for="prompt-input"></label>
           <input id="prompt-input" type="text" autocomplete="off" spellcheck="false" />
           <div class="prompt-actions">
             <button id="prompt-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>

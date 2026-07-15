@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { I18N_ATTR_MAP, MESSAGES } from "../src/i18n.js";
+import { I18N_ATTR_MAP, MESSAGES, SERVER_CODE_KEYS, serverMessage } from "../src/i18n.js";
+import { state } from "../src/state.js";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,6 +65,7 @@ describe("i18n completeness", () => {
     const referenced = new Set([
       ...sourceFiles(path.join(webRoot, "src")).flatMap(staticTKeys),
       ...staticHtmlKeys(),
+      ...Object.values(SERVER_CODE_KEYS),
     ]);
     referenced.delete("");
 
@@ -71,6 +73,41 @@ describe("i18n completeness", () => {
       for (const [locale, table] of Object.entries(MESSAGES)) {
         expect(table, `${locale} missing ${key}`).toHaveProperty(key);
       }
+    }
+  });
+});
+
+describe("localized server errors (#176)", () => {
+  it("translates stable server codes in Japanese and English", () => {
+    const originalLanguage = state.settings.language;
+    try {
+      state.settings.language = "ja";
+      expect(serverMessage({ code: "not_found", message: "operation not found" })).toBe(
+        "要求された項目が見つかりません。",
+      );
+
+      state.settings.language = "en";
+      expect(serverMessage({ code: "corrupted", message: "data corruption" })).toBe(
+        "Data corruption was detected.",
+      );
+    } finally {
+      state.settings.language = originalLanguage;
+    }
+  });
+
+  it("keeps unknown-code details behind a localized fallback", () => {
+    const originalLanguage = state.settings.language;
+    try {
+      state.settings.language = "ja";
+      expect(serverMessage({ code: "future_code", message: "detail" })).toBe(
+        "サーバエラー: detail",
+      );
+      state.settings.language = "en";
+      expect(serverMessage({ code: "future_code", message: "detail" })).toBe(
+        "Server error: detail",
+      );
+    } finally {
+      state.settings.language = originalLanguage;
     }
   });
 });

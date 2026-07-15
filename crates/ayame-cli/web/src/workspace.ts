@@ -13,7 +13,7 @@ import {
   setModalOpen,
 } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
-import { serverMessage, t } from "./i18n.js";
+import { currentLocale, serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
 import {
   confirmCloseLastTab,
@@ -340,11 +340,11 @@ export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (p: string
   host.title = clean;
   let crumbs = pathCrumbs(clean);
   if (clean === DRIVES_DIR) {
-    crumbs = [{ label: "PC", path: DRIVES_DIR }];
+    crumbs = [{ label: t("dialog.open.thisPc"), path: DRIVES_DIR }];
   } else if (/^[A-Za-z]:[\\/]/.test(clean)) {
     // Windows: a "PC" root crumb in front of the drive, so other drives are
     // one click away (the drive list is also the ".." of every drive root).
-    crumbs = [{ label: "PC", path: DRIVES_DIR }, ...crumbs];
+    crumbs = [{ label: t("dialog.open.thisPc"), path: DRIVES_DIR }, ...crumbs];
   }
   for (const [i, crumb] of crumbs.entries()) {
     if (i > 0) {
@@ -390,7 +390,7 @@ export function browseRow(ent, isUp) {
   nm.textContent = isUp ? t("dialog.open.up") : ent.name;
   const sz = document.createElement("span");
   sz.className = "sz";
-  sz.textContent = ent.is_dir ? "" : humanBytes(ent.size);
+  sz.textContent = ent.is_dir ? "" : humanBytes(ent.size, currentLocale());
   row.append(ic, nm, sz);
   row.addEventListener("click", () => {
     if (ent.is_dir) browse(ent.path);
