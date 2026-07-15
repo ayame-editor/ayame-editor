@@ -86,6 +86,23 @@ For files where a single wrong byte is unacceptable, see the
 (byte-exact save, crash recovery, encoding round-trips) and the tests that
 verify each one.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate
+by [SignPath Foundation](https://signpath.org/), after the project is accepted
+and signing is configured. Until then, Windows releases remain unsigned.
+
+- Committer, reviewer, and signing approver: [hjosugi](https://github.com/hjosugi)
+  (repository owner). Repository collaborators may contribute according to
+  their assigned GitHub permissions; external contributions require owner
+  review before release signing.
+- Privacy: Ayame does not upload opened document contents or telemetry. Network
+  requests are limited to explicit or configured actions such as checking for
+  and downloading releases from GitHub.
+
+See [Windows code signing](docs/PACKAGING.md#windows-code-signing) for the
+release workflow, secrets, and verification procedure.
+
 ## License
 
 0BSD. You can use, copy, modify, and distribute this project for almost any purpose.

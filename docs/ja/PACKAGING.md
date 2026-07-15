@@ -42,6 +42,50 @@ brew install hjosugi/tap/ayame
 brew upgrade ayame
 ```
 
+## Windows コード署名
+
+審査を通過した OSS project は
+[SignPath Foundation](https://signpath.org/) の Authenticode 署名を無料で
+利用できます。SignPath 未設定時、release workflow は従来の未署名 release 経路を
+維持します。次の repository secret が 4 つすべて設定されている場合、Windows job は
+次の順で処理します。
+
+1. 未署名の `ayame-<tag>-windows-x86_64.exe` を build する。
+2. SignPath が build provenance を検証できるよう GitHub Actions artifact として
+   upload する。
+3. [`SignPath/github-action-submit-signing-request`](https://github.com/SignPath/github-action-submit-signing-request)
+   へ送信する。
+4. staging 中の executable を署名済み結果で置き換える。
+5. GitHub Release の公開前に `.sha256` を再計算する。
+
+そのため、署名前 binary の checksum が公開されることはありません。secret が
+すべて未設定なら従来どおり未署名で release し、一部だけ設定されている場合は
+意図しない fallback を避けるため Windows job を失敗させます。
+
+| Repository secret | 用途 |
+| --- | --- |
+| `SIGNPATH_API_TOKEN` | Submitter 権限を持つ SignPath user の API token。 |
+| `SIGNPATH_ORGANIZATION_ID` | SignPath organization ID。 |
+| `SIGNPATH_PROJECT_SLUG` | Ayame Editor 用 SignPath project slug。 |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | release binary に使う signing policy。 |
+
+SignPath の初期設定は owner 作業です。Foundation への申請、SignPath GitHub App の
+install/許可、repository と既定の GitHub.com trusted build system の関連付け、
+`.exe` を含む ZIP artifact を受け付ける artifact configuration の作成が必要です。
+release workflow は GitHub-hosted runner を使い、provenance 検証に必要な
+`actions: read` を token へ付与します。
+
+download した release は PowerShell で検証できます。
+
+```powershell
+Get-AuthenticodeSignature .\ayame-v0.0.0-windows-x86_64.exe | Format-List
+Get-FileHash -Algorithm SHA256 .\ayame-v0.0.0-windows-x86_64.exe
+```
+
+最初の command が有効な署名を報告することを確認し、2 番目の hash を同じ release
+の `.sha256` または `SHA256SUMS` と比較します。有効な証明書があっても
+SmartScreen reputation の蓄積には時間がかかる場合があります。
+
 ## self-update の扱い
 
 `ayame update` は standalone install 用です。Package manager 管理下の Ayame を検出

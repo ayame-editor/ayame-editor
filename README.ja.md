@@ -86,6 +86,23 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 （バイト正確な保存・クラッシュ復元・エンコーディング往復などの正確性の約束と、
 それを検証するテスト）をまとめています。
 
+## Code signing policy（コード署名ポリシー）
+
+Project の審査通過・設定完了後は、[SignPath.io](https://signpath.io/) による無料の
+コード署名（証明書: [SignPath Foundation](https://signpath.org/)）を利用します。
+それまでは Windows release は未署名です。
+
+- Committer、reviewer、signing approver: repository owner の
+  [hjosugi](https://github.com/hjosugi)。Repository collaborator は割り当てられた
+  GitHub 権限に従って参加し、外部 contribution は release 署名前に owner が
+  review します。
+- Privacy: Ayame は開いた document の内容や telemetry を upload しません。
+  Network request は、GitHub release の確認・download など、明示的または設定済みの
+  操作に限られます。
+
+release workflow、secret、検証方法は
+[Windows コード署名](docs/ja/PACKAGING.md#windows-コード署名)を参照してください。
+
 ## ライセンス
 
 0BSD。ほぼすべての目的で、このプロジェクトを使用、コピー、変更、配布できます。
