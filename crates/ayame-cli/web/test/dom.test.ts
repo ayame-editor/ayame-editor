@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   commas,
   displayPath,
+  displayShortcut,
   humanBytes,
   isAbsolutePath,
   isUntitled,
@@ -68,5 +69,18 @@ describe("path helpers", () => {
     expect(isUntitled("/tmp/ayame-untitled-1234/untitled.txt")).toBe(true);
     expect(isUntitled("E:\\note\\untitled.txt")).toBe(false);
     expect(isUntitled("")).toBe(false);
+  });
+});
+
+describe("shortcut display (#164)", () => {
+  it("uses native compact modifier glyphs on macOS", () => {
+    expect(displayShortcut("Ctrl+S", "MacIntel")).toBe("⌘S");
+    expect(displayShortcut("Ctrl+Alt+Shift+ArrowUp", "MacIntel")).toBe("⌘⌥⇧↑");
+    expect(displayShortcut("Ctrl++", "MacIntel")).toBe("⌘+");
+  });
+
+  it("keeps the existing labels on Windows and Linux", () => {
+    expect(displayShortcut("Ctrl+Alt+Shift+ArrowUp", "Win32")).toBe("Ctrl+Alt+Shift+↑");
+    expect(displayShortcut("Ctrl+S", "Linux x86_64")).toBe("Ctrl+S");
   });
 });
