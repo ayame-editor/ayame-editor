@@ -371,6 +371,15 @@ export function settingsVisible() {
 
 export function showSettings() {
   setModalOpen($("settings"), true);
+  // Move focus into the panel so it is keyboard-operable the moment it opens
+  // (#174); skip the corner ✕ in favor of the first real control.
+  queueMicrotask(() => {
+    const panel = $("settings").querySelector(".modal-panel");
+    const first = panel?.querySelector<HTMLElement>(
+      'select, input, button:not(.modal-x), [tabindex]:not([tabindex="-1"])',
+    );
+    (first || $("settings-close")).focus();
+  });
 }
 
 export function hideSettings() {
