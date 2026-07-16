@@ -2,7 +2,96 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.7.7 - 2026-07-16
+
+- The native desktop app now cleans up its scratch on exit and reaps dead
+  sessions' leftovers on startup (#138). Graceful shutdown cleanup (uploads,
+  untitled buffers, unsaved sort results, in-place aside files, clean-session
+  WAL) was CLI `serve`-only; the GUI leaked all of it every session — up to
+  several GiB, and Windows %TEMP% is never auto-swept. The window close path
+  now runs the same cleanup, and startup reaps `ayame-*` scratch left by
+  crashed/killed prior processes whose PID is no longer alive (own and
+  live-sibling sessions are spared).
+- The build now fails on recoverable TypeScript syntax errors (#115). oxc
+  recovers from many TS syntax errors without panicking, so a broken module
+  was silently type-stripped into wrong JS and embedded into release
+  binaries — `tsc` gates CI but not local or release builds. The TS→JS step
+  now asserts the parser reported no diagnostics and names the offending
+  file.
+- Two error variants that carried the wrong meaning as strings are now
+  structured (#111). An existing target was reported as `Conflict(String)`
+  with the path baked into the message, and only the two save endpoints that
+  remembered to re-synthesize it returned the stable "exists" code; the new
+  `TargetExists { path }` maps to 409/"exists" on every endpoint. A
+  truncated spill record — an engine/storage fault — was reported as
+  `Error::Search` and surfaced as HTTP 400, blaming the user's input; the
+  new `Corrupted` variant maps to 500.
+- Removed a process-abort risk in `serve` (#106). `ops.rs` guarded the
+  global artifact-op map and each op's message with `.lock().unwrap()`, one
+  of them inside `OperationGuard::drop` — which can run while unwinding a
+  panicking request, so a poisoned mutex meant a double panic and a whole
+  process abort. All seven lock sites now go through a `lock_recover` helper
+  that recovers from poisoning, mirroring the policy `state.rs` already
+  upheld for its RwLocks.
+- `group`/`top`/`distinct` no longer accept `-k 0` (#105). `parse_key` was
+  missing the 1-based check `parse_keys` already had, so `-k 0` silently
+  degraded to a whole-line key; it now fails cleanly with the same error.
+  `--budget`'s 256 MiB default is shared with core's `DEFAULT_BUDGET_BYTES`
+  instead of being hardcoded twice, and the CLI drift guard now reads
+  `run()`'s dispatch arms out of the source (the hand-copied list it
+  replaced had silently dropped `grep-lines` — a guard that could not
+  guard).
+- Accessibility pass over the editor UI (#152, #160, #161, #184). Hint,
+  placeholder, and disabled text used `--fg-faint`, which failed WCAG AA
+  against `--bg` in all seven themes (2.19–3.66:1) at 11px — it is now
+  ≥4.6:1, and disabled buttons no longer double-dim into sub-2:1. Modals
+  gained a focus trap and an inert backdrop, so Tab and the screen-reader
+  cursor can no longer escape behind an open dialog. The menubar, which
+  declared `role=menubar` while wiring only click, now implements the ARIA
+  keyboard contract (roving tabindex, arrows, Home/End, Enter/Space, Esc,
+  F10). The progress overlay gained role/aria-modal/aria-live, focus on
+  Cancel, and Esc-to-cancel — previously it was pointer-only.
+- Fixed a start-up dead end and several UX inconsistencies (#174, #186,
+  #169, #153). The welcome opener refused to close while no document was
+  open (Esc, ✕, and the backdrop all inert, with no "New File" action), so
+  the only way out was to open a file; it now closes onto a fresh untitled
+  buffer and offers New File. The apply-theme/apply-keymap buttons appeared
+  only on a `*.ayame-theme.json` / `*.ayame-keys.json` tab and shoved
+  undo/redo sideways when they did — they now occupy their own right-aligned
+  lane. Menubar Edit > Cut/Copy now disables without a selection, matching
+  the context menu. The encoding-convert modal takes Enter to confirm, and
+  its destructive "reopen" (which discards edits) is now visually and
+  textually distinguished from "convert and save". The theme now defaults to
+  following the OS light/dark preference, with an explicit choice still
+  winning and `theme-color` tracking the active theme.
+- Find, replace, and command-palette inputs gained persistent localized
+  accessible names; the opener and prompt labels are associated with their
+  inputs, and the match count is an atomic polite status region (#182). The
+  opener is keyboard-navigable — recent files and directory entries are
+  listbox options with active-descendant state, reachable from the path
+  input with arrows/Home/End, activated with Enter/Space (#185).
+- The find bar's "N / total" count now updates live while typing (#162). It
+  rebuilt the highlight matcher on every keystroke but only refreshed the
+  count on Enter or an option toggle, so the count read stale mid-type. The
+  refresh is debounced 120ms and reuses the existing cancellation.
+- Localization gaps closed: grouped numbers format with the active UI locale
+  instead of a hardcoded en-US, and every stable server error code resolves
+  through the ordinary ja/en tables (#176). Four literals that bypassed the
+  i18n table — the opener's "PC" root, the " (BOM)" suffix, "Mixed"/"None"
+  EOL, and the "[EOF]" marker — now resolve through `t()`, and file sizes
+  take the locale's decimal separator (#189). Each locale now declares a
+  writing direction that drives `document.dir` alongside `lang`, so an RTL
+  language stays data-only to add (#190) — the CSS logical-property
+  migration follows once one ships.
+- macOS renders stored `Ctrl`/`Alt`/`Shift` shortcuts as native `⌘`/`⌥`/`⇧`
+  glyphs; Windows and Linux labels and the cross-platform stored format are
+  unchanged (#164).
+- Added English and Japanese documentation (#136).
+- Windows releases can now be Authenticode-signed via SignPath Foundation
+  (#226). Signing is optional — an unconfigured repo still publishes
+  unsigned builds, and a partially configured one fails rather than
+  silently shipping unsigned. The signed executable replaces the staged one
+  and its SHA256 is regenerated before publishing.
 
 ## v0.7.6 - 2026-07-14
 
@@ -21,17 +110,6 @@ All notable changes to Ayame Editor are tracked here.
   experimental` deep inside the dependency. cargo now reports "requires rustc
   1.95" up front, and the `msrv` CI job (which the floating-`stable` job can't
   substitute for) fails if a future dependency raises the real minimum. (#195)
-
-## Unreleased
-
-- The native desktop app now cleans up its scratch on exit and reaps dead
-  sessions' leftovers on startup (#138). Graceful shutdown cleanup (uploads,
-  untitled buffers, unsaved sort results, in-place aside files, clean-session
-  WAL) was CLI `serve`-only; the GUI leaked all of it every session — up to
-  several GiB, and Windows %TEMP% is never auto-swept. The window close path
-  now runs the same cleanup, and startup reaps `ayame-*` scratch left by
-  crashed/killed prior processes whose PID is no longer alive (own and
-  live-sibling sessions are spared).
 
 ## v0.7.5 - 2026-07-14
 
