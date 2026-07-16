@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## v0.7.7 - 2026-07-16
+## v0.8.0 - 2026-07-16
 
 - The native desktop app now cleans up its scratch on exit and reaps dead
   sessions' leftovers on startup (#138). Graceful shutdown cleanup (uploads,
