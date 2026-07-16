@@ -129,6 +129,16 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
 
 // ---- input wiring ----------------------------------------------------------
 
+// Enter confirms the encoding dialog's primary action (Convert & Save) from
+// anywhere in it — including the encoding <select> — so a conversion never
+// requires the mouse. A focused Reopen button is honored instead; Esc closes
+// through the global handler (#169).
+export function onConvertModalKey(e) {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  (document.activeElement === $("reopen-go") ? $("reopen-go") : $("convert-go")).click();
+}
+
 export function setQueryFromInput() {
   state.query = $("find").value;
   state.lastMatch = null;
@@ -227,6 +237,7 @@ export function initEvents() {
     hideConvert();
     reopenWithEncoding(encoding);
   });
+  $("convert-modal").addEventListener("keydown", onConvertModalKey);
   $("convert-modal").addEventListener("click", (e) => {
     if (e.target === $("convert-modal")) hideConvert();
   });

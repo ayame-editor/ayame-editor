@@ -460,9 +460,10 @@
             <input id="convert-bom" type="checkbox" />
             <span class="set-hint" data-i18n="dialog.convert.bom">BOMを付ける（UTF-8のみ）</span>
           </label>
+          <p class="convert-note" data-i18n="dialog.convert.actionsHint">「変換して保存」は現在の内容を選んだ文字コードで書き出します。「開き直す」は保存済みファイルを読み直し、未保存の編集は破棄されます。</p>
           <div class="form-actions">
             <button id="convert-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
-            <button id="reopen-go" class="cmd" data-i18n="dialog.convert.reopen">開き直す</button>
+            <button id="reopen-go" class="cmd warn" title="保存済みファイルを選んだ文字コードで読み直します（未保存の編集は破棄）" data-i18n-title="dialog.convert.reopenTitle" data-i18n="dialog.convert.reopen">開き直す</button>
             <button id="convert-go" class="cmd primary" data-i18n="dialog.convert.go">変換して保存</button>
           </div>
         </div>

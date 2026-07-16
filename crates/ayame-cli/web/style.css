@@ -1777,6 +1777,21 @@ html.saving .caret.extra { visibility: hidden; }
 .prompt-actions .cmd { border: 1px solid var(--border); }
 .cmd.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .cmd.primary:hover { background: var(--accent-bright); }
+/* A cautionary (potentially destructive) secondary action — outlined in the
+   danger hue so it reads apart from the primary without shouting like a filled
+   danger button (e.g. 開き直す / Reopen, which discards edits). */
+.cmd.warn {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger);
+}
+.cmd.warn:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+/* Explains the two convert verbs so the destructive one isn't a mystery (#169). */
+.convert-note {
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+  line-height: 1.5;
+  margin: 2px 2px 8px;
+}
 
 /* editor context menu: .file-menu look, but fixed at the pointer */
 .ctx-menu {

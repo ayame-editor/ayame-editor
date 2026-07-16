@@ -92,7 +92,7 @@ vi.mock("../src/settings.js", () => ({
 
 import { focusEditor } from "../src/editor.js";
 import { insertNewline } from "../src/edits.js";
-import { onCompEnd, onEditKey } from "../src/input.js";
+import { onCompEnd, onConvertModalKey, onEditKey } from "../src/input.js";
 import { hideFind } from "../src/search.js";
 import { state } from "../src/state.js";
 
@@ -170,5 +170,47 @@ describe("IME confirm-Enter (WebKit) handling", () => {
     onEditKey(enterEvent(1010)); // consumed
     onEditKey(enterEvent(1020)); // next Enter is a real newline
     expect(insertNewline).toHaveBeenCalledOnce();
+  });
+});
+
+describe("encoding dialog Enter-to-confirm (#169)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <div id="convert-modal">
+        <select id="convert-enc"><option value="utf-8">UTF-8</option></select>
+        <button id="reopen-go"></button>
+        <button id="convert-go" class="primary"></button>
+      </div>`;
+  });
+
+  it("confirms Convert & Save when Enter is pressed from the encoding select", () => {
+    const convert = vi.fn();
+    const reopen = vi.fn();
+    document.getElementById("convert-go")!.addEventListener("click", convert);
+    document.getElementById("reopen-go")!.addEventListener("click", reopen);
+    document.getElementById("convert-enc")!.focus();
+    const e = { key: "Enter", preventDefault: vi.fn() };
+    onConvertModalKey(e);
+    expect(e.preventDefault).toHaveBeenCalledOnce();
+    expect(convert).toHaveBeenCalledOnce();
+    expect(reopen).not.toHaveBeenCalled();
+  });
+
+  it("honors a focused Reopen button instead of the primary action", () => {
+    const convert = vi.fn();
+    const reopen = vi.fn();
+    document.getElementById("convert-go")!.addEventListener("click", convert);
+    document.getElementById("reopen-go")!.addEventListener("click", reopen);
+    document.getElementById("reopen-go")!.focus();
+    onConvertModalKey({ key: "Enter", preventDefault: vi.fn() });
+    expect(reopen).toHaveBeenCalledOnce();
+    expect(convert).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-Enter keys", () => {
+    const convert = vi.fn();
+    document.getElementById("convert-go")!.addEventListener("click", convert);
+    onConvertModalKey({ key: "a", preventDefault: vi.fn() });
+    expect(convert).not.toHaveBeenCalled();
   });
 });

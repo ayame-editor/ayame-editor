@@ -281,6 +281,10 @@ export const MESSAGES = {
     "dialog.convert.eolCr": "CR (旧 Mac)",
     "dialog.convert.bom": "BOMを付ける（UTF-8 / UTF-16）",
     "dialog.convert.reopen": "開き直す",
+    "dialog.convert.reopenTitle":
+      "保存済みファイルを選んだ文字コードで読み直します（未保存の編集は破棄）",
+    "dialog.convert.actionsHint":
+      "「変換して保存」は現在の内容を選んだ文字コードで書き出します。「開き直す」は保存済みファイルを読み直し、未保存の編集は破棄されます。",
     "dialog.convert.go": "変換して保存",
     "dialog.convert.savedAs": "{enc} / {eol} で保存しました",
     "dialog.convert.reopenedAs": "{enc} で開き直しました",
@@ -672,6 +676,10 @@ export const MESSAGES = {
     "dialog.convert.eolCr": "CR (classic Mac)",
     "dialog.convert.bom": "Add BOM (UTF-8 / UTF-16)",
     "dialog.convert.reopen": "Reopen",
+    "dialog.convert.reopenTitle":
+      "Re-read the saved file in the chosen encoding (unsaved edits are discarded)",
+    "dialog.convert.actionsHint":
+      "“Convert and Save” writes the current contents in the chosen encoding. “Reopen” re-reads the saved file and discards any unsaved edits.",
     "dialog.convert.go": "Convert and Save",
     "dialog.convert.savedAs": "Saved as {enc} / {eol}",
     "dialog.convert.reopenedAs": "Reopened as {enc}",
