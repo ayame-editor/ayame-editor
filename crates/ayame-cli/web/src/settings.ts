@@ -281,6 +281,27 @@ export function applyCustomVars(t) {
   S("--illus", String(t.illustration ?? 0.2));
 }
 
+// True when the OS asks for a dark UI (guarded for non-browser test/build env).
+function prefersDark() {
+  return typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+// Resolve a stored theme setting to a concrete built-in id. "auto" (or an unset
+// value) follows the OS preference; any explicit id is returned unchanged (#153).
+export function resolvedThemeId(theme) {
+  if (!theme || theme === "auto") return prefersDark() ? "dark" : "iris-light";
+  return theme;
+}
+
+// Keep the mobile browser chrome (address bar / status bar) in step with the
+// active theme by mirroring the computed --bg into <meta name="theme-color">.
+function updateThemeColorMeta(root) {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const bg = getComputedStyle(root).getPropertyValue("--bg").trim();
+  if (bg) meta.setAttribute("content", bg);
+}
+
 export function applySettings(s) {
   const root = document.documentElement;
   // ---- theme (built-in CSS block, or a custom JSON theme at runtime) ----
@@ -290,7 +311,8 @@ export function applySettings(s) {
     root.dataset.theme = "custom";
     if (t) applyCustomVars(t);
   } else {
-    root.dataset.theme = s.theme || "iris-light"; // iris-* | dark | black (unknown → :root)
+    // iris-* | dark | black | "auto" (→ OS preference). Unknown → :root default.
+    root.dataset.theme = resolvedThemeId(s.theme);
   }
   // ---- whitespace glyphs: swap the zenkaku-space box for an underline ----
   root.classList.toggle("zenkaku-underline", !!s.zenkakuUnderline);
@@ -332,6 +354,7 @@ export function applySettings(s) {
   // fit the viewport render (and caret/select) exactly as before. See style.css
   // #content.wrap for the documented limitations on genuinely wrapped lines.
   $("content").classList.toggle("wrap", !!s.wordWrap);
+  updateThemeColorMeta(root); // reflect the resolved theme in the browser chrome
   scheduleRender();
 }
 
@@ -396,7 +419,7 @@ export function themeJSONFor(id) {
 }
 
 export function themeIllusPct(id) {
-  const t = themeJSONFor(id);
+  const t = themeJSONFor(resolvedThemeId(id));
   return Math.round(((t && t.illustration) ?? 0) * 100);
 }
 
@@ -544,6 +567,13 @@ function notifyNativeUpdateCheckSetting() {
 export function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
+  // Follow live OS light/dark changes while the theme is on "auto" (#153).
+  if (typeof matchMedia !== "undefined") {
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      const theme = state.settings.theme;
+      if (!theme || theme === "auto") applySettings(state.settings);
+    });
+  }
   notifyNativeUpdateCheckSetting();
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
