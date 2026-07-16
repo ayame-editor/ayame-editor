@@ -76,6 +76,8 @@ vi.mock("../src/dialogs.js", () => ({
   formVisible: vi.fn(() => false),
   promptVisible: vi.fn(() => false),
   loadingVisible: vi.fn(() => false),
+  loadingCancelable: vi.fn(() => false),
+  cancelLoading: vi.fn(() => {}),
 }));
 vi.mock("../src/workspace.js", () => ({
   hideOpener: vi.fn(),

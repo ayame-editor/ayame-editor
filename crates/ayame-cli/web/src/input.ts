@@ -1,5 +1,5 @@
 // Ayame Editor — input module. Type-stripped to JS at build time (build.rs, oxc).
-import { $ } from "./dom.js";
+import { $, initModalFocusTrap } from "./dom.js";
 import { LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
 import {
@@ -71,7 +71,14 @@ import {
   showSearchHistory,
   updateCount,
 } from "./search.js";
-import { confirmVisible, formVisible, loadingVisible, promptVisible } from "./dialogs.js";
+import {
+  cancelLoading,
+  confirmVisible,
+  formVisible,
+  loadingCancelable,
+  loadingVisible,
+  promptVisible,
+} from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
 import {
   adjustZoom,
@@ -100,6 +107,9 @@ export function anyModalOpen() {
 }
 
 const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
+  // A cancelable long operation: Esc requests cancel instead of being swallowed
+  // by the loadingVisible() modal guard below (#184).
+  [loadingCancelable, cancelLoading],
   [ctxMenuVisible, hideCtxMenu],
   [fileMenuVisible, () => hideFileMenu(true)],
   [keymapVisible, hideKeymap],
@@ -256,6 +266,7 @@ export function initEvents() {
   });
 
   document.addEventListener("keydown", onGlobalKey);
+  initModalFocusTrap();
   window.addEventListener("resize", scheduleRender);
 }
 
