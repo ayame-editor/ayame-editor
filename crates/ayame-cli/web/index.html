@@ -149,8 +149,6 @@
            editor viewport instead. -->
       <header id="toolbar">
         <div class="tb-group">
-          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
-          <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
             <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-undo"></use></svg>
           </button>
@@ -191,6 +189,15 @@
             <button class="menu-item" data-menu-action="caseKebab" role="menuitem"><span class="menu-label" data-i18n="menu.caseKebab">kebab-case に変換</span><span class="menu-key" data-key-action="caseKebab"></span></button>
             <button class="menu-item" data-menu-action="caseConstant" role="menuitem"><span class="menu-label" data-i18n="menu.caseConstant">CONSTANT_CASE に変換</span><span class="menu-key" data-key-action="caseConstant"></span></button>
           </div>
+        </div>
+
+        <!-- Contextual "apply this JSON" actions. Right-aligned in their own
+             group so appearing for a theme/keymap tab never shifts the
+             undo/redo/tools controls on the left (#186). -->
+        <div class="tb-spacer"></div>
+        <div class="tb-group tb-apply">
+          <button id="apply-theme" class="cmd primary hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
+          <button id="apply-keymap" class="cmd primary hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
         </div>
       </header>
 

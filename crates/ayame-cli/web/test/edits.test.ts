@@ -127,9 +127,7 @@ describe("edit generation guards", () => {
       const path = String(input);
       if (path === "/api/edit/replace_batch") return edit.promise;
       if (path.startsWith("/api/lines?")) {
-        return Promise.resolve(
-          jsonResponse({ lines: [{ number: 1, text: "abcdef" }], total: 10 }),
-        );
+        return Promise.resolve(jsonResponse({ lines: [{ number: 1, text: "abcdef" }], total: 10 }));
       }
       throw new Error(`unexpected fetch ${path}`);
     });

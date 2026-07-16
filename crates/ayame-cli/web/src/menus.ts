@@ -109,6 +109,17 @@ export function showAppMenu(id) {
       tail.setAttribute("aria-checked", String(state.followTail));
     }
   }
+  if (id === "edit") {
+    // Cut/Copy need a selection to act on — match the context menu, which
+    // already disables them, instead of offering dead commands (#186).
+    const hasSel = hasTextSelection();
+    for (const action of ["cut", "copy"]) {
+      const item = $("edit-menu").querySelector<HTMLButtonElement>(
+        `[data-menu-action="${action}"]`,
+      );
+      if (item) item.disabled = !hasSel;
+    }
+  }
   $(`${id}-menu`).classList.remove("hidden");
   $(`${id}-menu-button`).classList.add("on");
   $(`${id}-menu-button`).setAttribute("aria-expanded", "true");

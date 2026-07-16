@@ -339,6 +339,12 @@ html, body {
   background: var(--border);
   flex: 0 0 auto;
 }
+/* Pushes the contextual apply-theme/apply-keymap group to the right edge so it
+   claims its own lane and never shoves the primary controls when it appears. */
+.tb-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 
 /* Buttons: text commands (.cmd) and square icon buttons (.ico). */

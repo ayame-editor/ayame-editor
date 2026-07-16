@@ -48,10 +48,16 @@ describe("search pure helpers", () => {
 describe("search count request generation (#123)", () => {
   it("aborts an older request and ignores its late response", async () => {
     document.body.innerHTML = '<span id="find-count"></span>';
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     const first = deferredResponse();
     const second = deferredResponse();
-    const fetchMock = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
     vi.stubGlobal("fetch", fetchMock);
 
     state.query = "old";
@@ -78,7 +84,10 @@ describe("live incremental count while typing (#162)", () => {
   it("debounces a burst of keystrokes into a single count request", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<span id="find-count"></span>';
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     const fetchMock = vi
       .fn()
       .mockResolvedValue(

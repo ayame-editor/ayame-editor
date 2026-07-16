@@ -10,6 +10,7 @@ vi.mock("../src/input.js", () => ({
 }));
 
 import { focusMenubar, initMenuBar } from "../src/menus.js";
+import { state } from "../src/state.js";
 
 function shell(id: string, items: string) {
   return `
@@ -32,7 +33,10 @@ describe("menubar keyboard navigation (#161)", () => {
       <div id="app">
         <nav id="menubar" role="menubar">
           ${shell("file", item("newFile", "New") + item("openFile", "Open"))}
-          ${shell("edit", item("undo", "Undo") + item("redo", "Redo"))}
+          ${shell(
+            "edit",
+            item("undo", "Undo") + item("redo", "Redo") + item("cut", "Cut") + item("copy", "Copy"),
+          )}
           ${shell("selection", item("selectAll", "All"))}
           ${shell(
             "view",
@@ -46,7 +50,30 @@ describe("menubar keyboard navigation (#161)", () => {
         </nav>
       </div>
       ${shell("tools", item("sortSave", "Sort"))}`;
+    state.sel = null;
+    state.extraCursors = [];
     initMenuBar();
+  });
+
+  const editItem = (action: string) =>
+    document.querySelector<HTMLButtonElement>(`#edit-menu [data-menu-action="${action}"]`)!;
+
+  it("disables Cut/Copy in the edit menu when there is no selection (#186)", () => {
+    state.sel = null;
+    const edit = document.getElementById("edit-menu-button")!;
+    edit.focus();
+    key(edit, "ArrowDown"); // opens the edit menu → showAppMenu("edit")
+    expect(editItem("cut").disabled).toBe(true);
+    expect(editItem("copy").disabled).toBe(true);
+  });
+
+  it("enables Cut/Copy in the edit menu when text is selected (#186)", () => {
+    state.sel = { anchor: { line: 0, col: 0 }, head: { line: 0, col: 4 } } as never;
+    const edit = document.getElementById("edit-menu-button")!;
+    edit.focus();
+    key(edit, "ArrowDown");
+    expect(editItem("cut").disabled).toBe(false);
+    expect(editItem("copy").disabled).toBe(false);
   });
 
   it("starts with a single roving Tab stop on the first trigger", () => {

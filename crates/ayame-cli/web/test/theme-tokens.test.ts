@@ -57,7 +57,9 @@ describe("Ayame design tokens", () => {
 
   it("completes dark theme chrome tokens", () => {
     for (const theme of ["dark", "black"]) {
-      const block = css.match(new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
       expect(block).toBeTruthy();
       expect(block).toContain("--accent: #9b82d8");
       expect(block).toContain("--accent-bright: #b49de6");
@@ -69,7 +71,9 @@ describe("Ayame design tokens", () => {
   it("gives every named theme its own syntax palette and keeps Mono Paper monochrome (#154)", () => {
     const names = ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"];
     for (const name of names) {
-      const block = css.match(new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
       expect(block).toBeTruthy();
       for (const token of ["string", "number", "literal", "function", "link"]) {
         expect(block).toContain(`--syn-${token}:`);
@@ -85,7 +89,9 @@ describe("Ayame design tokens", () => {
   });
 
   it("uses semantic tokens for syntax colors", () => {
-    expect(css).not.toMatch(/\.syn-(?:string|number|literal|function|link)[^{]*\{[^}]*#[\da-f]{3,8}/is);
+    expect(css).not.toMatch(
+      /\.syn-(?:string|number|literal|function|link)[^{]*\{[^}]*#[\da-f]{3,8}/is,
+    );
   });
 
   it("routes component corners, shadows, and foregrounds through tokens", () => {
@@ -107,7 +113,9 @@ describe("Ayame design tokens", () => {
     expect(contrast(rootFaint!, rootBg!)).toBeGreaterThanOrEqual(4.5);
 
     for (const theme of ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"]) {
-      const block = css.match(new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
       expect(block, theme).toBeTruthy();
       const bg = token(block!, "--bg");
       const faint = token(block!, "--fg-faint");
@@ -127,6 +135,8 @@ describe("Ayame design tokens", () => {
   it("uses a theme-aware focus ring for controls and the editor viewport (#183)", () => {
     expect(css).toContain("--focus-ring:");
     expect(css).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus-ring\)/);
-    expect(css).toMatch(/#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s);
+    expect(css).toMatch(
+      /#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s,
+    );
   });
 });
