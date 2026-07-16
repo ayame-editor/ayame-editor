@@ -28,7 +28,8 @@
   --hover: color-mix(in srgb, var(--accent) 10%, transparent);
   --fg: #2A2140;
   --fg-dim: #6E6383;
-  --fg-faint: #A99DBC;
+  /* WCAG AA (>=4.5:1 on --bg) — hints/placeholders use this at 11px (#152). */
+  --fg-faint: #756C82;
   --border: #E7E0D3;
   --accent: #7A5CC0;
   --accent-bright: #6A4CB0;
@@ -72,7 +73,7 @@
 html[data-theme="iris-mist"] {
   --bg: #F7F9FC; --bg-elevated: #FDFEFF; --bg-toolbar: rgba(250,252,255,.68);
   --bg-active-line: #E6EDFA; --gutter-bg: #F7F9FC; --edit-bg: #FFFFFF;
-  --fg: #26314A; --fg-dim: #5E6E8A; --fg-faint: #9DAAC0; --border: #DCE4EF;
+  --fg: #26314A; --fg-dim: #5E6E8A; --fg-faint: #697281; --border: #DCE4EF;
   --accent: #5B79C9; --accent-bright: #4A68B8; --status: rgba(250,252,255,.68); --status-fg: #5E6E8A;
   --gutter-fg: #9DAAC0; --mark-bg: #E3ECFB; --mark-fg: #2C3E6B;
   --mark-active-bg: #7EC7C0; --mark-active-fg: #0F2A28; --danger: #C05C74;
@@ -87,7 +88,7 @@ html[data-theme="iris-mist"] {
 html[data-theme="iris-dawn"] {
   --bg: #FDF6EE; --bg-elevated: #FFFBF7; --bg-toolbar: rgba(255,250,244,.70);
   --bg-active-line: #F6E7F0; --gutter-bg: #FDF6EE; --edit-bg: #FFFFFF;
-  --fg: #3A2438; --fg-dim: #7A5A6E; --fg-faint: #B79AA6; --border: #EFE0D6;
+  --fg: #3A2438; --fg-dim: #7A5A6E; --fg-faint: #7E6A73; --border: #EFE0D6;
   --accent: #A65CB0; --accent-bright: #944EA0; --status: rgba(255,250,244,.70); --status-fg: #7A5A6E;
   --gutter-fg: #B79AA6; --mark-bg: #FBE7C8; --mark-fg: #7A4A16;
   --mark-active-bg: #F0B85A; --mark-active-fg: #3A2205; --danger: #D96A86;
@@ -102,7 +103,7 @@ html[data-theme="iris-dawn"] {
 html[data-theme="sumi-light"] {
   --bg: #FAFAF8; --bg-elevated: #FFFFFF; --bg-toolbar: rgba(252,252,250,.74);
   --bg-active-line: #ECE8F4; --gutter-bg: #FAFAF8; --edit-bg: #FFFFFF;
-  --fg: #222024; --fg-dim: #63616A; --fg-faint: #A7A4AE; --border: #E6E4DE;
+  --fg: #222024; --fg-dim: #63616A; --fg-faint: #737178; --border: #E6E4DE;
   --accent: #7A5CC0; --accent-bright: #6A4CB0; --status: rgba(252,252,250,.74); --status-fg: #63616A;
   --gutter-fg: #A7A4AE; --mark-bg: #ECE6FA; --mark-fg: #3E2E63;
   --mark-active-bg: #7A5CC0; --mark-active-fg: #FFFFFF; --danger: #B24A5E;
@@ -116,7 +117,7 @@ html[data-theme="sumi-light"] {
 html[data-theme="mono-paper"] {
   --bg: #F5F3ED; --bg-elevated: #FBFAF5; --bg-toolbar: rgba(245,243,237,.92);
   --bg-active-line: #E8E6DE; --gutter-bg: #F5F3ED; --edit-bg: #FBFAF5;
-  --fg: #24231F; --fg-dim: #6C6A63; --fg-faint: #A9A69D; --border: #E2DFD6;
+  --fg: #24231F; --fg-dim: #6C6A63; --fg-faint: #6E6C66; --border: #E2DFD6;
   --accent: #6F6B79; --accent-bright: #605C6C; --status: rgba(245,243,237,.92); --status-fg: #6C6A63;
   --gutter-fg: #A9A69D; --mark-bg: #E7E4EC; --mark-fg: #3A3745;
   --mark-active-bg: #6F6B79; --mark-active-fg: #FFFFFF; --danger: #9A6A6A;
@@ -135,7 +136,7 @@ html[data-theme="dark"] {
   --hover: #ffffff14;
   --fg: #d4d4d4;
   --fg-dim: #9a9a9a;
-  --fg-faint: #6a6a6a;
+  --fg-faint: #888888;
   --border: #3c3c3c;
   --accent: #9b82d8;
   --accent-bright: #b49de6;
@@ -163,7 +164,7 @@ html[data-theme="black"] {
   --hover: #ffffff18;
   --fg: #e8e8e8;
   --fg-dim: #9a9a9a;
-  --fg-faint: #666666;
+  --fg-faint: #777777;
   --border: #222222;
   --accent: #9b82d8;
   --accent-bright: #b49de6;
@@ -338,6 +339,12 @@ html, body {
   background: var(--border);
   flex: 0 0 auto;
 }
+/* Pushes the contextual apply-theme/apply-keymap group to the right edge so it
+   claims its own lane and never shoves the primary controls when it appears. */
+.tb-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 
 /* Buttons: text commands (.cmd) and square icon buttons (.ico). */
@@ -427,8 +434,18 @@ button.on {
   color: var(--accent-bright);
 }
 button:active { transform: translateY(0.5px); }
-button:disabled { color: var(--fg-faint); opacity: 0.5; cursor: default; }
+/* Disabled uses ONE dimming mechanism (faint color, now WCAG AA) — never color
+   *and* opacity together, which drove contrast below 2:1 (#152). */
+button:disabled { color: var(--fg-faint); cursor: default; }
 button:disabled:hover { background: transparent; color: var(--fg-faint); }
+/* Filled buttons keep their legible on-accent text; a single opacity step is
+   their one dimming mechanism (no faint color on top). */
+.cmd.primary:disabled, .cmd.danger:disabled {
+  color: var(--on-accent);
+  opacity: 0.55;
+}
+.cmd.primary:disabled:hover { background: var(--accent); color: var(--on-accent); }
+.cmd.danger:disabled:hover { background: var(--danger); color: var(--on-accent); }
 button.toggle {
   width: 30px;
   font-size: var(--fs-ui-sm);
@@ -765,7 +782,7 @@ html.replace-open .find-group .replace-row { display: flex; }
 /* Hover affordance: the row under the pointer gets a faint wash so the text
    reads as selectable. Kept lighter than the active-line and selection washes
    so they still win when they apply. */
-.row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.row:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .row.active:hover { background: var(--bg-active-line); }
 .row.eof { cursor: default; }
 .row.eof .tx { color: var(--fg-faint); font-family: var(--ui); font-style: italic; }
@@ -1760,6 +1777,21 @@ html.saving .caret.extra { visibility: hidden; }
 .prompt-actions .cmd { border: 1px solid var(--border); }
 .cmd.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .cmd.primary:hover { background: var(--accent-bright); }
+/* A cautionary (potentially destructive) secondary action — outlined in the
+   danger hue so it reads apart from the primary without shouting like a filled
+   danger button (e.g. 開き直す / Reopen, which discards edits). */
+.cmd.warn {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger);
+}
+.cmd.warn:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+/* Explains the two convert verbs so the destructive one isn't a mystery (#169). */
+.convert-note {
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+  line-height: 1.5;
+  margin: 2px 2px 8px;
+}
 
 /* editor context menu: .file-menu look, but fixed at the pointer */
 .ctx-menu {

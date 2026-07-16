@@ -254,6 +254,8 @@ export function configureOpener(mode, title?) {
   $("opener-open").textContent = t(
     save ? "menu.save" : folder ? "dialog.open.chooseFolder" : "menu.open",
   );
+  // "New File" only makes sense on the welcome/open screen, not save/folder.
+  $("opener-new").classList.toggle("hidden", save || folder);
   $("opener-hint").textContent = t(
     save ? "dialog.open.hintSave" : folder ? "dialog.open.hintFolder" : "dialog.open.hintOpen",
   );
@@ -271,10 +273,14 @@ export function hideOpener() {
     finishFolderDialog(null);
     return;
   }
-  // The opener doubles as the welcome screen: don't let it close while there is
-  // no document to fall back to.
-  if (!state.stat?.open) return;
   setModalOpen($("opener"), false);
+  // The opener doubles as the welcome screen. Refusing to close it with nothing
+  // open was a dead end (Esc/✕ inert, no "New File"); instead land on a fresh
+  // untitled buffer so there is always a way out (#174).
+  if (!state.stat?.open) {
+    newUntitled();
+    return;
+  }
   focusEditor();
 }
 
@@ -1044,6 +1050,11 @@ export function initWorkspace() {
     openFileDialog();
   });
   $("opener-close").addEventListener("click", hideOpener);
+  $("opener-new").addEventListener("click", () => {
+    // Escape the welcome screen straight into a fresh buffer (#174).
+    setModalOpen($("opener"), false);
+    newUntitled();
+  });
   $("opener-open").addEventListener("click", commitOpener);
   $("opener-input").addEventListener("keydown", onOpenerInputKeydown);
   for (const id of ["opener-recent", "opener-list"]) {

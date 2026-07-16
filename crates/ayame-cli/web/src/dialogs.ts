@@ -293,11 +293,16 @@ function loadingParts() {
     const textEl = document.createElement("div");
     textEl.id = "overlay-text";
     textEl.className = "overlay-text";
+    // The operation name and the "finishing" state change rarely, so announce
+    // them politely. The per-tick detail below is deliberately NOT live —
+    // re-reading "45,000 / 100,000" every 500ms would swamp a screen reader.
+    textEl.setAttribute("aria-live", "polite");
     const bar = document.createElement("progress");
     bar.id = "overlay-progress";
     bar.className = "overlay-progress";
     bar.max = 100;
     bar.value = 0;
+    bar.setAttribute("aria-label", t("dialog.operation.busy"));
     const detail = document.createElement("div");
     detail.id = "overlay-detail";
     detail.className = "overlay-detail";
@@ -411,7 +416,32 @@ export function showLoading(text, opts: { opId?: string | null; cancel?: boolean
     pollLoadingOperation(opts.opId);
     loadingPoll = setInterval(() => pollLoadingOperation(opts.opId!), 500);
   }
+  // Name the dialog after the running operation so a screen reader announces
+  // "<operation>, dialog" when focus moves in (#184).
+  o.setAttribute("aria-label", parts.text.textContent || t("dialog.operation.busy"));
   o.classList.remove("hidden");
+  // Move focus into the overlay so keyboard/SR users land on Cancel (and the
+  // app-wide focus trap keeps them there); fall back to the overlay itself.
+  const cancelable = !parts.cancel.classList.contains("hidden");
+  queueMicrotask(() => {
+    if (!loadingVisible()) return;
+    if (cancelable) parts.cancel.focus();
+  });
+}
+
+// True while a running operation can be canceled from the overlay (a cancelable
+// op is in flight and the Cancel button is showing and still enabled).
+export function loadingCancelable() {
+  if (!loadingVisible() || !loadingOpId) return false;
+  const cancel = document.getElementById("overlay-cancel") as HTMLButtonElement | null;
+  return !!cancel && !cancel.classList.contains("hidden") && !cancel.disabled;
+}
+
+// Fire the overlay's Cancel action from the keyboard (Esc). Mirrors a click on
+// the Cancel button so the same server-cancel + "canceling" UI path runs.
+export function cancelLoading() {
+  const cancel = document.getElementById("overlay-cancel") as HTMLButtonElement | null;
+  if (cancel && !cancel.disabled) cancel.click();
 }
 
 export function hideLoading() {

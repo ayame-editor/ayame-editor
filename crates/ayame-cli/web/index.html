@@ -149,8 +149,6 @@
            editor viewport instead. -->
       <header id="toolbar">
         <div class="tb-group">
-          <button id="apply-theme" class="cmd hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
-          <button id="apply-keymap" class="cmd hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
           <button id="undo-edit" class="ico" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
             <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-undo"></use></svg>
           </button>
@@ -191,6 +189,15 @@
             <button class="menu-item" data-menu-action="caseKebab" role="menuitem"><span class="menu-label" data-i18n="menu.caseKebab">kebab-case に変換</span><span class="menu-key" data-key-action="caseKebab"></span></button>
             <button class="menu-item" data-menu-action="caseConstant" role="menuitem"><span class="menu-label" data-i18n="menu.caseConstant">CONSTANT_CASE に変換</span><span class="menu-key" data-key-action="caseConstant"></span></button>
           </div>
+        </div>
+
+        <!-- Contextual "apply this JSON" actions. Right-aligned in their own
+             group so appearing for a theme/keymap tab never shifts the
+             undo/redo/tools controls on the left (#186). -->
+        <div class="tb-spacer"></div>
+        <div class="tb-group tb-apply">
+          <button id="apply-theme" class="cmd primary hidden" title="このJSONをテーマとして適用" data-i18n="toolbar.applyTheme" data-i18n-title="toolbar.applyThemeTitle">テーマ適用</button>
+          <button id="apply-keymap" class="cmd primary hidden" title="このJSONをキー設定として適用" data-i18n="toolbar.applyKeymap" data-i18n-title="toolbar.applyKeymapTitle">キー設定適用</button>
         </div>
       </header>
 
@@ -242,7 +249,7 @@
               <button id="replace-all" class="cmd replace-btn" title="すべての一致を置換 (元に戻せます)" data-i18n="find.replaceAll" data-i18n-title="find.replaceAllTitle">すべて置換</button>
             </div>
           </div>
-          <div id="overlay" class="overlay hidden"></div>
+          <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="処理中" data-i18n-aria-label="dialog.operation.busy"></div>
         </main>
       </div>
 
@@ -280,6 +287,7 @@
           <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder"
                  aria-controls="opener-recent opener-list" />
+          <button id="opener-new" class="cmd" data-i18n="menu.newFile" title="新規ファイル" data-i18n-title="menu.newFile">新規ファイル</button>
           <button id="opener-open" class="cmd" data-i18n="menu.open">開く</button>
         </div>
 
@@ -307,6 +315,7 @@
           <label class="set-row">
             <span class="set-label" data-i18n="settings.theme">テーマ</span>
             <select id="set-theme">
+              <option value="auto" data-i18n="settings.themeAuto">システム設定に従う</option>
               <option value="iris-light">Iris Light</option>
               <option value="iris-mist">Iris Mist</option>
               <option value="iris-dawn">Iris Dawn</option>
@@ -452,9 +461,10 @@
             <input id="convert-bom" type="checkbox" />
             <span class="set-hint" data-i18n="dialog.convert.bom">BOMを付ける（UTF-8のみ）</span>
           </label>
+          <p class="convert-note" data-i18n="dialog.convert.actionsHint">「変換して保存」は現在の内容を選んだ文字コードで書き出します。「開き直す」は保存済みファイルを読み直し、未保存の編集は破棄されます。</p>
           <div class="form-actions">
             <button id="convert-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
-            <button id="reopen-go" class="cmd" data-i18n="dialog.convert.reopen">開き直す</button>
+            <button id="reopen-go" class="cmd warn" title="保存済みファイルを選んだ文字コードで読み直します（未保存の編集は破棄）" data-i18n-title="dialog.convert.reopenTitle" data-i18n="dialog.convert.reopen">開き直す</button>
             <button id="convert-go" class="cmd primary" data-i18n="dialog.convert.go">変換して保存</button>
           </div>
         </div>

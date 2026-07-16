@@ -9,6 +9,29 @@ const css = readFileSync(path.join(webRoot, "style.css"), "utf8");
 
 const compactStack = (value: string) => value.replace(/[\s"]/g, "");
 
+// --- WCAG relative-luminance contrast, for the hint/placeholder legibility
+// guarantee (#152). Mirrors the sRGB formula in WCAG 2.1 SC 1.4.3.
+function channel(v: number): number {
+  const c = v / 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function luminance(hex: string): number {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+function contrast(a: string, b: string): number {
+  const hi = Math.max(luminance(a), luminance(b));
+  const lo = Math.min(luminance(a), luminance(b));
+  return (hi + 0.05) / (lo + 0.05);
+}
+// Read a `--token: #hex` value from a CSS block body.
+function token(block: string, name: string): string | undefined {
+  return block.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1];
+}
+
 describe("Ayame design tokens", () => {
   it("uses one CJK-capable mono stack in CSS and runtime settings", () => {
     const cssMono = css.match(/--mono:\s*([^;]+);/s)?.[1];
@@ -34,7 +57,9 @@ describe("Ayame design tokens", () => {
 
   it("completes dark theme chrome tokens", () => {
     for (const theme of ["dark", "black"]) {
-      const block = css.match(new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
       expect(block).toBeTruthy();
       expect(block).toContain("--accent: #9b82d8");
       expect(block).toContain("--accent-bright: #b49de6");
@@ -46,7 +71,9 @@ describe("Ayame design tokens", () => {
   it("gives every named theme its own syntax palette and keeps Mono Paper monochrome (#154)", () => {
     const names = ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"];
     for (const name of names) {
-      const block = css.match(new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1];
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
       expect(block).toBeTruthy();
       for (const token of ["string", "number", "literal", "function", "link"]) {
         expect(block).toContain(`--syn-${token}:`);
@@ -62,7 +89,9 @@ describe("Ayame design tokens", () => {
   });
 
   it("uses semantic tokens for syntax colors", () => {
-    expect(css).not.toMatch(/\.syn-(?:string|number|literal|function|link)[^{]*\{[^}]*#[\da-f]{3,8}/is);
+    expect(css).not.toMatch(
+      /\.syn-(?:string|number|literal|function|link)[^{]*\{[^}]*#[\da-f]{3,8}/is,
+    );
   });
 
   it("routes component corners, shadows, and foregrounds through tokens", () => {
@@ -74,9 +103,40 @@ describe("Ayame design tokens", () => {
     expect(css).not.toMatch(/font-weight:\s*(?:560|650)/);
   });
 
+  it("keeps --fg-faint legible on --bg (WCAG AA >= 4.5:1) in every theme (#152)", () => {
+    // Default theme lives in :root; named themes in their html[data-theme] block.
+    const root = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+    const rootBg = token(root, "--bg");
+    const rootFaint = token(root, "--fg-faint");
+    expect(rootBg).toBeTruthy();
+    expect(rootFaint).toBeTruthy();
+    expect(contrast(rootFaint!, rootBg!)).toBeGreaterThanOrEqual(4.5);
+
+    for (const theme of ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"]) {
+      const block = css.match(
+        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
+      )?.[1];
+      expect(block, theme).toBeTruthy();
+      const bg = token(block!, "--bg");
+      const faint = token(block!, "--fg-faint");
+      expect(bg, theme).toBeTruthy();
+      expect(faint, theme).toBeTruthy();
+      expect(contrast(faint!, bg!), `${theme} --fg-faint on --bg`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("never double-dims disabled buttons with both color and opacity (#152)", () => {
+    // The base disabled rule must not set opacity alongside the faint color.
+    const rule = css.match(/button:disabled\s*\{([^}]*)\}/)?.[1];
+    expect(rule).toBeTruthy();
+    expect(rule).not.toMatch(/opacity/);
+  });
+
   it("uses a theme-aware focus ring for controls and the editor viewport (#183)", () => {
     expect(css).toContain("--focus-ring:");
     expect(css).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus-ring\)/);
-    expect(css).toMatch(/#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s);
+    expect(css).toMatch(
+      /#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s,
+    );
   });
 });

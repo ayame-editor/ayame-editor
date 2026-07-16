@@ -109,6 +109,17 @@ export function showAppMenu(id) {
       tail.setAttribute("aria-checked", String(state.followTail));
     }
   }
+  if (id === "edit") {
+    // Cut/Copy need a selection to act on — match the context menu, which
+    // already disables them, instead of offering dead commands (#186).
+    const hasSel = hasTextSelection();
+    for (const action of ["cut", "copy"]) {
+      const item = $("edit-menu").querySelector<HTMLButtonElement>(
+        `[data-menu-action="${action}"]`,
+      );
+      if (item) item.disabled = !hasSel;
+    }
+  }
   $(`${id}-menu`).classList.remove("hidden");
   $(`${id}-menu-button`).classList.add("on");
   $(`${id}-menu-button`).setAttribute("aria-expanded", "true");
@@ -847,21 +858,187 @@ export function runMenuAction(action) {
 // with the same action ids the in-page menus use.
 window.__ayameMenu = runMenuAction;
 
+// ---- ARIA menubar keyboard contract (#161) ---------------------------------
+// The five triggers that make up the role=menubar. The ツール dropdown lives in
+// the toolbar (not the menubar), so it is excluded from left/right roving.
+function menubarButtons(): HTMLElement[] {
+  return APP_MENUS.map((id) => $(`${id}-menu-button`));
+}
+
+// Enabled, focusable rows inside a dropdown, in DOM order — arrow keys skip
+// separators and disabled entries so focus never lands on a dead row.
+function menuItemsOf(id): HTMLElement[] {
+  return [...$(`${id}-menu`).querySelectorAll<HTMLElement>(".menu-item")].filter(
+    (el) => !(el as HTMLButtonElement).disabled,
+  );
+}
+
+// Roving tabindex: exactly one menubar trigger is in the Tab order at a time.
+function setMenubarRoving(idx: number) {
+  const btns = menubarButtons();
+  const i = ((idx % btns.length) + btns.length) % btns.length;
+  btns.forEach((b, j) => b.setAttribute("tabindex", j === i ? "0" : "-1"));
+  return btns[i];
+}
+
+// Open a menubar menu and move focus onto an item (first, or last for ArrowUp).
+function openMenuWithFocus(id, edge: "first" | "last" = "first") {
+  showAppMenu(id);
+  const bi = APP_MENUS.indexOf(id);
+  if (bi >= 0) setMenubarRoving(bi);
+  const items = menuItemsOf(id);
+  if (items.length) (edge === "last" ? items[items.length - 1] : items[0]).focus();
+}
+
+// F10 (and the native path) drops keyboard focus onto the menubar.
+export function focusMenubar() {
+  if (anyModalOpen()) return;
+  const btns = menubarButtons();
+  const active = btns.find((b) => b.getAttribute("tabindex") === "0") || btns[0];
+  active.focus();
+}
+
+function onMenubarButtonKey(e: KeyboardEvent, id) {
+  const idx = APP_MENUS.indexOf(id);
+  const last = APP_MENUS.length - 1;
+  const moveTo = (ni: number) => {
+    const wasOpen = fileMenuVisible();
+    setMenubarRoving(ni).focus();
+    if (wasOpen)
+      showAppMenu(APP_MENUS[((ni % APP_MENUS.length) + APP_MENUS.length) % APP_MENUS.length]);
+  };
+  switch (e.key) {
+    case "ArrowRight":
+      e.preventDefault();
+      moveTo(idx + 1);
+      break;
+    case "ArrowLeft":
+      e.preventDefault();
+      moveTo(idx - 1);
+      break;
+    case "Home":
+      e.preventDefault();
+      moveTo(0);
+      break;
+    case "End":
+      e.preventDefault();
+      moveTo(last);
+      break;
+    case "ArrowDown":
+      e.preventDefault();
+      openMenuWithFocus(id, "first");
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      openMenuWithFocus(id, "last");
+      break;
+    // Enter / Space activate the trigger through its native click below, which
+    // opens the menu and moves focus to the first item.
+    case "Escape":
+      if (fileMenuVisible()) {
+        e.preventDefault();
+        hideFileMenu();
+      }
+      break;
+  }
+}
+
+function onMenuKey(e: KeyboardEvent, id) {
+  const items = menuItemsOf(id);
+  const menuIdx = APP_MENUS.indexOf(id); // -1 for the toolbar ツール menu
+  const pos = items.indexOf(document.activeElement as HTMLElement);
+  switch (e.key) {
+    case "ArrowDown":
+      e.preventDefault();
+      if (items.length) items[pos < 0 ? 0 : (pos + 1) % items.length].focus();
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      if (items.length)
+        items[pos < 0 ? items.length - 1 : (pos - 1 + items.length) % items.length].focus();
+      break;
+    case "Home":
+      e.preventDefault();
+      items[0]?.focus();
+      break;
+    case "End":
+      e.preventDefault();
+      items[items.length - 1]?.focus();
+      break;
+    case "ArrowRight":
+      if (menuIdx >= 0) {
+        e.preventDefault();
+        openMenuWithFocus(APP_MENUS[(menuIdx + 1) % APP_MENUS.length], "first");
+      }
+      break;
+    case "ArrowLeft":
+      if (menuIdx >= 0) {
+        e.preventDefault();
+        openMenuWithFocus(APP_MENUS[(menuIdx - 1 + APP_MENUS.length) % APP_MENUS.length], "first");
+      }
+      break;
+    case "Escape":
+      e.preventDefault();
+      hideFileMenu();
+      $(`${id}-menu-button`).focus();
+      break;
+    case "Tab":
+      // Leave the menu the way a native menu does: close and let Tab move on.
+      hideFileMenu();
+      break;
+    // Enter / Space fall through to the button's native activation.
+  }
+}
+
 export function initMenuBar() {
   for (const id of DROPDOWN_MENUS) {
     const button = $(`${id}-menu-button`);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
       const open = !$(`${id}-menu`).classList.contains("hidden");
-      if (open) hideFileMenu();
-      else showAppMenu(id);
+      if (open) {
+        hideFileMenu();
+      } else if ((e as MouseEvent).detail === 0) {
+        // Keyboard activation (Enter/Space synthesize a click with detail 0):
+        // open and drop focus onto the first item.
+        openMenuWithFocus(id, "first");
+      } else {
+        showAppMenu(id);
+      }
     });
+    button.addEventListener("keydown", (e) => onMenubarButtonKey(e, id));
+    $(`${id}-menu`).addEventListener("keydown", (e) => onMenuKey(e, id));
+    // Items are reached with the arrow keys, never a plain Tab stop.
+    menuItemsOf(id).forEach((item) => item.setAttribute("tabindex", "-1"));
     if (APP_MENUS.includes(id)) {
       button.addEventListener("pointerenter", () => {
         if (fileMenuVisible()) showAppMenu(id);
       });
     }
   }
+  // Roving tabindex: only the first menubar trigger is tabbable to start with,
+  // and whichever trigger takes focus becomes the single Tab stop.
+  const btns = menubarButtons();
+  btns.forEach((b, j) => b.setAttribute("tabindex", j === 0 ? "0" : "-1"));
+  $("menubar").addEventListener("focusin", (e) => {
+    const i = btns.indexOf(e.target as HTMLElement);
+    if (i >= 0) btns.forEach((b, j) => b.setAttribute("tabindex", j === i ? "0" : "-1"));
+  });
+  // F10 moves keyboard focus to the menubar (Alt is already spent on search /
+  // line-move bindings, so the menubar uses the other standard activation key).
+  document.addEventListener("keydown", (e) => {
+    if (
+      e.key === "F10" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      !anyModalOpen()
+    ) {
+      e.preventDefault();
+      focusMenubar();
+    }
+  });
   document.querySelectorAll("[data-menu-action]").forEach((item) => {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));
   });

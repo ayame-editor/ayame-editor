@@ -69,11 +69,109 @@ export function displayShortcut(
     .replace(/Shift\+/g, "⇧");
 }
 
+// The stack of currently-open modal dialogs. The last entry is the top-most,
+// active dialog; everything behind it (the app chrome and any lower modals) is
+// made inert so Tab and the screen-reader cursor can't escape behind it (#160).
+const modalStack: HTMLElement[] = [];
+
+// Drop any modals that left the DOM without a proper close, so a stray removal
+// can never strand the backdrop in the inert state.
+function pruneStack() {
+  for (let i = modalStack.length - 1; i >= 0; i--) {
+    if (!modalStack[i].isConnected) modalStack.splice(i, 1);
+  }
+}
+
+// Re-derive inert / aria-hidden for the whole document from the modal stack:
+// #app plus every top-level modal is considered (the loading overlay lives
+// inside #app, so it is trapped separately — see activeTrapRoot). Only the
+// top-most open dialog stays interactive and exposed to assistive tech.
+function refreshInert() {
+  pruneStack();
+  const top = modalStack[modalStack.length - 1] || null;
+  const app = document.getElementById("app");
+  if (app) {
+    app.toggleAttribute("inert", !!top);
+    if (top) app.setAttribute("aria-hidden", "true");
+    else app.removeAttribute("aria-hidden");
+  }
+  for (const m of document.querySelectorAll<HTMLElement>(".modal")) {
+    const isTop = m === top;
+    m.toggleAttribute("inert", !!top && !isTop);
+    // Leave closed modals as setModalOpen left them; only re-assert exposure
+    // while a stack exists so a buried-but-open dialog is hidden from SR.
+    if (top) m.setAttribute("aria-hidden", isTop ? "false" : "true");
+  }
+}
+
 // Show/hide one modal element, keeping the .hidden class and aria-hidden in
-// step (every modal in the app pairs the two).
+// step (every modal in the app pairs the two), and maintaining the inert
+// backdrop + focus-trap bookkeeping so the dialog truly owns the keyboard.
 export function setModalOpen(modal, open) {
   modal.classList.toggle("hidden", !open);
   modal.setAttribute("aria-hidden", open ? "false" : "true");
+  const i = modalStack.indexOf(modal);
+  if (open) {
+    if (i === -1) modalStack.push(modal);
+  } else if (i !== -1) {
+    modalStack.splice(i, 1);
+  }
+  refreshInert();
+}
+
+// Tab-focusable descendants, in DOM order, skipping disabled controls and
+// anything inside a hidden/inert subtree (jsdom has no layout, so we test the
+// class/attribute rather than offsetParent).
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function focusables(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => {
+    if ((el as AyameElement).disabled) return false;
+    if (el.getAttribute("tabindex") === "-1") return false;
+    return !el.closest(".hidden") && !el.closest("[inert]");
+  });
+}
+
+// The container that should trap focus right now: the top-most modal, or the
+// loading overlay when it is the only thing up (it lives inside #app, so it is
+// never on the modal stack). Exposed for the overlay's own focus handling.
+export function activeTrapRoot(): HTMLElement | null {
+  pruneStack();
+  if (modalStack.length) return modalStack[modalStack.length - 1];
+  const overlay = document.getElementById("overlay");
+  if (overlay && !overlay.classList.contains("hidden")) return overlay;
+  return null;
+}
+
+// Install the single, app-wide focus trap. While a dialog (or the overlay) is
+// up, Tab / Shift+Tab cycle within it instead of reaching the inert backdrop.
+export function initModalFocusTrap() {
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Tab") return;
+      const root = activeTrapRoot();
+      if (!root) return;
+      const items = focusables(root);
+      if (items.length === 0) {
+        e.preventDefault(); // nothing to focus — keep it off the backdrop
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !root.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    true,
+  );
 }
 
 // Build an <svg><use href="#id"></use></svg> node for a sprite symbol from

@@ -1,5 +1,5 @@
 // Ayame Editor — input module. Type-stripped to JS at build time (build.rs, oxc).
-import { $ } from "./dom.js";
+import { $, initModalFocusTrap } from "./dom.js";
 import { LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
 import {
@@ -71,7 +71,14 @@ import {
   showSearchHistory,
   updateCount,
 } from "./search.js";
-import { confirmVisible, formVisible, loadingVisible, promptVisible } from "./dialogs.js";
+import {
+  cancelLoading,
+  confirmVisible,
+  formVisible,
+  loadingCancelable,
+  loadingVisible,
+  promptVisible,
+} from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
 import {
   adjustZoom,
@@ -100,6 +107,9 @@ export function anyModalOpen() {
 }
 
 const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
+  // A cancelable long operation: Esc requests cancel instead of being swallowed
+  // by the loadingVisible() modal guard below (#184).
+  [loadingCancelable, cancelLoading],
   [ctxMenuVisible, hideCtxMenu],
   [fileMenuVisible, () => hideFileMenu(true)],
   [keymapVisible, hideKeymap],
@@ -118,6 +128,16 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
 ];
 
 // ---- input wiring ----------------------------------------------------------
+
+// Enter confirms the encoding dialog's primary action (Convert & Save) from
+// anywhere in it — including the encoding <select> — so a conversion never
+// requires the mouse. A focused Reopen button is honored instead; Esc closes
+// through the global handler (#169).
+export function onConvertModalKey(e) {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  (document.activeElement === $("reopen-go") ? $("reopen-go") : $("convert-go")).click();
+}
 
 export function setQueryFromInput() {
   state.query = $("find").value;
@@ -217,6 +237,7 @@ export function initEvents() {
     hideConvert();
     reopenWithEncoding(encoding);
   });
+  $("convert-modal").addEventListener("keydown", onConvertModalKey);
   $("convert-modal").addEventListener("click", (e) => {
     if (e.target === $("convert-modal")) hideConvert();
   });
@@ -256,6 +277,7 @@ export function initEvents() {
   });
 
   document.addEventListener("keydown", onGlobalKey);
+  initModalFocusTrap();
   window.addEventListener("resize", scheduleRender);
 }
 

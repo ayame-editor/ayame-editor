@@ -30,7 +30,9 @@ export const FONT_STACKS = {
 };
 
 export const DEFAULT_SETTINGS = {
-  theme: "iris-light",
+  // "auto" follows the OS light/dark preference until the user picks a theme
+  // explicitly (#153); any concrete id (iris-light, dark, …) then wins.
+  theme: "auto",
   font: "mono",
   fontSize: 13,
   zoom: 100,
