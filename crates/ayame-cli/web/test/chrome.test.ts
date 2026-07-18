@@ -177,6 +177,33 @@ describe("application chrome", () => {
     expect(reduced).toContain("animation: none");
   });
 
+  it("uses shared motion and state treatments for interactive feedback (#193)", () => {
+    const css = read("style.css");
+    const html = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const search = read("src/search.ts");
+    const block = (selector: string) =>
+      css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
+
+    expect(css).toContain("--motion-fast: 120ms");
+    expect(css).toContain("--motion-ease:");
+    expect(css).toContain("button.toggle.on:hover");
+    expect(css).toContain(".keymap-row.conflict .keymap-input");
+    expect(css).toContain(".opener-msg:not(.busy):not(:empty)");
+    expect(css).toContain(":is(mark, .grep-match)");
+
+    const replace = block(".find-group .replace-row");
+    expect(replace).not.toContain("display: none");
+    expect(replace).toContain("height: 0");
+    expect(replace).toContain("opacity: 0");
+    expect(block("html.replace-open .find-group .replace-row")).toContain("height: 30px");
+
+    const replaceRow = html.querySelector("#replace-row");
+    expect(replaceRow?.getAttribute("aria-hidden")).toBe("true");
+    expect(replaceRow?.hasAttribute("inert")).toBe(true);
+    expect(search).toContain('row.setAttribute("aria-hidden", open ? "false" : "true")');
+    expect(search).toContain("row.inert = !open");
+  });
+
   it("does not override the widened settings popup with the old width", () => {
     const widths = [
       ...read("style.css").matchAll(/\.settings-panel\s*{\s*width:\s*min\((\d+)px/g),

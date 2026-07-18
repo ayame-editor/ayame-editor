@@ -2,6 +2,16 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Unified interactive state feedback in the web editor (#193). Buttons, tabs,
+  fields, rows, menus, and the scrollbar now share motion tokens with the
+  existing reduced-motion override; active search toggles respond on hover,
+  invalid controls share one danger-ring treatment, and editor/folder-search
+  matches share one highlight treatment. The replace row now expands in sync
+  with its chevron while remaining inert and hidden from assistive technology
+  when collapsed.
+
 ## v0.8.0 - 2026-07-16
 
 - The native desktop app now cleans up its scratch on exit and reaps dead

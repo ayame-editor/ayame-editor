@@ -60,6 +60,9 @@ export function setReplaceRow(open) {
   state.replaceOpen = open;
   document.documentElement.classList.toggle("replace-open", open);
   $("find-expand").setAttribute("aria-expanded", open ? "true" : "false");
+  const row = $("replace-row");
+  row.setAttribute("aria-hidden", open ? "false" : "true");
+  row.inert = !open;
 }
 
 export function buildMatcher() {

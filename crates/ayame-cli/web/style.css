@@ -62,6 +62,11 @@
   --gutter-pad-end: 20px;
   --modal-edge: 94vw;
   --modal-body-padding: 12px 14px 14px;
+  --motion-fast: 120ms;
+  --motion-normal: 160ms;
+  --motion-ease: cubic-bezier(.2, 0, 0, 1);
+  --invalid-ring: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  --match-ring: 0 0 0 1px color-mix(in srgb, var(--gold) 30%, transparent);
   --desk:
     radial-gradient(46vw 42vh at 12% 84%, rgba(122,92,192,.12), transparent 60%),
     radial-gradient(42vw 40vh at 88% 14%, rgba(185,139,214,.10), transparent 60%),
@@ -364,6 +369,20 @@ button {
   gap: 6px;
   white-space: nowrap;
 }
+button,
+.tab,
+.field,
+.row,
+#vthumb,
+.menu-item,
+.opener-row {
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
 button.cmd {
   height: var(--control-h);
   min-width: var(--cmd-min-width);
@@ -457,6 +476,10 @@ button.toggle.on {
   border-color: var(--accent-bright);
   color: var(--on-accent);
 }
+button.toggle.on:hover {
+  background: color-mix(in srgb, var(--accent) 86%, var(--fg));
+  border-color: color-mix(in srgb, var(--accent-bright) 78%, var(--fg));
+}
 
 /* Floating in-editor search & replace: overlays the viewport's top-right
    (VS Code style) so opening it never reflows the toolbar or the text. */
@@ -469,7 +492,7 @@ button.toggle.on {
   width: min(520px, calc(100% - 48px));
   min-width: 0;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
 html.find-open .find-group { display: flex; }
 /* Sit below the column ruler instead of overlapping it. */
@@ -521,9 +544,13 @@ html.find-open .find-group { display: flex; }
   border-color: var(--accent-bright);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
 }
-.field.error {
+:is(
+  .field.error,
+  .keymap-row.conflict .keymap-input,
+  .opener-msg:not(.busy):not(:empty)
+) {
   border-color: var(--danger);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  box-shadow: var(--invalid-ring);
 }
 .field .ico { height: 24px; width: 26px; font-size: var(--fs-ui-sm); }
 .field .toggle { height: 24px; }
@@ -562,20 +589,43 @@ html.find-open .find-group { display: flex; }
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   border-left: 5px solid currentColor;
-  transition: transform .12s ease;
+  transition: transform var(--motion-fast) var(--motion-ease);
 }
 html.replace-open .find-expand::before { transform: rotate(90deg); }
 
-/* Replace row: hidden until expanded (Ctrl+H or the chevron). */
+/* Keep the row in layout so its expansion can follow the chevron motion.
+   inert/aria-hidden in setReplaceRow keep collapsed controls out of focus and
+   the accessibility tree. */
 .find-group .replace-row {
-  display: none;
-  height: 30px;
-  padding: 2px 7px;
+  height: 0;
+  min-height: 0;
+  margin-top: 0;
+  padding: 0 7px;
+  border-width: 0;
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    height var(--motion-fast) var(--motion-ease),
+    margin-top var(--motion-fast) var(--motion-ease),
+    padding var(--motion-fast) var(--motion-ease),
+    border-width var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
 }
-html.replace-open .find-group .replace-row { display: flex; }
+html.replace-open .find-group .replace-row {
+  height: 30px;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border-width: 1px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
 .replace-row input {
   flex: 1 1 120px;
   width: auto;
@@ -937,13 +987,20 @@ html.replace-open .find-group .replace-row { display: flex; }
   opacity: 0.6;
   pointer-events: none;
 }
-mark {
+:is(mark, .grep-match) {
   background: var(--mark-bg);
   color: var(--mark-fg);
   border-radius: calc(var(--radius-control) - 3px);
+  box-shadow: var(--match-ring);
+}
+mark {
   padding: 0 1px;
 }
-mark.current { background: var(--mark-active-bg); color: var(--mark-active-fg); }
+mark.current {
+  background: var(--mark-active-bg);
+  color: var(--mark-active-fg);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mark-active-bg) 52%, transparent);
+}
 
 /* ---- custom vertical scrollbar --------------------------------------- */
 
@@ -1370,7 +1427,14 @@ html.saving .caret.extra { visibility: hidden; }
   font-family: var(--ui);
   font-size: var(--fs-hint);
 }
-.opener-msg { padding: 6px 16px; min-height: 18px; color: var(--danger); font-size: var(--fs-ui-sm); }
+.opener-msg {
+  padding: 6px 16px;
+  min-height: 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: var(--fs-ui-sm);
+}
 .opener-msg.busy { color: var(--fg-dim); }
 .opener-hint {
   padding: 10px 16px;
@@ -1588,10 +1652,6 @@ html.saving .caret.extra { visibility: hidden; }
   border-color: var(--accent-bright);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
-.keymap-row.conflict .keymap-input {
-  border-color: var(--danger);
-  color: var(--danger);
-}
 .keymap-actions {
   display: flex;
   justify-content: flex-end;
@@ -1736,12 +1796,6 @@ html.saving .caret.extra { visibility: hidden; }
   white-space: pre;
   padding: 0 8px;
 }
-.grep-match {
-  border-radius: calc(var(--radius-control) - 2px);
-  background: color-mix(in srgb, var(--gold) 30%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 30%, transparent);
-}
-
 /* generic confirm / message modal (replaces window.confirm / window.alert) */
 .confirm-panel { width: min(460px, var(--modal-edge)); }
 .confirm-body { display: flex; flex-direction: column; gap: 12px; }
