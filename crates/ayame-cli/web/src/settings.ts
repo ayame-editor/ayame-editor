@@ -30,10 +30,40 @@ import { onDocumentOpened } from "./workspace.js";
 
 // ---- settings (theme / font) -----------------------------------------------
 
+export const FONT_SIZE_MIN = 6;
+export const FONT_SIZE_MAX = 48;
+export const FONT_SIZE_STEP = 1;
+
+export function clampFontSize(value) {
+  const parsed = Number(value);
+  const px = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : DEFAULT_SETTINGS.fontSize;
+  return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, px));
+}
+
+function clampLegacyZoom(value) {
+  const parsed = Math.round(Number(value) || 100);
+  return Math.max(50, Math.min(300, parsed));
+}
+
+// Before issue #170, the visible size was stored as two independent values:
+// fontSize (11–22px) × zoom (50–300%). Collapse that legacy pair to the exact
+// rounded size the old renderer displayed, then persist only fontSize.
+export function migratedFontSize(raw) {
+  if (raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "zoom")) {
+    const base = Math.max(11, Math.min(22, Number(raw.fontSize) || DEFAULT_SETTINGS.fontSize));
+    return clampFontSize(Math.round((base * clampLegacyZoom(raw.zoom)) / 100));
+  }
+  return clampFontSize(raw?.fontSize);
+}
+
 export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    const hadLegacyZoom =
+      raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "zoom");
     const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+    merged.fontSize = migratedFontSize(raw);
+    delete merged.zoom;
     // Explorer/sidebar settings existed before PR #90's removal was completed.
     // Drop them while loading so the next settings write also cleans old data.
     delete merged.sidebar;
@@ -43,6 +73,7 @@ export function loadSettings() {
     merged.language = normalizeLanguage(merged.language);
     merged.updateCheckOnStartup = merged.updateCheckOnStartup !== false;
     merged.keymap = sanitizeKeymap(merged.keymap);
+    if (hadLegacyZoom) saveSettings(merged);
     return merged;
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -51,7 +82,9 @@ export function loadSettings() {
 
 export function saveSettings(s) {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    const persisted = { ...s };
+    delete persisted.zoom;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(persisted));
     return true;
   } catch {
     return false; // private-mode / quota errors (e.g. a large bgImage)
@@ -331,20 +364,16 @@ export function applySettings(s) {
   if (typeof s.illus === "number") root.style.setProperty("--illus", String(s.illus));
   // ---- font / size ----
   root.style.setProperty("--mono", FONT_STACKS[s.font] || FONT_STACKS.mono);
-  const base = Math.max(11, Math.min(22, Number(s.fontSize) || 13));
-  const zoom = clampZoom(s.zoom);
-  // Zoom scales the chosen font size (and line spacing with it), so the caret
-  // and ruler — measured from real glyphs — follow automatically.
-  const fs = Math.max(6, Math.min(48, Math.round((base * zoom) / 100)));
+  const fs = clampFontSize(s.fontSize);
   root.style.setProperty("--font-size", `${fs}px`);
-  const lh = Math.max(fs + 2, Math.round(((base + 6) * zoom) / 100));
+  const lh = fs + 6;
   root.style.setProperty("--line-height", `${lh}px`);
   setLineHeight(lh); // keep virtualization math in sync with the CSS
-  const zoomEl = document.getElementById("st-zoom");
-  if (zoomEl) {
-    zoomEl.textContent = `${zoom}%`;
-    zoomEl.setAttribute("aria-label", t("status.zoomValue", { value: `${zoom}%` }));
-    zoomEl.classList.toggle("dim", zoom === 100);
+  const fontSizeEl = document.getElementById("st-fontsize");
+  if (fontSizeEl) {
+    fontSizeEl.textContent = `${fs}px`;
+    fontSizeEl.setAttribute("aria-label", t("status.fontSizeValue", { value: `${fs}px` }));
+    fontSizeEl.classList.toggle("dim", fs === DEFAULT_SETTINGS.fontSize);
   }
   invalidateFontMetrics(); // font metrics changed → remeasure + rebuild the ruler
   // ---- long-line wrapping (折り返し) ----
@@ -360,6 +389,7 @@ export function applySettings(s) {
 
 export function updateSetting(key, value) {
   if (key === "language") value = normalizeLanguage(value);
+  if (key === "fontSize") value = clampFontSize(value);
   state.settings = { ...state.settings, [key]: value };
   applySettings(state.settings);
   saveSettings(state.settings);
@@ -370,22 +400,22 @@ export function updateSetting(key, value) {
   if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
 }
 
-export const ZOOM_STEP = 10;
-const ZOOM_MIN = 50;
-const ZOOM_MAX = 300;
-
-export function clampZoom(v) {
-  const n = Math.round(Number(v) || 100);
-  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, n));
+function syncFontSizeControls(value) {
+  const px = clampFontSize(value);
+  const range = document.getElementById("set-fontsize") as HTMLInputElement | null;
+  const number = document.getElementById("set-fontsize-number") as HTMLInputElement | null;
+  if (range) range.value = String(px);
+  if (number) number.value = String(px);
 }
 
-// Set the display zoom (percent); persisted and applied like any setting.
-export function setZoom(pct) {
-  updateSetting("zoom", clampZoom(pct));
+export function setFontSize(px) {
+  const next = clampFontSize(px);
+  updateSetting("fontSize", next);
+  syncFontSizeControls(next);
 }
 
-export function adjustZoom(delta) {
-  setZoom((Number(state.settings.zoom) || 100) + delta);
+export function adjustFontSize(delta) {
+  setFontSize(clampFontSize(state.settings.fontSize) + delta);
 }
 
 export function settingsVisible() {
@@ -586,8 +616,7 @@ export function initSettings() {
   $("set-illus").value = String(illusPct);
   $("set-illus-val").textContent = illusPct + "%";
   $("set-font").value = state.settings.font;
-  $("set-fontsize").value = String(state.settings.fontSize);
-  $("set-fontsize-val").textContent = `${state.settings.fontSize}px`;
+  syncFontSizeControls(state.settings.fontSize);
 
   $("set-theme").addEventListener("change", () => {
     const id = $("set-theme").value;
@@ -654,10 +683,16 @@ export function initSettings() {
   });
   $("set-font").addEventListener("change", () => updateSetting("font", $("set-font").value));
   $("set-fontsize").addEventListener("input", () => {
-    const v = Number($("set-fontsize").value);
-    $("set-fontsize-val").textContent = `${v}px`;
-    updateSetting("fontSize", v);
+    setFontSize($("set-fontsize").value);
   });
+  const fontSizeNumber = $("set-fontsize-number") as HTMLInputElement;
+  fontSizeNumber.addEventListener("input", () => {
+    const value = fontSizeNumber.valueAsNumber;
+    if (Number.isFinite(value) && value >= FONT_SIZE_MIN && value <= FONT_SIZE_MAX) {
+      setFontSize(value);
+    }
+  });
+  fontSizeNumber.addEventListener("change", () => setFontSize(fontSizeNumber.valueAsNumber));
   $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
   $("set-line-commas").checked = state.settings.lineNumberCommas !== false;

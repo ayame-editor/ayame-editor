@@ -1,6 +1,6 @@
 // Ayame Editor — input module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, initModalFocusTrap } from "./dom.js";
-import { LINE_HEIGHT, state } from "./state.js";
+import { DEFAULT_SETTINGS, LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
 import {
   convertSave,
@@ -81,14 +81,14 @@ import {
 } from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
 import {
-  adjustZoom,
+  adjustFontSize,
   applyKeymapFromBuffer,
   applyThemeFromBuffer,
-  clampZoom,
+  clampFontSize,
+  FONT_SIZE_STEP,
   hideSettings,
   settingsVisible,
-  setZoom,
-  ZOOM_STEP,
+  setFontSize,
 } from "./settings.js";
 
 export function anyModalOpen() {
@@ -157,9 +157,9 @@ export function initEvents() {
     "wheel",
     (e) => {
       if (e.ctrlKey || e.metaKey) {
-        // Ctrl/Cmd + wheel zooms instead of scrolling.
+        // Ctrl/Cmd + wheel changes the one persisted editor font-size value.
         e.preventDefault();
-        adjustZoom(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+        adjustFontSize(e.deltaY < 0 ? FONT_SIZE_STEP : -FONT_SIZE_STEP);
         return;
       }
       e.preventDefault();
@@ -243,19 +243,19 @@ export function initEvents() {
   });
   $("st-enc").addEventListener("click", showConvert);
   $("st-eol").addEventListener("click", showConvert);
-  $("st-zoom").addEventListener("click", () => setZoom(100));
-  // Right-click the zoom % for a quick zoom-level menu (instead of only the
+  $("st-fontsize").addEventListener("click", () => setFontSize(DEFAULT_SETTINGS.fontSize));
+  // Right-click the effective px value for common sizes (instead of only the
   // click-to-reset), suppressing the webview's default context menu.
-  $("st-zoom").addEventListener("contextmenu", (e) => {
+  $("st-fontsize").addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    const cur = clampZoom(Number(state.settings.zoom) || 100);
+    const cur = clampFontSize(state.settings.fontSize);
     showPopupMenu(
       e.clientX,
       e.clientY,
-      [50, 75, 100, 125, 150, 200].map((z) => ({
-        label: `${z}%`,
-        checked: z === cur,
-        action: () => setZoom(z),
+      [8, 10, 12, 13, 14, 16, 18, 20, 24, 32].map((px) => ({
+        label: `${px}px`,
+        checked: px === cur,
+        action: () => setFontSize(px),
       })),
     );
   });
@@ -385,22 +385,22 @@ export function onEditKey(e) {
     e.preventDefault();
     e.stopPropagation();
   };
-  // Zoom: Ctrl/Cmd with +/-/0. Checked before the switch so nothing else claims
-  // them (and the browser/webview page zoom is suppressed).
+  // Font size: Ctrl/Cmd with +/-/0. Checked before the switch so nothing else
+  // claims them (and browser/webview page zoom remains suppressed).
   if (mod && !e.altKey) {
     if (e.key === "+" || e.key === "=") {
       take();
-      adjustZoom(ZOOM_STEP);
+      adjustFontSize(FONT_SIZE_STEP);
       return;
     }
     if (e.key === "-" || e.key === "_") {
       take();
-      adjustZoom(-ZOOM_STEP);
+      adjustFontSize(-FONT_SIZE_STEP);
       return;
     }
     if (e.key === "0") {
       take();
-      setZoom(100);
+      setFontSize(DEFAULT_SETTINGS.fontSize);
       return;
     }
   }

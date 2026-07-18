@@ -35,7 +35,6 @@ export const DEFAULT_SETTINGS = {
   theme: "auto",
   font: "mono",
   fontSize: 13,
-  zoom: 100,
   ruler: true,
   lineNumberCommas: true,
   confirmLastTabClose: true,

@@ -104,7 +104,7 @@ describe("application chrome", () => {
       expect(button?.getAttribute("aria-label")).toBeTruthy();
       expect(button?.getAttribute("aria-pressed")).toBe("false");
     }
-    for (const id of ["st-enc", "st-eol", "st-zoom"]) {
+    for (const id of ["st-enc", "st-eol", "st-fontsize"]) {
       expect(doc.querySelector(`#${id}`)?.getAttribute("aria-label")).toBeTruthy();
     }
     const input = doc.querySelector("#palette-input");
@@ -114,6 +114,22 @@ describe("application chrome", () => {
     const menus = read("src/menus.ts");
     expect(menus).toContain('setAttribute("aria-pressed", String(pressed))');
     expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
+  });
+
+  it("exposes one effective font-size value instead of multiplying font size and zoom (#170)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const range = doc.querySelector<HTMLInputElement>("#set-fontsize");
+    const number = doc.querySelector<HTMLInputElement>("#set-fontsize-number");
+    const status = doc.querySelector("#st-fontsize");
+
+    expect(range?.min).toBe("6");
+    expect(range?.max).toBe("48");
+    expect(number?.type).toBe("number");
+    expect(number?.min).toBe(range?.min);
+    expect(number?.max).toBe(range?.max);
+    expect(status?.textContent).toBe("13px");
+    expect(status?.getAttribute("data-i18n-title")).toBe("status.fontSizeTitle");
+    expect(doc.querySelector("#st-zoom")).toBeNull();
   });
 
   it("separates transient notifications from persistent status values (#177)", () => {
