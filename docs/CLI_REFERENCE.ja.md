@@ -50,7 +50,7 @@ ayame <COMMAND> [OPTIONS]
 
 従来の `diff`、`sortdiff`、`sort-diff` コマンドは v0.7.0 で削除しました。
 1 リリースの間は、対応する ayame-diff コマンドを示すエラーを返します。
-[比較ワークフローの ayame-diff 移行ガイド](MIGRATING_TO_AYAME_DIFF.md)も参照してください。
+ファイル比較は [ayame-diff](https://github.com/hjosugi/ayame-diff) で利用できます。
 
 ## 共通オプション
 

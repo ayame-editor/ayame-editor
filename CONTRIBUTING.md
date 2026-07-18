@@ -3,6 +3,9 @@
 Thanks for improving Ayame Editor. This project keeps the core editor in Rust,
 with the web UI embedded by Cargo at build time.
 
+By participating, you agree to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Development Loop
 
 Run these before sending a pull request:

@@ -59,6 +59,12 @@ This repository therefore never publishes a checksum for the pre-signing
 binary. If none of the secrets are set, releases remain unsigned as before. A
 partial configuration fails the Windows job instead of silently falling back.
 
+The Windows build embeds `ProductName`, `FileVersion`, and `ProductVersion`
+metadata before submission. Product name is fixed to `Ayame Editor`; both
+version fields are derived from the Cargo package version. The release workflow
+checks these values before uploading the unsigned artifact so the SignPath
+artifact configuration can enforce the same restrictions.
+
 | Repository secret | Purpose |
 | --- | --- |
 | `SIGNPATH_API_TOKEN` | API token for a SignPath user with submitter permission. |
@@ -84,6 +90,12 @@ hash with the matching `.sha256` file or `SHA256SUMS` from the same release.
 SmartScreen reputation can still take time to accumulate even with a valid
 certificate.
 
+The public
+[code signing policy](https://github.com/hjosugi/ayame-editor#code-signing-policy)
+documents the signed files, build provenance, team roles, approval rule, and
+[privacy policy](https://github.com/hjosugi/ayame-editor/blob/main/PRIVACY.md)
+required for the Foundation application.
+
 ## Self-Update Policy
 
 `ayame update` is for standalone installs. If Ayame detects a package-manager
@@ -95,3 +107,14 @@ install, it refuses to modify it and points users at the manager-native command:
 
 The same rule applies to `ayame remove`: package-manager installs should be
 removed with `brew uninstall`, `scoop uninstall`, or Nix.
+
+Source builds include self-update support by default. A server-only deployment
+can omit the TLS, checksum, and archive stack:
+
+```sh
+cargo build --release --locked -p ayame-cli --no-default-features
+```
+
+In that build, `ayame update` and `ayame remove` remain recognizable commands
+but explain that package-manager management or a rebuild with
+`--features self-update` is required.

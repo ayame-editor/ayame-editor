@@ -93,8 +93,8 @@ input by default, using `<stem>.partNNNN<.ext>` names. Output commands refuse to
 overwrite existing files, so choose a new path when the target already exists.
 
 Use [CLI Reference](CLI_REFERENCE.md) or `ayame --help` for the full command and
-option list. File comparison is provided by the sister project ayame-diff; see
-[the migration guide](MIGRATING_TO_AYAME_DIFF.md).
+option list. File comparison is provided by the sister project
+[ayame-diff](https://github.com/hjosugi/ayame-diff).
 
 ## Main Features
 

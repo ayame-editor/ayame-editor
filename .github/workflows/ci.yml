@@ -69,6 +69,21 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --locked
+      # `self-update` is default-on for release binaries, but server-only
+      # deployments must compile and test without reqwest/rustls/zip/sha2.
+      - name: Clippy (server-only, no default features)
+        run: cargo clippy --locked -p ayame-cli --all-targets --no-default-features -- -D warnings
+      - name: Test (server-only, no default features)
+        run: cargo test --locked -p ayame-cli --no-default-features
+      - name: Release build (server-only, no default features)
+        run: cargo build --release --locked -p ayame-cli --no-default-features
+      - name: Server-only dependency guard
+        run: |
+          if cargo tree --locked -p ayame-cli --no-default-features --edges normal --prefix none \
+            | grep -Eq '^(reqwest|rustls|sha2|zip) v'; then
+            echo "server-only build unexpectedly includes the self-update dependency stack"
+            exit 1
+          fi
       # The desktop app is the product: don't let the gui feature rot until
       # release day.
       - name: Install webview deps (gui feature)
@@ -81,3 +96,36 @@ jobs:
         run: cargo build --release --locked --features gui
       - name: Clippy (gui feature)
         run: cargo clippy --all-targets --locked --features gui -- -D warnings
+
+  windows-metadata:
+    name: Windows executable metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build Windows executable
+        run: cargo build --release --locked -p ayame-cli
+      - name: Verify SignPath metadata
+        shell: pwsh
+        run: |
+          $binary = "target/release/ayame.exe"
+          $info = (Get-Item -LiteralPath $binary).VersionInfo
+          $metadata = cargo metadata --format-version 1 --no-deps |
+            ConvertFrom-Json
+          $expectedVersion = (
+            $metadata.packages |
+              Where-Object { $_.name -eq "ayame-cli" }
+          ).version
+          if ($info.ProductName -ne "Ayame Editor") {
+            throw "Unexpected ProductName '$($info.ProductName)' in $binary"
+          }
+          if (-not $info.FileVersion.StartsWith($expectedVersion)) {
+            throw "FileVersion '$($info.FileVersion)' does not match '$expectedVersion'"
+          }
+          if (-not $info.ProductVersion.StartsWith($expectedVersion)) {
+            throw "ProductVersion '$($info.ProductVersion)' does not match '$expectedVersion'"
+          }

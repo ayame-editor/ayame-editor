@@ -10,12 +10,23 @@ repository.workspace = true
 name = "ayame"
 path = "src/main.rs"
 
+[package.metadata.winres]
+ProductName = "Ayame Editor"
+FileDescription = "Ayame Editor"
+CompanyName = "hjosugi"
+LegalCopyright = "Copyright (C) 2026 hjosugi"
+InternalName = "ayame"
+OriginalFilename = "ayame.exe"
+
 [features]
 # Default builds are the standalone, statically-linkable CLI + web server with
-# no webview dependency. The native desktop window is opt-in so CLI releases
-# stay small and dependency-free.
-default = []
-gui = ["dep:wry", "dep:tao", "dep:muda", "dep:rfd"]
+# self-update support but no webview dependency. Server-only deployments can
+# use --no-default-features to omit the TLS/checksum/archive stack.
+default = ["self-update"]
+self-update = ["dep:reqwest", "dep:sha2", "dep:zip"]
+# The native app checks and installs updates, so gui always carries self-update
+# even when a caller combines it with --no-default-features.
+gui = ["self-update", "dep:wry", "dep:tao", "dep:muda", "dep:rfd"]
 # Dev-only: `ayame typegen` emits web/types/api.d.ts from the serve API types
 # via the owner's typeship facade (never enabled in shipped builds).
 typegen = ["dep:ts-rs", "dep:typeship", "dep:typeship-ts-rs"]
@@ -26,15 +37,15 @@ typeship = { version = "0.2", optional = true }
 typeship-ts-rs = { version = "0.2", optional = true }
 ayame-core = { path = "../ayame-core" }
 anyhow.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10"
+sha2 = { workspace = true, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "io-util"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["catch-panic"] }
 futures-util = { version = "0.3", default-features = false }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 # Native window (feature = "gui"): the OS webview (WKWebView / WebView2 /
 # WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.
@@ -62,6 +73,7 @@ oxc_span = "0.138"
 oxc_semantic = "0.138"
 oxc_transformer = "0.138"
 oxc_codegen = "0.138"
+winres = "0.1.12"
 
 [lints]
 workspace = true

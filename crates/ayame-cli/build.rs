@@ -24,6 +24,8 @@ use oxc_span::SourceType;
 use oxc_transformer::{TransformOptions, Transformer};
 
 fn main() {
+    compile_windows_resources();
+
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let src_dir = manifest.join("web/src");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -69,6 +71,20 @@ fn main() {
     }
     gen.push_str("];\n");
     fs::write(out_dir.join("web_modules.rs"), gen).unwrap();
+}
+
+/// Embed the version fields that SignPath validates before accepting a Windows
+/// executable. `winres` derives FileVersion and ProductVersion from the Cargo
+/// package version; the remaining strings live in Cargo.toml so they are easy
+/// to audit alongside the package metadata.
+fn compile_windows_resources() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
+    winres::WindowsResource::new()
+        .compile()
+        .expect("compile Windows version resources");
 }
 
 fn collect_ts(dir: &Path, out: &mut Vec<PathBuf>) {

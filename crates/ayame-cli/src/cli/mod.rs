@@ -21,7 +21,28 @@ mod progress;
 // the real `sort` parser with the flags `sort_command` emits.
 pub(crate) mod sort;
 mod transform;
+#[cfg(feature = "self-update")]
 mod update;
+#[cfg(not(feature = "self-update"))]
+mod update {
+    use anyhow::{bail, Result};
+
+    fn unavailable(command: &str) -> Result<()> {
+        bail!(
+            "`ayame {command}` is not included in this server-only build; \
+             use your package manager to manage Ayame, or rebuild with \
+             `--features self-update`"
+        )
+    }
+
+    pub(crate) fn cmd_update(_args: &[String]) -> Result<()> {
+        unavailable("update")
+    }
+
+    pub(crate) fn cmd_remove(_args: &[String]) -> Result<()> {
+        unavailable("remove")
+    }
+}
 
 // Used by both the gui startup path and temp_paths' disk-backed scratch
 // default (#140), so it is not gui-gated.
@@ -366,5 +387,16 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(feature = "self-update"))]
+    #[test]
+    fn server_only_build_explains_disabled_update_commands() {
+        for command in ["update", "remove"] {
+            let error = run(vec![command.to_string()]).unwrap_err().to_string();
+            assert!(error.contains("server-only build"), "{error}");
+            assert!(error.contains("package manager"), "{error}");
+            assert!(error.contains("--features self-update"), "{error}");
+        }
     }
 }

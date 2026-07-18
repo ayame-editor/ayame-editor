@@ -93,7 +93,7 @@ ayame serve huge.csv --port 8777
 
 全コマンドとオプションは [CLI リファレンス](CLI_REFERENCE.md) または
 `ayame --help` を参照してください。ファイル比較は姉妹プロジェクト ayame-diff が
-提供します。[移行ガイド](MIGRATING_TO_AYAME_DIFF.md)も参照してください。
+提供します。[ayame-diff](https://github.com/hjosugi/ayame-diff)を参照してください。
 
 ## 主な機能
 

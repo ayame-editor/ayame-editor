@@ -69,6 +69,27 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked --features gui --target "${{ matrix.target }}"
+      - name: Verify Windows version metadata
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = "target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          $info = (Get-Item -LiteralPath $binary).VersionInfo
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "${{ inputs.tag }}"
+          } else {
+            "${{ github.ref_name }}"
+          }
+          $expectedVersion = $tag.TrimStart("v")
+          if ($info.ProductName -ne "Ayame Editor") {
+            throw "Unexpected ProductName '$($info.ProductName)' in $binary"
+          }
+          if (-not $info.FileVersion.StartsWith($expectedVersion)) {
+            throw "FileVersion '$($info.FileVersion)' does not match '$expectedVersion'"
+          }
+          if (-not $info.ProductVersion.StartsWith($expectedVersion)) {
+            throw "ProductVersion '$($info.ProductVersion)' does not match '$expectedVersion'"
+          }
       - name: Prepare artifact
         shell: bash
         run: |

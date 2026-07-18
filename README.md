@@ -12,7 +12,6 @@ Runs on macOS, Windows, and Linux.
 > **Comparing files?** Comparison moved to the sister project
 > **[ayame-diff](https://github.com/hjosugi/ayame-diff)**. Ayame Editor v0.7.0
 > removes its `diff` / `sortdiff` implementations and two-file comparison UI.
-> See the [migration guide](docs/MIGRATING_TO_AYAME_DIFF.md).
 
 ## Features
 
@@ -80,6 +79,7 @@ GUI. Use Ayame Editor to open and edit huge files, and ayame-diff to compare the
 The docs site includes the user guide, full CLI reference, architecture notes,
 default shortcuts, install notes, build steps, and Linux runtime packages:
 [docs site](https://hjosugi.github.io/ayame-editor/).
+Project participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 For files where a single wrong byte is unacceptable, see the
 [data integrity guarantees](docs/DATA_INTEGRITY.md) — the correctness promises
@@ -88,17 +88,40 @@ verify each one.
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io/), certificate
-by [SignPath Foundation](https://signpath.org/), after the project is accepted
-and signing is configured. Until then, Windows releases remain unsigned.
+Status: pending SignPath Foundation approval and production configuration.
+Until then, Windows releases remain unsigned.
 
-- Committer, reviewer, and signing approver: [hjosugi](https://github.com/hjosugi)
-  (repository owner). Repository collaborators may contribute according to
-  their assigned GitHub permissions; external contributions require owner
-  review before release signing.
-- Privacy: Ayame does not upload opened document contents or telemetry. Network
-  requests are limited to explicit or configured actions such as checking for
-  and downloading releases from GitHub.
+> Free code signing provided by [SignPath.io](https://signpath.io/), certificate
+> by [SignPath Foundation](https://signpath.org/).
+
+### What will be signed
+
+- Native Windows executables published by this project on
+  [GitHub Releases](https://github.com/hjosugi/ayame-editor/releases).
+- macOS and Linux artifacts are currently outside this code-signing policy.
+
+### Build and signing process
+
+- Release artifacts are built from this public repository by
+  [GitHub Actions](https://github.com/hjosugi/ayame-editor/actions).
+- Only artifacts produced by the repository's release workflow are submitted
+  to SignPath. SignPath holds the private signing key; this repository does not
+  store or handle it.
+
+### Team roles
+
+- Authors: [hjosugi](https://github.com/hjosugi), the repository owner, may
+  modify the repository without an additional review.
+- Reviewers: [hjosugi](https://github.com/hjosugi) reviews changes proposed by
+  external contributors before merge.
+- Approvers: [hjosugi](https://github.com/hjosugi) explicitly approves every
+  signing request before an artifact is signed.
+
+### Privacy
+
+Ayame does not upload opened document contents or telemetry. Its optional and
+configured network behavior, including GitHub release checks and downloads, is
+documented in the [privacy policy](PRIVACY.md).
 
 See [Windows code signing](docs/PACKAGING.md#windows-code-signing) for the
 release workflow, secrets, and verification procedure.

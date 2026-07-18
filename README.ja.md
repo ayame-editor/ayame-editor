@@ -12,7 +12,7 @@ macOS、Windows、Linux で動作します。
 > **ファイル比較は？** 比較機能は姉妹プロジェクト
 > **[ayame-diff](https://github.com/hjosugi/ayame-diff)** へ移管しました。
 > Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
-> 削除します。[移行ガイド](docs/MIGRATING_TO_AYAME_DIFF.ja.md)をご覧ください。
+> 削除します。
 
 ## 主な機能
 
@@ -81,6 +81,7 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 ユーザー向けガイド、全 CLI リファレンス、アーキテクチャ、既定ショートカット、
 インストール、ビルド手順、Linux の実行時パッケージは
 [ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
+Project への参加には[行動規範](CODE_OF_CONDUCT.ja.md)が適用されます。
 
 1 バイトの誤りも許されない用途向けに、[データ完全性の保証](docs/DATA_INTEGRITY.ja.md)
 （バイト正確な保存・クラッシュ復元・エンコーディング往復などの正確性の約束と、
@@ -88,17 +89,40 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 
 ## Code signing policy（コード署名ポリシー）
 
-Project の審査通過・設定完了後は、[SignPath.io](https://signpath.io/) による無料の
-コード署名（証明書: [SignPath Foundation](https://signpath.org/)）を利用します。
-それまでは Windows release は未署名です。
+Status: SignPath Foundation の審査および本番設定待ちです。それまでは Windows
+release は未署名です。
 
-- Committer、reviewer、signing approver: repository owner の
-  [hjosugi](https://github.com/hjosugi)。Repository collaborator は割り当てられた
-  GitHub 権限に従って参加し、外部 contribution は release 署名前に owner が
-  review します。
-- Privacy: Ayame は開いた document の内容や telemetry を upload しません。
-  Network request は、GitHub release の確認・download など、明示的または設定済みの
-  操作に限られます。
+> Free code signing provided by [SignPath.io](https://signpath.io/), certificate
+> by [SignPath Foundation](https://signpath.org/).
+
+### 署名対象
+
+- この project が
+  [GitHub Releases](https://github.com/hjosugi/ayame-editor/releases) で配布する
+  Windows native executable。
+- macOS・Linux artifact は現在このコード署名ポリシーの対象外です。
+
+### Build・署名手順
+
+- Release artifact は、この公開 repository から
+  [GitHub Actions](https://github.com/hjosugi/ayame-editor/actions) で build します。
+- Repository の release workflow が生成した artifact だけを SignPath に送信します。
+  秘密署名鍵は SignPath が保持し、この repository には保存しません。
+
+### Team role
+
+- Author: repository owner の [hjosugi](https://github.com/hjosugi) は、追加 review
+  なしで repository を変更できます。
+- Reviewer: [hjosugi](https://github.com/hjosugi) は、外部 contributor が提案した
+  変更を merge 前に review します。
+- Approver: [hjosugi](https://github.com/hjosugi) は、artifact の署名前にすべての
+  signing request を明示的に承認します。
+
+### Privacy
+
+Ayame は開いた document の内容や telemetry を upload しません。GitHub release の
+確認・download など、任意または設定済みの network 動作は
+[プライバシーポリシー](PRIVACY.ja.md)に記載しています。
 
 release workflow、secret、検証方法は
 [Windows コード署名](docs/PACKAGING.ja.md#windows-コード署名)を参照してください。

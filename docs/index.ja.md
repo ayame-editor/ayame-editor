@@ -1,8 +1,3 @@
-<div class="doc-family">
-  <span>編集ではなく、2つのファイルを比較したいですか？</span>
-  <a href="MIGRATING_TO_AYAME_DIFF/">移行ガイドを見る →</a>
-</div>
-
 <section class="doc-hero">
   <div class="doc-hero-copy">
     <p class="doc-eyebrow">Ayame Editor Docs</p>

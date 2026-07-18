@@ -59,6 +59,12 @@ brew upgrade ayame
 すべて未設定なら従来どおり未署名で release し、一部だけ設定されている場合は
 意図しない fallback を避けるため Windows job を失敗させます。
 
+Windows build は、SignPath への送信前に `ProductName`、`FileVersion`、
+`ProductVersion` metadata を埋め込みます。Product name は `Ayame Editor` に固定し、
+2 つの version field は Cargo package version から生成します。Release workflow は
+未署名 artifact の upload 前にこれらを検証するため、SignPath の artifact
+configuration でも同じ制約を適用できます。
+
 | Repository secret | 用途 |
 | --- | --- |
 | `SIGNPATH_API_TOKEN` | Submitter 権限を持つ SignPath user の API token。 |
@@ -83,6 +89,13 @@ Get-FileHash -Algorithm SHA256 .\ayame-v0.0.0-windows-x86_64.exe
 の `.sha256` または `SHA256SUMS` と比較します。有効な証明書があっても
 SmartScreen reputation の蓄積には時間がかかる場合があります。
 
+公開
+[コード署名ポリシー](https://github.com/hjosugi/ayame-editor/blob/main/README.ja.md#code-signing-policyコード署名ポリシー)
+には、Foundation 申請に必要な署名対象、build provenance、team role、承認ルール、
+および
+[プライバシーポリシー](https://github.com/hjosugi/ayame-editor/blob/main/PRIVACY.ja.md)
+を記載しています。
+
 ## self-update の扱い
 
 `ayame update` は standalone install 用です。Package manager 管理下の Ayame を検出
@@ -94,3 +107,13 @@ SmartScreen reputation の蓄積には時間がかかる場合があります。
 
 `ayame remove` も同じ方針です。Package manager 管理下の install は
 `brew uninstall`、`scoop uninstall`、または Nix 側で削除します。
+
+ソースからの通常ビルドでは self-update が既定で有効です。サーバー専用配布では
+TLS・checksum・archive の依存スタックを除外できます。
+
+```sh
+cargo build --release --locked -p ayame-cli --no-default-features
+```
+
+このビルドでも `ayame update` / `ayame remove` は認識されますが、package manager
+での管理、または `--features self-update` を付けた再ビルドが必要であることを案内します。

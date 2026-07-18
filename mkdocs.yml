@@ -58,7 +58,6 @@ plugins:
             Using Ayame: 使いかた
             User Guide: ユーザー向け
             CLI Reference: CLI リファレンス
-            Migrating to ayame-diff: ayame-diff への移行
             Internals: しくみ
             Architecture: アーキテクチャ
             Data Integrity: データ完全性
@@ -95,7 +94,6 @@ nav:
   - Using Ayame:
       - User Guide: USER_GUIDE.md
       - CLI Reference: CLI_REFERENCE.md
-      - Migrating to ayame-diff: MIGRATING_TO_AYAME_DIFF.md
   - Internals:
       - Architecture: ARCHITECTURE.md
       - Data Integrity: DATA_INTEGRITY.md

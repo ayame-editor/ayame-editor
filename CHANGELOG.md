@@ -2,6 +2,21 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Added SignPath Foundation application readiness: Windows release binaries now
+  embed and validate product/version metadata, and the public signing policy,
+  privacy disclosure, and community conduct rules are explicit.
+- Made the self-update stack optional for server-only source builds (#117).
+  Default and GUI builds still include `ayame update` / `ayame remove`, while
+  `--no-default-features` omits reqwest/rustls, SHA-256, and zip and returns an
+  actionable package-manager/rebuild message for those commands. CI now gates
+  default, server-only, and GUI feature combinations. On the same Linux x86_64
+  host with empty target directories, the server-only clean release build took
+  61.343s instead of 92.222s (33.5% less), and the stripped binary was
+  5,825,456 instead of 8,521,496 bytes (31.6% smaller); these figures are
+  environment-specific.
+
 ## v0.8.1 - 2026-07-18
 
 - Unified interactive state feedback in the web editor (#193). Buttons, tabs,

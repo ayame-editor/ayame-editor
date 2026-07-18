@@ -1,8 +1,3 @@
-<div class="doc-family">
-  <span>Need to compare files instead of editing them?</span>
-  <a href="MIGRATING_TO_AYAME_DIFF/">Read the migration guide →</a>
-</div>
-
 <section class="doc-hero">
   <div class="doc-hero-copy">
     <p class="doc-eyebrow">Ayame Editor Docs</p>
