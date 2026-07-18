@@ -11,6 +11,7 @@ import {
   state,
 } from "./state.js";
 import { availableLocales, localeLabel, normalizeLanguage, t } from "./i18n.js";
+import { sanitizeKeymap } from "./keys.js";
 import { api, type LinesResponse } from "./api.js";
 import { focusEditor, invalidateFontMetrics, scheduleRender } from "./editor.js";
 import { postNativeMessage } from "./app.js";
@@ -19,7 +20,6 @@ import {
   hideKeymap,
   renderKeymapRows,
   resetKeymap,
-  sanitizeKeymap,
   showKeymap,
   updateKeyHints,
 } from "./menus.js";

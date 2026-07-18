@@ -50,25 +50,6 @@ export function displayPath(path) {
   return s;
 }
 
-// Shortcuts use one cross-platform storage format ("Ctrl+Alt+ArrowUp"). Keep
-// that format for matching and persistence, but render native macOS modifier
-// glyphs so menus, the command palette, and keymap inputs do not mislead users.
-export function displayShortcut(
-  shortcut,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-) {
-  const rendered = String(shortcut || "")
-    .replace(/ArrowUp/g, "↑")
-    .replace(/ArrowDown/g, "↓")
-    .replace(/ArrowLeft/g, "←")
-    .replace(/ArrowRight/g, "→");
-  if (!/^(?:Mac|iPhone|iPad|iPod)/i.test(String(platform))) return rendered;
-  return rendered
-    .replace(/Ctrl\+/g, "⌘")
-    .replace(/Alt\+/g, "⌥")
-    .replace(/Shift\+/g, "⇧");
-}
-
 // The stack of currently-open modal dialogs. The last entry is the top-most,
 // active dialog; everything behind it (the app chrome and any lower modals) is
 // made inert so Tab and the screen-reader cursor can't escape behind it (#160).
