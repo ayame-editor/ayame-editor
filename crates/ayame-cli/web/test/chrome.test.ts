@@ -75,6 +75,28 @@ describe("application chrome", () => {
     expect(menus).toContain('const DROPDOWN_MENUS = [...APP_MENUS, "tools"]');
   });
 
+  it("places the menubar and compact toolbar in one fixed-height chrome row (#148)", () => {
+    const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const block = (selector: string) =>
+      css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ??
+      "";
+
+    const app = block("#app");
+    expect(css).toContain("--chrome-top-h: 38px");
+    expect(app).toContain('"menubar toolbar"');
+    expect(app).toContain('"tabbar tabbar"');
+    expect(app).toContain("grid-template-rows: var(--chrome-top-h) auto minmax(0, 1fr) auto");
+
+    const menubar = block("#menubar");
+    const toolbar = block("#toolbar");
+    expect(menubar).toContain("grid-area: menubar");
+    expect(menubar).toContain("height: 100%");
+    expect(toolbar).toContain("grid-area: toolbar");
+    expect(toolbar).toContain("height: 100%");
+    expect(toolbar).toContain("flex-wrap: nowrap");
+    expect(toolbar).toContain("padding: 0 10px 0 2px");
+  });
+
   it("exposes search toggles, status values, and palette selection to assistive technology (#171)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     for (const id of ["opt-case", "opt-word", "opt-regex"]) {

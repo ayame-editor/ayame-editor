@@ -58,6 +58,7 @@
   --radius-control: 6px;
   --control-h: 34px;
   --cmd-min-width: 46px;
+  --chrome-top-h: 38px;
   --gutter-pad-start: 8px;
   --gutter-pad-end: 20px;
   --modal-edge: 94vw;
@@ -211,7 +212,13 @@ html, body {
 
 #app {
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-areas:
+    "menubar toolbar"
+    "tabbar tabbar"
+    "main main"
+    "statusbar statusbar";
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: var(--chrome-top-h) auto minmax(0, 1fr) auto;
   height: 100vh;
   background: transparent;
   position: relative;
@@ -220,10 +227,11 @@ html, body {
 /* ---- menu bar --------------------------------------------------------- */
 
 #menubar {
+  grid-area: menubar;
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 38px;
+  height: 100%;
   padding: 0 10px;
   background: color-mix(in srgb, var(--bg-toolbar) 96%, var(--bg));
   border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
@@ -248,6 +256,7 @@ html, body {
 /* ---- tab bar ---------------------------------------------------------- */
 
 #tabbar {
+  grid-area: tabbar;
   display: flex;
   align-items: stretch;
   background: var(--bg-toolbar);
@@ -317,16 +326,18 @@ html, body {
 /* ---- toolbar ---------------------------------------------------------- */
 
 #toolbar {
+  grid-area: toolbar;
   display: flex;
-  flex-wrap: wrap;              /* shrink → wrap, never hide controls */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px 0 2px;
+  background: color-mix(in srgb, var(--bg-toolbar) 96%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   font-size: var(--fs-ui);
   user-select: none;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent);
   position: relative;
   z-index: 30;
 }
@@ -664,6 +675,7 @@ html.replace-open .find-group .replace-row {
 /* ---- main area ------------------------------------------------------- */
 
 #main {
+  grid-area: main;
   display: flex;
   min-height: 0;
   overflow: hidden;
@@ -1143,6 +1155,7 @@ mark.current {
 /* ---- status bar ------------------------------------------------------- */
 
 #statusbar {
+  grid-area: statusbar;
   display: flex;
   align-items: center;
   gap: 0;
@@ -1897,7 +1910,7 @@ html.saving .caret.extra { visibility: hidden; }
 @media (max-width: 860px) {
   #toolbar {
     gap: 5px;
-    padding: 5px 6px;
+    padding: 0 6px 0 2px;
   }
   .find-group {
     left: 10px;
@@ -1953,13 +1966,22 @@ html.saving .caret.extra { visibility: hidden; }
     display: none;
   }
   .menubar-button {
-    min-width: 54px;
+    min-width: 0;
+    padding-inline: 6px;
   }
   .menubar-button .btn-label {
     display: inline;
   }
   .file-menu {
     width: min(236px, calc(100vw - 16px));
+  }
+  #toolbar > .tb-group:first-child,
+  #toolbar > .tb-sep {
+    display: none;
+  }
+  #tools-menu-button {
+    min-width: var(--control-h);
+    padding-inline: 6px;
   }
   #statusbar {
     overflow-x: auto;
