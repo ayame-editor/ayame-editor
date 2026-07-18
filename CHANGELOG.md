@@ -4,6 +4,10 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Reclaimed 47px of vertical editor space by placing the compact undo/redo and
+  tools toolbar in the menubar row (#148). The dedicated toolbar strip no
+  longer pushes the tab bar and editor down, while contextual theme/keymap
+  actions remain right-aligned and narrow layouts keep the tools entry visible.
 - Replaced the web editor's single transient status message with a notification
   queue (#177). Consecutive operation results now remain visible for their own
   lifetime, informational messages expire independently, and errors stay until
