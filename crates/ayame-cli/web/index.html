@@ -254,12 +254,14 @@
         </main>
       </div>
 
-      <!-- Status bar keeps only the always-useful vitals, right-aligned like a
-           normal editor; feedback (save results, errors, hints) lives on the
-           left in #st-msg, the single visible home for operation messages. -->
+      <!-- Operation results live outside the persistent status lane. Each
+           message owns its lifetime, so a later operation cannot erase it. -->
+      <div id="notifications" class="notifications" role="region" aria-label="通知"
+           data-i18n-aria-label="notification.region"></div>
+
+      <!-- Status bar keeps only persistent editor state and save progress. -->
       <footer id="statusbar">
         <span id="st-saving" class="seg saving-seg hidden" role="status" data-i18n="status.saving">保存中…</span>
-        <span id="st-msg" class="seg msg" role="status" aria-live="polite"></span>
         <div class="spacer"></div>
         <span id="st-pos" class="seg">—</span>
         <button id="st-tail" class="seg seg-btn" title="末尾に追従 (tail -f)" data-i18n="status.follow" data-i18n-title="menu.followTail">追従</button>
