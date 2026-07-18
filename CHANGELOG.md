@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.8.1 - 2026-07-18
 
 - Unified interactive state feedback in the web editor (#193). Buttons, tabs,
   fields, rows, menus, and the scrollbar now share motion tokens with the
@@ -11,6 +11,10 @@ All notable changes to Ayame Editor are tracked here.
   matches share one highlight treatment. The replace row now expands in sync
   with its chevron while remaining inert and hidden from assistive technology
   when collapsed.
+- Unified the documentation language experience around the header selector.
+  English and Japanese now share one translated navigation structure, switch
+  between matching pages, and no longer duplicate language links in page
+  content or show both languages in the sidebar.
 
 ## v0.8.0 - 2026-07-16
 
