@@ -273,7 +273,7 @@ export function renderKeymapRows() {
     name.className = "keymap-label";
     name.textContent = t(label);
     const input = document.createElement("input");
-    input.className = "keymap-input";
+    input.className = "keymap-input input-control";
     input.readOnly = true;
     input.value = displayShortcut(shortcut);
     input.placeholder = t("keymap.unassigned");

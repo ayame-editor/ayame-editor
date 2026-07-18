@@ -234,6 +234,59 @@ describe("application chrome", () => {
     expect(css).toContain("min-width: var(--cmd-min-width)");
   });
 
+  it("uses one text-entry component across dialogs with mono limited to paths (#150)", () => {
+    const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const html = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const block = (selector: string) =>
+      css.split(`${selector} {`, 2)[1]?.split("}", 1)[0] ?? "";
+
+    const inputControl = block(".input-control");
+    expect(inputControl).toContain("height: var(--control-h)");
+    expect(inputControl).toContain("font-family: var(--ui)");
+    expect(inputControl).toContain("font-size: var(--fs-ui)");
+    expect(inputControl).toContain("border-radius: var(--radius-control)");
+    expect(block(".input-control:focus")).toContain("box-shadow:");
+    expect(block(".input-control--mono")).toContain("font-family: var(--mono)");
+
+    for (const id of [
+      "opener-input",
+      "set-theme",
+      "set-bg",
+      "set-language",
+      "set-font",
+      "set-memo-name",
+      "convert-enc",
+      "convert-eol",
+      "palette-input",
+      "prompt-input",
+    ]) {
+      expect(html.querySelector(`#${id}`)?.classList.contains("input-control"), id).toBe(true);
+    }
+    expect(html.querySelector("#opener-input")?.classList.contains("input-control--mono")).toBe(
+      true,
+    );
+
+    const dialogs = read("src/dialogs.ts");
+    const menus = read("src/menus.ts");
+    expect(dialogs).toContain('input.className = "input-control input-control--mono"');
+    expect(dialogs).toContain('sel.className = "input-control"');
+    expect(dialogs).toContain('input.className = "input-control"');
+    expect(menus).toContain('input.className = "keymap-input input-control"');
+
+    for (const selector of [
+      ".opener-path input",
+      ".set-row select",
+      '.set-row input[type="text"]',
+      ".keymap-input",
+      ".palette-input",
+      "#prompt-input",
+      '.form-row input[type="text"]',
+      ".form-row select",
+    ]) {
+      expect(block(selector), selector).not.toMatch(/height:|font-family:|font-size:/);
+    }
+  });
+
   it("shares gutter spacing and keeps find controls border-consistent (#194)", () => {
     const css = read("style.css");
     const padding = "padding: 0 var(--gutter-pad-end) 0 var(--gutter-pad-start)";

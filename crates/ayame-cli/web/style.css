@@ -375,6 +375,7 @@ button,
 .row,
 #vthumb,
 .menu-item,
+.input-control,
 .opener-row {
   transition:
     background-color var(--motion-fast) var(--motion-ease),
@@ -388,6 +389,28 @@ button.cmd {
   min-width: var(--cmd-min-width);
   padding: 0 11px;
 }
+
+/* Canonical text-entry control. Dialogs use one height, type scale, surface,
+   and focus treatment; only path-like values opt into the mono stack. */
+.input-control {
+  height: var(--control-h);
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0 10px;
+  font-family: var(--ui);
+  font-size: var(--fs-ui);
+  outline: none;
+}
+.input-control:focus {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.input-control::placeholder { color: var(--fg-faint); }
+.input-control--mono { font-family: var(--mono); }
+
 .menu-shell {
   position: relative;
   display: inline-flex;
@@ -1274,19 +1297,6 @@ html.saving .caret.extra { visibility: hidden; }
 .opener-path input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 36px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: var(--fs-ui);
-  padding: 0 11px;
-  outline: none;
-}
-.opener-path input:focus {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .opener-path .cmd { flex: 0 0 auto; border: 1px solid var(--border); }
 .opener-path #opener-open {
@@ -1464,32 +1474,11 @@ html.saving .caret.extra { visibility: hidden; }
 #convert-bom-row.disabled { opacity: 0.5; }
 .set-row select {
   flex: 1;
-  height: 30px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  padding: 0 8px;
-  font-family: var(--ui);
-  font-size: var(--fs-ui);
-  outline: none;
 }
-.set-row select:focus { border-color: var(--accent-bright); }
 .set-row input[type="text"] {
   flex: 1;
   min-width: 0;
-  height: 30px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  padding: 0 8px;
-  font-family: var(--mono);
-  font-size: var(--fs-ui-sm);
-  outline: none;
 }
-.set-row input[type="text"]:focus { border-color: var(--accent-bright); }
-.set-row input[type="text"]::placeholder { color: var(--fg-faint); }
 /* the 使える変数 hint hugs the メモの名前 row above it */
 .set-row.set-hint-row { padding-top: 0; margin-top: -8px; }
 .set-row.set-hint-row .set-hint { font-size: var(--fs-hint); color: var(--fg-faint); }
@@ -1638,19 +1627,6 @@ html.saving .caret.extra { visibility: hidden; }
 }
 .keymap-input {
   width: 100%;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 3px);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  font-family: var(--ui);
-  font-size: var(--fs-ui-sm);
-  outline: none;
-}
-.keymap-input:focus {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .keymap-actions {
   display: flex;
@@ -1671,19 +1647,6 @@ html.saving .caret.extra { visibility: hidden; }
 }
 .palette-input {
   width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 2px);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  font-family: var(--ui);
-  font-size: var(--fs-ui);
-  outline: none;
-}
-.palette-input:focus {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .palette-list {
   overflow: auto;
@@ -1818,15 +1781,6 @@ html.saving .caret.extra { visibility: hidden; }
 .prompt-panel { width: min(460px, var(--modal-edge)); }
 .prompt-body { display: flex; flex-direction: column; gap: 10px; }
 .prompt-label { color: var(--fg-dim); font-size: var(--fs-ui-sm); }
-#prompt-input {
-  height: 38px; box-sizing: border-box;
-  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-  color: var(--fg); font-family: var(--mono); font-size: var(--fs-ui); padding: 0 11px; outline: none;
-}
-#prompt-input:focus {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
-}
 .prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .prompt-actions .cmd { border: 1px solid var(--border); }
 .cmd.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
@@ -1867,27 +1821,7 @@ html.saving .caret.extra { visibility: hidden; }
 .form-body { display: flex; flex-direction: column; gap: 10px; }
 .form-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); align-items: center; gap: 10px; }
 .form-row > span { color: var(--fg-dim); font-size: var(--fs-ui-sm); }
-.form-row input[type="text"] {
-  height: 36px; box-sizing: border-box;
-  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-  color: var(--fg); font-family: var(--mono); font-size: var(--fs-ui); padding: 0 11px; outline: none;
-}
-.form-row input[type="text"]:focus {
-  border-color: var(--accent-bright);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
-}
-.form-row select {
-  height: 36px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0 8px;
-  font-family: var(--ui);
-  font-size: var(--fs-ui);
-  outline: none;
-}
-.form-row select:focus { border-color: var(--accent-bright); }
+.form-row > .input-control { width: 100%; min-width: 0; }
 .form-check { display: flex; align-items: center; gap: 8px; color: var(--fg); font-size: var(--fs-ui); cursor: pointer; }
 .form-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 .form-path { display: flex; gap: 6px; align-items: center; }

@@ -285,7 +285,7 @@
 
         <div class="opener-path">
           <label id="opener-input-label" class="opener-input-label" for="opener-input" data-i18n="dialog.open.path">パス</label>
-          <input id="opener-input" type="text" autocomplete="off" spellcheck="false"
+          <input id="opener-input" class="input-control input-control--mono" type="text" autocomplete="off" spellcheck="false"
                  placeholder="ファイルのパスを入力… (例: /var/log/huge.log)" data-i18n-placeholder="dialog.open.pathPlaceholder"
                  aria-controls="opener-recent opener-list" />
           <button id="opener-new" class="cmd" data-i18n="menu.newFile" title="新規ファイル" data-i18n-title="menu.newFile">新規ファイル</button>
@@ -315,7 +315,7 @@
         <div class="settings-body">
           <label class="set-row">
             <span class="set-label" data-i18n="settings.theme">テーマ</span>
-            <select id="set-theme">
+            <select id="set-theme" class="input-control">
               <option value="auto" data-i18n="settings.themeAuto">システム設定に従う</option>
               <option value="iris-light">Iris Light</option>
               <option value="iris-mist">Iris Mist</option>
@@ -328,7 +328,7 @@
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.background">背景</span>
-            <select id="set-bg">
+            <select id="set-bg" class="input-control">
               <option value="watercolor" data-i18n="settings.bgDefault">デフォルト</option>
               <option value="solid" data-i18n="settings.bgSolid">単色</option>
               <option value="image" data-i18n="settings.bgImage">カスタム画像</option>
@@ -345,7 +345,7 @@
             <span class="set-label" data-i18n="settings.language">言語</span>
             <!-- Options are built by populateLanguageSelect() from the locales
                  in MESSAGES; keep this empty (single source of truth). -->
-            <select id="set-language"></select>
+            <select id="set-language" class="input-control"></select>
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.illustration">イラスト</span>
@@ -354,7 +354,7 @@
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.font">フォント</span>
-            <select id="set-font">
+            <select id="set-font" class="input-control">
               <option value="mono" data-i18n="settings.fontMono">等幅 (Consolas / Menlo)</option>
               <option value="mono-jp" data-i18n="settings.fontMonoJp">等幅 + 日本語 (Noto/MS Gothic)</option>
               <option value="system" data-i18n="settings.fontSystem">システムUI</option>
@@ -412,7 +412,7 @@
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.memoName">新規ファイルの名前</span>
-            <input id="set-memo-name" type="text" autocomplete="off" spellcheck="false"
+            <input id="set-memo-name" class="input-control" type="text" autocomplete="off" spellcheck="false"
                    placeholder="untitled-{seq}.txt" />
           </label>
           <div class="set-row set-hint-row">
@@ -441,7 +441,7 @@
         <div class="settings-body">
           <label class="set-row">
             <span class="set-label" data-i18n="dialog.convert.encoding">文字コード</span>
-            <select id="convert-enc">
+            <select id="convert-enc" class="input-control">
               <option value="utf-8">UTF-8</option>
               <option value="utf-16le">UTF-16 LE</option>
               <option value="utf-16be">UTF-16 BE</option>
@@ -451,7 +451,7 @@
           </label>
           <label class="set-row">
             <span class="set-label" data-i18n="dialog.convert.eol">改行コード</span>
-            <select id="convert-eol">
+            <select id="convert-eol" class="input-control">
               <option value="lf">LF (Unix / macOS)</option>
               <option value="crlf">CRLF (Windows)</option>
               <option value="cr" data-i18n="dialog.convert.eolCr">CR (旧 Mac)</option>
@@ -497,7 +497,7 @@
           <button id="palette-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
         <div class="palette-body">
-          <input id="palette-input" class="palette-input" autocomplete="off" spellcheck="false"
+          <input id="palette-input" class="palette-input input-control" autocomplete="off" spellcheck="false"
                  role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
                  aria-controls="palette-list" aria-expanded="false"
                  aria-label="コマンドパレット" data-i18n-aria-label="menu.commandPalette" />
@@ -564,7 +564,7 @@
         </div>
         <div class="prompt-body">
           <label class="prompt-label" id="prompt-label" for="prompt-input"></label>
-          <input id="prompt-input" type="text" autocomplete="off" spellcheck="false" />
+          <input id="prompt-input" class="input-control" type="text" autocomplete="off" spellcheck="false" />
           <div class="prompt-actions">
             <button id="prompt-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
             <button id="prompt-ok" class="cmd primary" data-i18n="common.ok">OK</button>

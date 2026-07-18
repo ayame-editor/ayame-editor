@@ -188,6 +188,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       wrap.className = "form-path";
       const input = document.createElement("input");
       input.type = "text";
+      input.className = "input-control input-control--mono";
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
@@ -214,6 +215,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
     row.append(span);
     if (f.type === "select") {
       const sel = document.createElement("select");
+      sel.className = "input-control";
       for (const [v, text] of f.options || []) {
         const o = document.createElement("option");
         o.value = v;
@@ -226,6 +228,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
     } else {
       const input = document.createElement("input");
       input.type = "text";
+      input.className = "input-control";
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
