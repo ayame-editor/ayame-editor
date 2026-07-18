@@ -434,17 +434,6 @@ pub(super) fn uploads_dir() -> PathBuf {
     uploads_dir_result().expect("create private uploads scratch directory")
 }
 
-#[cfg(test)]
-pub(super) fn untitled_dir() -> PathBuf {
-    untitled_dir_result().expect("create private untitled scratch directory")
-}
-
-/// Scratch home for sort results the client didn't pick a destination for.
-#[cfg(test)]
-pub(super) fn sorted_dir() -> PathBuf {
-    sorted_dir_result().expect("create private sorted scratch directory")
-}
-
 /// Best-effort removal of this process's scratch directories (uploads,
 /// untitled buffers, unsaved sort results) on graceful shutdown. Failures are
 /// ignored: files may be mmap'd on platforms that refuse deletion of mapped
@@ -678,11 +667,13 @@ mod tests {
     #[test]
     fn scratch_dirs_are_randomized_created_private_dirs() {
         let pid = std::process::id();
-        for (kind, dir) in [
-            ("uploads", uploads_dir()),
-            ("untitled", untitled_dir()),
-            ("sorted", sorted_dir()),
-        ] {
+        for kind in ["srv-uploads", "srv-untitled", "srv-sorted"] {
+            // Use directories owned by this test instead of the process-global
+            // OnceLock paths. Parallel server tests may legitimately call
+            // cleanup_temp_dirs(), which removes those shared paths between a
+            // getter returning and this test inspecting them.
+            let dir = temp_paths::create_private_temp_dir(kind)
+                .expect("create private workspace scratch directory");
             let name = dir.file_name().unwrap().to_string_lossy();
             assert!(
                 !name.eq(&format!("ayame-{kind}-{pid}")),
@@ -695,6 +686,7 @@ mod tests {
                 let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
                 assert_eq!(mode, 0o700, "scratch dir mode for {}", dir.display());
             }
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 }
