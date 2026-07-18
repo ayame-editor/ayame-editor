@@ -94,6 +94,17 @@ describe("application chrome", () => {
     expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
   });
 
+  it("separates transient notifications from persistent status values (#177)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const notifications = doc.querySelector("#notifications");
+
+    expect(notifications?.getAttribute("role")).toBe("region");
+    expect(notifications?.getAttribute("data-i18n-aria-label")).toBe("notification.region");
+    expect(doc.querySelector("#statusbar #st-msg")).toBeNull();
+    expect(doc.querySelector("#statusbar #st-saving")).not.toBeNull();
+    expect(doc.querySelector("#statusbar #st-pos")).not.toBeNull();
+  });
+
   it("exposes opener rows as keyboard-navigable listbox options (#185)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     expect(doc.querySelector("#opener-input")?.getAttribute("aria-controls")).toBe(

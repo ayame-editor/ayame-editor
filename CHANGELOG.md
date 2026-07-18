@@ -4,6 +4,11 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Replaced the web editor's single transient status message with a notification
+  queue (#177). Consecutive operation results now remain visible for their own
+  lifetime, informational messages expire independently, and errors stay until
+  dismissed. Notifications are separate from persistent editor status and use
+  polite or assertive announcements according to severity.
 - Added SignPath Foundation application readiness: Windows release binaries now
   embed and validate product/version metadata, and the public signing policy,
   privacy disclosure, and community conduct rules are explicit.

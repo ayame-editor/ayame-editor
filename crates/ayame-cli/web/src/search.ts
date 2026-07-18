@@ -28,7 +28,10 @@ import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
 import { openPath, showFolderDialog } from "./workspace.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
+import { flashCount } from "./notifications.js";
 import type { GrepRequest } from "./types/api.js";
+
+export { flashCount };
 
 type GrepResponse = {
   hits: { path: string; line: number; col: number; text: string }[];
@@ -339,33 +342,6 @@ export function updateFindCountLabel() {
     }
   }
   $("find-count").textContent = t("find.matchCount", { total });
-}
-
-// Operation feedback goes to the always-visible status bar (aria-live), and is
-// mirrored into the find bar when that is open. Errors stay a little longer.
-// `msg` arrives already localized — callers pass t("key", vars) results.
-export let stMsgTimer = 0;
-
-export function flashCount(msg, kind = "") {
-  msg = msg || "";
-  const isError = kind === "error";
-  const el = $("st-msg");
-  if (el) {
-    el.textContent = msg || "";
-    el.classList.toggle("error", isError);
-    clearTimeout(stMsgTimer);
-    if (msg) {
-      stMsgTimer = setTimeout(
-        () => {
-          el.textContent = "";
-          el.classList.remove("error");
-          if (state.findOpen) updateFindCountLabel();
-        },
-        isError ? 10000 : 6000,
-      );
-    }
-  }
-  if (state.findOpen) $("find-count").textContent = msg;
 }
 
 export function loadSearchHistory() {

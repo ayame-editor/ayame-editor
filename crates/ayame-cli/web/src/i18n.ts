@@ -158,6 +158,8 @@ export const MESSAGES = {
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
     "status.tailFileChanged": "ファイルが外部で変更されました — 追従を停止しました",
+    "notification.region": "通知",
+    "notification.dismiss": "通知を閉じる",
     // -- editor (clipboard, edits, caps) --
     "editor.label": "エディタ",
     "editor.copied": "コピーしました",
@@ -566,6 +568,8 @@ export const MESSAGES = {
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
     "status.tailFileChanged": "The file changed externally. Tail following stopped.",
+    "notification.region": "Notifications",
+    "notification.dismiss": "Dismiss notification",
     "editor.label": "Editor",
     "editor.copied": "Copied",
     "editor.copyError": "Copy error",

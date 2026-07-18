@@ -1189,17 +1189,6 @@ mark.current {
   font-weight: 600;
 }
 #statusbar .spacer { flex: 1; }
-/* Single visible home for operation feedback (save results, errors, hints):
-   always on screen, announced politely to screen readers. */
-#statusbar .seg.msg {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--fg-dim);
-}
-#statusbar .seg.msg.error { color: var(--danger); }
-#statusbar .seg.msg:empty { display: none; }
 /* Save-in-progress: a small spinner so the (deliberate) edit block reads as
    "busy", not "broken". */
 #statusbar .saving-seg {
@@ -1225,6 +1214,77 @@ mark.current {
 html.saving #content { opacity: 0.75; }
 html.saving #caret,
 html.saving .caret.extra { visibility: hidden; }
+
+/* ---- operation notifications ----------------------------------------- */
+
+.notifications {
+  position: fixed;
+  inset-inline-end: 12px;
+  bottom: 34px;
+  z-index: 49;
+  width: min(440px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.notification {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  color: var(--fg);
+  box-shadow: 0 14px 38px -20px color-mix(in srgb, var(--fg) 54%, #000);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  pointer-events: auto;
+  animation: ayame-notification-in var(--motion-normal) var(--motion-ease);
+  transition:
+    opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease);
+}
+.notification.error {
+  border-inline-start-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, var(--bg-elevated));
+}
+.notification-message {
+  align-self: center;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.notification.error .notification-message { color: var(--danger); }
+.notification-dismiss {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--fg-dim);
+}
+.notification-dismiss:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.notification-dismiss .ay-icon {
+  width: 13px;
+  height: 13px;
+}
+.notification.closing {
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+}
+@keyframes ayame-notification-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
 
 /* ---- modals (open dialog + settings) ---------------------------------- */
 
@@ -1904,6 +1964,10 @@ html.saving .caret.extra { visibility: hidden; }
   #statusbar {
     overflow-x: auto;
     scrollbar-width: none;
+  }
+  .notifications {
+    inset-inline: 8px;
+    width: auto;
   }
   #ambient {
     width: 210px;
