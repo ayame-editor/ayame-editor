@@ -1,5 +1,5 @@
 // Ayame Editor — menus module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, commas, displayName, displayShortcut, humanBytes, setModalOpen } from "./dom.js";
+import { $, commas, displayName, humanBytes, setModalOpen } from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { applyStaticI18n, currentLocale, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
@@ -39,7 +39,14 @@ import {
 } from "./search.js";
 import { askPrompt, formVisible, promptVisible, showMessage } from "./dialogs.js";
 import { anyModalOpen } from "./input.js";
-import { isBindableShortcut, normalizeShortcut, sanitizeKeymap } from "./shortcuts.js";
+import {
+  displayShortcut,
+  eventShortcut,
+  isBindableShortcut,
+  matchesShortcut as eventMatchesShortcut,
+  normalizeShortcut,
+  sanitizeKeymap,
+} from "./keys.js";
 import {
   closeTab,
   configureOpener,
@@ -160,17 +167,6 @@ export function applyLocale() {
   renderRecentFiles();
 }
 
-export function eventShortcut(e) {
-  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return "";
-  let key = e.key;
-  if (key.length === 1) key = key.toUpperCase();
-  else if (/^f\d+$/i.test(key)) key = key.toUpperCase();
-  else key = key[0].toUpperCase() + key.slice(1);
-  return [(e.ctrlKey || e.metaKey) && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt", key]
-    .filter(Boolean)
-    .join("+");
-}
-
 export function shortcutList(action) {
   const custom =
     state.settings.keymap && Object.prototype.hasOwnProperty.call(state.settings.keymap, action)
@@ -185,8 +181,7 @@ export function shortcutFor(action) {
 }
 
 export function matchesShortcut(e, action) {
-  const ev = eventShortcut(e);
-  return !!ev && shortcutList(action).includes(ev);
+  return eventMatchesShortcut(e, shortcutList(action));
 }
 
 export function setKeymap(action, shortcut) {
@@ -212,8 +207,12 @@ export function resetKeymap() {
 }
 
 export function updateKeyHints() {
+  rebuildGlobalShortcutActions();
   document.querySelectorAll("[data-key-action]").forEach((el) => {
     el.textContent = displayShortcut(shortcutFor((el as any).dataset.keyAction));
+  });
+  document.querySelectorAll("[data-key-static]").forEach((el) => {
+    el.textContent = displayShortcut((el as HTMLElement).dataset.keyStatic);
   });
   const hint = (labelKey, action) => {
     const key = displayShortcut(shortcutFor(action));
@@ -835,11 +834,31 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "undo",
 ];
 
-export function shortcutActionFromEvent(e, inField = false) {
+let globalShortcutActionsByKey = new Map<string, string[]>();
+
+// The action table is rebuilt when settings/key hints change, not for every
+// keydown. Preserve GLOBAL_SHORTCUT_ACTIONS order so conflicts resolve exactly
+// as the previous linear scan did.
+export function rebuildGlobalShortcutActions() {
+  const next = new Map<string, string[]>();
   for (const action of GLOBAL_SHORTCUT_ACTIONS) {
+    for (const shortcut of shortcutList(action)) {
+      const actions = next.get(shortcut) || [];
+      if (!actions.includes(action)) actions.push(action);
+      next.set(shortcut, actions);
+    }
+  }
+  globalShortcutActionsByKey = next;
+}
+
+export function shortcutActionFromEvent(e, inField = false) {
+  const shortcut = eventShortcut(e);
+  if (!shortcut) return null;
+  if (!globalShortcutActionsByKey.size) rebuildGlobalShortcutActions();
+  for (const action of globalShortcutActionsByKey.get(shortcut) || []) {
     const entry = ACTIONS[action];
     if (!entry?.globalShortcut || (inField && entry.editorOnly)) continue;
-    if (matchesShortcut(e, action)) return action;
+    return action;
   }
   return null;
 }

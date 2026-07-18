@@ -1,5 +1,8 @@
 import { KEYMAP_ACTIONS } from "./state.js";
 
+// Shortcut persistence uses one platform-neutral spelling. Parsing,
+// KeyboardEvent conversion, matching, and platform display all live here so
+// their modifier/key rules cannot drift apart.
 export function normalizeShortcut(raw) {
   if (!raw) return "";
   const parts = String(raw)
@@ -40,6 +43,39 @@ export function normalizeShortcut(raw) {
   return [mods.Ctrl && "Ctrl", mods.Shift && "Shift", mods.Alt && "Alt", key]
     .filter(Boolean)
     .join("+");
+}
+
+export function eventShortcut(e) {
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return "";
+  const key = e.key === " " ? "Space" : e.key;
+  return normalizeShortcut(
+    [(e.ctrlKey || e.metaKey) && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt", key]
+      .filter(Boolean)
+      .join("+"),
+  );
+}
+
+export function matchesShortcut(e, shortcuts) {
+  const event = eventShortcut(e);
+  return !!event && shortcuts.includes(event);
+}
+
+// Keep the storage spelling for matching, but render native macOS modifier
+// glyphs so menus, the command palette, and keymap inputs describe real keys.
+export function displayShortcut(
+  shortcut,
+  platform = typeof navigator === "undefined" ? "" : navigator.platform,
+) {
+  const rendered = String(shortcut || "")
+    .replace(/ArrowUp/g, "↑")
+    .replace(/ArrowDown/g, "↓")
+    .replace(/ArrowLeft/g, "←")
+    .replace(/ArrowRight/g, "→");
+  if (!/^(?:Mac|iPhone|iPad|iPod)/i.test(String(platform))) return rendered;
+  return rendered
+    .replace(/Ctrl\+/g, "⌘")
+    .replace(/Alt\+/g, "⌥")
+    .replace(/Shift\+/g, "⇧");
 }
 
 export function isBindableShortcut(shortcut) {
