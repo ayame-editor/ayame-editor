@@ -4,6 +4,10 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Unified editor sizing into one effective pixel value (#170). Settings now
+  offers synchronized slider and numeric inputs, Ctrl/Cmd+wheel and +/- adjust
+  the same persisted font size, and the status bar shows the exact px value.
+  Existing font-size × zoom settings migrate to their previous visible size.
 - Reclaimed 47px of vertical editor space by placing the compact undo/redo and
   tools toolbar in the menubar row (#148). The dedicated toolbar strip no
   longer pushes the tab bar and editor down, while contextual theme/keymap

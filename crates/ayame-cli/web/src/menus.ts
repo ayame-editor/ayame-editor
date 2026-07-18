@@ -509,7 +509,7 @@ export function initContextMenu() {
   });
 }
 
-// ---- reusable pop-up menu (tab / zoom right-click) --------------------------
+// ---- reusable pop-up menu (tab / font-size right-click) ---------------------
 
 export interface PopupMenuItem {
   label?: string;

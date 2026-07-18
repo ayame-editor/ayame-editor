@@ -10,7 +10,7 @@
   --mono: "SFMono-Regular", "Menlo", "Consolas", "DejaVu Sans Mono",
     "Noto Sans Mono CJK JP", "MS Gothic", monospace;
   --ui: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-  /* Shared Ayame chrome scale. --font-size remains the zoomable editor data size. */
+  /* Shared Ayame chrome scale. --font-size is the editor data size in pixels. */
   --fs-ui: 13px;
   --fs-ui-sm: 12px;
   --fs-hint: 11px;
@@ -1556,6 +1556,13 @@ html.saving .caret.extra { visibility: hidden; }
 .set-row.set-hint-row { padding-top: 0; margin-top: -8px; }
 .set-row.set-hint-row .set-hint { font-size: var(--fs-hint); color: var(--fg-faint); }
 .set-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.set-row .set-number {
+  flex: 0 0 68px;
+  width: 68px;
+  padding-inline: 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 /* Action buttons in a settings row (キー設定→編集 / テーマJSON→ファイルで開く /
    画像を選択…) otherwise inherit the transparent-until-hover .cmd chrome and read
    as plain text; give them a visible border + hover so they look clickable. */

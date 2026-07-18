@@ -269,7 +269,7 @@
         <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存" data-i18n-title="status.encTitle" aria-label="文字コード: —">—</button>
         <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存" data-i18n-title="status.eolTitle" aria-label="改行コード: —">—</button>
         <span id="st-index" class="seg dim">—</span>
-        <button id="st-zoom" class="seg seg-btn dim" title="表示倍率（クリックで100%に戻す）" data-i18n-title="status.zoomTitle" aria-label="表示倍率: 100%">100%</button>
+        <button id="st-fontsize" class="seg seg-btn dim" title="文字サイズ（クリックで13pxに戻す）" data-i18n-title="status.fontSizeTitle" aria-label="文字サイズ: 13px">13px</button>
       </footer>
     </div>
 
@@ -362,11 +362,14 @@
               <option value="system" data-i18n="settings.fontSystem">システムUI</option>
             </select>
           </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.fontSize">文字サイズ</span>
-            <input id="set-fontsize" type="range" min="11" max="22" step="1" />
-            <span id="set-fontsize-val" class="set-val"></span>
-          </label>
+          <div class="set-row" role="group" aria-labelledby="set-fontsize-label">
+            <span id="set-fontsize-label" class="set-label" data-i18n="settings.fontSize">文字サイズ (px)</span>
+            <input id="set-fontsize" type="range" min="6" max="48" step="1"
+                   aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
+            <input id="set-fontsize-number" class="input-control set-number" type="number"
+                   min="6" max="48" step="1" inputmode="numeric"
+                   aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
+          </div>
           <label class="set-row">
             <span class="set-label" data-i18n="settings.ruler">列ルーラー</span>
             <input id="set-ruler" type="checkbox" />
