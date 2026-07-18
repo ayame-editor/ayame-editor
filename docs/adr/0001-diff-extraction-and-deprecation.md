@@ -1,78 +1,75 @@
-<!-- i18n: language-switcher -->
-[English](0001-diff-extraction-and-deprecation.en.md) | [日本語](0001-diff-extraction-and-deprecation.md)
+# ADR 0001: Policy for Transferring diff Functionality to ayame-diff and Deprecation Schedule
 
-# ADR 0001: diff 機能の ayame-diff への移管方針と非推奨化スケジュール
+- Status: Accepted (2026-07-10)
+- Related Issue: hjosugi/ayame-editor#93
+- Epic for Extraction: hjosugi/ayame-editor#104
+- Transfer Roadmap: hjosugi/ayame-diff#26
 
-- ステータス: Accepted（2026-07-10）
-- 関連 Issue: hjosugi/ayame-editor#93
-- 切り出し Epic: hjosugi/ayame-editor#104
-- 移管先ロードマップ: hjosugi/ayame-diff#26
+## Background
 
-## 背景
+With the formation of a sister project, the diff-related features will be extracted to hjosugi/ayame-diff.
+ayame-editor will focus on **"Opening and editing large files"**, while comprehensive comparison features will be handled by
+ayame-diff (clarifying product boundaries following Sindre Sorhus's approach: deeply resolving a single friction point).
 
-姉妹プロジェクト化に伴い、diff 関連機能を hjosugi/ayame-diff へ切り出す。
-ayame-editor は **「巨大ファイルを開く・編集する」** に集中し、本格的な比較は
-ayame-diff が担う（Sindre Sorhus 流の製品境界の明確化：一つの摩擦を深く解く）。
+Extraction targets:
 
-移管対象：
+- `crates/ayame-cli/src/diff.rs` (subcommands `diff` / `sortdiff`)
+- `/api/diff` endpoint in `serve/ops.rs`
+- The two-file diff view in `web/src/search.ts`
+- Diff items in native menus / command palette / shortcuts
+- CSS for diff styling that overlays `.grep-panel`
 
-- `crates/ayame-cli/src/diff.rs`（`diff` / `sortdiff` サブコマンド）
-- `serve/ops.rs` の `/api/diff` エンドポイント
-- `web/src/search.ts` の 2 ファイル差分ビュー
-- ネイティブメニュー / コマンドパレット / ショートカットの diff 項目
-- `.grep-panel` に相乗りしている diff 用 CSS
+## Decisions
 
-## 決定
+### 1. Gradual Deprecation (Two Phases)
 
-### 1. 段階的非推奨（2 段階）
+Do not remove the functionality without a replacement. **Release ayame-diff v0.4.0 (the replacement)** first.
 
-受け皿のないまま機能を消さない。**ayame-diff v0.4.0（受け皿）リリースが先。**
-
-| リリース | 内容 |
+| Release | Details |
 | --- | --- |
-| **v0.6.0（非推奨化）** | ayame-diff v0.4.0 リリース後。`ayame diff` / `ayame sortdiff` 実行時と Web の diff ダイアログに **非推奨警告 + ayame-diff への誘導** を表示。コード（`diff.rs` 等）は残置し、挙動は変えない。 |
-| **v0.7.0（削除）** | 実装・API（`/api/diff`）・Web UI・ネイティブメニュー項目・docs・テストを削除。 |
+| **v0.6.0 (Deprecation)** | After releasing ayame-diff v0.4.0. Show **deprecation warnings + guidance to ayame-diff** when executing `ayame diff` / `ayame sortdiff` and in the Web diff dialog. Keep the code (`diff.rs`, etc.) intact without changing behavior. |
+| **v0.7.0 (Removal)** | Remove implementation, API (`/api/diff`), Web UI, native menu items, docs, and tests. |
 
-一括削除ではなく 2 段階にする理由：既存ユーザーに移行期間と明確な乗り換え先を
-与えるため。破壊的変更は 1 リリース前に必ず予告される状態を保つ。
+The reason for two phases instead of a single removal: to give existing users a transition period and a clear alternative.
+Breaking changes will always be announced at least one release prior.
 
-### 2. Web UI の diff 導線
+### 2. Diff Path in Web UI
 
-v0.7.0 では **単純削除**を基本とする。ayame-diff がインストール済みなら外部
-起動する連携は、需要と実装コストを見て **別 Issue（#102 連携）** で判断する
-（v0.7.0 のブロッカーにはしない）。非推奨期間（v0.6.0）は誘導バナー（#97）で
-ayame-diff へ案内する。
+v0.7.0 will primarily perform a **simple removal**.
+If ayame-diff is installed, whether to invoke it externally will be decided based on demand and implementation cost, in a **separate issue (#102 integration)** (not a blocker for v0.7.0).
+During the deprecation period (v0.6.0), guidance banners (#97) will direct users to ayame-diff.
 
-### 3. 移管中の二重メンテ回避（凍結）
+### 3. Avoiding Dual Maintenance During Transfer (Freeze)
 
-切り出し完了まで **editor 側 diff への機能追加は凍結**する。バグ修正は妨げない
-が、新機能・アルゴリズム改善は ayame-diff 側（#5〜#8）で行い、editor へは
-バックポートしない。二重実装のドリフトを防ぐ。
+Until the extraction is complete, **adding new diff features on the editor side will be frozen**.
+Bug fixes are allowed, but new features and algorithm improvements will be made on the ayame-diff side (#5–#8), and not backported to the editor.
+This prevents drift from maintaining two implementations.
 
-### 4. 破壊的変更の告知文面
+### 4. Notification Text for Breaking Changes
 
-CHANGELOG / リリースノートに以下を明記する：
+The following will be clearly stated in the CHANGELOG / release notes:
 
-- v0.6.0: 「`diff` / `sortdiff` は非推奨。後継は ayame-diff（リンク）。
-  次リリース v0.7.0 で削除予定。」
-- v0.7.0: 「`diff` / `sortdiff`、`/api/diff`、Web 差分ビューを削除。
-  比較機能は ayame-diff（リンク）へ移行してください。」
+- v0.6.0: "`diff` / `sortdiff` are deprecated. The successor is ayame-diff (link).
+  Scheduled for removal in the next release v0.7.0."
+- v0.7.0: "`diff` / `sortdiff`, `/api/diff`, and Web diff view are removed.
+  Please migrate comparison features to ayame-diff (link)."
 
-## 依存順序
+## Dependency Order
 
 ```
-ayame-diff #5〜#8（移植・受け皿実装）
+ayame-diff #5〜#8 (Migration and replacement implementation)
         │
-ayame-diff v0.4.0 リリース（#24）   ← ここが先
+ayame-diff v0.4.0 release (#24)   ← This comes first
         │
-ayame-editor v0.6.0 非推奨化（#94 #97 #99 #100 #102）
+ayame-editor v0.6.0 deprecation (#94 #97 #99 #100 #102)
         │
-ayame-editor v0.7.0 削除（#94 #95 #96 #97 #98 #99 #101）
+ayame-editor v0.7.0 removal (#94 #95 #96 #97 #98 #99 #101)
         │
-ayame-editor #103 リリース
+ayame-editor #103 release
 ```
 
-## 完了条件（本 ADR で満たすもの）
+## Completion Criteria (Fulfilled by this ADR)
 
-スケジュール（2 段階）と Web 導線方針（単純削除 + 非推奨期間の誘導）が確定し、
-凍結方針と告知文面が定まった。切り出し実装 Issue（#94〜#102）が着手可能。
+The schedule (two phases) and Web UI guidance (simple removal + deprecation guidance during the deprecation period) are finalized,
+the freeze policy and notification wording are determined.
+The extraction implementation issue (#94–#102) can now be started.

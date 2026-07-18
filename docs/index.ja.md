@@ -1,6 +1,3 @@
-<!-- i18n: language-switcher -->
-[English](../index.md) | [日本語](index.md)
-
 <div class="doc-family">
   <span>編集ではなく、2つのファイルを比較したいですか？</span>
   <a href="MIGRATING_TO_AYAME_DIFF/">移行ガイドを見る →</a>
@@ -17,7 +14,7 @@
     </div>
   </div>
   <figure class="doc-preview">
-    <img src="../assets/screenshot-main.png" alt="大きな CSV ファイルを表示する Ayame Editor" loading="eager">
+    <img src="assets/screenshot-main.png" alt="大きな CSV ファイルを表示する Ayame Editor" loading="eager">
     <figcaption>巨大なファイルを扱っている間も、移動や操作を軽快に保ちます。</figcaption>
   </figure>
 </section>

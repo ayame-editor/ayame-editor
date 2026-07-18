@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](DEVELOPMENT.md) | [日本語](ja/DEVELOPMENT.md)
-
 # Development Guide
-
-*日本語版: [ja/DEVELOPMENT.md](ja/DEVELOPMENT.md)*
 
 Ayame is a Rust workspace.
 

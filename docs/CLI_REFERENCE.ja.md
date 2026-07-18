@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](../CLI_REFERENCE.md) | [日本語](CLI_REFERENCE.md)
-
 # CLI リファレンス
-
-*English: [../CLI_REFERENCE.md](../CLI_REFERENCE.md)*
 
 `ayame` はネイティブエディタの起動、ローカル Web エディタの起動、巨大テキスト
 ファイルの端末処理を行えます。各コマンドはストリーミングまたは bounded memory

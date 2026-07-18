@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](USER_GUIDE.md) | [日本語](ja/USER_GUIDE.md)
-
 # User Guide
-
-*日本語版: [ja/USER_GUIDE.md](ja/USER_GUIDE.md)*
 
 Ayame Editor is a desktop text editor for huge files. Use the native app for normal editing, or the local web editor when you want to keep it in a browser.
 

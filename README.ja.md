@@ -12,7 +12,7 @@ macOS、Windows、Linux で動作します。
 > **ファイル比較は？** 比較機能は姉妹プロジェクト
 > **[ayame-diff](https://github.com/hjosugi/ayame-diff)** へ移管しました。
 > Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
-> 削除します。[移行ガイド](docs/ja/MIGRATING_TO_AYAME_DIFF.md)をご覧ください。
+> 削除します。[移行ガイド](docs/MIGRATING_TO_AYAME_DIFF.ja.md)をご覧ください。
 
 ## 主な機能
 
@@ -82,7 +82,7 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 インストール、ビルド手順、Linux の実行時パッケージは
 [ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
 
-1 バイトの誤りも許されない用途向けに、[データ完全性の保証](docs/ja/DATA_INTEGRITY.md)
+1 バイトの誤りも許されない用途向けに、[データ完全性の保証](docs/DATA_INTEGRITY.ja.md)
 （バイト正確な保存・クラッシュ復元・エンコーディング往復などの正確性の約束と、
 それを検証するテスト）をまとめています。
 
@@ -101,7 +101,7 @@ Project の審査通過・設定完了後は、[SignPath.io](https://signpath.io
   操作に限られます。
 
 release workflow、secret、検証方法は
-[Windows コード署名](docs/ja/PACKAGING.md#windows-コード署名)を参照してください。
+[Windows コード署名](docs/PACKAGING.ja.md#windows-コード署名)を参照してください。
 
 ## ライセンス
 

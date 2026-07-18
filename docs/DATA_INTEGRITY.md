@@ -1,6 +1,3 @@
-<!-- i18n: language-switcher -->
-[English](DATA_INTEGRITY.md) | [日本語](ja/DATA_INTEGRITY.md)
-
 # Data Integrity Guarantees
 
 Ayame is built to edit files where **a single wrong byte is unacceptable** —

@@ -1,6 +1,3 @@
-<!-- i18n: language-switcher -->
-[English](../DATA_INTEGRITY.md) | [日本語](DATA_INTEGRITY.md)
-
 # データ完全性の保証
 
 Ayame は **1 バイトの誤りも許されない** ファイル（金融記録・法務文書・科学

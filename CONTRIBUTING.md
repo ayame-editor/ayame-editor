@@ -38,7 +38,7 @@ land on `main` with red CI.
 Keep English and Japanese docs in sync when changing user-facing behavior:
 
 - English docs live in `docs/*.md`.
-- Japanese docs live in `docs/ja/*.md`.
+- Japanese docs use the `docs/*.ja.md` suffix convention.
 - Navigation lives in `mkdocs.yml`; add both language pages there.
 - Build the docs with `mkdocs build --strict --site-dir site` when MkDocs is
   installed.

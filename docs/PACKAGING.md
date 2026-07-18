@@ -1,6 +1,3 @@
-<!-- i18n: language-switcher -->
-[English](PACKAGING.md) | [日本語](ja/PACKAGING.md)
-
 # Packaging
 
 Ayame's GitHub Releases remain the source of truth. Package manager manifests

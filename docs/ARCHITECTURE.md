@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](ARCHITECTURE.md) | [日本語](ja/ARCHITECTURE.md)
-
 # Architecture
-
-*日本語版: [ja/ARCHITECTURE.md](ja/ARCHITECTURE.md)*
 
 Ayame is a Rust workspace with a small browser UI embedded into the Rust binary.
 The same engine powers the CLI, `ayame serve`, and the native desktop window.

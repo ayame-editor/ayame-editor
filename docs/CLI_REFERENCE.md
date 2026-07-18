@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](CLI_REFERENCE.md) | [日本語](ja/CLI_REFERENCE.md)
-
 # CLI Reference
-
-*日本語版: [ja/CLI_REFERENCE.md](ja/CLI_REFERENCE.md)*
 
 `ayame` can open the native editor, run the local web editor, and process huge
 text files from a terminal. Commands are designed to stream or use bounded

@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](../ARCHITECTURE.md) | [日本語](ARCHITECTURE.md)
-
 # アーキテクチャ
-
-*English: [../ARCHITECTURE.md](../ARCHITECTURE.md)*
 
 Ayame は Rust workspace です。小さな browser UI を Rust binary に埋め込み、
 CLI、`ayame serve`、ネイティブデスクトップウィンドウが同じ engine を使います。

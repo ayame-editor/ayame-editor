@@ -1,9 +1,4 @@
-<!-- i18n: language-switcher -->
-[English](../USER_GUIDE.md) | [日本語](USER_GUIDE.md)
-
 # ユーザー向け
-
-*English: [../USER_GUIDE.md](../USER_GUIDE.md)*
 
 Ayame Editor は巨大ファイル向けのデスクトップ・テキストエディタです。通常の編集はネイティブアプリを使い、ブラウザで開きたい場合はローカル Web エディタを使います。
 
