@@ -94,7 +94,9 @@ describe("application chrome", () => {
     expect(toolbar).toContain("grid-area: toolbar");
     expect(toolbar).toContain("height: 100%");
     expect(toolbar).toContain("flex-wrap: nowrap");
-    expect(toolbar).toContain("padding: 0 10px 0 2px");
+    expect(toolbar).toMatch(
+      /padding:\s*var\(--space-0\)\s+var\(--space-2-5\)\s+var\(--space-0\)\s+var\(--space-0-5\)/,
+    );
   });
 
   it("exposes search toggles, status values, and palette selection to assistive technology (#171)", () => {
@@ -338,12 +340,13 @@ describe("application chrome", () => {
 
   it("shares gutter spacing and keeps find controls border-consistent (#194)", () => {
     const css = read("style.css");
-    const padding = "padding: 0 var(--gutter-pad-end) 0 var(--gutter-pad-start)";
+    const padding =
+      /padding:\s*var\(--space-0\)\s+var\(--gutter-pad-end\)\s+var\(--space-0\)\s+var\(--gutter-pad-start\)/;
     const block = (selector: string) =>
       css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
 
-    expect(block(".ln")).toContain(padding);
-    expect(block(".grep-ln")).toContain(padding);
+    expect(block(".ln")).toMatch(padding);
+    expect(block(".grep-ln")).toMatch(padding);
     expect(block(".replace-btn")).not.toMatch(/border\s*:/);
   });
 

@@ -4,6 +4,10 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Routed component padding, margins, and gaps through a shared 4px spacing
+  scale with 2px half-steps (#149). Legacy off-grid layout values are
+  normalized, while the two 1px inline-glyph adjustments are documented and
+  isolated as optical exceptions.
 - Unified editor sizing into one effective pixel value (#170). Settings now
   offers synchronized slider and numeric inputs, Ctrl/Cmd+wheel and +/- adjust
   the same persisted font size, and the status bar shows the exact px value.
