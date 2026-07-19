@@ -78,8 +78,7 @@ describe("application chrome", () => {
   it("places the menubar and compact toolbar in one fixed-height chrome row (#148)", () => {
     const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
     const block = (selector: string) =>
-      css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ??
-      "";
+      css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
 
     const app = block("#app");
     expect(css).toContain("--chrome-top-h: 38px");
@@ -211,9 +210,14 @@ describe("application chrome", () => {
 
   it("keeps the busy overlay above the floating find popup", () => {
     const css = read("style.css");
-    const findZ = Number(css.match(/\.find-group\s*{[^}]*z-index:\s*(\d+)/s)?.[1]);
-    const overlayZ = Number(css.match(/\.overlay\s*{[^}]*z-index:\s*(\d+)/s)?.[1]);
+    const findGroup = css.match(/\.find-group\s*{([^}]*)}/s)?.[1] ?? "";
+    const overlay = css.match(/\.overlay\s*{([^}]*)}/s)?.[1] ?? "";
+    const tokenValue = (name: string) => Number(css.match(new RegExp(`${name}:\\s*(\\d+)`))?.[1]);
+    const findZ = tokenValue("--z-find");
+    const overlayZ = tokenValue("--z-progress");
 
+    expect(findGroup).toContain("z-index: var(--z-find)");
+    expect(overlay).toContain("z-index: var(--z-progress)");
     expect(findZ).toBeGreaterThan(0);
     expect(overlayZ).toBeGreaterThan(findZ);
   });
@@ -288,8 +292,7 @@ describe("application chrome", () => {
   it("uses one text-entry component across dialogs with mono limited to paths (#150)", () => {
     const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
     const html = new DOMParser().parseFromString(read("index.html"), "text/html");
-    const block = (selector: string) =>
-      css.split(`${selector} {`, 2)[1]?.split("}", 1)[0] ?? "";
+    const block = (selector: string) => css.split(`${selector} {`, 2)[1]?.split("}", 1)[0] ?? "";
 
     const inputControl = block(".input-control");
     expect(inputControl).toContain("height: var(--control-h)");
