@@ -328,124 +328,165 @@
           <div class="modal-title" data-i18n="menu.settings">設定</div>
           <button id="settings-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
         </div>
+        <div class="settings-tools">
+          <input id="settings-search" class="settings-search input-control" type="search"
+                 autocomplete="off" spellcheck="false"
+                 placeholder="設定を検索…" data-i18n-placeholder="settings.searchPlaceholder"
+                 aria-label="設定を検索" data-i18n-aria-label="settings.search" />
+          <span id="settings-search-status" class="settings-search-status"
+                role="status" aria-live="polite" aria-atomic="true"></span>
+          <button id="settings-reset" class="cmd" type="button"
+                  data-i18n="settings.reset">既定に戻す</button>
+        </div>
         <div class="settings-body">
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.theme">テーマ</span>
-            <select id="set-theme" class="input-control">
-              <option value="auto" data-i18n="settings.themeAuto">システム設定に従う</option>
-              <option value="iris-light">Iris Light</option>
-              <option value="iris-mist">Iris Mist</option>
-              <option value="iris-dawn">Iris Dawn</option>
-              <option value="sumi-light">Sumi Light</option>
-              <option value="mono-paper" data-i18n="settings.themeMonoPaper">Mono Paper (単色)</option>
-              <option value="dark" data-i18n="settings.themeDark">ダーク</option>
-              <option value="black" data-i18n="settings.themeBlack">ブラック</option>
-            </select>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.background">背景</span>
-            <select id="set-bg" class="input-control">
-              <option value="watercolor" data-i18n="settings.bgDefault">デフォルト</option>
-              <option value="solid" data-i18n="settings.bgSolid">単色</option>
-              <option value="image" data-i18n="settings.bgImage">カスタム画像</option>
-            </select>
-          </label>
-          <!-- Visible only in カスタム画像 mode: re-pick the wallpaper file. -->
-          <div class="set-row hidden" id="set-bg-image-row">
-            <span class="set-label" aria-hidden="true"></span>
-            <button type="button" id="set-bg-image-pick" class="cmd" data-i18n="settings.bgImagePick">画像を選択…</button>
-            <span id="set-bg-image-name"></span>
-            <input id="set-bg-image-file" type="file" accept="image/*" hidden />
-          </div>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.language">言語</span>
-            <!-- Options are built by populateLanguageSelect() from the locales
-                 in MESSAGES; keep this empty (single source of truth). -->
-            <select id="set-language" class="input-control"></select>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.illustration">イラスト</span>
-            <input id="set-illus" type="range" min="0" max="100" step="5" />
-            <span id="set-illus-val" class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.font">フォント</span>
-            <select id="set-font" class="input-control">
-              <option value="mono" data-i18n="settings.fontMono">等幅 (Consolas / Menlo)</option>
-              <option value="mono-jp" data-i18n="settings.fontMonoJp">等幅 + 日本語 (Noto/MS Gothic)</option>
-              <option value="system" data-i18n="settings.fontSystem">システムUI</option>
-            </select>
-          </label>
-          <div class="set-row" role="group" aria-labelledby="set-fontsize-label">
-            <span id="set-fontsize-label" class="set-label" data-i18n="settings.fontSize">文字サイズ (px)</span>
-            <input id="set-fontsize" type="range" min="6" max="48" step="1"
-                   aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
-            <input id="set-fontsize-number" class="input-control set-number" type="number"
-                   min="6" max="48" step="1" inputmode="numeric"
-                   aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
-          </div>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.ruler">列ルーラー</span>
-            <input id="set-ruler" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.lineNumberCommas">行番号をカンマ区切りで表示</span>
-            <input id="set-line-commas" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="menu.showWhitespace">空白・改行を表示</span>
-            <input id="set-show-whitespace" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="menu.syntaxHighlight">シンタックスハイライト</span>
-            <input id="set-syntax-highlight" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="menu.zenkakuUnderline">全角空白を下線で表示</span>
-            <input id="set-zenkaku-underline" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="menu.wordWrap">折り返し</span>
-            <input id="set-word-wrap" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.restoreSession">セッション復元</span>
-            <input id="set-restore-session" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.updateCheckOnStartup">起動時に更新を確認</span>
-            <input id="set-update-check-startup" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.confirmExit">終了確認</span>
-            <input id="set-confirm-last-tab-close" type="checkbox" />
-            <span class="set-val"></span>
-          </label>
-          <label class="set-row">
-            <span class="set-label" data-i18n="settings.memoName">新規ファイルの名前</span>
-            <input id="set-memo-name" class="input-control" type="text" autocomplete="off" spellcheck="false"
-                   placeholder="untitled-{seq}.txt" />
-          </label>
-          <div class="set-row set-hint-row">
-            <span class="set-label" aria-hidden="true"></span>
-            <span class="set-hint" data-i18n="settings.memoNameHint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}</span>
-          </div>
-          <div class="set-row">
-            <span class="set-label" data-i18n="keymap.title">キー設定</span>
-            <button id="keymap-open" class="cmd" data-i18n="menu.edit">編集</button>
-          </div>
-          <div class="set-row">
-            <span class="set-label" data-i18n="settings.themeJson">テーマJSON</span>
-            <button id="theme-json-edit" class="cmd" data-i18n="settings.editInTab">タブで編集</button>
-          </div>
+          <section class="settings-group" aria-labelledby="settings-group-appearance">
+            <h3 id="settings-group-appearance" class="settings-group-title"
+                data-i18n="settings.groupAppearance">外観</h3>
+            <div class="settings-group-body">
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.theme">テーマ</span>
+                <select id="set-theme" class="input-control">
+                  <option value="auto" data-i18n="settings.themeAuto">システム設定に従う</option>
+                  <option value="iris-light">Iris Light</option>
+                  <option value="iris-mist">Iris Mist</option>
+                  <option value="iris-dawn">Iris Dawn</option>
+                  <option value="sumi-light">Sumi Light</option>
+                  <option value="mono-paper" data-i18n="settings.themeMonoPaper">Mono Paper (単色)</option>
+                  <option value="dark" data-i18n="settings.themeDark">ダーク</option>
+                  <option value="black" data-i18n="settings.themeBlack">ブラック</option>
+                </select>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.background">背景</span>
+                <select id="set-bg" class="input-control">
+                  <option value="watercolor" data-i18n="settings.bgDefault">デフォルト</option>
+                  <option value="solid" data-i18n="settings.bgSolid">単色</option>
+                  <option value="image" data-i18n="settings.bgImage">カスタム画像</option>
+                </select>
+              </label>
+              <!-- Visible only in カスタム画像 mode: re-pick the wallpaper file. -->
+              <div class="set-row hidden" id="set-bg-image-row">
+                <span class="set-label" aria-hidden="true"></span>
+                <button type="button" id="set-bg-image-pick" class="cmd" data-i18n="settings.bgImagePick">画像を選択…</button>
+                <span id="set-bg-image-name"></span>
+                <input id="set-bg-image-file" type="file" accept="image/*" hidden />
+              </div>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.illustration">イラスト</span>
+                <input id="set-illus" type="range" min="0" max="100" step="5" />
+                <span id="set-illus-val" class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.font">フォント</span>
+                <select id="set-font" class="input-control">
+                  <option value="mono" data-i18n="settings.fontMono">等幅 (Consolas / Menlo)</option>
+                  <option value="mono-jp" data-i18n="settings.fontMonoJp">等幅 + 日本語 (Noto/MS Gothic)</option>
+                  <option value="system" data-i18n="settings.fontSystem">システムUI</option>
+                </select>
+              </label>
+              <div class="set-row" role="group" aria-labelledby="set-fontsize-label">
+                <span id="set-fontsize-label" class="set-label" data-i18n="settings.fontSize">文字サイズ (px)</span>
+                <input id="set-fontsize" type="range" min="6" max="48" step="1"
+                       aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
+                <input id="set-fontsize-number" class="input-control set-number" type="number"
+                       min="6" max="48" step="1" inputmode="numeric"
+                       aria-label="文字サイズ" data-i18n-aria-label="settings.fontSize" />
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group" aria-labelledby="settings-group-editor">
+            <h3 id="settings-group-editor" class="settings-group-title"
+                data-i18n="settings.groupEditor">エディタ</h3>
+            <div class="settings-group-body">
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.ruler">列ルーラー</span>
+                <input id="set-ruler" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.lineNumberCommas">行番号をカンマ区切りで表示</span>
+                <input id="set-line-commas" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="menu.showWhitespace">空白・改行を表示</span>
+                <input id="set-show-whitespace" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="menu.syntaxHighlight">シンタックスハイライト</span>
+                <input id="set-syntax-highlight" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="menu.zenkakuUnderline">全角空白を下線で表示</span>
+                <input id="set-zenkaku-underline" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="menu.wordWrap">折り返し</span>
+                <input id="set-word-wrap" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-group" aria-labelledby="settings-group-app">
+            <h3 id="settings-group-app" class="settings-group-title"
+                data-i18n="settings.groupApp">アプリ</h3>
+            <div class="settings-group-body">
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.language">言語</span>
+                <!-- Options are built by populateLanguageSelect() from the locales
+                     in MESSAGES; keep this empty (single source of truth). -->
+                <select id="set-language" class="input-control"></select>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.restoreSession">セッション復元</span>
+                <input id="set-restore-session" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.updateCheckOnStartup">起動時に更新を確認</span>
+                <input id="set-update-check-startup" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="settings.confirmExit">最後のタブを閉じる時に確認</span>
+                <input id="set-confirm-last-tab-close" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <div class="settings-item">
+                <label class="set-row">
+                  <span class="set-label" data-i18n="settings.memoName">新規ファイルの名前</span>
+                  <input id="set-memo-name" class="input-control" type="text" autocomplete="off" spellcheck="false"
+                         placeholder="untitled-{seq}.txt" />
+                </label>
+                <div class="set-row set-hint-row">
+                  <span class="set-label" aria-hidden="true"></span>
+                  <span class="set-hint" data-i18n="settings.memoNameHint">使える変数: {yyyy} {yy} {mm} {dd} {HH} {MM} {ss} {ddd} {dddd}(曜日) {seq}(連番) {date} {time} {datetime}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group" aria-labelledby="settings-group-advanced">
+            <h3 id="settings-group-advanced" class="settings-group-title"
+                data-i18n="settings.groupAdvanced">詳細</h3>
+            <div class="settings-group-body">
+              <div class="set-row">
+                <span class="set-label" data-i18n="keymap.title">キー設定</span>
+                <button id="keymap-open" class="cmd" data-i18n="menu.edit">編集</button>
+              </div>
+              <div class="set-row">
+                <span class="set-label" data-i18n="settings.themeJson">テーマJSON</span>
+                <button id="theme-json-edit" class="cmd" data-i18n="settings.editInTab">タブで編集</button>
+              </div>
+            </div>
+          </section>
+          <p id="settings-empty" class="settings-empty hidden"
+             data-i18n="settings.noResults">一致する設定はありません</p>
         </div>
       </div>
     </div>
