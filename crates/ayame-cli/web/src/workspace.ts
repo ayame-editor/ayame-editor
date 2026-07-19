@@ -970,9 +970,11 @@ export async function selectTab(id) {
   try {
     await settleEditQueue();
     onDocumentOpened(await apiPost<unknown, TabIdRequest>("/api/tabs/select", { id }));
+    return true;
   } catch (e) {
     flashCount(t("tab.switchError"));
     console.error(e);
+    return false;
   }
 }
 

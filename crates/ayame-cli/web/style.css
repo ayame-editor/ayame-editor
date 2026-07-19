@@ -109,6 +109,7 @@
   --radius-control: 6px;
   --control-h: 34px;
   --cmd-min-width: 46px;
+  --menu-secondary-max: 18ch;
   --chrome-top-h: 38px;
   --gutter-pad-start: var(--space-2);
   --gutter-pad-end: var(--space-5);
@@ -491,6 +492,8 @@ button.cmd {
   width: max-content;
   min-width: 252px;
   max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - var(--chrome-top-h) - var(--space-2));
+  overflow-y: auto;
   padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -513,6 +516,21 @@ button.cmd {
 .menu-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.menu-section-label {
+  padding:
+    var(--space-1) var(--space-2-5)
+    var(--space-0-5);
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.menu-recent-path {
+  max-width: var(--menu-secondary-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .menu-item.checked .menu-label::after {
   content: " ✓";

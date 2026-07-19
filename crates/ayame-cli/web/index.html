@@ -85,9 +85,23 @@
             <button id="save-copy" class="menu-item" role="menuitem">
               <span class="menu-label" data-i18n="menu.saveAs">名前を付けて保存</span><span class="menu-key" data-key-action="saveAs">Ctrl+Shift+S</span>
             </button>
+            <button id="save-all" class="menu-item" data-menu-action="saveAll" role="menuitem">
+              <span class="menu-label" data-i18n="menu.saveAll">すべて保存</span><span class="menu-key"></span>
+            </button>
             <button id="convert-save-item" class="menu-item" data-menu-action="encoding" role="menuitem">
               <span class="menu-label" data-i18n="menu.encoding">文字コード / 改行コード…</span><span class="menu-key"></span>
             </button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button id="close-tab" class="menu-item" data-menu-action="closeTab" role="menuitem">
+              <span class="menu-label" data-i18n="tab.close">タブを閉じる</span><span class="menu-key" data-key-action="closeTab">Ctrl+W</span>
+            </button>
+            <div id="file-menu-recent-section" class="hidden">
+              <div class="menu-sep" aria-hidden="true"></div>
+              <div id="file-menu-recent-label" class="menu-section-label" data-i18n="menu.recentFiles">
+                最近使ったファイル
+              </div>
+              <div id="file-menu-recents" role="group" aria-labelledby="file-menu-recent-label"></div>
+            </div>
           </div>
         </div>
         <div class="menu-shell">

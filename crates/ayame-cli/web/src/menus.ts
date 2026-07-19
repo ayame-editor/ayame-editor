@@ -1,9 +1,25 @@
 // Ayame Editor — menus module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, commas, displayName, humanBytes, setModalOpen } from "./dom.js";
+import {
+  $,
+  commas,
+  displayName,
+  displayPath,
+  humanBytes,
+  pathDirName,
+  setModalOpen,
+} from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { applyStaticI18n, currentLocale, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
-import { grepToFile, saveCopy, saveFile, showConvert, sortSave, splitFile } from "./save.js";
+import {
+  grepToFile,
+  saveAllTabs,
+  saveCopy,
+  saveFile,
+  showConvert,
+  sortSave,
+  splitFile,
+} from "./save.js";
 import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
 import {
   addCursorAbove,
@@ -50,8 +66,10 @@ import {
 import {
   closeTab,
   configureOpener,
+  loadRecentFiles,
   newUntitled,
   openFileDialog,
+  openRecent,
   openerVisible,
   renderRecentFiles,
   renderTabs,
@@ -85,6 +103,13 @@ export function fileMenuVisible() {
 
 export function showAppMenu(id) {
   hideFileMenu();
+  if (id === "file") {
+    renderFileMenuRecentFiles();
+    const saveAll = document.getElementById("save-all") as HTMLButtonElement | null;
+    const close = document.getElementById("close-tab") as HTMLButtonElement | null;
+    if (saveAll) saveAll.disabled = !(state.tabs || []).some((tab) => tab.dirty);
+    if (close) close.disabled = !(state.tabs || []).some((tab) => tab.active);
+  }
   if (id === "view") {
     const ws = $("menu-toggle-ws");
     if (ws) {
@@ -148,6 +173,36 @@ export function hideFileMenu(focusButton = false) {
   }
 }
 
+export function renderFileMenuRecentFiles() {
+  const section = document.getElementById("file-menu-recent-section");
+  const box = document.getElementById("file-menu-recents");
+  if (!section || !box) return;
+  const list = loadRecentFiles();
+  box.textContent = "";
+  section.classList.toggle("hidden", !list.length);
+  for (const path of list) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "menu-item";
+    item.setAttribute("role", "menuitem");
+    item.setAttribute("tabindex", "-1");
+    item.title = displayPath(path);
+    item.setAttribute("aria-label", `${t("menu.recentFiles")}: ${displayPath(path)}`);
+    const name = document.createElement("span");
+    name.className = "menu-label";
+    name.textContent = displayName(path);
+    const dir = document.createElement("span");
+    dir.className = "menu-key menu-recent-path";
+    dir.textContent = pathDirName(displayPath(path)) || "";
+    item.append(name, dir);
+    item.addEventListener("click", () => {
+      hideFileMenu();
+      void openRecent(path);
+    });
+    box.append(item);
+  }
+}
+
 export function applyLocale() {
   applyStaticI18n();
   populateLanguageSelect(); // the "auto" label is localized; refresh it too
@@ -165,6 +220,7 @@ export function applyLocale() {
     renderCommandPalette();
   }
   renderRecentFiles();
+  renderFileMenuRecentFiles();
 }
 
 export function shortcutList(action) {
@@ -783,6 +839,7 @@ export const ACTIONS: Record<
   openFile: { run: openFileDialog, globalShortcut: true },
   saveFile: { run: saveFile, globalShortcut: true },
   saveAs: { run: saveCopy, globalShortcut: true },
+  saveAll: { run: saveAllTabs, globalShortcut: true },
   encoding: { run: showConvert },
   closeTab: { run: closeActiveTab, globalShortcut: true },
   findPrev: { run: () => findStep("prev"), globalShortcut: true },

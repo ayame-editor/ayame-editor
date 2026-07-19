@@ -9,7 +9,7 @@ vi.mock("../src/input.js", () => ({
   setQueryFromInput: () => {},
 }));
 
-import { focusMenubar, initMenuBar } from "../src/menus.js";
+import { focusMenubar, initMenuBar, renderFileMenuRecentFiles } from "../src/menus.js";
 import { state } from "../src/state.js";
 
 function shell(id: string, items: string) {
@@ -29,10 +29,30 @@ function key(el: Element | null, k: string) {
 
 describe("menubar keyboard navigation (#161)", () => {
   beforeEach(() => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() {
+        return values.size;
+      },
+    } satisfies Storage);
     document.body.innerHTML = `
       <div id="app">
         <nav id="menubar" role="menubar">
-          ${shell("file", item("newFile", "New") + item("openFile", "Open"))}
+          ${shell(
+            "file",
+            item("newFile", "New") +
+              item("openFile", "Open") +
+              `<div id="file-menu-recent-section" class="hidden">
+                <div id="file-menu-recent-label">Recent Files</div>
+                <div id="file-menu-recents" role="group"
+                     aria-labelledby="file-menu-recent-label"></div>
+              </div>`,
+          )}
           ${shell(
             "edit",
             item("undo", "Undo") + item("redo", "Redo") + item("cut", "Cut") + item("copy", "Copy"),
@@ -147,5 +167,25 @@ describe("menubar keyboard navigation (#161)", () => {
     document.getElementById("file-menu-button")!.blur();
     key(document.body, "F10");
     expect(document.activeElement!.id).toBe("file-menu-button");
+  });
+
+  it("renders recent paths as keyboard-navigable File menu items (#167)", () => {
+    localStorage.setItem(
+      "ayame.recentFiles.v1",
+      JSON.stringify(["/work/alpha.txt", "/work/nested/beta.txt"]),
+    );
+
+    renderFileMenuRecentFiles();
+
+    const section = document.getElementById("file-menu-recent-section")!;
+    const rows = [...section.querySelectorAll<HTMLButtonElement>(".menu-item")];
+    expect(section.classList.contains("hidden")).toBe(false);
+    expect(rows.map((row) => row.querySelector(".menu-label")?.textContent)).toEqual([
+      "alpha.txt",
+      "beta.txt",
+    ]);
+    expect(rows[0].querySelector(".menu-recent-path")?.textContent).toBe("/work");
+    expect(rows[0].title).toBe("/work/alpha.txt");
+    expect(rows.every((row) => row.getAttribute("tabindex") === "-1")).toBe(true);
   });
 });

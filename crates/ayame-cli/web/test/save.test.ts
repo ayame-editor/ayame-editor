@@ -5,6 +5,7 @@ import {
   freeMemoName,
   isExistsError,
   parseSortKeys,
+  saveTabsSequentially,
   sortFormatForPath,
 } from "../src/save.js";
 
@@ -38,5 +39,51 @@ describe("save-name helpers", () => {
     expect(sortFormatForPath("/data/report.tab")).toBe("tsv");
     expect(sortFormatForPath("/data/report.txt")).toBe("text");
     expect(parseSortKeys("3, 1、2")).toEqual([3, 1, 2]);
+  });
+});
+
+describe("Save All ordering (#167)", () => {
+  it("saves only dirty tabs sequentially and restores the original tab", async () => {
+    const events: string[] = [];
+    const select = vi.fn(async (id: number) => {
+      events.push(`select:${id}`);
+      return true;
+    });
+    const save = vi.fn(async (tab: { id: number }) => {
+      events.push(`save:${tab.id}`);
+      return tab.id === 1;
+    });
+
+    const result = await saveTabsSequentially(
+      [
+        { id: 1, active: true, dirty: true },
+        { id: 2, active: false, dirty: false },
+        { id: 3, active: false, dirty: true },
+      ],
+      select,
+      save,
+    );
+
+    expect(result).toEqual({ saved: 1, total: 2 });
+    expect(events).toEqual(["save:1", "select:3", "save:3", "select:1"]);
+  });
+
+  it("skips a tab when selection fails instead of saving the wrong document", async () => {
+    const save = vi.fn(async () => true);
+    const select = vi.fn(async (id: number) => id !== 2);
+
+    const result = await saveTabsSequentially(
+      [
+        { id: 1, active: true, dirty: false },
+        { id: 2, active: false, dirty: true },
+        { id: 3, active: false, dirty: true },
+      ],
+      select,
+      save,
+    );
+
+    expect(result).toEqual({ saved: 1, total: 2 });
+    expect(save).toHaveBeenCalledOnce();
+    expect(select.mock.calls.map(([id]) => id)).toEqual([2, 3, 1]);
   });
 });

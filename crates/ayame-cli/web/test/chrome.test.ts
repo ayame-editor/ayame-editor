@@ -57,6 +57,20 @@ describe("application chrome", () => {
     expect(read("src/menus.ts")).toContain("paste: { run: pasteFromClipboard, editorOnly: true }");
   });
 
+  it("exposes tab close, Save All, and recent files from the File menu (#167)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const file = doc.querySelector("#file-menu");
+    const actions = [...(file?.querySelectorAll("[data-menu-action]") || [])].map((el) =>
+      el.getAttribute("data-menu-action"),
+    );
+
+    expect(actions).toEqual(expect.arrayContaining(["saveAll", "closeTab"]));
+    expect(file?.querySelector('[data-key-action="closeTab"]')).not.toBeNull();
+    expect(file?.querySelector("#file-menu-recents[role=group]")).not.toBeNull();
+    expect(read("src/save.ts")).toContain("export async function saveAllTabs()");
+    expect(read("src/menus.ts")).toContain("export function renderFileMenuRecentFiles()");
+  });
+
   it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     const topLevelIds = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")].map(
