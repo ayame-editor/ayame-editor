@@ -43,6 +43,7 @@ describe("Ayame design tokens", () => {
 
   it("defines the chrome type scale without hardcoded component font sizes", () => {
     for (const declaration of [
+      "--fs-editor: 13px",
       "--fs-ui: 13px",
       "--fs-ui-sm: 12px",
       "--fs-hint: 11px",
@@ -52,7 +53,13 @@ describe("Ayame design tokens", () => {
     ]) {
       expect(css).toContain(declaration);
     }
-    expect(css.match(/(?<!-)font-size:\s*[\d.]+px/g)).toBeNull();
+    const fontSizes = [...css.matchAll(/(?<!-)font-size:\s*([^;]+);/g)].map((match) =>
+      match[1].trim(),
+    );
+    expect(fontSizes.length).toBeGreaterThanOrEqual(40);
+    for (const fontSize of fontSizes) {
+      expect(fontSize).toMatch(/^var\(--fs-[\w-]+\)$/);
+    }
   });
 
   it("completes dark theme chrome tokens", () => {
@@ -138,5 +145,88 @@ describe("Ayame design tokens", () => {
     expect(css).toMatch(
       /#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s,
     );
+  });
+
+  it("routes every layer through an ordered semantic z-index scale (#178)", () => {
+    for (const declaration of [
+      "--z-base: 0",
+      "--z-sticky: 10",
+      "--z-content: 20",
+      "--z-scrollbar: 30",
+      "--z-caret: 40",
+      "--z-ime: 50",
+      "--z-find: 60",
+      "--z-progress: 70",
+      "--z-chrome: 80",
+      "--z-menu: 90",
+      "--z-menubar: 100",
+      "--z-notification: 110",
+      "--z-modal: 120",
+      "--z-dropzone: 130",
+      "--z-context-menu: 140",
+    ]) {
+      expect(css).toContain(declaration);
+    }
+
+    const layers = [...css.matchAll(/(?<!-)z-index:\s*([^;]+);/g)].map((match) => match[1].trim());
+    expect(layers).toHaveLength(16);
+    for (const layer of layers) {
+      expect(layer).toMatch(/^var\(--z-[\w-]+\)$/);
+    }
+  });
+
+  it("separates editor typography from chrome and tokenizes UI leading (#178)", () => {
+    expect(css).toContain("Settings updates these two values live");
+    expect(css).toContain("--fs-ui is not an alias for the user-controlled");
+    expect(css).toContain("--fs-editor: 13px");
+    expect(css).toContain("--lh-editor: 18px");
+    expect(css).toContain("--lh-icon: 1");
+    expect(css).toContain("--lh-tight: 1.4");
+    expect(css).toContain("--lh-body: 1.5");
+
+    const lineHeights = [...css.matchAll(/(?<!-)line-height:\s*([^;]+);/g)].map((match) =>
+      match[1].trim(),
+    );
+    expect(lineHeights.length).toBeGreaterThanOrEqual(9);
+    for (const lineHeight of lineHeights) {
+      expect(lineHeight).toMatch(/^var\(--lh-[\w-]+\)$/);
+    }
+  });
+
+  it("names and documents intentional subpixel optical geometry (#178)", () => {
+    expect(css).toContain("Fractional values preserve the intended visual weight");
+    for (const declaration of [
+      "--stroke-icon: 1.8",
+      "--stroke-folder: 1.5px",
+      "--offset-pressed: 0.5px",
+      "--offset-glyph-underline: 0.12em",
+    ]) {
+      expect(css).toContain(declaration);
+    }
+    expect(css).not.toMatch(/(?<!-)stroke-width:\s*1\.8/);
+    expect(css).not.toMatch(/border:\s*1\.5px/);
+    expect(css).not.toMatch(/box-shadow:[^;]*-1\.5px/s);
+    expect(css).not.toMatch(/bottom:\s*0\.12em/);
+    expect(css).not.toMatch(/translateY\(0\.5px\)/);
+  });
+
+  it("keeps readable fallbacks for color mixing and acrylic chrome (#178)", () => {
+    expect(css).toContain("@supports not (color: color-mix(in srgb, black, white))");
+    expect(css).toContain(
+      "@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))",
+    );
+    expect(css).toMatch(
+      /@supports not \(color: color-mix[\s\S]*\.modal-panel[\s\S]*background: var\(--bg-elevated\)/,
+    );
+    expect(css).toMatch(
+      /@supports not \(\(backdrop-filter:[\s\S]*\.file-menu,[\s\S]*backdrop-filter: none/,
+    );
+    expect(css).toMatch(
+      /@supports not \(\(backdrop-filter:[\s\S]*#statusbar\s*\{\s*background: var\(--bg-elevated\)/,
+    );
+
+    const standard = css.match(/(?<!-)backdrop-filter:/g) ?? [];
+    const webkit = css.match(/-webkit-backdrop-filter:/g) ?? [];
+    expect(standard).toHaveLength(webkit.length);
   });
 });

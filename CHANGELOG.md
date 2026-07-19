@@ -4,6 +4,11 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Systematized visual design tokens for editor/UI font size, line height, layer
+  order, and intentional subpixel geometry (#178). Components now consume
+  named typography and layering variables instead of local values. Older
+  embedded engines receive readable color and acrylic fallbacks when
+  `color-mix()` or backdrop filters are unavailable.
 - Routed component padding, margins, and gaps through a shared 4px spacing
   scale with 2px half-steps (#149). Legacy off-grid layout values are
   normalized, while the two 1px inline-glyph adjustments are documented and

@@ -1,6 +1,6 @@
 // Ayame Editor — state module. Type-stripped to JS at build time (build.rs, oxc).
 export let LINE_HEIGHT = 18;
-// tracks --line-height; updated by Settings (font size)
+// tracks --lh-editor; updated by Settings (font size)
 // LINE_HEIGHT is reassigned only through this setter so other modules can
 // import it as a read-only live binding (Settings owns the write).
 export function setLineHeight(v) {

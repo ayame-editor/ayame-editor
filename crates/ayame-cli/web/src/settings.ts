@@ -365,9 +365,9 @@ export function applySettings(s) {
   // ---- font / size ----
   root.style.setProperty("--mono", FONT_STACKS[s.font] || FONT_STACKS.mono);
   const fs = clampFontSize(s.fontSize);
-  root.style.setProperty("--font-size", `${fs}px`);
+  root.style.setProperty("--fs-editor", `${fs}px`);
   const lh = fs + 6;
-  root.style.setProperty("--line-height", `${lh}px`);
+  root.style.setProperty("--lh-editor", `${lh}px`);
   setLineHeight(lh); // keep virtualization math in sync with the CSS
   const fontSizeEl = document.getElementById("st-fontsize");
   if (fontSizeEl) {

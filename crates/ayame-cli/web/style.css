@@ -4,19 +4,26 @@
    variables at runtime. Acrylic chrome, iris accent, gold search marks. */
 
 :root {
-  /* Typography (overridden live by Settings). */
-  --font-size: 13px;
-  --line-height: 18px;
+  /* Editor data typography. Settings updates these two values live; their
+     defaults intentionally match the UI scale but must remain independent. */
+  --fs-editor: 13px;
+  --lh-editor: 18px;
   --mono: "SFMono-Regular", "Menlo", "Consolas", "DejaVu Sans Mono",
     "Noto Sans Mono CJK JP", "MS Gothic", monospace;
   --ui: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-  /* Shared Ayame chrome scale. --font-size is the editor data size in pixels. */
+  /* Stable chrome type scale. --fs-ui is not an alias for the user-controlled
+     --fs-editor even though both default to 13px. */
   --fs-ui: 13px;
   --fs-ui-sm: 12px;
   --fs-hint: 11px;
   --fs-ui-lg: 14px;
   --fs-title: 16px;
   --fs-ruler: 10px;
+  /* Unitless UI leading: icons suppress extra leading, compact labels stay
+     tight, and prose/status messages share one readable body rhythm. */
+  --lh-icon: 1;
+  --lh-tight: 1.4;
+  --lh-body: 1.5;
 
   /* Spacing scale: a 4px grid with 2px half-steps where compact chrome needs
      them. Components must consume these tokens instead of naked lengths. */
@@ -36,6 +43,31 @@
   --space-8: 32px;
   /* Optical-only nudge for inline glyph ink; never use this for layout. */
   --space-optical: 1px;
+
+  /* Optical geometry. Fractional values preserve the intended visual weight
+     on small glyphs and controls; they are not layout spacing. */
+  --stroke-icon: 1.8;
+  --stroke-folder: 1.5px;
+  --offset-pressed: 0.5px;
+  --offset-glyph-underline: 0.12em;
+
+  /* Layer order, low to high. Ten-point steps leave room for local states
+     without introducing one-off z-index literals in components. */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-content: 20;
+  --z-scrollbar: 30;
+  --z-caret: 40;
+  --z-ime: 50;
+  --z-find: 60;
+  --z-progress: 70;
+  --z-chrome: 80;
+  --z-menu: 90;
+  --z-menubar: 100;
+  --z-notification: 110;
+  --z-modal: 120;
+  --z-dropzone: 130;
+  --z-context-menu: 140;
 
   /* Iris Light (default). Light-first; iris accent + gold marks + acrylic chrome. */
   --bg: #FBF8F1;
@@ -217,7 +249,7 @@ html[data-theme="black"] {
   flex: 0 0 auto;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: var(--stroke-icon);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -257,7 +289,7 @@ html, body {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   user-select: none;
   position: relative;
-  z-index: 48;
+  z-index: var(--z-menubar);
 }
 .menubar-button {
   height: 24px;
@@ -361,7 +393,7 @@ html, body {
   font-size: var(--fs-ui);
   user-select: none;
   position: relative;
-  z-index: 30;
+  z-index: var(--z-chrome);
 }
 
 .tb-group {
@@ -453,7 +485,7 @@ button.cmd {
   position: absolute;
   top: calc(100% + 3px);
   left: 0;
-  z-index: 45;
+  z-index: var(--z-menu);
   /* Wide enough for the longest label+shortcut pair: labels must never be
      ellipsized into "カーソルを上に...". */
   width: max-content;
@@ -467,6 +499,7 @@ button.cmd {
     0 18px 44px -26px color-mix(in srgb, var(--fg) 54%, #000),
     0 0 0 1px color-mix(in srgb, #fff 40%, transparent);
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
 }
 .file-menu.hidden { display: none; }
 .menu-item {
@@ -499,7 +532,7 @@ button.cmd {
 button.ico {
   width: 32px;
   padding: var(--space-0);
-  line-height: 1;
+  line-height: var(--lh-icon);
   color: var(--fg-dim);
 }
 button:hover { background: var(--hover); color: var(--accent-bright); }
@@ -508,7 +541,7 @@ button.on {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
   color: var(--accent-bright);
 }
-button:active { transform: translateY(0.5px); }
+button:active { transform: translateY(var(--offset-pressed)); }
 /* Disabled uses ONE dimming mechanism (faint color, now WCAG AA) — never color
    *and* opacity together, which drove contrast below 2:1 (#152). */
 button:disabled { color: var(--fg-faint); cursor: default; }
@@ -544,7 +577,7 @@ button.toggle.on:hover {
   position: absolute;
   top: 10px;
   right: 24px;
-  z-index: 24;
+  z-index: var(--z-find);
   width: min(520px, calc(100% - 48px));
   min-width: 0;
   flex-direction: column;
@@ -584,6 +617,7 @@ html.find-open .find-group { display: flex; }
     0 8px 20px -18px color-mix(in srgb, var(--fg) 52%, #000),
     0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
 }
 .find input {
   flex: 1 1 160px;
@@ -661,6 +695,7 @@ html.replace-open .find-expand::before { transform: rotate(90deg); }
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
@@ -719,10 +754,10 @@ html.replace-open .find-group .replace-row {
   overflow-x: auto;
   overflow-y: hidden;
   font-family: var(--mono);
-  font-size: var(--font-size);
-  line-height: var(--line-height);
+  font-size: var(--fs-editor);
+  line-height: var(--lh-editor);
   user-select: none; /* rows use a custom (line,col) selection, not native */
-  z-index: 2;
+  z-index: var(--z-content);
 }
 
 /* Zero-height spacer that holds #content's horizontal scroll width while rows
@@ -746,7 +781,7 @@ html.replace-open .find-group .replace-row {
 }
 .selrect {
   position: absolute;
-  height: var(--line-height);
+  height: var(--lh-editor);
   /* A clearly readable selection box: the old 24% wash was easy to miss, so
      a selection now reads as a solid highlight with a defined 1px edge, like
      a desktop editor. */
@@ -763,14 +798,14 @@ html.replace-open .find-group .replace-row {
   top: 1px;
   left: 0;
   width: 2px;
-  height: calc(var(--line-height) - 2px);
+  height: calc(var(--lh-editor) - 2px);
   background: var(--fg);
   border-radius: calc(var(--radius-control) - 5px);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
   pointer-events: none;
   display: none;
   will-change: transform;
-  z-index: 8;
+  z-index: var(--z-caret);
 }
 #caret.on {
   display: block;
@@ -788,14 +823,14 @@ html.replace-open .find-group .replace-row {
   top: 1px;
   left: 0;
   width: 2px;
-  height: calc(var(--line-height) - 2px);
+  height: calc(var(--lh-editor) - 2px);
   background: var(--fg);
   border-radius: calc(var(--radius-control) - 5px);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
   pointer-events: none;
   display: none;
   will-change: transform;
-  z-index: 8;
+  z-index: var(--z-caret);
 }
 .caret.extra.on {
   display: block;
@@ -815,7 +850,7 @@ html.replace-open .find-group .replace-row {
   top: 0;
   left: 0;
   width: 2px;
-  height: var(--line-height);
+  height: var(--lh-editor);
   margin: var(--space-0);
   padding: var(--space-0);
   border: 0;
@@ -824,11 +859,11 @@ html.replace-open .find-group .replace-row {
   overflow: hidden;
   white-space: pre;
   font: inherit;
-  line-height: var(--line-height);
+  line-height: var(--lh-editor);
   color: transparent;
   background: transparent;
   caret-color: transparent;
-  z-index: 9;
+  z-index: var(--z-ime);
 }
 #hidden-input.composing {
   width: auto;
@@ -866,7 +901,7 @@ html.replace-open .find-group .replace-row {
   height: 100%;
   border-left: 1px solid var(--border);
   padding-left: var(--space-0-5);
-  line-height: 18px;
+  line-height: var(--lh-editor);
 }
 #ruler-corner {
   position: absolute;
@@ -878,7 +913,7 @@ html.replace-open .find-group .replace-row {
 }
 
 .row {
-  height: var(--line-height);
+  height: var(--lh-editor);
   white-space: pre;
   display: block;
   cursor: text;
@@ -966,7 +1001,7 @@ html.replace-open .find-group .replace-row {
 #content.wrap .row {
   white-space: pre-wrap;
   height: auto;
-  min-height: var(--line-height);
+  min-height: var(--lh-editor);
   overflow-wrap: anywhere; /* break even unbroken runs so nothing overflows */
 }
 
@@ -1031,7 +1066,7 @@ html.replace-open .find-group .replace-row {
 .zenkaku-underline .ws-zsp::before {
   content: "";
   border-bottom: 1px solid var(--fg-faint);
-  bottom: 0.12em;
+  bottom: var(--offset-glyph-underline);
 }
 /* Trailing half-width spaces before a line end: keep the real space for width,
    overlay a faint middle dot (one per space) so they are noticeable. */
@@ -1070,7 +1105,7 @@ mark.current {
   width: 14px;
   background:
     linear-gradient(to right, transparent, color-mix(in srgb, var(--fg) 8%, transparent));
-  z-index: 4;
+  z-index: var(--z-scrollbar);
 }
 #vticks {
   position: absolute;
@@ -1109,7 +1144,7 @@ mark.current {
 .overlay {
   position: absolute;
   inset: 0;
-  z-index: 26;
+  z-index: var(--z-progress);
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -1143,7 +1178,7 @@ mark.current {
 .overlay-text {
   font-weight: 600;
   color: var(--fg);
-  line-height: 1.4;
+  line-height: var(--lh-tight);
 }
 .overlay-progress {
   width: 100%;
@@ -1259,7 +1294,7 @@ html.saving .caret.extra { visibility: hidden; }
   position: fixed;
   inset-inline-end: 12px;
   bottom: 34px;
-  z-index: 49;
+  z-index: var(--z-notification);
   width: min(440px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
@@ -1281,6 +1316,7 @@ html.saving .caret.extra { visibility: hidden; }
   color: var(--fg);
   box-shadow: 0 14px 38px -20px color-mix(in srgb, var(--fg) 54%, #000);
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
   pointer-events: auto;
   animation: ayame-notification-in var(--motion-normal) var(--motion-ease);
   transition:
@@ -1294,7 +1330,7 @@ html.saving .caret.extra { visibility: hidden; }
 .notification-message {
   align-self: center;
   min-width: 0;
-  line-height: 1.45;
+  line-height: var(--lh-body);
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -1330,11 +1366,12 @@ html.saving .caret.extra { visibility: hidden; }
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--fg) 26%, transparent);
   backdrop-filter: blur(4px) saturate(1.1);
+  -webkit-backdrop-filter: blur(4px) saturate(1.1);
 }
 .modal.hidden { display: none; }
 
@@ -1349,6 +1386,7 @@ html.saving .caret.extra { visibility: hidden; }
   box-shadow: 0 26px 72px -34px color-mix(in srgb, var(--fg) 60%, #000);
   overflow: hidden;
   backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.22);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.22);
 }
 #opener .modal-panel {
   width: min(860px, var(--modal-edge));
@@ -1424,10 +1462,11 @@ html.saving .caret.extra { visibility: hidden; }
   flex: 0 0 auto;
   /* Optical exception: align the drawn folder tab with the breadcrumb text. */
   width: 12px; height: 10px; margin-top: var(--space-optical);
-  border: 1.5px solid var(--fg-faint);
+  border: var(--stroke-folder) solid var(--fg-faint);
   border-radius: calc(var(--radius-control) - 4px);
   border-top-left-radius: 0;
-  box-shadow: -3px -3px 0 -1.5px var(--fg-faint); /* folder tab */
+  box-shadow:
+    -3px -3px 0 calc(-1 * var(--stroke-folder)) var(--fg-faint); /* folder tab */
 }
 .cwd-crumb {
   height: 22px;
@@ -1645,7 +1684,7 @@ html.saving .caret.extra { visibility: hidden; }
 .dropzone {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-dropzone);
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -1679,7 +1718,7 @@ html.saving .caret.extra { visibility: hidden; }
   bottom: -26px;
   width: 282px;
   height: 330px;
-  z-index: 0;
+  z-index: var(--z-base);
   pointer-events: none;
   opacity: var(--illus, 0);
   background: url("/iris-watercolor.png") left bottom / contain no-repeat;
@@ -1825,7 +1864,7 @@ html.saving .caret.extra { visibility: hidden; }
 .grep-file-head {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-sticky);
   padding: var(--space-1-5) var(--space-2-5);
   background: color-mix(in srgb, var(--bg-toolbar) 92%, transparent);
   color: var(--fg-dim);
@@ -1841,15 +1880,15 @@ html.saving .caret.extra { visibility: hidden; }
   grid-template-columns:
     calc(7ch + var(--gutter-pad-start) + var(--gutter-pad-end)) minmax(0, 1fr);
   width: 100%;
-  min-height: var(--line-height);
+  min-height: var(--lh-editor);
   text-align: left;
   background: none;
   border: none;
   border-radius: 0;
   cursor: pointer;
   font-family: var(--mono);
-  font-size: var(--font-size);
-  line-height: var(--line-height);
+  font-size: var(--fs-editor);
+  line-height: var(--lh-editor);
   color: var(--fg);
 }
 .grep-hit:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -1877,7 +1916,7 @@ html.saving .caret.extra { visibility: hidden; }
 .confirm-message {
   color: var(--fg);
   font-size: var(--fs-ui);
-  line-height: 1.55;
+  line-height: var(--lh-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 40vh;
@@ -1914,7 +1953,7 @@ html.saving .caret.extra { visibility: hidden; }
 .convert-note {
   color: var(--fg-dim);
   font-size: var(--fs-hint);
-  line-height: 1.5;
+  line-height: var(--lh-body);
   margin: var(--space-0-5) var(--space-0-5) var(--space-2);
 }
 
@@ -1925,7 +1964,7 @@ html.saving .caret.extra { visibility: hidden; }
   left: 0;
   width: max-content;
   min-width: 252px;
-  z-index: 70;
+  z-index: var(--z-context-menu);
 }
 .ctx-menu .menu-item:disabled {
   color: var(--fg-faint);
@@ -1967,6 +2006,132 @@ html.saving .caret.extra { visibility: hidden; }
 
 /* clearer loading overlay */
 .overlay { font-size: var(--fs-ui-lg); font-weight: 500; }
+
+/* Progressive enhancement for older embedded engines. Unsupported color-mix()
+   declarations otherwise become invalid at computed-value time, so keep every
+   text surface opaque/readable and preserve state with existing theme colors. */
+@supports not (color: color-mix(in srgb, black, white)) {
+  :root {
+    --hover: var(--bg-active-line);
+    --invalid-ring: inset 0 0 0 1px var(--danger);
+    --match-ring: 0 0 0 1px var(--gold);
+  }
+
+  #menubar,
+  #toolbar {
+    background: var(--bg-toolbar);
+    border-bottom-color: var(--border);
+  }
+  .tab.active,
+  .file-menu,
+  .field,
+  .find,
+  .find-group .replace-row,
+  .notification,
+  .modal-panel {
+    background: var(--bg-elevated);
+  }
+  .file-menu,
+  .notification,
+  .modal-panel {
+    box-shadow: var(--shadow);
+  }
+  button.on {
+    background: var(--bg-active-line);
+    border-color: var(--border);
+  }
+  button.toggle.on:hover {
+    background: var(--accent);
+    border-color: var(--accent-bright);
+  }
+  .selrect {
+    background: var(--bg-active-line);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  #caret,
+  .caret.extra {
+    box-shadow: 0 0 0 1px var(--edit-bg);
+  }
+  #ruler,
+  .ln,
+  .grep-ln {
+    background: var(--gutter-bg);
+  }
+  .row:hover,
+  .opener-row:hover,
+  .grep-hit:hover,
+  .cmd.warn:hover {
+    background: var(--bg-active-line);
+  }
+  .syn-comment { color: var(--fg-dim); }
+  .syn-keyword,
+  .syn-bool,
+  .syn-null { color: var(--accent-bright); }
+  .syn-string { color: var(--syn-string); }
+  .syn-number { color: var(--syn-number); }
+  .syn-literal { color: var(--syn-literal); }
+  .syn-function { color: var(--syn-function); }
+  .syn-heading { color: var(--accent); }
+  .syn-link,
+  .syn-url { color: var(--syn-link); }
+  .syn-code { color: var(--gold); }
+  .syn-error { color: var(--danger); }
+  mark.current { box-shadow: 0 0 0 1px var(--mark-active-bg); }
+  #vscrollbar { background: transparent; }
+  #vthumb {
+    background: var(--fg-faint);
+    box-shadow: none;
+  }
+  #vthumb:hover,
+  #vthumb.drag { background: var(--fg-dim); }
+  .overlay { background: var(--bg); }
+  .overlay-progress,
+  .overlay-progress::-webkit-progress-bar { background: var(--border); }
+  #statusbar .seg.dim { color: var(--status-fg); }
+  #statusbar button.seg-btn { border-color: var(--border); }
+  #statusbar button.seg-btn.on { background: var(--bg-active-line); }
+  .notification.error { background: var(--bg-elevated); }
+  .modal { background: rgba(0, 0, 0, .35); }
+  .opener-path,
+  .seg-control,
+  .keymap-list,
+  .palette-list { background: var(--bg); }
+  .cwd-crumb:hover {
+    border-color: var(--accent);
+    background: var(--bg-active-line);
+  }
+  .opener-row.picked,
+  .opener-row.active {
+    background: var(--bg-active-line);
+    border-color: var(--accent);
+  }
+  .grep-file-head { background: var(--bg-toolbar); }
+  .cmd.danger:hover { background: var(--danger); }
+  .cmd.warn { border-color: var(--danger); }
+}
+
+/* Acrylic is decorative. Without either standard or WebKit backdrop support,
+   switch translucent chrome and floating panels to opaque theme surfaces. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  #menubar,
+  #toolbar,
+  #tabbar,
+  #statusbar { background: var(--bg-elevated); }
+  .file-menu,
+  .find,
+  .find-group .replace-row,
+  .notification,
+  .modal-panel {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .modal {
+    background: rgba(0, 0, 0, .35);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
 
 @media (max-width: 860px) {
   #toolbar {
