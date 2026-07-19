@@ -28,7 +28,7 @@ use super::ops::{
     OperationCancelRequest, ReplaceSaveRequest, SortSaveRequest, SplitSaveRequest,
 };
 use super::state::{SessionState, TabInfo, TabsResponse, UiState};
-use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest};
+use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest, TabReorderRequest};
 
 fn output_path() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/ayame-cli; the generated file lives next to
@@ -40,6 +40,7 @@ fn bridge() -> Bridge {
     Bridge::fetch()
         .decl(&decl::<OpenRequest>())
         .decl(&decl::<TabIdRequest>())
+        .decl(&decl::<TabReorderRequest>())
         .decl(&decl::<BrowseEntry>())
         .decl(&decl::<BrowseResponse>())
         .decl(&decl::<ReplaceRangeRequest>())

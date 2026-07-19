@@ -42,7 +42,13 @@ import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./search.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
-import type { BrowseResponse, OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
+import type {
+  BrowseResponse,
+  OpenRequest,
+  TabIdRequest,
+  TabReorderRequest,
+  TabsResponse,
+} from "./types/api.js";
 
 // ---- workspace: open / browse / drag&drop ----------------------------------
 
@@ -701,6 +707,106 @@ export function initDropZone() {
 
 let refreshTabsSeq = 0;
 const TAB_DRAG_TYPE = "application/x-ayame-tab";
+let draggingTabId: number | null = null;
+let localDropHandledId: number | null = null;
+
+export function tabOrderAfterMove(list, id, beforeId) {
+  const next = [...list];
+  const from = next.findIndex((tab) => tab.id === id);
+  if (from < 0) return null;
+  if (beforeId === id) return next;
+  if (beforeId != null && !next.some((tab) => tab.id === beforeId)) return null;
+  const [moved] = next.splice(from, 1);
+  const to = beforeId == null ? next.length : next.findIndex((tab) => tab.id === beforeId);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+export function tabDropBeforeId(list, draggedId, targetId, after) {
+  const draggedIndex = list.findIndex((tab) => tab.id === draggedId);
+  if (draggedIndex < 0) return null;
+  if (draggedId === targetId) return list[draggedIndex + 1]?.id ?? null;
+
+  const remaining = list.filter((tab) => tab.id !== draggedId);
+  const targetIndex = remaining.findIndex((tab) => tab.id === targetId);
+  if (targetIndex < 0) return null;
+  return remaining[targetIndex + (after ? 1 : 0)]?.id ?? null;
+}
+
+export function ensureActiveTabVisible(container = document.getElementById("tabs")) {
+  container
+    ?.querySelector<HTMLElement>(".tab.active")
+    ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+}
+
+export function showTabList() {
+  const button = $("tab-list");
+  const rect = button.getBoundingClientRect();
+  showPopupMenu(
+    rect.right,
+    rect.bottom,
+    (state.tabs || []).map((tab) => {
+      const folder = tab.path && !isUntitled(tab.path) ? pathDirName(displayPath(tab.path)) : "";
+      return {
+        label: folder ? `${tab.name} — ${folder}` : tab.name,
+        checked: !!tab.active,
+        action: () => {
+          if (!tab.active) selectTab(tab.id);
+        },
+      };
+    }),
+  );
+}
+
+export async function reorderTab(id, beforeId) {
+  const reordered = tabOrderAfterMove(state.tabs || [], id, beforeId);
+  if (!reordered) return false;
+  if (reordered.every((tab, index) => tab.id === state.tabs[index]?.id)) return true;
+  try {
+    const response = await apiPost<TabsResponse, TabReorderRequest>("/api/tabs/reorder", {
+      id,
+      before_id: beforeId,
+    });
+    renderTabs(response.tabs);
+    return true;
+  } catch (error) {
+    flashCount(t("tab.reorderError"), "error");
+    console.error(error);
+    return false;
+  }
+}
+
+function eventTab(e: Event) {
+  return e.target instanceof Element ? e.target.closest<HTMLElement>(".tab") : null;
+}
+
+function beforeIdAtPointer(e: DragEvent, draggedId: number) {
+  const target = eventTab(e);
+  if (!target) return null;
+  const box = target.getBoundingClientRect();
+  return tabDropBeforeId(
+    state.tabs || [],
+    draggedId,
+    Number(target.dataset.id),
+    e.clientX >= box.left + box.width / 2,
+  );
+}
+
+function clearTabDropTarget() {
+  for (const tab of document.querySelectorAll(".tab-drop-before, .tab-drop-after")) {
+    tab.classList.remove("tab-drop-before", "tab-drop-after");
+  }
+}
+
+function markTabDropTarget(e: DragEvent, draggedId: number) {
+  clearTabDropTarget();
+  const target = eventTab(e);
+  if (!target || Number(target.dataset.id) === draggedId) return;
+  const box = target.getBoundingClientRect();
+  target.classList.add(
+    e.clientX >= box.left + box.width / 2 ? "tab-drop-after" : "tab-drop-before",
+  );
+}
 
 export async function refreshTabs() {
   const seq = ++refreshTabsSeq;
@@ -723,6 +829,8 @@ export async function closeTabsSequentially(ids, close = closeTab) {
 export function renderTabs(list) {
   state.tabs = list;
   const c = $("tabs");
+  const listButton = document.getElementById("tab-list") as HTMLButtonElement | null;
+  if (listButton) listButton.disabled = list.length === 0;
   c.setAttribute("role", "tablist");
   c.textContent = "";
   for (const tab of list) {
@@ -806,6 +914,7 @@ export function renderTabs(list) {
     });
     c.append(el);
   }
+  ensureActiveTabVisible(c);
 }
 
 export function tabDragPayload(tab) {
@@ -820,11 +929,12 @@ export function tabDragPayload(tab) {
 
 export function startTabDrag(e, tab) {
   if (!e.dataTransfer) return;
-  if (tab.dirty && !canHandoffDirtyTab(tab)) {
+  if (e.target instanceof Element && e.target.closest(".tab-x")) {
     e.preventDefault();
-    flashCount(t("tab.moveDirty"), "error");
     return;
   }
+  draggingTabId = tab.id;
+  if (e.currentTarget instanceof HTMLElement) e.currentTarget.classList.add("dragging");
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData(TAB_DRAG_TYPE, JSON.stringify(tabDragPayload(tab)));
   e.dataTransfer.setData("text/plain", tab.path || tab.name || "");
@@ -851,14 +961,24 @@ export function canDragOutToNewWindow(tab) {
 }
 
 export async function finishTabDrag(e, tab) {
+  clearTabDropTarget();
+  if (e.currentTarget instanceof HTMLElement) e.currentTarget.classList.remove("dragging");
+  draggingTabId = null;
+  if (localDropHandledId === tab.id) {
+    localDropHandledId = null;
+    return;
+  }
   if (savingCount > 0) return;
-  if (tab.dirty && !canHandoffDirtyTab(tab)) return;
   const dropped = e.dataTransfer?.dropEffect === "move";
   const outside =
     e.clientX < 0 ||
     e.clientY < 0 ||
     e.clientX > window.innerWidth ||
     e.clientY > window.innerHeight;
+  if (tab.dirty && !canHandoffDirtyTab(tab)) {
+    if (dropped || outside) flashCount(t("tab.moveDirty"), "error");
+    return;
+  }
   if (dropped) {
     // Another Ayame window accepted the drop and (re)opens the path itself.
     // A dirty tab detaches — its crash log carries the unsaved edits to the
@@ -896,6 +1016,12 @@ export function initTabDropTarget() {
   const c = $("tabs");
   const acceptsDirty = (payload) => isNativeApp() && !!payload.path && !isUntitled(payload.path);
   c.addEventListener("dragover", (e) => {
+    if (draggingTabId != null) {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      markTabDropTarget(e, draggingTabId);
+      return;
+    }
     const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
     if (!raw) return;
     const payload = parseTabDragPayload(raw);
@@ -904,7 +1030,21 @@ export function initTabDropTarget() {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   });
+  c.addEventListener("dragleave", (e) => {
+    if (draggingTabId != null && !c.contains(e.relatedTarget as Node | null)) {
+      clearTabDropTarget();
+    }
+  });
   c.addEventListener("drop", async (e) => {
+    if (draggingTabId != null) {
+      const id = draggingTabId;
+      const beforeId = beforeIdAtPointer(e, id);
+      e.preventDefault();
+      localDropHandledId = id;
+      clearTabDropTarget();
+      await reorderTab(id, beforeId);
+      return;
+    }
     const payload = parseTabDragPayload(e.dataTransfer?.getData(TAB_DRAG_TYPE));
     if (!payload || payload.sourceWindowId === state.windowId) return;
     e.preventDefault();
@@ -1068,6 +1208,7 @@ export function initWorkspace() {
     if (e.target === $("opener")) hideOpener();
   });
   $("new-tab").addEventListener("click", () => newUntitled());
+  $("tab-list").addEventListener("click", showTabList);
   initTabDropTarget();
   initDropZone();
 }

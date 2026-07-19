@@ -48,6 +48,7 @@
      on small glyphs and controls; they are not layout spacing. */
   --stroke-icon: 1.8;
   --stroke-folder: 1.5px;
+  --stroke-tab-drop: 2px;
   --offset-pressed: 0.5px;
   --offset-glyph-underline: 0.12em;
 
@@ -314,16 +315,19 @@ html, body {
   align-items: stretch;
   background: var(--bg-toolbar);
   border-bottom: 1px solid var(--border);
-  height: 34px;
+  height: var(--control-h);
   user-select: none;
   overflow: hidden;
 }
 #tabs {
   display: flex;
   align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
+#tabs::-webkit-scrollbar { display: none; }
 .tab {
   display: flex;
   align-items: center;
@@ -340,6 +344,22 @@ html, body {
   position: relative;
 }
 .tab:hover { background: var(--hover); }
+.tab.dragging {
+  background: var(--hover);
+  color: var(--fg-faint);
+}
+.tab.tab-drop-before::before,
+.tab.tab-drop-after::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: var(--stroke-tab-drop);
+  background: var(--accent);
+  border-radius: var(--radius-control);
+}
+.tab.tab-drop-before::before { left: var(--space-0); }
+.tab.tab-drop-after::after { right: var(--space-0); }
 .tab.active {
   background: color-mix(in srgb, var(--bg-elevated) 84%, transparent);
   color: var(--fg);
@@ -348,8 +368,8 @@ html, body {
 .tab .tab-name { overflow: hidden; text-overflow: ellipsis; }
 .tab.dirty .tab-name { font-style: italic; }
 .tab .tab-dot {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
   border-radius: 50%;
   background: var(--accent);
   flex: 0 0 auto;
@@ -357,8 +377,8 @@ html, body {
 }
 .tab.dirty .tab-dot { visibility: visible; }
 .tab .tab-x {
-  width: 18px;
-  height: 18px;
+  width: var(--space-6);
+  height: var(--space-6);
   border-radius: calc(var(--radius-control) - 2px);
   display: inline-flex;
   align-items: center;
@@ -367,14 +387,23 @@ html, body {
   font-size: var(--fs-ui);
   flex: 0 0 auto;
 }
-.tab .tab-x .ay-icon { width: 12px; height: 12px; }
+.tab .tab-x .ay-icon { width: var(--space-3); height: var(--space-3); }
 .tab .tab-x:hover { background: var(--hover); color: var(--fg); }
-.tab-new {
-  width: 36px;
+.tab-new,
+.tab-list {
+  width: var(--control-h);
+  height: 100%;
+  padding: var(--space-0);
   border: none;
   border-radius: 0;
   color: var(--fg-dim);
   flex: 0 0 auto;
+}
+.tab-list { border-left: 1px solid var(--border); }
+.tab-new:hover,
+.tab-list:hover {
+  background: var(--hover);
+  color: var(--fg);
 }
 
 /* ---- toolbar ---------------------------------------------------------- */

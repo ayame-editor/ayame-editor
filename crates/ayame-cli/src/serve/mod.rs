@@ -169,6 +169,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/tabs", get(workspace::api_tabs))
         .route("/api/tabs/select", post(workspace::api_tabs_select))
         .route("/api/tabs/close", post(workspace::api_tabs_close))
+        .route("/api/tabs/reorder", post(workspace::api_tabs_reorder))
         .route("/api/tabs/detach", post(workspace::api_tabs_detach))
         .route("/api/ui_state", get(workspace::api_ui_state))
         .route("/api/ui_state", post(workspace::api_ui_state_save))

@@ -645,6 +645,35 @@ impl AppState {
         self.write(|ws| ws.focus_tab(id, self.open_opts.cache_dir.as_deref()))
     }
 
+    /// Move an open tab before another tab, or to the end when `before_id` is
+    /// absent. The active document and every inactive edit session stay put;
+    /// only the user-visible order changes.
+    pub(super) async fn reorder_tab(
+        &self,
+        id: u64,
+        before_id: Option<u64>,
+    ) -> Result<(), ApiError> {
+        let _transitions = self.transitions.lock().await;
+        self.write(|ws| {
+            let Some(from) = ws.tabs.order.iter().position(|tab_id| *tab_id == id) else {
+                return Err(bad_request("no such tab"));
+            };
+            if before_id == Some(id) {
+                return Ok(());
+            }
+            if before_id.is_some_and(|before| !ws.tabs.order.contains(&before)) {
+                return Err(bad_request("no such destination tab"));
+            }
+
+            ws.tabs.order.remove(from);
+            let to = before_id
+                .and_then(|before| ws.tabs.order.iter().position(|tab_id| *tab_id == before))
+                .unwrap_or(ws.tabs.order.len());
+            ws.tabs.order.insert(to, id);
+            Ok(())
+        })
+    }
+
     /// Close a tab; if it was active, focus a neighbor (or empty the workspace).
     pub(super) async fn close_tab(&self, id: u64) {
         let _transitions = self.transitions.lock().await;
@@ -1852,6 +1881,58 @@ mod tests {
         state.close_tab(aid).await;
         assert_eq!(state.read(|ws| ws.tabs.active), Some(cid));
         assert!(!inactive_aside.exists(), "inactive aside was not removed");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reorder_tab_changes_only_the_visible_order() {
+        let dir = scratch_dir("tab-reorder");
+        let a = scratch_file(&dir, "a.txt", b"a\n");
+        let b = scratch_file(&dir, "b.txt", b"b\n");
+        let c = scratch_file(&dir, "c.txt", b"c\n");
+        let state = AppState::new(
+            Some(Document::open(&a, &OpenOptions::default()).unwrap()),
+            OpenOptions::default(),
+        );
+        state
+            .open_path(b.to_string_lossy().to_string())
+            .await
+            .unwrap();
+        state
+            .open_path(c.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        let tabs = state.tabs_response().tabs;
+        let aid = tabs.iter().find(|tab| tab.name == "a.txt").unwrap().id;
+        let bid = tabs.iter().find(|tab| tab.name == "b.txt").unwrap().id;
+        let cid = tabs.iter().find(|tab| tab.name == "c.txt").unwrap().id;
+        assert_eq!(state.read(|ws| ws.tabs.active), Some(cid));
+
+        state.reorder_tab(cid, Some(aid)).await.unwrap();
+        let names = state
+            .tabs_response()
+            .tabs
+            .into_iter()
+            .map(|tab| tab.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["c.txt", "a.txt", "b.txt"]);
+        assert_eq!(state.read(|ws| ws.tabs.active), Some(cid));
+
+        state.reorder_tab(aid, None).await.unwrap();
+        let ids = state
+            .tabs_response()
+            .tabs
+            .into_iter()
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [cid, bid, aid]);
+        assert_eq!(state.read(|ws| ws.tabs.active), Some(cid));
+
+        let before_invalid = state.read(|ws| ws.tabs.order.clone());
+        assert!(state.reorder_tab(cid, Some(u64::MAX)).await.is_err());
+        assert_eq!(state.read(|ws| ws.tabs.order.clone()), before_invalid);
 
         let _ = std::fs::remove_dir_all(dir);
     }

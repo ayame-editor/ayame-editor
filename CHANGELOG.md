@@ -4,6 +4,9 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added same-window drag reordering for tabs, automatic active-tab scrolling,
+  a localized All Tabs menu for overflow navigation, and a larger tab-close
+  target (#166).
 - Organized Settings into Appearance, Editor, Application, and Advanced
   sections with incremental search and a bulk Restore Defaults action (#165).
   User-authored custom themes and background images remain available after a
