@@ -4,6 +4,8 @@ export type OpenRequest = { path: string, };
 
 export type TabIdRequest = { id: bigint, };
 
+export type TabReorderRequest = { id: bigint, before_id: bigint | null, };
+
 export type BrowseEntry = { name: string, path: string, is_dir: boolean, size: bigint, };
 
 export type BrowseResponse = { dir: string, parent: string | null, entries: Array<BrowseEntry>, };

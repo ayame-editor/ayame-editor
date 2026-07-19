@@ -20,6 +20,7 @@ vi.mock("../src/menus.js", () => ({
   fileMenuVisible: vi.fn(() => false),
   hideFileMenu: vi.fn(),
   initMenuBar: vi.fn(),
+  showPopupMenu: vi.fn(),
   updateStatusMeta: vi.fn(),
 }));
 vi.mock("../src/edits.js", () => ({
@@ -39,17 +40,24 @@ vi.mock("../src/app.js", () => ({
 }));
 
 import { isNativeApp } from "../src/app.js";
+import { showPopupMenu } from "../src/menus.js";
 import { state } from "../src/state.js";
 import {
   browseRow,
   canDragOutToNewWindow,
   canHandoffDirtyTab,
   closeTabsSequentially,
+  finishTabDrag,
   moveOpenerSelection,
   onOpenerInputKeydown,
   onOpenerListKeydown,
   recentRow,
+  renderTabs,
   resetOpenerSelection,
+  showTabList,
+  startTabDrag,
+  tabDropBeforeId,
+  tabOrderAfterMove,
 } from "../src/workspace.js";
 
 function deferred() {
@@ -106,6 +114,80 @@ describe("tab drag-out to a new window (#35)", () => {
   it("refuses a missing tab", () => {
     expect(canDragOutToNewWindow(null)).toBe(false);
     expect(canDragOutToNewWindow(undefined)).toBe(false);
+  });
+});
+
+describe("same-window tab ordering and overflow access (#166)", () => {
+  const tabs = [
+    { id: 1, name: "one.txt", path: "/tmp/one.txt", active: false, dirty: false },
+    { id: 2, name: "two.txt", path: "/tmp/two.txt", active: true, dirty: true },
+    { id: 3, name: "three.txt", path: "/tmp/three.txt", active: false, dirty: false },
+  ];
+
+  it("computes stable before-ids and reordered snapshots without mutating the source", () => {
+    expect(tabDropBeforeId(tabs, 1, 3, true)).toBeNull();
+    expect(tabDropBeforeId(tabs, 3, 1, false)).toBe(1);
+    expect(tabDropBeforeId(tabs, 2, 2, false)).toBe(3);
+    expect(tabOrderAfterMove(tabs, 3, 1)?.map((tab) => tab.id)).toEqual([3, 1, 2]);
+    expect(tabOrderAfterMove(tabs, 1, null)?.map((tab) => tab.id)).toEqual([2, 3, 1]);
+    expect(tabOrderAfterMove(tabs, 99, 1)).toBeNull();
+    expect(tabs.map((tab) => tab.id)).toEqual([1, 2, 3]);
+  });
+
+  it("starts a local drag for a dirty tab while retaining cross-window guards", async () => {
+    const dragged = document.createElement("div");
+    const setData = vi.fn();
+    const preventDefault = vi.fn();
+    const dataTransfer = { effectAllowed: "none", dropEffect: "none", setData };
+    const event = {
+      currentTarget: dragged,
+      dataTransfer,
+      preventDefault,
+      target: dragged,
+    };
+
+    startTabDrag(event, tabs[1]);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(dataTransfer.effectAllowed).toBe("move");
+    expect(setData).toHaveBeenCalledTimes(2);
+    expect(dragged.classList.contains("dragging")).toBe(true);
+
+    await finishTabDrag({ clientX: 1, clientY: 1, currentTarget: dragged, dataTransfer }, tabs[1]);
+    expect(dragged.classList.contains("dragging")).toBe(false);
+  });
+
+  it("keeps the active tab visible and exposes every tab through the list button", () => {
+    const originalTabs = state.tabs;
+    const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    document.body.innerHTML = '<div id="tabs"></div><button id="tab-list"></button>';
+
+    try {
+      renderTabs(tabs);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+      expect((document.getElementById("tab-list") as HTMLButtonElement).disabled).toBe(false);
+
+      showTabList();
+      const items = vi.mocked(showPopupMenu).mock.calls.at(-1)?.[2] || [];
+      expect(items.map((item) => item.label)).toEqual([
+        "one.txt — /tmp",
+        "two.txt — /tmp",
+        "three.txt — /tmp",
+      ]);
+      expect(items.map((item) => !!item.checked)).toEqual([false, true, false]);
+    } finally {
+      state.tabs = originalTabs;
+      document.body.textContent = "";
+      if (originalScroll) {
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScroll);
+      } else {
+        delete (HTMLElement.prototype as any).scrollIntoView;
+      }
+    }
   });
 });
 

@@ -50,6 +50,9 @@
       <symbol id="i-chevron-right" viewBox="0 0 24 24">
         <path d="m9 5.5 6.5 6.5L9 18.5" />
       </symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24">
+        <path d="m5.5 9 6.5 6.5L18.5 9" />
+      </symbol>
       <symbol id="i-folder" viewBox="0 0 24 24">
         <path d="M3.8 18.5V7.2c0-.8.5-1.3 1.3-1.3h5l1.8 2.1h6.9c.8 0 1.3.5 1.3 1.3v9.2H3.8Z" />
       </symbol>
@@ -219,6 +222,11 @@
         <div id="tabs"></div>
         <button id="new-tab" class="tab-new" title="新規タブ (Ctrl+N)" aria-label="新規タブ">
           <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-plus"></use></svg>
+        </button>
+        <button id="tab-list" class="tab-list" type="button"
+                title="すべてのタブ" aria-label="すべてのタブ"
+                data-i18n-title="tab.allTabs" data-i18n-aria-label="tab.allTabs">
+          <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-chevron-down"></use></svg>
         </button>
       </nav>
 

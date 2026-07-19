@@ -17,6 +17,7 @@ type JsonWire<T> = T extends bigint
 
 export type OpenRequest = JsonWire<Wire.OpenRequest>;
 export type TabIdRequest = JsonWire<Wire.TabIdRequest>;
+export type TabReorderRequest = JsonWire<Wire.TabReorderRequest>;
 export type BrowseEntry = JsonWire<Wire.BrowseEntry>;
 export type BrowseResponse = JsonWire<Wire.BrowseResponse>;
 export type ReplaceRangeRequest = JsonWire<Wire.ReplaceRangeRequest>;

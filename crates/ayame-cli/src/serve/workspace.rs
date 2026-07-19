@@ -67,6 +67,13 @@ pub(super) struct TabIdRequest {
     id: u64,
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct TabReorderRequest {
+    id: u64,
+    before_id: Option<u64>,
+}
+
 pub(super) async fn api_tabs_select(
     State(state): State<SharedState>,
     Json(req): Json<TabIdRequest>,
@@ -81,6 +88,14 @@ pub(super) async fn api_tabs_close(
 ) -> Json<StatResponse> {
     state.close_tab(req.id).await;
     Json(stat_response(&state))
+}
+
+pub(super) async fn api_tabs_reorder(
+    State(state): State<SharedState>,
+    Json(req): Json<TabReorderRequest>,
+) -> Result<Json<TabsResponse>, ApiError> {
+    state.reorder_tab(req.id, req.before_id).await?;
+    Ok(Json(state.tabs_response()))
 }
 
 /// `POST /api/tabs/detach` — remove a tab while KEEPING its crash log

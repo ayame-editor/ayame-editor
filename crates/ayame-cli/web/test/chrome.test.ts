@@ -101,6 +101,27 @@ describe("application chrome", () => {
     expect(read("src/settings.ts")).toContain("export function resetSettingsToDefaults()");
   });
 
+  it("keeps overflowed tabs reachable and supports same-window ordering (#166)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const tabbar = doc.querySelector("#tabbar");
+    const allTabs = tabbar?.querySelector("#tab-list");
+    const css = read("style.css");
+    const workspace = read("src/workspace.ts");
+
+    expect(tabbar?.querySelector("#tabs")).not.toBeNull();
+    expect(tabbar?.querySelector("#new-tab")).not.toBeNull();
+    expect(allTabs?.getAttribute("data-i18n-title")).toBe("tab.allTabs");
+    expect(allTabs?.getAttribute("data-i18n-aria-label")).toBe("tab.allTabs");
+    expect(css).toMatch(
+      /#tabs\s*\{[^}]*flex:\s*1 1 auto[^}]*min-width:\s*0[^}]*overflow-x:\s*auto/s,
+    );
+    expect(css).toMatch(
+      /\.tab \.tab-x\s*\{[^}]*width:\s*var\(--space-6\)[^}]*height:\s*var\(--space-6\)/s,
+    );
+    expect(workspace).toContain('"/api/tabs/reorder"');
+    expect(workspace).toContain("export function ensureActiveTabVisible(");
+  });
+
   it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     const topLevelIds = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")].map(
