@@ -71,6 +71,36 @@ describe("application chrome", () => {
     expect(read("src/menus.ts")).toContain("export function renderFileMenuRecentFiles()");
   });
 
+  it("groups, searches, and restores defaults from the Settings dialog (#165)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const settings = doc.querySelector("#settings");
+    const groups = [...(settings?.querySelectorAll(".settings-group") || [])].map((group) =>
+      group.getAttribute("aria-labelledby"),
+    );
+
+    expect(groups).toEqual([
+      "settings-group-appearance",
+      "settings-group-editor",
+      "settings-group-app",
+      "settings-group-advanced",
+    ]);
+    expect(settings?.querySelector('#settings-search[type="search"]')).not.toBeNull();
+    expect(settings?.querySelector("#settings-search-status[role=status]")).not.toBeNull();
+    expect(settings?.querySelector("#settings-reset")).not.toBeNull();
+    for (const id of [
+      "set-theme",
+      "set-fontsize",
+      "set-word-wrap",
+      "set-language",
+      "set-confirm-last-tab-close",
+      "keymap-open",
+    ]) {
+      expect(settings?.querySelector(`#${id}`)?.closest(".settings-group"), id).not.toBeNull();
+    }
+    expect(read("src/settings.ts")).toContain("export function filterSettings(");
+    expect(read("src/settings.ts")).toContain("export function resetSettingsToDefaults()");
+  });
+
   it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     const topLevelIds = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")].map(

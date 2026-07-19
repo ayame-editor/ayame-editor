@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   clampFontSize,
+  filterSettings,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
+  freshDefaultSettings,
   loadSettings,
   migratedFontSize,
+  normalizeSettingsSearch,
 } from "../src/settings.js";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../src/state.js";
 
@@ -44,5 +47,72 @@ describe("editor font size (#170)", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("organized settings (#165)", () => {
+  it("builds fresh defaults while preserving user-authored visual assets", () => {
+    const customThemes = { Plum: { name: "Plum" } };
+    const defaults = freshDefaultSettings({
+      theme: "dark",
+      keymap: { saveFile: "Alt+S" },
+      customThemes,
+      bgImage: "data:image/png;base64,test",
+      bgImageName: "plum.png",
+    });
+
+    expect(defaults).toMatchObject({
+      theme: DEFAULT_SETTINGS.theme,
+      keymap: {},
+      customThemes,
+      bgImage: "data:image/png;base64,test",
+      bgImageName: "plum.png",
+    });
+    expect(defaults.customThemes).not.toBe(customThemes);
+    expect(defaults.keymap).not.toBe(DEFAULT_SETTINGS.keymap);
+  });
+
+  it("normalizes width, case, and surrounding whitespace for incremental search", () => {
+    expect(normalizeSettingsSearch("  ＦＯＮＴ  ")).toBe("font");
+  });
+
+  it("filters individual settings and keeps a matching group fully visible", () => {
+    document.body.innerHTML = `
+      <span id="settings-search-status"></span>
+      <p id="settings-empty" class="hidden"></p>
+      <section id="appearance" class="settings-group">
+        <h3 class="settings-group-title">Appearance</h3>
+        <div class="settings-group-body">
+          <label id="theme-row" class="set-row">Theme</label>
+          <label id="font-row" class="set-row">Font family</label>
+          <label id="image-row" class="set-row hidden">Choose image</label>
+        </div>
+      </section>
+      <section id="editor" class="settings-group">
+        <h3 class="settings-group-title">Editor</h3>
+        <div class="settings-group-body">
+          <label id="wrap-row" class="set-row">Word wrap</label>
+        </div>
+      </section>`;
+
+    expect(filterSettings("font")).toBe(1);
+    expect(document.getElementById("theme-row")!.classList.contains("settings-filtered")).toBe(
+      true,
+    );
+    expect(document.getElementById("font-row")!.classList.contains("settings-filtered")).toBe(
+      false,
+    );
+    expect(document.getElementById("editor")!.classList.contains("settings-filtered")).toBe(true);
+
+    expect(filterSettings("appearance")).toBe(2);
+    expect(document.getElementById("theme-row")!.classList.contains("settings-filtered")).toBe(
+      false,
+    );
+    expect(document.getElementById("font-row")!.classList.contains("settings-filtered")).toBe(
+      false,
+    );
+
+    expect(filterSettings("missing")).toBe(0);
+    expect(document.getElementById("settings-empty")!.classList.contains("hidden")).toBe(false);
   });
 });

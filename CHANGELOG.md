@@ -4,6 +4,10 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Organized Settings into Appearance, Editor, Application, and Advanced
+  sections with incremental search and a bulk Restore Defaults action (#165).
+  User-authored custom themes and background images remain available after a
+  reset.
 - Added Close Tab, Save All, and direct recent-file entries to the File menu
   (#167). Save All processes modified tabs sequentially and restores the
   previously active tab when it finishes.

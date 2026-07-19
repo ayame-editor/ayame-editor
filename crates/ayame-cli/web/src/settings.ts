@@ -56,6 +56,18 @@ export function migratedFontSize(raw) {
   return clampFontSize(raw?.fontSize);
 }
 
+export function freshDefaultSettings(preserved: Record<string, any> = {}) {
+  return {
+    ...DEFAULT_SETTINGS,
+    // User-authored theme assets are content, not active preferences. Keep
+    // them available after Restore Defaults while resetting their selection.
+    customThemes: { ...preserved.customThemes },
+    bgImage: preserved.bgImage || DEFAULT_SETTINGS.bgImage,
+    bgImageName: preserved.bgImageName || DEFAULT_SETTINGS.bgImageName,
+    keymap: {},
+  };
+}
+
 export function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
@@ -76,7 +88,7 @@ export function loadSettings() {
     if (hadLegacyZoom) saveSettings(merged);
     return merged;
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return freshDefaultSettings();
   }
 }
 
@@ -396,6 +408,7 @@ export function updateSetting(key, value) {
   if (key === "language") {
     applyLocale();
     postNativeMessage(`ayame:language:${state.settings.language}`);
+    filterSettings();
   }
   if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
 }
@@ -418,12 +431,55 @@ export function adjustFontSize(delta) {
   setFontSize(clampFontSize(state.settings.fontSize) + delta);
 }
 
+export function normalizeSettingsSearch(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+export function filterSettings(
+  query = (document.getElementById("settings-search") as HTMLInputElement | null)?.value,
+) {
+  const terms = normalizeSettingsSearch(query).split(/\s+/).filter(Boolean);
+  let visible = 0;
+
+  for (const group of document.querySelectorAll<HTMLElement>(".settings-group")) {
+    const title = normalizeSettingsSearch(
+      group.querySelector(".settings-group-title")?.textContent,
+    );
+    const groupMatches = terms.length > 0 && terms.every((term) => title.includes(term));
+    const body = group.querySelector(".settings-group-body");
+    let groupVisible = 0;
+    for (const item of Array.from(body?.children || []) as HTMLElement[]) {
+      if (!item.matches(".set-row, .settings-item")) continue;
+      const text = normalizeSettingsSearch(item.textContent);
+      const available = !item.classList.contains("hidden");
+      const matches =
+        available &&
+        (terms.length === 0 || groupMatches || terms.every((term) => text.includes(term)));
+      item.classList.toggle("settings-filtered", !matches);
+      if (matches) {
+        visible++;
+        groupVisible++;
+      }
+    }
+    group.classList.toggle("settings-filtered", groupVisible === 0);
+  }
+
+  const status = document.getElementById("settings-search-status");
+  if (status) status.textContent = terms.length ? t("settings.searchResults", { n: visible }) : "";
+  document.getElementById("settings-empty")?.classList.toggle("hidden", visible > 0);
+  return visible;
+}
+
 export function settingsVisible() {
   return !$("settings").classList.contains("hidden");
 }
 
 export function showSettings() {
   setModalOpen($("settings"), true);
+  filterSettings();
   // Move focus into the panel so it is keyboard-operable the moment it opens
   // (#174); skip the corner ✕ in favor of the first real control.
   queueMicrotask(() => {
@@ -594,17 +650,13 @@ function notifyNativeUpdateCheckSetting() {
   );
 }
 
-export function initSettings() {
-  state.settings = loadSettings();
-  applySettings(state.settings);
-  // Follow live OS light/dark changes while the theme is on "auto" (#153).
-  if (typeof matchMedia !== "undefined") {
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-      const theme = state.settings.theme;
-      if (!theme || theme === "auto") applySettings(state.settings);
-    });
-  }
-  notifyNativeUpdateCheckSetting();
+function syncBgImageRow() {
+  $("set-bg-image-row").classList.toggle("hidden", state.settings.bgMode !== "image");
+  $("set-bg-image-name").textContent = state.settings.bgImageName || "";
+  filterSettings();
+}
+
+export function syncSettingsControls() {
   populateThemeSelect();
   $("set-theme").value = state.settings.theme;
   $("set-bg").value = state.settings.bgMode || "watercolor";
@@ -617,6 +669,45 @@ export function initSettings() {
   $("set-illus-val").textContent = illusPct + "%";
   $("set-font").value = state.settings.font;
   syncFontSizeControls(state.settings.fontSize);
+  $("set-ruler").checked = !!state.settings.ruler;
+  $("set-line-commas").checked = state.settings.lineNumberCommas !== false;
+  $("set-show-whitespace").checked = !!state.settings.showWhitespace;
+  $("set-syntax-highlight").checked = state.settings.syntaxHighlight !== false;
+  $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
+  $("set-word-wrap").checked = !!state.settings.wordWrap;
+  $("set-restore-session").checked = state.settings.restoreSession !== false;
+  $("set-update-check-startup").checked = state.settings.updateCheckOnStartup !== false;
+  $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
+  $("set-memo-name").value = state.settings.memoName || DEFAULT_SETTINGS.memoName;
+  syncBgImageRow();
+}
+
+export function resetSettingsToDefaults() {
+  state.settings = freshDefaultSettings(state.settings);
+  saveSettings(state.settings);
+  applySettings(state.settings);
+  notifyNativeUpdateCheckSetting();
+  postNativeMessage(`ayame:language:${state.settings.language}`);
+  syncSettingsControls();
+  updateKeyHints();
+  renderKeymapRows();
+  applyLocale();
+  filterSettings();
+  flashCount(t("settings.resetDone"));
+}
+
+export function initSettings() {
+  state.settings = loadSettings();
+  applySettings(state.settings);
+  // Follow live OS light/dark changes while the theme is on "auto" (#153).
+  if (typeof matchMedia !== "undefined") {
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      const theme = state.settings.theme;
+      if (!theme || theme === "auto") applySettings(state.settings);
+    });
+  }
+  notifyNativeUpdateCheckSetting();
+  syncSettingsControls();
 
   $("set-theme").addEventListener("change", () => {
     const id = $("set-theme").value;
@@ -631,11 +722,6 @@ export function initSettings() {
   // The wallpaper persists as a data: URL inside settings; cap the source file
   // so the JSON stays within typical localStorage quotas (~5MB).
   const MAX_BG_IMAGE_BYTES = 4 * 1024 * 1024;
-  const syncBgImageRow = () => {
-    $("set-bg-image-row").classList.toggle("hidden", state.settings.bgMode !== "image");
-    $("set-bg-image-name").textContent = state.settings.bgImageName || "";
-  };
-  syncBgImageRow();
   $("set-bg").addEventListener("change", () => {
     const mode = $("set-bg").value;
     if (mode === "image" && !state.settings.bgImage) {
@@ -693,41 +779,31 @@ export function initSettings() {
     }
   });
   fontSizeNumber.addEventListener("change", () => setFontSize(fontSizeNumber.valueAsNumber));
-  $("set-ruler").checked = !!state.settings.ruler;
   $("set-ruler").addEventListener("change", () => updateSetting("ruler", $("set-ruler").checked));
-  $("set-line-commas").checked = state.settings.lineNumberCommas !== false;
   $("set-line-commas").addEventListener("change", () =>
     updateSetting("lineNumberCommas", $("set-line-commas").checked),
   );
-  $("set-show-whitespace").checked = !!state.settings.showWhitespace;
   $("set-show-whitespace").addEventListener("change", () =>
     updateSetting("showWhitespace", $("set-show-whitespace").checked),
   );
-  $("set-syntax-highlight").checked = state.settings.syntaxHighlight !== false;
   $("set-syntax-highlight").addEventListener("change", () =>
     updateSetting("syntaxHighlight", $("set-syntax-highlight").checked),
   );
-  $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
   $("set-zenkaku-underline").addEventListener("change", () =>
     updateSetting("zenkakuUnderline", $("set-zenkaku-underline").checked),
   );
-  $("set-word-wrap").checked = !!state.settings.wordWrap;
   $("set-word-wrap").addEventListener("change", () =>
     updateSetting("wordWrap", $("set-word-wrap").checked),
   );
-  $("set-restore-session").checked = state.settings.restoreSession !== false;
   $("set-restore-session").addEventListener("change", () =>
     updateSetting("restoreSession", $("set-restore-session").checked),
   );
-  $("set-update-check-startup").checked = state.settings.updateCheckOnStartup !== false;
   $("set-update-check-startup").addEventListener("change", () =>
     updateSetting("updateCheckOnStartup", $("set-update-check-startup").checked),
   );
-  $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
   $("set-confirm-last-tab-close").addEventListener("change", () =>
     updateSetting("confirmLastTabClose", $("set-confirm-last-tab-close").checked),
   );
-  $("set-memo-name").value = state.settings.memoName || DEFAULT_SETTINGS.memoName;
   $("set-memo-name").addEventListener("input", () =>
     updateSetting("memoName", $("set-memo-name").value),
   );
@@ -749,5 +825,12 @@ export function initSettings() {
   $("settings").addEventListener("click", (e) => {
     if (e.target === $("settings")) hideSettings();
   });
+  $("settings-search").addEventListener("input", () => filterSettings());
+  $("settings-reset").addEventListener("click", async () => {
+    if (await askConfirm(t("settings.reset"), t("settings.resetConfirm"))) {
+      resetSettingsToDefaults();
+    }
+  });
   applyLocale();
+  filterSettings();
 }

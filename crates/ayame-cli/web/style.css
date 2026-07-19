@@ -1615,6 +1615,53 @@ html.saving .caret.extra { visibility: hidden; }
 .settings-panel { width: min(840px, var(--modal-edge)); }
 /* the memo rows pushed the panel past 80vh on short windows: scroll, don't clip */
 .settings-body { overflow-y: auto; scrollbar-width: thin; }
+.settings-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2-5) var(--space-3-5);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+}
+.settings-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.settings-search-status {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--bg-elevated) 74%, transparent);
+}
+.settings-group + .settings-group { margin-top: var(--space-4); }
+.settings-group-title {
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-size: var(--fs-ui-sm);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.settings-group-body { padding: var(--space-0) var(--space-3); }
+.settings-group.settings-filtered,
+.settings-group-body > .settings-filtered {
+  display: none;
+}
+.settings-empty {
+  margin: var(--space-6) var(--space-0);
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-body);
+  text-align: center;
+}
+.settings-empty.hidden { display: none; }
 .set-row {
   display: flex;
   align-items: center;
@@ -1653,12 +1700,14 @@ html.saving .caret.extra { visibility: hidden; }
 /* Action buttons in a settings row (キー設定→編集 / テーマJSON→ファイルで開く /
    画像を選択…) otherwise inherit the transparent-until-hover .cmd chrome and read
    as plain text; give them a visible border + hover so they look clickable. */
-.set-row .cmd {
+.set-row .cmd,
+.settings-tools .cmd {
   flex: 0 0 auto;
   border: 1px solid var(--border);
   background: var(--bg);
 }
-.set-row .cmd:hover {
+.set-row .cmd:hover,
+.settings-tools .cmd:hover {
   border-color: var(--accent-bright);
   background: var(--bg-elevated, var(--bg));
 }
@@ -2036,7 +2085,8 @@ html.saving .caret.extra { visibility: hidden; }
   }
 
   #menubar,
-  #toolbar {
+  #toolbar,
+  .settings-tools {
     background: var(--bg-toolbar);
     border-bottom-color: var(--border);
   }
@@ -2046,6 +2096,7 @@ html.saving .caret.extra { visibility: hidden; }
   .find,
   .find-group .replace-row,
   .notification,
+  .settings-group,
   .modal-panel {
     background: var(--bg-elevated);
   }
