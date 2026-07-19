@@ -16,7 +16,7 @@ import {
   showLoading,
   showMessage,
 } from "./dialogs.js";
-import { onDocumentOpened, openPath, refreshTabs, showSaveDialog } from "./workspace.js";
+import { onDocumentOpened, openPath, refreshTabs, selectTab, showSaveDialog } from "./workspace.js";
 import { saveSettings } from "./settings.js";
 import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
 import type {
@@ -157,7 +157,11 @@ export async function reloadActiveDocument({
 // document to the new path), exactly like every desktop editor — no leftover
 // untitled tab, no extra tab for the saved file. Also remembers the folder as
 // 前回の保存先 for the next untitled buffer.
-export async function finishSaveAs(res) {
+interface SaveOptions {
+  announce?: boolean;
+}
+
+export async function finishSaveAs(res, { announce = true }: SaveOptions = {}) {
   if (res.switched) {
     // Same tab, new document identity: refresh in place, keep the caret.
     await reloadActiveDocument();
@@ -167,7 +171,7 @@ export async function finishSaveAs(res) {
     onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: res.path }));
   }
   rememberSaveDir(res.path);
-  flashCount(t("file.saved", { path: displayPath(res.path) }));
+  if (announce) flashCount(t("file.saved", { path: displayPath(res.path) }));
 }
 
 // 前回の保存先: persisted so untitled buffers suggest the folder you last
@@ -179,14 +183,15 @@ export function rememberSaveDir(path) {
   saveSettings(state.settings);
 }
 
-export async function saveCopy() {
+export async function saveCopy(options: SaveOptions = {}) {
+  const { announce = true } = options;
   if (savingCount > 0) {
     flashCount(t("editor.savingWait"));
-    return;
+    return false;
   }
   await settleEditQueue();
   const target = await showSaveDialog(t("menu.saveAs"), await suggestedSaveAsPath());
-  if (!target) return;
+  if (!target) return false;
   savingCount++;
   setSavingUI();
   try {
@@ -194,7 +199,8 @@ export async function saveCopy() {
       "/api/edit/save",
       editSaveRequest({ ...target, switch_to_saved: true }),
     );
-    await finishSaveAs(res);
+    await finishSaveAs(res, { announce });
+    return true;
   } catch (e) {
     let finalError = e;
     if (!target.overwrite && isExistsError(e)) {
@@ -216,17 +222,18 @@ export async function saveCopy() {
               switch_to_saved: true,
             }),
           );
-          await finishSaveAs(res);
-          return;
+          await finishSaveAs(res, { announce });
+          return true;
         } catch (retryError) {
           finalError = retryError;
         }
       } else {
-        return;
+        return false;
       }
     }
     flashCount(t("error.saveError"), "error");
     showMessage(t("error.saveError"), serverMessage(finalError));
+    return false;
   } finally {
     savingCount--;
     setSavingUI();
@@ -330,18 +337,18 @@ export function freeMemoName(name, taken) {
   return null;
 }
 
-export async function saveFile() {
-  if (!state.stat?.open) return;
+export async function saveFile(options: SaveOptions = {}) {
+  const { announce = true } = options;
+  if (!state.stat?.open) return false;
   if (savingCount > 0) {
     flashCount(t("editor.savingWait"));
-    return;
+    return false;
   }
   await settleEditQueue();
   if (isUntitled(state.stat.path)) {
     // Untitled buffers always go through the save dialog; the dialog is
     // pre-filled with the expanded name template (see suggestedSaveAsPath).
-    await saveCopy();
-    return;
+    return saveCopy({ announce });
   }
   savingCount++;
   setSavingUI();
@@ -354,14 +361,76 @@ export async function saveFile() {
     await refreshStat();
     await reloadViewport();
     render();
-    flashCount(t("file.saved", { path: displayPath(res.path) }));
+    if (announce) flashCount(t("file.saved", { path: displayPath(res.path) }));
+    return true;
   } catch (e) {
     flashCount(t("error.saveError"), "error");
     showMessage(t("error.saveError"), serverMessage(e));
+    return false;
   } finally {
     savingCount--;
     setSavingUI();
     retryPendingNativeClose();
+  }
+}
+
+type SaveAllTab = { id: number; active?: boolean; dirty?: boolean };
+
+// Save dirty tabs in a deterministic order and restore the user's original
+// active tab afterwards. The injected operations keep the ordering contract
+// testable without a live server.
+export async function saveTabsSequentially(
+  tabs: SaveAllTab[],
+  select: (id: number) => Promise<boolean | void>,
+  save: (tab: SaveAllTab) => Promise<boolean>,
+) {
+  const dirty = tabs.filter((tab) => tab.dirty);
+  const original = tabs.find((tab) => tab.active)?.id ?? null;
+  let current = original;
+  let saved = 0;
+
+  for (const tab of dirty) {
+    if (current !== tab.id) {
+      if ((await select(tab.id)) === false) continue;
+      current = tab.id;
+    }
+    if (await save(tab)) saved++;
+  }
+
+  if (original != null && current !== original) await select(original);
+  return { saved, total: dirty.length };
+}
+
+let savingAll = false;
+
+export async function saveAllTabs() {
+  if (savingAll || savingCount > 0) {
+    flashCount(t("editor.savingWait"));
+    return { saved: 0, total: 0 };
+  }
+  const tabs = [...(state.tabs || [])];
+  const total = tabs.filter((tab) => tab.dirty).length;
+  if (!total) {
+    flashCount(t("status.allSaved"));
+    return { saved: 0, total: 0 };
+  }
+
+  savingAll = true;
+  try {
+    const result = await saveTabsSequentially(
+      tabs,
+      (id) => selectTab(id),
+      () => saveFile({ announce: false }),
+    );
+    await refreshTabs();
+    flashCount(
+      result.saved === result.total
+        ? t("file.savedAll", { n: result.saved })
+        : t("file.savedAllPartial", result),
+    );
+    return result;
+  } finally {
+    savingAll = false;
   }
 }
 

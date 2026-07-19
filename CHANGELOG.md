@@ -4,6 +4,9 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Added Close Tab, Save All, and direct recent-file entries to the File menu
+  (#167). Save All processes modified tabs sequentially and restores the
+  previously active tab when it finishes.
 - Systematized visual design tokens for editor/UI font size, line height, layer
   order, and intentional subpixel geometry (#178). Components now consume
   named typography and layering variables instead of local values. Older
