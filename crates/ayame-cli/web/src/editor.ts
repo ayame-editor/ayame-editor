@@ -7,6 +7,7 @@ import { hasSelection, renderSelection } from "./selection.js";
 import { highlightSpans } from "./syntax.js";
 import { updateStatusPos } from "./menus.js";
 import { anyModalOpen } from "./input.js";
+import { analysisRanges } from "./analysis-model.js";
 
 export const pool = [];
 
@@ -211,8 +212,8 @@ export function fillRow(row, line, rec) {
   if (rec == null) {
     tx.classList.add("pending");
     tx.textContent = "⋯";
-  } else if (state.matcher) {
-    appendHighlighted(tx, rec.text);
+  } else if (state.matcher || state.analysisMatchers.length) {
+    appendLayeredHighlighted(tx, rec.text);
   } else if (state.settings.syntaxHighlight !== false && appendSyntaxHighlighted(tx, rec.text)) {
     // rendered by appendSyntaxHighlighted
   } else if (state.settings.showWhitespace) {
@@ -436,6 +437,59 @@ export function appendHighlighted(container, text) {
   }
 }
 
+/// Compose normal Find highlighting above analysis backgrounds. Rule priority
+/// is resolved by `analysisRanges`; the ordinary `<mark>` stays innermost so
+/// the active Find query remains the strongest visual signal.
+export function appendLayeredHighlighted(container, text) {
+  const analysis = analysisRanges(text, state.analysisMatchers, state.analysisVisibleRuleIds);
+  const search = [];
+  if (state.matcher) {
+    state.matcher.lastIndex = 0;
+    let match;
+    while ((match = state.matcher.exec(text)) !== null) {
+      if (match[0].length === 0) {
+        state.matcher.lastIndex++;
+        continue;
+      }
+      search.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+  if (!analysis.length && !search.length) {
+    appendText(container, text, true);
+    return;
+  }
+  const boundaries = [
+    ...new Set([
+      0,
+      text.length,
+      ...analysis.flatMap((range) => [range.start, range.end]),
+      ...search.flatMap((range) => [range.start, range.end]),
+    ]),
+  ].sort((a, b) => a - b);
+  for (let index = 0; index + 1 < boundaries.length; index++) {
+    const start = boundaries[index];
+    const end = boundaries[index + 1];
+    if (end <= start) continue;
+    const analysisRange = analysis.find((range) => range.start < end && range.end > start);
+    const searchRange = search.find((range) => range.start < end && range.end > start);
+    let target = container;
+    if (analysisRange) {
+      const span = document.createElement("span");
+      span.className = `analysis-mark${analysisRange.overlap ? " overlap" : ""}`;
+      span.dataset.analysisColor = analysisRange.color;
+      span.dataset.analysisRules = analysisRange.ruleIds.join(" ");
+      target.append(span);
+      target = span;
+    }
+    if (searchRange) {
+      const mark = document.createElement("mark");
+      target.append(mark);
+      target = mark;
+    }
+    appendText(target, text.slice(start, end), end === text.length);
+  }
+}
+
 export function appendSyntaxHighlighted(container, text) {
   const spans = highlightSpans(text, state.stat?.path || "");
   if (!spans) return false;
@@ -533,21 +587,45 @@ export function renderSearchTicks(vh) {
   const ticks = $("vticks");
   if (!ticks) return;
   ticks.textContent = "";
-  if (!state.query || !state.searchHits || state.searchHits.length === 0 || state.total <= 1)
-    return;
   const frag = document.createDocumentFragment();
   const maxTicks = 700;
-  const step = Math.max(1, Math.ceil(state.searchHits.length / maxTicks));
-  const denom = Math.max(1, state.total - 1);
-  for (let i = 0; i < state.searchHits.length; i += step) {
-    const h = state.searchHits[i];
-    if (typeof h.line !== "number") continue;
-    const t = document.createElement("div");
-    t.className = "vtick";
-    if (state.lastMatch && h.byte === state.lastMatch.byte) t.classList.add("current");
-    const y = Math.max(0, Math.min(vh - 3, (h.line / denom) * (vh - 3)));
-    t.style.transform = `translateY(${y}px)`;
-    frag.append(t);
+  if (state.query && state.searchHits?.length && state.total > 1) {
+    const step = Math.max(1, Math.ceil(state.searchHits.length / maxTicks));
+    const denom = Math.max(1, state.total - 1);
+    for (let i = 0; i < state.searchHits.length; i += step) {
+      const h = state.searchHits[i];
+      if (typeof h.line !== "number") continue;
+      const tick = document.createElement("div");
+      tick.className = "vtick";
+      if (state.lastMatch && h.byte === state.lastMatch.byte) tick.classList.add("current");
+      const y = Math.max(0, Math.min(vh - 3, (h.line / denom) * (vh - 3)));
+      tick.style.transform = `translateY(${y}px)`;
+      frag.append(tick);
+    }
+  }
+  const analysisRules = (state.analysisStatus?.rules || []).filter(
+    (rule) =>
+      rule.enabled &&
+      state.analysisVisibleRuleIds.has(rule.id) &&
+      rule.histogram.some((count) => count > 0),
+  );
+  const occupied = analysisRules.reduce(
+    (total, rule) => total + rule.histogram.reduce((n, count) => n + (count > 0 ? 1 : 0), 0),
+    0,
+  );
+  const analysisStep = Math.max(1, Math.ceil(occupied / maxTicks));
+  let seen = 0;
+  for (const rule of analysisRules) {
+    const denominator = Math.max(1, rule.histogram.length - 1);
+    rule.histogram.forEach((count, bin) => {
+      if (!count || seen++ % analysisStep !== 0) return;
+      const tick = document.createElement("div");
+      tick.className = "vtick analysis-vtick";
+      tick.dataset.analysisColor = rule.color;
+      const y = Math.max(0, Math.min(vh - 3, (bin / denominator) * (vh - 3)));
+      tick.style.transform = `translateY(${y}px)`;
+      frag.append(tick);
+    });
   }
   ticks.append(frag);
 }

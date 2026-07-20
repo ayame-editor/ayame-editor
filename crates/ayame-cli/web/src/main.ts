@@ -28,6 +28,7 @@ import {
 } from "./workspace.js";
 import { initSettings } from "./settings.js";
 import { initBookmarks } from "./bookmarks.js";
+import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest } from "./types/api.js";
 
@@ -54,6 +55,7 @@ export async function boot() {
   initSettings();
   await hydrateSharedUiState();
   state.history = loadSearchHistory();
+  initAnalysis();
   initCommandPalette();
   initScrollbar();
   initEvents();
@@ -71,6 +73,7 @@ export async function boot() {
     return;
   }
   updateStatusMeta();
+  if (state.stat?.open) handleAnalysisDocumentOpened(state.stat.path);
   // Native launch with a FILE argument: the window appears immediately and the
   // (possibly long) first-index happens behind this progress overlay.
   const pending = typeof window.__ayamePendingOpen === "string" ? window.__ayamePendingOpen : "";

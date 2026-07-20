@@ -19,6 +19,10 @@ use anyhow::{bail, Context, Result};
 use typeship::Bridge;
 use typeship_ts_rs::decl;
 
+use super::analysis::{
+    AnalysisCancelRequest, AnalysisHit, AnalysisHitsResponse, AnalysisNavigateResponse,
+    AnalysisProfile, AnalysisRuleConfig, AnalysisRuleStatus, AnalysisStartRequest, AnalysisStatus,
+};
 use super::edit::{
     CaretPosition, EditSaveRequest, EditSaveResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
@@ -79,6 +83,15 @@ fn bridge() -> Bridge {
         .decl(&decl::<SplitSaveRequest>())
         .decl(&decl::<GrepRequest>())
         .decl(&decl::<GrepSaveRequest>())
+        .decl(&decl::<AnalysisRuleConfig>())
+        .decl(&decl::<AnalysisProfile>())
+        .decl(&decl::<AnalysisStartRequest>())
+        .decl(&decl::<AnalysisCancelRequest>())
+        .decl(&decl::<AnalysisRuleStatus>())
+        .decl(&decl::<AnalysisStatus>())
+        .decl(&decl::<AnalysisHit>())
+        .decl(&decl::<AnalysisNavigateResponse>())
+        .decl(&decl::<AnalysisHitsResponse>())
         .decl(&decl::<SessionState>())
         .decl(&decl::<UiState>())
         .decl(&decl::<TabInfo>())

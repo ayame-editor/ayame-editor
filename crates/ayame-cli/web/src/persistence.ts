@@ -4,8 +4,16 @@
 // UI state keeps recents, search history, and session restore data shared
 // across windows while preserving localStorage as the browser fallback.
 
-import { RECENT_KEY, RECENT_MAX, SEARCH_HISTORY_KEY, state } from "./state.js";
+import {
+  ANALYSIS_PROFILES_KEY,
+  RECENT_KEY,
+  RECENT_MAX,
+  SEARCH_HISTORY_KEY,
+  state,
+} from "./state.js";
 import { api, apiPost } from "./api.js";
+import { normalizeAnalysisProfiles } from "./analysis-model.js";
+import type { AnalysisProfile } from "./types/api.js";
 import type { UiState } from "./types/api.js";
 
 let sharedUiState: UiState | null = null;
@@ -38,6 +46,8 @@ function saveLocalList(key, list, max) {
 }
 
 function normalizeUiState(ui: Partial<UiState> = {}): UiState {
+  const analysisProfiles = normalizeAnalysisProfiles(ui.analysis_profiles);
+  const active = String(ui.active_analysis_profile || "").trim();
   return {
     recent_files: cleanList(ui.recent_files, RECENT_MAX),
     search_history: cleanList(ui.search_history, 50),
@@ -45,6 +55,10 @@ function normalizeUiState(ui: Partial<UiState> = {}): UiState {
       paths: cleanList(ui.session?.paths, 64),
       active_path: String(ui.session?.active_path || "").trim() || null,
     },
+    analysis_profiles: analysisProfiles,
+    active_analysis_profile: analysisProfiles.some((profile) => profile.id === active)
+      ? active
+      : null,
   };
 }
 
@@ -53,16 +67,28 @@ export async function hydrateSharedUiState() {
     const remote = normalizeUiState(await api<UiState>("/api/ui_state"));
     const localRecent = localList(RECENT_KEY, RECENT_MAX);
     const localHistory = localList(SEARCH_HISTORY_KEY, 50);
+    let localProfiles = [];
+    try {
+      localProfiles = normalizeAnalysisProfiles(
+        JSON.parse(localStorage.getItem(ANALYSIS_PROFILES_KEY) || "[]"),
+      );
+    } catch {
+      // ignore malformed local fallback
+    }
     const merged = normalizeUiState({
       ...remote,
       recent_files: remote.recent_files.length ? remote.recent_files : localRecent,
       search_history: remote.search_history.length ? remote.search_history : localHistory,
+      analysis_profiles: remote.analysis_profiles.length ? remote.analysis_profiles : localProfiles,
     });
     sharedUiState = merged;
     state.history = merged.search_history;
+    state.analysisProfiles = merged.analysis_profiles;
+    state.activeAnalysisProfile = merged.active_analysis_profile;
     if (
       merged.recent_files.length !== remote.recent_files.length ||
-      merged.search_history.length !== remote.search_history.length
+      merged.search_history.length !== remote.search_history.length ||
+      merged.analysis_profiles.length !== remote.analysis_profiles.length
     ) {
       await saveSharedUiState(merged);
     }
@@ -120,6 +146,48 @@ export function saveSearchHistoryShared(list) {
   void currentUiStateBase().then((base) => {
     if (!base) return; // can't read current state — don't clobber the server
     void saveSharedUiState(normalizeUiState({ ...base, search_history: history }));
+  });
+}
+
+export function loadAnalysisProfilesShared(): {
+  profiles: AnalysisProfile[];
+  active: string | null;
+} {
+  if (sharedUiState) {
+    return {
+      profiles: sharedUiState.analysis_profiles,
+      active: sharedUiState.active_analysis_profile,
+    };
+  }
+  try {
+    const profiles = normalizeAnalysisProfiles(
+      JSON.parse(localStorage.getItem(ANALYSIS_PROFILES_KEY) || "[]"),
+    );
+    return { profiles, active: state.activeAnalysisProfile };
+  } catch {
+    return { profiles: [], active: null };
+  }
+}
+
+export function saveAnalysisProfilesShared(profiles, active) {
+  const clean = normalizeAnalysisProfiles(profiles);
+  const activeId = clean.some((profile) => profile.id === active) ? active : null;
+  state.analysisProfiles = clean;
+  state.activeAnalysisProfile = activeId;
+  try {
+    localStorage.setItem(ANALYSIS_PROFILES_KEY, JSON.stringify(clean));
+  } catch {
+    // ignore private-mode quota errors
+  }
+  void currentUiStateBase().then((base) => {
+    if (!base) return;
+    void saveSharedUiState(
+      normalizeUiState({
+        ...base,
+        analysis_profiles: clean,
+        active_analysis_profile: activeId,
+      }),
+    );
   });
 }
 
