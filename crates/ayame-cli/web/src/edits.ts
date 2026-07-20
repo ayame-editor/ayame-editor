@@ -5,6 +5,7 @@ import { t } from "./i18n.js";
 import { api, apiPost, type BatchEditResponse, type LinesResponse } from "./api.js";
 import { refreshStat, savingCount, waitForSavingDone } from "./save.js";
 import {
+  cacheLineResponse,
   cachedLine,
   focusEditor,
   maxFirst,
@@ -86,8 +87,7 @@ export async function reloadViewport() {
   const start = Math.max(0, state.first - PAD);
   const count = rowsVisible() + OVERSCAN + 2 * PAD;
   const res = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
-  state.cache = { start, lines: res.lines };
-  state.total = res.total;
+  cacheLineResponse(start, res);
   state.loadToken++; // cancel any in-flight ensureData for the old contents
 }
 

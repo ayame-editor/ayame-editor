@@ -33,6 +33,7 @@ use crate::{first_opt, has_flag, open_opts, parse_checked};
 mod assets;
 mod edit;
 mod error;
+mod markers;
 mod ops;
 mod security;
 mod state;
@@ -203,6 +204,13 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/revert", post(edit::api_edit_revert))
         .route("/api/edit/recover", post(edit::api_edit_recover))
         .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
+        .route("/api/markers", get(markers::api_markers))
+        .route("/api/markers/previews", get(markers::api_marker_previews))
+        .route("/api/markers/navigate", get(markers::api_marker_navigate))
+        .route("/api/markers/toggle", post(markers::api_marker_toggle))
+        .route("/api/markers/add", post(markers::api_marker_add))
+        .route("/api/markers/clear", post(markers::api_marker_clear))
+        .route("/api/markers/save", post(markers::api_marker_save))
         .route("/api/ops/status", get(ops::api_operation_status))
         .route("/api/ops/cancel", post(ops::api_operation_cancel))
         .route("/api/sort/save", post(ops::api_sort_save))
@@ -653,6 +661,152 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sparse_bookmarks_follow_edits_undo_redo_and_viewport_queries() {
+        let f = scratch_file("bookmarks.txt", b"zero\none\ntwo\nthree\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/markers/toggle",
+                &host,
+                Some(&origin),
+                r#"{"kind":"bookmark","line":2}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"marked\":true"), "body: {body}");
+        assert!(body.contains("\"count\":1"), "body: {body}");
+
+        // The viewport returns only its sparse marker sidecar, never a
+        // document-sized bitmap.
+        let (status, body) = send(addr, get("/api/lines?start=2&count=1", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(
+            body.contains(r#""markers":[{"kind":"bookmark","line":2}]"#),
+            "body: {body}"
+        );
+
+        // Inserting one line at the top moves the bookmark with its content.
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":0,"text":"head\n"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+
+        let (status, body) = send(
+            addr,
+            get("/api/markers?kind=bookmark&start=0&limit=20", &host),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"lines\":[3]"), "body: {body}");
+
+        let (status, body) =
+            send(addr, post_json("/api/edit/undo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(
+            addr,
+            get("/api/markers?kind=bookmark&start=0&limit=20", &host),
+        )
+        .await;
+        assert!(body.contains("\"lines\":[2]"), "body: {body}");
+
+        let (status, body) =
+            send(addr, post_json("/api/edit/redo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(
+            addr,
+            get(
+                "/api/markers/navigate?kind=bookmark&from=3&direction=next&wrap=true",
+                &host,
+            ),
+        )
+        .await;
+        assert!(body.contains("\"line\":3"), "body: {body}");
+        assert!(body.contains("\"wrapped\":true"), "body: {body}");
+
+        let (status, body) = send(
+            addr,
+            get(
+                "/api/markers/previews?kind=bookmark&start=0&limit=20",
+                &host,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"line\":3"), "body: {body}");
+        assert!(body.contains("\"text\":\"two\""), "body: {body}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/markers/clear",
+                &host,
+                Some(&origin),
+                r#"{"kind":"bookmark"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"count\":0"), "body: {body}");
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/markers/add",
+                &host,
+                Some(&origin),
+                r#"{"kind":"bookmark","lines":[0,1,1]}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"added\":2"), "body: {body}");
+        assert!(body.contains("\"count\":2"), "body: {body}");
+
+        let exported = f.parent().unwrap().join("bookmarks-export.txt");
+        let request = serde_json::json!({
+            "kind": "bookmark",
+            "path": exported.to_string_lossy(),
+            "overwrite": false
+        })
+        .to_string();
+        let (status, body) = send(
+            addr,
+            post_json("/api/markers/save", &host, Some(&origin), &request),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"lines\":2"), "body: {body}");
+        assert_eq!(std::fs::read(&exported).unwrap(), b"head\nzero");
+
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/markers/toggle",
+                &host,
+                Some(&origin),
+                r#"{"kind":"bookmark","line":18446744073709551615}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 400);
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_file(exported);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

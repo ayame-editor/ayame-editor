@@ -9,6 +9,7 @@ export type LineRecord = {
 
 export type LinesResponse = {
   lines: LineRecord[];
+  markers?: { kind: string; line: number }[];
   total: number;
 };
 
@@ -39,6 +40,55 @@ export type SearchResponse = {
 export type BatchEditResponse = {
   carets?: { line: number; col: number }[];
   stats: { total_lines: number };
+};
+
+export type MarkerMutationResponse = {
+  kind: string;
+  line: number;
+  marked: boolean;
+  count: number;
+  limit: number;
+};
+
+export type MarkerListResponse = {
+  kind: string;
+  total: number;
+  lines: number[];
+  truncated: boolean;
+};
+
+export type MarkerBulkResponse = {
+  kind: string;
+  added: number;
+  count: number;
+  limit: number;
+  limit_reached: boolean;
+};
+
+export type MarkerSaveRequest = {
+  kind: string;
+  path: string;
+  overwrite: boolean;
+};
+
+export type MarkerSaveResponse = {
+  path: string;
+  lines: number;
+  bytes: number;
+};
+
+export type MarkerNavigateResponse = {
+  kind: string;
+  line: number | null;
+  count: number;
+  wrapped: boolean;
+};
+
+export type MarkerPreviewResponse = {
+  kind: string;
+  total: number;
+  entries: { line: number; text: string; truncated: boolean }[];
+  truncated: boolean;
 };
 
 export type ApiError = Error & { code?: string };

@@ -12,6 +12,7 @@ import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { applyStaticI18n, currentLocale, t } from "./i18n.js";
 import { openNewWindow, setAppTitle } from "./app.js";
 import {
+  bookmarksToFile,
   grepToFile,
   saveAllTabs,
   saveCopy,
@@ -84,7 +85,17 @@ import {
   showSettings,
   updateSetting,
 } from "./settings.js";
+import {
+  bookmarkSearchMatches,
+  clearBookmarks,
+  nextBookmark,
+  previousBookmark,
+  selectBookmarkedLines,
+  showBookmarkList,
+  toggleBookmark,
+} from "./bookmarks.js";
 
+export { showPopupMenu } from "./popup-menu.js";
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
 
 export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
@@ -565,72 +576,6 @@ export function initContextMenu() {
   });
 }
 
-// ---- reusable pop-up menu (tab / font-size right-click) ---------------------
-
-export interface PopupMenuItem {
-  label?: string;
-  action?: () => void;
-  disabled?: boolean;
-  checked?: boolean;
-  separator?: boolean;
-}
-
-// A lightweight context menu positioned at (x, y). Reuses the .file-menu look
-// and the .ctx-menu pointer positioning, and dismisses on outside click / Esc.
-export function showPopupMenu(x: number, y: number, items: PopupMenuItem[]) {
-  document.getElementById("popup-menu")?.remove();
-  const menu = document.createElement("div");
-  menu.id = "popup-menu";
-  menu.className = "file-menu ctx-menu";
-  menu.setAttribute("role", "menu");
-  const close = () => {
-    menu.remove();
-    document.removeEventListener("pointerdown", onDown, true);
-    document.removeEventListener("keydown", onKey, true);
-  };
-  const onDown = (e: Event) => {
-    if (!(e.target as any)?.closest?.("#popup-menu")) close();
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-    }
-  };
-  for (const it of items) {
-    if (it.separator) {
-      const sep = document.createElement("div");
-      sep.className = "menu-sep";
-      menu.append(sep);
-      continue;
-    }
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "menu-item" + (it.checked ? " checked" : "");
-    b.setAttribute("role", "menuitem");
-    b.disabled = !!it.disabled;
-    const label = document.createElement("span");
-    label.className = "menu-label";
-    label.textContent = it.label || "";
-    b.append(label);
-    b.addEventListener("click", () => {
-      close();
-      it.action?.();
-    });
-    menu.append(b);
-  }
-  document.body.append(menu);
-  const mw = menu.offsetWidth;
-  const mh = menu.offsetHeight;
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - mw - 8))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - mh - 8))}px`;
-  // Defer wiring the dismiss listeners so the opening right-click doesn't close it.
-  setTimeout(() => {
-    document.addEventListener("pointerdown", onDown, true);
-    document.addEventListener("keydown", onKey, true);
-  }, 0);
-}
-
 // ---- status bar ------------------------------------------------------------
 
 export function updateStatusMeta() {
@@ -791,6 +736,14 @@ export const ACTIONS: Record<
   find: { run: () => showFind(), globalShortcut: true },
   replace: { run: () => showFind(true), globalShortcut: true },
   gotoLine: { run: promptGotoLine, globalShortcut: true },
+  toggleBookmark: { run: () => toggleBookmark(), globalShortcut: true, editorOnly: true },
+  nextBookmark: { run: nextBookmark, globalShortcut: true, editorOnly: true },
+  previousBookmark: { run: previousBookmark, globalShortcut: true, editorOnly: true },
+  showBookmarks: { run: showBookmarkList, globalShortcut: true, editorOnly: true },
+  bookmarkMatches: { run: bookmarkSearchMatches, globalShortcut: true, editorOnly: true },
+  saveBookmarks: { run: bookmarksToFile, globalShortcut: true, editorOnly: true },
+  selectBookmarks: { run: selectBookmarkedLines, globalShortcut: true, editorOnly: true },
+  clearBookmarks: { run: clearBookmarks, globalShortcut: true, editorOnly: true },
   selectAll: { run: selectAll, globalShortcut: true, editorOnly: true },
   selectNextOccurrence: { run: selectNextOccurrence },
   addCursorAbove: { run: addCursorAbove },
@@ -859,6 +812,14 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "newFile",
   "newWindow",
   "gotoLine",
+  "toggleBookmark",
+  "nextBookmark",
+  "previousBookmark",
+  "showBookmarks",
+  "bookmarkMatches",
+  "saveBookmarks",
+  "selectBookmarks",
+  "clearBookmarks",
   "closeTab",
   "nextTab",
   "prevTab",

@@ -100,6 +100,11 @@ export function setModalOpen(modal, open) {
   refreshInert();
 }
 
+export function modalVisible(id: string) {
+  const modal = document.getElementById(id);
+  return !!modal && !modal.classList.contains("hidden");
+}
+
 // Tab-focusable descendants, in DOM order, skipping disabled controls and
 // anything inside a hidden/inert subtree (jsdom has no layout, so we test the
 // class/attribute rather than offsetParent).

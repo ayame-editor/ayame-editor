@@ -122,6 +122,15 @@
             <button class="menu-item" data-menu-action="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
             <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label" data-i18n="menu.gotoLine">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="toggleBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.toggle">ブックマークを切り替え</span><span class="menu-key" data-key-action="toggleBookmark">Ctrl+F2</span></button>
+            <button class="menu-item" data-menu-action="nextBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.next">次のブックマーク</span><span class="menu-key" data-key-action="nextBookmark">F2</span></button>
+            <button class="menu-item" data-menu-action="previousBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.previous">前のブックマーク</span><span class="menu-key" data-key-action="previousBookmark">Shift+F2</span></button>
+            <button class="menu-item" data-menu-action="showBookmarks" role="menuitem"><span class="menu-label" data-i18n="bookmark.showList">ブックマーク一覧</span><span class="menu-key" data-key-action="showBookmarks">Ctrl+Shift+F2</span></button>
+            <button class="menu-item" data-menu-action="bookmarkMatches" role="menuitem"><span class="menu-label" data-i18n="bookmark.addMatches">検索一致行をブックマークに追加</span><span class="menu-key" data-key-action="bookmarkMatches"></span></button>
+            <button class="menu-item" data-menu-action="saveBookmarks" role="menuitem"><span class="menu-label" data-i18n="bookmark.save">ブックマーク行を新しいファイルへ保存</span><span class="menu-key" data-key-action="saveBookmarks"></span></button>
+            <button class="menu-item" data-menu-action="selectBookmarks" role="menuitem"><span class="menu-label" data-i18n="bookmark.selectAll">ブックマーク行をすべて選択</span><span class="menu-key" data-key-action="selectBookmarks"></span></button>
+            <button class="menu-item" data-menu-action="clearBookmarks" role="menuitem"><span class="menu-label" data-i18n="bookmark.clear">ブックマークをすべて消去</span><span class="menu-key" data-key-action="clearBookmarks">Alt+F2</span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="duplicateLine" role="menuitem"><span class="menu-label" data-i18n="menu.duplicateLine">行を複製</span><span class="menu-key" data-key-action="duplicateLine">Ctrl+Shift+D</span></button>
             <button class="menu-item" data-menu-action="moveLineUp" role="menuitem"><span class="menu-label" data-i18n="menu.moveLineUp">行を上へ移動</span><span class="menu-key" data-key-action="moveLineUp">Alt+↑</span></button>
             <button class="menu-item" data-menu-action="moveLineDown" role="menuitem"><span class="menu-label" data-i18n="menu.moveLineDown">行を下へ移動</span><span class="menu-key" data-key-action="moveLineDown">Alt+↓</span></button>
@@ -574,6 +583,23 @@
       </div>
     </div>
 
+    <!-- Sparse bookmark navigator. Only one bounded preview page is decoded
+         at a time; the marker store and next/previous navigation stay server-side. -->
+    <div id="bookmark-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel bookmark-panel" role="dialog" aria-label="ブックマーク一覧" data-i18n-aria-label="bookmark.showList">
+        <div class="modal-head">
+          <div class="modal-title" data-i18n="bookmark.showList">ブックマーク一覧</div>
+          <button id="bookmark-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
+        </div>
+        <div class="bookmark-body">
+          <div id="bookmark-summary" class="bookmark-summary" role="status" aria-live="polite"></div>
+          <div id="bookmark-empty" class="bookmark-empty hidden" data-i18n="bookmark.none">ブックマークはありません</div>
+          <div id="bookmark-list" class="bookmark-list" role="listbox" aria-label="ブックマーク一覧" data-i18n-aria-label="bookmark.showList"></div>
+          <button id="bookmark-more" class="cmd hidden" type="button" data-i18n="bookmark.loadMore">さらに表示</button>
+        </div>
+      </div>
+    </div>
+
     <!-- フォルダ内検索 (Grep): recursive multi-file search results. Each hit is
          a button that opens its file and jumps to the line. -->
     <div id="grep-modal" class="modal hidden" aria-hidden="true">
@@ -657,6 +683,9 @@
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="find" role="menuitem"><span class="menu-label" data-i18n="menu.find">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
       <button class="menu-item" data-ctx="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
+      <div class="menu-sep" aria-hidden="true"></div>
+      <button class="menu-item" data-ctx="toggleBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.toggle">ブックマークを切り替え</span><span class="menu-key" data-key-action="toggleBookmark">Ctrl+F2</span></button>
+      <button class="menu-item" data-ctx="showBookmarks" role="menuitem"><span class="menu-label" data-i18n="bookmark.showList">ブックマーク一覧</span><span class="menu-key" data-key-action="showBookmarks">Ctrl+Shift+F2</span></button>
       <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="sortSave" role="menuitem"><span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key"></span></button>
       <button class="menu-item" data-ctx="splitFile" role="menuitem"><span class="menu-label" data-i18n="menu.split">ファイルを分割</span><span class="menu-key"></span></button>

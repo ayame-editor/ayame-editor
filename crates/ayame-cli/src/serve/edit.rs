@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use ayame_core::{BatchEdit, EditLine, EditStats, Encoding, Eol, SaveResult};
+use ayame_core::{BatchEdit, EditLine, EditStats, Encoding, Eol, LineMarker, SaveResult};
 use serde::{Deserialize, Serialize};
 
 use crate::temp_paths;
@@ -25,6 +25,7 @@ pub(super) struct LinesResponse {
     start: u64,
     total: u64,
     lines: Vec<EditLine>,
+    markers: Vec<LineMarker>,
 }
 
 pub(super) async fn api_lines(
@@ -37,13 +38,24 @@ pub(super) async fn api_lines(
     let snapshot = state.read(|ws| {
         // An empty workspace has no lines; answer with an empty page rather
         // than an error so the viewport can render nothing gracefully.
-        ws.doc().map(|doc| (doc.clone(), ws.edits.view_clone()))
+        ws.doc().map(|doc| {
+            (
+                doc.clone(),
+                ws.edits.view_clone(),
+                super::markers::visible_markers(
+                    ws.markers(),
+                    q.start,
+                    q.start.saturating_add(count),
+                ),
+            )
+        })
     });
-    let Some((doc, edits)) = snapshot else {
+    let Some((doc, edits, markers)) = snapshot else {
         return Json(LinesResponse {
             start: q.start,
             total: 0,
             lines: Vec::new(),
+            markers: Vec::new(),
         });
     };
     let start = q.start;
@@ -51,12 +63,14 @@ pub(super) async fn api_lines(
         start,
         total: edits.total_lines(&doc),
         lines: edits.lines(&doc, start, count),
+        markers,
     })
     .await
     .unwrap_or_else(|_| LinesResponse {
         start,
         total: 0,
         lines: Vec::new(),
+        markers: Vec::new(),
     });
     Json(response)
 }
@@ -86,10 +100,25 @@ pub(super) async fn api_edit_replace_range(
     Json(req): Json<ReplaceRangeRequest>,
 ) -> Result<Json<ReplaceRangeResponse>, ApiError> {
     state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        let (caret_line, caret_col) = edits
-            .replace_range(doc, req.l0, req.c0, req.l1, req.c1, &req.text)
-            .map_err(bad_request)?;
+        let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
+        let marker_edit =
+            super::markers::range_line_edit(edits.total_lines(doc), req.l0, req.l1, &req.text)
+                .map_err(bad_request)?;
+        let pending = markers.begin([marker_edit]).map_err(bad_request)?;
+        let revision = edits.revision();
+        let (caret_line, caret_col) =
+            match edits.replace_range(doc, req.l0, req.c0, req.l1, req.c1, &req.text) {
+                Ok(caret) => caret,
+                Err(error) => {
+                    markers.rollback(pending);
+                    return Err(bad_request(error));
+                }
+            };
+        if edits.revision() == revision {
+            markers.rollback(pending);
+        } else {
+            markers.commit(pending);
+        }
         Ok(Json(ReplaceRangeResponse {
             stats: edits.stats(doc),
             caret_line,
@@ -125,8 +154,23 @@ pub(super) async fn api_edit_replace_batch(
     Json(req): Json<ReplaceBatchRequest>,
 ) -> Result<Json<ReplaceBatchResponse>, ApiError> {
     state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        let carets = edits.replace_batch(doc, &req.edits).map_err(bad_request)?;
+        let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
+        let marker_edits = super::markers::batch_line_edits(&req.edits, edits.total_lines(doc))
+            .map_err(bad_request)?;
+        let pending = markers.begin(marker_edits).map_err(bad_request)?;
+        let revision = edits.revision();
+        let carets = match edits.replace_batch(doc, &req.edits) {
+            Ok(carets) => carets,
+            Err(error) => {
+                markers.rollback(pending);
+                return Err(bad_request(error));
+            }
+        };
+        if edits.revision() == revision {
+            markers.rollback(pending);
+        } else {
+            markers.commit(pending);
+        }
         Ok(Json(ReplaceBatchResponse {
             stats: edits.stats(doc),
             carets: carets
@@ -152,10 +196,25 @@ pub(super) async fn api_edit_replace_rect(
     Json(req): Json<ReplaceRectRequest>,
 ) -> Result<Json<ReplaceRangeResponse>, ApiError> {
     state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        let (caret_line, caret_col) = edits
-            .replace_rect(doc, req.l0, req.l1, req.c0, req.c1, &req.text)
-            .map_err(bad_request)?;
+        let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
+        // Rectangular edits cannot add/remove lines, but an empty marker
+        // record still keeps marker undo/redo generations aligned with the
+        // edit overlay's single transaction.
+        let pending = markers.begin([]).map_err(bad_request)?;
+        let revision = edits.revision();
+        let (caret_line, caret_col) =
+            match edits.replace_rect(doc, req.l0, req.l1, req.c0, req.c1, &req.text) {
+                Ok(caret) => caret,
+                Err(error) => {
+                    markers.rollback(pending);
+                    return Err(bad_request(error));
+                }
+            };
+        if edits.revision() == revision {
+            markers.rollback(pending);
+        } else {
+            markers.commit(pending);
+        }
         Ok(Json(ReplaceRangeResponse {
             stats: edits.stats(doc),
             caret_line,
@@ -566,8 +625,10 @@ pub(super) async fn api_edit_undo(
     State(state): State<SharedState>,
 ) -> Result<Json<EditStats>, ApiError> {
     state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        edits.undo();
+        let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
+        if edits.undo() {
+            markers.undo();
+        }
         Ok(Json(edits.stats(doc)))
     })
 }
@@ -576,8 +637,10 @@ pub(super) async fn api_edit_redo(
     State(state): State<SharedState>,
 ) -> Result<Json<EditStats>, ApiError> {
     state.write(|ws| {
-        let (doc, edits) = ws.doc_and_edits_mut()?;
-        edits.redo();
+        let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
+        if edits.redo() {
+            markers.redo();
+        }
         Ok(Json(edits.stats(doc)))
     })
 }

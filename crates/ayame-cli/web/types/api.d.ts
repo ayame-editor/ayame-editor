@@ -50,6 +50,32 @@ export type RecoverRequest = { discard: boolean, };
 
 export type ReopenRequest = { encoding: string, };
 
+export type MarkerToggleRequest = { kind: string, line: bigint, };
+
+export type MarkerBulkRequest = { kind: string, lines: Array<bigint>, };
+
+export type MarkerBulkResponse = { kind: string, added: bigint, count: bigint, limit: bigint, limit_reached: boolean, };
+
+export type MarkerClearRequest = { kind: string, };
+
+export type MarkerSaveRequest = { kind: string, path: string, overwrite: boolean, };
+
+export type MarkerSaveResponse = { path: string, lines: bigint, bytes: bigint, };
+
+export type MarkerMutationResponse = { kind: string, line: bigint, marked: boolean, count: bigint, limit: bigint, };
+
+export type MarkerListQuery = { kind: string, start: bigint, limit: number, };
+
+export type MarkerListResponse = { kind: string, total: bigint, lines: Array<bigint>, truncated: boolean, };
+
+export type MarkerNavigateQuery = { kind: string, from: bigint, direction: string, wrap: boolean, };
+
+export type MarkerNavigateResponse = { kind: string, line: bigint | null, count: bigint, wrapped: boolean, };
+
+export type MarkerPreview = { line: bigint, text: string, truncated: boolean, };
+
+export type MarkerPreviewResponse = { kind: string, total: bigint, entries: Array<MarkerPreview>, truncated: boolean, };
+
 export type SelectionSaveRequest = { path: string, overwrite: boolean, rect: boolean, l0: bigint, c0: number, l1: bigint, c1: number, };
 
 export type SelectionSaveResponse = { path: string, lines: bigint, bytes: bigint, };

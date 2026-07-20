@@ -1,5 +1,5 @@
 // Ayame Editor — input module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, initModalFocusTrap } from "./dom.js";
+import { $, initModalFocusTrap, modalVisible } from "./dom.js";
 import { DEFAULT_SETTINGS, LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
 import {
@@ -100,6 +100,7 @@ export function anyModalOpen() {
     keymapVisible() ||
     commandPaletteVisible() ||
     grepVisible() ||
+    modalVisible("bookmark-modal") ||
     openerVisible() ||
     convertVisible() ||
     loadingVisible()
@@ -114,6 +115,7 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
   [fileMenuVisible, () => hideFileMenu(true)],
   [keymapVisible, hideKeymap],
   [commandPaletteVisible, hideCommandPalette],
+  [() => modalVisible("bookmark-modal"), () => $("bookmark-close").click()],
   [grepVisible, hideGrep],
   [settingsVisible, hideSettings],
   [convertVisible, hideConvert],

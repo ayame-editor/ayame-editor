@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/save.js", () => ({
   convertSave: vi.fn(),
@@ -92,9 +92,45 @@ vi.mock("../src/settings.js", () => ({
 
 import { focusEditor } from "../src/editor.js";
 import { insertNewline } from "../src/edits.js";
-import { onCompEnd, onConvertModalKey, onEditKey } from "../src/input.js";
+import {
+  anyModalOpen,
+  onCompEnd,
+  onConvertModalKey,
+  onEditKey,
+  onGlobalKey,
+} from "../src/input.js";
 import { hideFind } from "../src/search.js";
 import { state } from "../src/state.js";
+
+describe("bookmark modal keyboard ownership (#241)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <div id="bookmark-modal">
+        <button id="bookmark-close"></button>
+      </div>`;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("blocks editor shortcuts and closes from the global Escape path", () => {
+    expect(anyModalOpen()).toBe(true);
+    const close = vi.fn();
+    document.getElementById("bookmark-close")!.addEventListener("click", close);
+    const event = {
+      key: "Escape",
+      target: document.body,
+      preventDefault: vi.fn(),
+    };
+
+    onGlobalKey(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
 
 describe("editor Escape handling", () => {
   beforeEach(() => {
