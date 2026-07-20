@@ -23,6 +23,11 @@ use super::edit::{
     CaretPosition, EditSaveRequest, EditSaveResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
+use super::markers::{
+    MarkerBulkRequest, MarkerBulkResponse, MarkerClearRequest, MarkerListQuery, MarkerListResponse,
+    MarkerMutationResponse, MarkerNavigateQuery, MarkerNavigateResponse, MarkerPreview,
+    MarkerPreviewResponse, MarkerSaveRequest, MarkerSaveResponse, MarkerToggleRequest,
+};
 use super::ops::{
     ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest,
     OperationCancelRequest, ReplaceSaveRequest, SortSaveRequest, SplitSaveRequest,
@@ -50,6 +55,19 @@ fn bridge() -> Bridge {
         .decl(&decl::<EditSaveResponse>())
         .decl(&decl::<RecoverRequest>())
         .decl(&decl::<ReopenRequest>())
+        .decl(&decl::<MarkerToggleRequest>())
+        .decl(&decl::<MarkerBulkRequest>())
+        .decl(&decl::<MarkerBulkResponse>())
+        .decl(&decl::<MarkerClearRequest>())
+        .decl(&decl::<MarkerSaveRequest>())
+        .decl(&decl::<MarkerSaveResponse>())
+        .decl(&decl::<MarkerMutationResponse>())
+        .decl(&decl::<MarkerListQuery>())
+        .decl(&decl::<MarkerListResponse>())
+        .decl(&decl::<MarkerNavigateQuery>())
+        .decl(&decl::<MarkerNavigateResponse>())
+        .decl(&decl::<MarkerPreview>())
+        .decl(&decl::<MarkerPreviewResponse>())
         .decl(&decl::<SelectionSaveRequest>())
         .decl(&decl::<SelectionSaveResponse>())
         .decl(&decl::<ArtifactOpStatus>())

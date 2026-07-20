@@ -110,6 +110,16 @@ export function cachedLine(line) {
   return i >= 0 && i < c.lines.length ? c.lines[i] : null;
 }
 
+export function cacheLineResponse(start: number, response: LinesResponse) {
+  state.cache = { start, lines: response.lines };
+  state.bookmarks = new Set(
+    (response.markers || [])
+      .filter((marker) => marker.kind === "bookmark")
+      .map((marker) => marker.line),
+  );
+  state.total = response.total;
+}
+
 export function ensureData(start, count) {
   const need0 = start;
   const need1 = Math.min(state.total, start + count);
@@ -128,8 +138,7 @@ export function ensureData(start, count) {
     })
     .then((res) => {
       if (token !== state.loadToken) return; // a newer request superseded us
-      state.cache = { start: fstart, lines: res.lines };
-      state.total = res.total;
+      cacheLineResponse(fstart, res);
       render();
     })
     .catch((e) => {
@@ -183,6 +192,19 @@ export function fillRow(row, line, rec) {
   row.className = "row";
   row.dataset.line = String(line);
   ln.textContent = formatLineNo(line + 1);
+  const bookmarked = state.bookmarks.has(line);
+  row.classList.toggle("bookmarked", bookmarked);
+  ln.setAttribute("role", "button");
+  ln.setAttribute("tabindex", "-1");
+  ln.setAttribute(
+    "aria-label",
+    t(bookmarked ? "bookmark.gutterRemove" : "bookmark.gutterAdd", {
+      line: formatLineNo(line + 1),
+    }),
+  );
+  ln.title = t(bookmarked ? "bookmark.gutterRemove" : "bookmark.gutterAdd", {
+    line: formatLineNo(line + 1),
+  });
   tx.textContent = "";
   tx.classList.remove("pending");
   row.classList.toggle("inserted", !!rec?.inserted);
@@ -207,7 +229,12 @@ export function fillRow(row, line, rec) {
 export function fillEofRow(row) {
   row.className = "row eof";
   row.dataset.line = "-1";
-  row.firstChild.textContent = "";
+  const ln = row.firstChild;
+  ln.textContent = "";
+  ln.removeAttribute("role");
+  ln.removeAttribute("tabindex");
+  ln.removeAttribute("aria-label");
+  ln.removeAttribute("title");
   const tx = row.lastChild;
   tx.className = "tx";
   tx.textContent = t("editor.eofMarker");
@@ -574,6 +601,8 @@ export function revealLine(line) {
 
 export function clearLineCache() {
   state.cache = { start: 0, lines: [] };
+  state.bookmarks = new Set();
+  state.bookmarkCount = 0;
   state.loadToken++;
 }
 

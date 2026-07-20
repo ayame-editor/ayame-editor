@@ -7,7 +7,7 @@ vi.mock("../src/selection.js", () => ({
 vi.mock("../src/menus.js", () => ({ updateStatusPos: vi.fn() }));
 vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
 
-import { ensureData, formatLineNo } from "../src/editor.js";
+import { cacheLineResponse, ensureData, fillRow, formatLineNo } from "../src/editor.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -39,6 +39,34 @@ describe("line-number formatting (#49)", () => {
     delete state.settings.lineNumberCommas;
     expect(formatLineNo(1000)).toBe("1,000");
     state.settings.lineNumberCommas = true;
+  });
+});
+
+describe("sparse bookmark gutter rendering (#241)", () => {
+  it("replaces the marker cache together with each viewport page", () => {
+    state.bookmarks = new Set([99]);
+    cacheLineResponse(40, {
+      lines: [{ number: 40, text: "visible" }],
+      markers: [{ kind: "bookmark", line: 40 }],
+      total: 10_000_000_000,
+    });
+    expect(state.bookmarks).toEqual(new Set([40]));
+    expect(state.cache.start).toBe(40);
+    expect(state.total).toBe(10_000_000_000);
+  });
+
+  it("marks only bookmarked pooled rows and exposes the gutter as a button", () => {
+    const row = document.createElement("div");
+    row.append(document.createElement("span"), document.createElement("span"));
+    state.bookmarks = new Set([41]);
+
+    fillRow(row, 41, { text: "marked" });
+    expect(row.classList.contains("bookmarked")).toBe(true);
+    expect(row.firstElementChild?.getAttribute("role")).toBe("button");
+    expect(row.firstElementChild?.getAttribute("aria-label")).toContain("42");
+
+    fillRow(row, 42, { text: "plain" });
+    expect(row.classList.contains("bookmarked")).toBe(false);
   });
 });
 

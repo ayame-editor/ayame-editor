@@ -8,6 +8,7 @@ use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
 use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
 use serde::{Deserialize, Serialize};
 
+use super::markers::MarkerSession;
 use super::ops::WorkerInput;
 use super::{bad_request, internal, ApiError};
 
@@ -45,6 +46,7 @@ pub(super) fn lock_recover<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 struct InactiveTab {
     doc: Shared,
     edits: EditSession,
+    markers: MarkerSession,
     /// Aside files (see [`Workspace::aside_files`]) travelling with the tab.
     aside_files: Vec<PathBuf>,
     /// Pending crash-recovery decision travelling with the tab (see
@@ -66,6 +68,10 @@ struct TabList {
 pub(super) struct Workspace {
     doc: Option<Shared>,
     pub(super) edits: EditSession,
+    /// Session-only sparse markers for the active document. This travels with
+    /// tabs alongside `edits`, but is not document content and never enters
+    /// save snapshots or the crash WAL.
+    markers: MarkerSession,
     /// Aside files left behind by in-place saves of the ACTIVE document: the
     /// pre-save file is renamed to a hidden sibling so the live mmap keeps its
     /// inode readable. Each save best-effort deletes the accumulated entries
@@ -102,14 +108,30 @@ impl Workspace {
         }
     }
 
-    /// Like [`Workspace::doc_and_edits`] but with a mutable overlay, split so
-    /// a handler can mutate the edits while reading the document.
-    pub(super) fn doc_and_edits_mut(&mut self) -> Result<(&Shared, &mut EditSession), ApiError> {
-        let Workspace { doc, edits, .. } = self;
+    /// The active document, edit overlay, and marker sidecar under the same
+    /// workspace write guard. Edit endpoints use this to commit line changes
+    /// and marker-coordinate transforms atomically.
+    pub(super) fn doc_edits_markers_mut(
+        &mut self,
+    ) -> Result<(&Shared, &mut EditSession, &mut MarkerSession), ApiError> {
+        let Workspace {
+            doc,
+            edits,
+            markers,
+            ..
+        } = self;
         match doc {
-            Some(doc) => Ok((doc, edits)),
+            Some(doc) => Ok((doc, edits, markers)),
             None => Err(no_document()),
         }
+    }
+
+    pub(super) fn markers(&self) -> &MarkerSession {
+        &self.markers
+    }
+
+    pub(super) fn markers_mut(&mut self) -> &mut MarkerSession {
+        &mut self.markers
     }
 
     /// Park the currently active tab's live state so a different tab can take
@@ -123,6 +145,7 @@ impl Workspace {
                 // so far; re-selecting the tab re-attaches and snapshots.
                 self.edits.set_wal(None);
                 let edits = std::mem::take(&mut self.edits);
+                let markers = std::mem::take(&mut self.markers);
                 let aside_files = std::mem::take(&mut self.aside_files);
                 let recoverable = self.recoverable.take();
                 self.tabs.inactive.insert(
@@ -130,6 +153,7 @@ impl Workspace {
                     InactiveTab {
                         doc,
                         edits,
+                        markers,
                         aside_files,
                         recoverable,
                     },
@@ -155,12 +179,14 @@ impl Workspace {
             Some(t) => {
                 self.doc = Some(t.doc);
                 self.edits = t.edits;
+                self.markers = t.markers;
                 self.aside_files = t.aside_files;
                 self.recoverable = t.recoverable;
             }
             None => {
                 self.doc = None;
                 self.edits = EditSession::default();
+                self.markers = MarkerSession::default();
                 self.recoverable = None;
             }
         }
@@ -206,6 +232,7 @@ impl Workspace {
         self.tabs.active = Some(id);
         self.doc = Some(doc);
         self.edits = EditSession::default();
+        self.markers = MarkerSession::default();
         self.recoverable = None;
         match wal {
             WalSetup::Attach(w) => self.edits.set_wal(Some(*w)),
@@ -475,6 +502,7 @@ impl AppState {
             ws: RwLock::new(Workspace {
                 doc: shared,
                 edits,
+                markers: MarkerSession::default(),
                 aside_files: Vec::new(),
                 recoverable,
                 tabs,
@@ -730,12 +758,14 @@ impl AppState {
                     // with it any writer handle, so the log file is deletable.
                     ws.doc = Some(t.doc);
                     ws.edits = t.edits;
+                    ws.markers = t.markers;
                     ws.aside_files = t.aside_files;
                     ws.recoverable = t.recoverable;
                 }
                 None => {
                     ws.doc = None;
                     ws.edits = EditSession::default();
+                    ws.markers = MarkerSession::default();
                     ws.recoverable = None;
                 }
             }
@@ -824,12 +854,14 @@ impl AppState {
                     Some(t) => {
                         ws.doc = Some(t.doc);
                         ws.edits = t.edits;
+                        ws.markers = t.markers;
                         ws.aside_files = t.aside_files;
                         ws.recoverable = t.recoverable;
                     }
                     None => {
                         ws.doc = None;
                         ws.edits = EditSession::default();
+                        ws.markers = MarkerSession::default();
                         ws.recoverable = None;
                     }
                 }
@@ -1057,7 +1089,10 @@ impl AppState {
     /// Used by full-reload commits (in-place sort); the in-place SAVE keeps
     /// the overlay and history via [`AppState::commit_in_place_save`] instead.
     pub(super) fn mark_edits_saved(&self) {
-        self.write(|ws| ws.edits = EditSession::default());
+        self.write(|ws| {
+            ws.edits = EditSession::default();
+            ws.markers = MarkerSession::default();
+        });
         self.invalidate_dirty_snapshot(); // clean session: the snapshot temp can go
     }
 
@@ -1226,6 +1261,7 @@ impl AppState {
             }
             ws.doc = Some(Arc::new(doc));
             ws.edits = EditSession::default();
+            ws.markers = MarkerSession::default();
             // Reset: a clean session over the file as it now exists on disk
             // gets a fresh, empty log for the new base identity.
             attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
@@ -1261,6 +1297,7 @@ impl AppState {
         let asides = self.write(|ws| {
             ws.doc = Some(Arc::new(doc));
             ws.edits = EditSession::default();
+            ws.markers = MarkerSession::default();
             // The encoding is part of the log's base identity: start a fresh
             // log recorded against the forced-encoding view.
             attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
@@ -1583,6 +1620,10 @@ impl AppState {
             }
             ws.recoverable = None;
             ws.edits = session;
+            // Recovery installs a different logical view whose transactions
+            // have no marker sidecar in the WAL. Keeping pre-recovery line
+            // numbers would silently misplace them, so invalidate safely.
+            ws.markers = MarkerSession::default();
             let (doc, edits) = ws.doc_and_edits()?;
             Ok((edits.stats(doc), n))
         })?;
@@ -1821,6 +1862,7 @@ mod tests {
                 InactiveTab {
                     doc: ws.doc.as_ref().unwrap().clone(),
                     edits: EditSession::default(),
+                    markers: MarkerSession::default(),
                     aside_files: Vec::new(),
                     recoverable: None,
                 },

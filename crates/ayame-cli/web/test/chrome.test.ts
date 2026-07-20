@@ -441,4 +441,11 @@ describe("application chrome", () => {
     }
     expect(block("#statusbar button.seg-btn")).toMatch(/border:\s*1px solid/);
   });
+
+  it("keeps inactive bookmark-list states visually hidden (#241)", () => {
+    const css = read("style.css");
+    expect(css).toMatch(
+      /\.bookmark-empty\.hidden,\s*#bookmark-more\.hidden\s*\{\s*display:\s*none;/,
+    );
+  });
 });

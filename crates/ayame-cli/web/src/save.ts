@@ -2,7 +2,13 @@
 import { $, commas, displayPath, isUntitled, joinPath, pathDirName, setModalOpen } from "./dom.js";
 import { DEFAULT_SETTINGS, state } from "./state.js";
 import { currentLocale, serverMessage, t, weekdayNames } from "./i18n.js";
-import { api, apiPost, isApiErrorCode } from "./api.js";
+import {
+  api,
+  apiPost,
+  isApiErrorCode,
+  type MarkerSaveRequest,
+  type MarkerSaveResponse,
+} from "./api.js";
 import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
 import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
@@ -801,6 +807,66 @@ async function runGrepSave(query, opts, target) {
   flashCount(t("file.saved", { path: displayPath(res.path) }));
   // Open the extracted lines so the result is immediately inspectable.
   await openPath(res.path);
+}
+
+function suggestedBookmarkPath() {
+  const path = state.stat?.path || "";
+  if (!path || isUntitled(path)) {
+    return joinPath((state.settings.lastSaveDir || "").trim(), "bookmarks.txt");
+  }
+  const shown = displayPath(path);
+  const dir = pathDirName(shown);
+  const base = shown.split(/[\\/]/).pop() || "bookmarks.txt";
+  const dot = base.lastIndexOf(".");
+  const name =
+    dot > 0 ? `${base.slice(0, dot)}.bookmarks${base.slice(dot)}` : `${base}.bookmarks.txt`;
+  return joinPath(dir, name);
+}
+
+export async function bookmarksToFile() {
+  if (!state.stat?.open) return;
+  if (savingCount > 0) {
+    flashCount(t("editor.savingWait"));
+    return;
+  }
+  await settleEditQueue();
+  const target = await showSaveDialog(t("bookmark.save"), suggestedBookmarkPath());
+  if (!target) return;
+  await runBookmarkSave(target);
+}
+
+async function runBookmarkSave(target) {
+  showLoading(t("bookmark.saving"));
+  let result;
+  try {
+    result = await apiPost<MarkerSaveResponse, MarkerSaveRequest>("/api/markers/save", {
+      kind: "bookmark",
+      path: target.path,
+      overwrite: !!target.overwrite,
+    });
+  } catch (error) {
+    hideLoading();
+    if (!target.overwrite && isExistsError(error)) {
+      const overwrite = await askConfirm(
+        t("dialog.overwrite.title"),
+        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
+        { okLabel: t("dialog.overwrite.ok"), danger: true },
+      );
+      if (overwrite) await runBookmarkSave({ ...target, overwrite: true });
+      return;
+    }
+    flashCount(t("bookmark.saveError"), "error");
+    showMessage(t("bookmark.saveError"), serverMessage(error));
+    return;
+  }
+  hideLoading();
+  flashCount(
+    t("bookmark.saved", {
+      count: commas(result.lines),
+      path: displayPath(result.path),
+    }),
+  );
+  await openPath(result.path);
 }
 
 // ---- crash recovery (server-side WAL) ---------------------------------------

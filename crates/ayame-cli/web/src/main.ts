@@ -27,6 +27,7 @@ import {
   refreshTabs,
 } from "./workspace.js";
 import { initSettings } from "./settings.js";
+import { initBookmarks } from "./bookmarks.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest } from "./types/api.js";
 
@@ -57,6 +58,7 @@ export async function boot() {
   initScrollbar();
   initEvents();
   initEditor();
+  initBookmarks();
   initSelection();
   initWorkspace();
   initContextMenu();

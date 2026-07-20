@@ -41,6 +41,7 @@ mod fsync;
 pub mod grep;
 pub mod index;
 mod mapfault;
+pub mod markers;
 pub mod ops;
 pub mod search;
 pub mod split;
@@ -52,6 +53,9 @@ pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};
+pub use markers::{
+    LineEdit, LineMarker, MarkerKind, MarkerSet, MarkerTransform, MAX_MARKERS_PER_KIND,
+};
 pub use ops::{
     DistinctOptions, DistinctResult, FieldSpec, GroupOptions, GroupRow, GroupStats,
     LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions, TopRow,

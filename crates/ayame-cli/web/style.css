@@ -114,6 +114,9 @@
   --chrome-top-h: 38px;
   --gutter-pad-start: var(--space-2);
   --gutter-pad-end: var(--space-5);
+  --marker-rail-w: var(--space-1);
+  --bookmark-panel-w: 44rem;
+  --bookmark-list-max-h: 55vh;
   --modal-edge: 94vw;
   --modal-body-padding:
     var(--space-3) var(--space-3-5) var(--space-3-5);
@@ -1073,6 +1076,20 @@ html.replace-open .find-group .replace-row {
   user-select: none;
 }
 .row.active .ln { background: var(--bg-active-line); }
+.ln[role="button"] { cursor: pointer; }
+.ln[role="button"]:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--mark-bg) 70%, var(--gutter-bg));
+}
+.row.bookmarked .ln {
+  color: var(--mark-fg);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--mark-bg) 82%, var(--gutter-bg));
+  box-shadow: inset var(--marker-rail-w) 0 var(--mark-fg);
+}
+.row.active.bookmarked .ln {
+  background: color-mix(in srgb, var(--mark-bg) 64%, var(--bg-active-line));
+}
 
 .tx { color: var(--fg); }
 .tx.pending { color: var(--fg-faint); }
@@ -1890,6 +1907,76 @@ html.saving .caret.extra { visibility: hidden; }
   gap: var(--space-2-5);
   min-height: 0;
 }
+
+/* ---- sparse bookmark list -------------------------------------------------
+   The list is bounded and paginated; geometry and type use the shared chrome
+   scales so this feature does not introduce another one-off size system. */
+.bookmark-panel {
+  width: min(var(--bookmark-panel-w), calc(100vw - 2 * var(--space-5)));
+}
+.bookmark-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3-5) var(--space-3-5);
+}
+.bookmark-summary,
+.bookmark-empty {
+  color: var(--fg-dim);
+  font-size: var(--fs-ui-sm);
+}
+.bookmark-empty.hidden,
+#bookmark-more.hidden {
+  display: none;
+}
+.bookmark-list {
+  display: flex;
+  flex-direction: column;
+  max-height: var(--bookmark-list-max-h);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.bookmark-list-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-height: var(--control-h);
+  padding: var(--space-1-5) var(--space-2-5);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bookmark-list-row:last-child { border-bottom: 0; }
+.bookmark-list-row:hover,
+.bookmark-list-row:focus-visible {
+  outline: none;
+  background: var(--mark-bg);
+}
+.bookmark-list-line {
+  min-width: 8ch;
+  color: var(--mark-fg);
+  font-family: var(--mono);
+  font-size: var(--fs-ui-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bookmark-list-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+#bookmark-more { align-self: center; }
 .palette-input {
   width: 100%;
 }

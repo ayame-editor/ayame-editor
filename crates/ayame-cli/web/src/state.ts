@@ -23,6 +23,11 @@ export const RECENT_MAX = 12;
 // cap on 最近使ったファイル entries
 export const MAX_COPY_LINES = 20000;
 
+// Creating a multi-selection allocates one small range/caret per bookmark.
+// Keep that explicitly bounded; larger sets remain navigable/listable and can
+// be streamed to a file without constructing DOM or selection objects.
+export const MAX_BOOKMARK_SELECTIONS = 1000;
+
 export const FONT_STACKS = {
   mono: '"SFMono-Regular","Menlo","Consolas","DejaVu Sans Mono","Noto Sans Mono CJK JP","MS Gothic",monospace',
   "mono-jp": '"Consolas","Menlo","Noto Sans Mono CJK JP","MS Gothic",monospace',
@@ -76,6 +81,14 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["findNext", "find.next", "F3"],
   ["findPrev", "find.prev", "Shift+F3"],
   ["gotoLine", "menu.gotoLine", "Ctrl+G"],
+  ["toggleBookmark", "bookmark.toggle", "Ctrl+F2"],
+  ["nextBookmark", "bookmark.next", "F2"],
+  ["previousBookmark", "bookmark.previous", "Shift+F2"],
+  ["showBookmarks", "bookmark.showList", "Ctrl+Shift+F2"],
+  ["bookmarkMatches", "bookmark.addMatches", ""],
+  ["saveBookmarks", "bookmark.save", ""],
+  ["selectBookmarks", "bookmark.selectAll", ""],
+  ["clearBookmarks", "bookmark.clear", "Alt+F2"],
   ["undo", "menu.undo", "Ctrl+Z"],
   ["redo", "menu.redo", ["Ctrl+Y", "Ctrl+Shift+Z"]],
   ["selectAll", "menu.selectAll", "Ctrl+A"],
@@ -133,6 +146,11 @@ export const state = {
   lastMatch: null, // { byte, len }
   searchHits: null,
   searchTruncated: false,
+  // Sparse marker cache for the same range as `cache.lines`. It is replaced,
+  // not accumulated, on each viewport fetch so edits can never leave stale
+  // line-number markers behind.
+  bookmarks: new Set<number>(),
+  bookmarkCount: 0,
   findOpen: false,
   replaceOpen: false,
   history: [],

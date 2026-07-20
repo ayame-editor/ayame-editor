@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/editor.js", () => ({
+  cacheLineResponse: vi.fn((start: number, response: { lines: unknown[]; total: number }) => {
+    state.cache = { start, lines: response.lines };
+    state.total = response.total;
+  }),
   cachedLine: vi.fn(() => null),
   focusEditor: vi.fn(),
   maxFirst: vi.fn(() => 0),
