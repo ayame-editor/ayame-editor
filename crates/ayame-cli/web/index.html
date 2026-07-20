@@ -190,6 +190,11 @@
             <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-tools"></use></svg><span class="btn-label" data-i18n="menu.tools">ツール</span>
           </button>
           <div id="tools-menu" class="file-menu hidden" role="menu" aria-label="ツール" data-i18n-aria-label="menu.tools">
+            <button class="menu-item" data-menu-action="analysisRules" role="menuitem"
+                    title="複数の検索ルールで巨大ログを段階分析します" data-i18n-title="analysis.menuTitle">
+              <span class="menu-label" data-i18n="analysis.title">ログ分析ルール</span><span class="menu-key" data-key-action="analysisRules">Ctrl+Shift+L</span>
+            </button>
+            <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="sortSave" role="menuitem"
                     title="行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます" data-i18n-title="menu.sortTitle">
               <span class="menu-label" data-i18n="menu.sort">ソート</span><span class="menu-key" data-key-action="sortSave"></span>
@@ -252,6 +257,26 @@
                       aria-label="エディタ"></textarea>
           </div>
           <div id="vscrollbar"><div id="vticks"></div><div id="vthumb"></div></div>
+          <!-- Bounded analysis publishes only rule counters and fixed histogram
+               bins here; it never creates one DOM node per document hit. -->
+          <section id="analysis-strip" class="analysis-strip hidden"
+                   aria-label="ログ分析" data-i18n-aria-label="analysis.title">
+            <button id="analysis-manage" class="analysis-profile-button" type="button"
+                    data-i18n-title="analysis.manage" title="分析ルールを管理"></button>
+            <div id="analysis-chips" class="analysis-chips" role="group"
+                 aria-label="分析ルール" data-i18n-aria-label="analysis.rules"></div>
+            <div class="analysis-progress-wrap">
+              <progress id="analysis-progress" max="100" value="0"
+                        aria-label="分析の進捗" data-i18n-aria-label="analysis.progress"></progress>
+              <span id="analysis-progress-label" class="analysis-progress-label"
+                    role="status" aria-live="polite"></span>
+            </div>
+            <button id="analysis-cancel-strip" class="ico analysis-cancel" type="button"
+                    title="分析をキャンセル" aria-label="分析をキャンセル"
+                    data-i18n-title="analysis.cancel" data-i18n-aria-label="analysis.cancel">
+              <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg>
+            </button>
+          </section>
           <!-- Floating in-editor search & replace (VS Code style): overlays the
                top-right of the viewport so the toolbar stays minimal. -->
           <div class="find-group" role="search" aria-label="検索と置換" data-i18n-aria-label="find.group">
@@ -596,6 +621,69 @@
           <div id="bookmark-empty" class="bookmark-empty hidden" data-i18n="bookmark.none">ブックマークはありません</div>
           <div id="bookmark-list" class="bookmark-list" role="listbox" aria-label="ブックマーク一覧" data-i18n-aria-label="bookmark.showList"></div>
           <button id="bookmark-more" class="cmd hidden" type="button" data-i18n="bookmark.loadMore">さらに表示</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="analysis-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel analysis-panel" role="dialog" aria-label="ログ分析ルール"
+           data-i18n-aria-label="analysis.title">
+        <div class="modal-head">
+          <div class="modal-title" data-i18n="analysis.title">ログ分析ルール</div>
+          <button id="analysis-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる"
+                  data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close">
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="analysis-body">
+          <div class="analysis-profile-row">
+            <label class="analysis-field">
+              <span data-i18n="analysis.profile">プロファイル</span>
+              <select id="analysis-profile-select" class="input-control"></select>
+            </label>
+            <label class="analysis-field">
+              <span data-i18n="analysis.profileName">名前</span>
+              <input id="analysis-profile-name" class="input-control" maxlength="120" />
+            </label>
+            <label class="analysis-field analysis-glob-field">
+              <span data-i18n="analysis.fileGlob">対象ファイル (glob・任意)</span>
+              <input id="analysis-file-glob" class="input-control" maxlength="1024"
+                     placeholder="*.log" />
+            </label>
+            <button id="analysis-profile-new" class="cmd" type="button" data-i18n="analysis.newProfile">新規</button>
+            <button id="analysis-profile-delete" class="cmd danger" type="button" data-i18n="analysis.deleteProfile">削除</button>
+          </div>
+          <div class="analysis-rules-head">
+            <span data-i18n="analysis.rules">分析ルール</span>
+            <button id="analysis-rule-add" class="cmd" type="button" data-i18n="analysis.addRule">ルール追加</button>
+          </div>
+          <div id="analysis-rules" class="analysis-rules"></div>
+          <div id="analysis-summary" class="analysis-summary" role="status"
+               aria-live="polite"></div>
+          <section id="analysis-results" class="analysis-results hidden"
+                   aria-label="一致行" data-i18n-aria-label="analysis.results">
+            <div class="analysis-results-toolbar">
+              <label class="analysis-field">
+                <span data-i18n="analysis.results">一致行</span>
+                <select id="analysis-result-rule" class="input-control"></select>
+              </label>
+              <button id="analysis-bookmark" class="cmd" type="button"
+                      data-i18n="analysis.bookmarkMatches">一致行をブックマーク</button>
+              <button id="analysis-save-matches" class="cmd" type="button"
+                      data-i18n="analysis.saveMatches">一致行をファイルへ保存</button>
+            </div>
+            <div id="analysis-hit-list" class="analysis-hit-list" role="listbox"
+                 aria-label="一致行" data-i18n-aria-label="analysis.results"></div>
+            <button id="analysis-hit-more" class="cmd hidden" type="button"
+                    data-i18n="analysis.loadMore">さらに表示</button>
+          </section>
+          <div class="analysis-actions">
+            <button id="analysis-import" class="cmd" type="button" data-i18n="analysis.import">Import</button>
+            <button id="analysis-export" class="cmd" type="button" data-i18n="analysis.export">Export</button>
+            <div class="spacer"></div>
+            <button id="analysis-save-profile" class="cmd" type="button" data-i18n="analysis.saveProfile">保存</button>
+            <button id="analysis-run" class="cmd primary" type="button" data-i18n="analysis.run">分析開始</button>
+          </div>
         </div>
       </div>
     </div>

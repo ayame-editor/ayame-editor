@@ -21,6 +21,8 @@ export const RECENT_KEY = "ayame.recentFiles.v1";
 
 export const RECENT_MAX = 12;
 // cap on 最近使ったファイル entries
+export const ANALYSIS_PROFILES_KEY = "ayame.analysisProfiles.v1";
+
 export const MAX_COPY_LINES = 20000;
 
 // Creating a multi-selection allocates one small range/caret per bookmark.
@@ -108,6 +110,10 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["splitFile", "menu.split", ""],
   ["grepFolder", "menu.grep", ""],
   ["grepSave", "menu.grepSave", ""],
+  ["analysisRules", "analysis.title", "Ctrl+Shift+L"],
+  ["analysisNext", "analysis.next", ""],
+  ["analysisPrevious", "analysis.previous", ""],
+  ["analysisCancel", "analysis.cancel", ""],
   ["caseUpper", "menu.caseUpper", ""],
   ["caseLower", "menu.caseLower", ""],
   ["caseCamel", "menu.caseCamel", ""],
@@ -146,6 +152,16 @@ export const state = {
   lastMatch: null, // { byte, len }
   searchHits: null,
   searchTruncated: false,
+  // Bounded log-analysis state. Profiles persist separately from find history;
+  // status contains only fixed histograms and capped sparse positions.
+  analysisProfiles: [],
+  activeAnalysisProfile: null,
+  analysisOperationId: null,
+  analysisStatus: null,
+  analysisMatchers: [],
+  analysisVisibleRuleIds: new Set<string>(),
+  analysisSelectedRule: null,
+  analysisLastHits: new Map(),
   // Sparse marker cache for the same range as `cache.lines`. It is replaced,
   // not accumulated, on each viewport fetch so edits can never leave stale
   // line-number markers behind.

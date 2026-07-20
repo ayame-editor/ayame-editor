@@ -61,7 +61,11 @@ pub use ops::{
     LineOffsetReader, OrderingReader, SortOptions, SortResult, TopOptions, TopRow,
     DEFAULT_BUDGET_BYTES,
 };
-pub use search::{SearchHit, SearchOptions, SearchResult};
+pub use search::{
+    analysis_histogram_bin_width, AnalysisOptions, AnalysisProgress, AnalysisResult, AnalysisRule,
+    AnalysisRuleResult, SearchHit, SearchOptions, SearchResult, ANALYSIS_DEFAULT_MAX_HITS,
+    ANALYSIS_HISTOGRAM_BINS, ANALYSIS_MAX_RULES,
+};
 pub use split::{
     split_by_lines, split_by_lines_with_progress, SplitOptions, SplitResult, SPLIT_RESULT_MAX_FILES,
 };

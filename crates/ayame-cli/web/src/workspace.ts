@@ -668,6 +668,9 @@ export function onDocumentOpened(stat) {
   focusEditor();
   noteWalError(stat);
   maybeOfferWalRecovery(stat); // async on purpose: the open itself is done
+  void import("./analysis.js").then(({ handleAnalysisDocumentOpened }) =>
+    handleAnalysisDocumentOpened(stat.path),
+  );
 }
 
 export function hasFiles(e) {

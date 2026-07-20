@@ -429,6 +429,7 @@ describe("application chrome", () => {
       ".keymap-panel",
       ".palette-panel",
       ".grep-panel",
+      ".analysis-panel",
       ".confirm-panel",
       ".prompt-panel",
       ".form-panel",

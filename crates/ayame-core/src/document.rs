@@ -34,7 +34,9 @@ use serde::Serialize;
 use crate::encoding::{self, Encoding, Eol};
 use crate::index::{LineIndex, DEFAULT_STRIDE};
 use crate::mapfault::MapWatch;
-use crate::search::{self, SearchHit, SearchOptions, SearchResult};
+use crate::search::{
+    self, AnalysisOptions, AnalysisProgress, AnalysisResult, SearchHit, SearchOptions, SearchResult,
+};
 use crate::{Error, Result};
 
 /// Options for [`Document::open`].
@@ -92,10 +94,55 @@ pub enum TailRefresh {
     Reindex,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(windows)]
+    creation_time: u64,
+    #[cfg(not(any(unix, windows)))]
+    created_nanos: u128,
+}
+
+impl FileIdentity {
+    fn from_metadata(meta: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            Self {
+                device: meta.dev(),
+                inode: meta.ino(),
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt as _;
+            Self {
+                creation_time: meta.creation_time(),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let created_nanos = meta
+                .created()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |duration| duration.as_nanos());
+            Self { created_nanos }
+        }
+    }
+}
+
 pub struct Document {
     path: PathBuf,
     // The mapping must outlive every borrow of `buf()`; `_file` keeps the fd open.
     _file: std::fs::File,
+    /// Stable identity of the opened file handle. Tail polling compares this
+    /// with the current path target so rename-based log rotation is never
+    /// mistaken for an append to the old, still-open inode.
+    identity: FileIdentity,
     // Declared before `mmap`: fields drop in declaration order, so the watch
     // deregisters while its address range is still mapped (see mapfault.rs).
     watch: MapWatch,
@@ -119,6 +166,7 @@ impl Document {
         let path = path.as_ref().to_path_buf();
         let file = std::fs::File::open(&path)?;
         let meta = file.metadata()?;
+        let identity = FileIdentity::from_metadata(&meta);
         let len = meta.len();
         let mtime = mtime_of(&meta);
         // Zero-length files cannot be mmap'd on some platforms; treat as empty.
@@ -182,6 +230,7 @@ impl Document {
         Ok(Document {
             path,
             _file: file,
+            identity,
             watch,
             mmap,
             poisoned: AtomicBool::new(false),
@@ -253,6 +302,22 @@ impl Document {
         Ok(self._file.metadata()?.len())
     }
 
+    /// Whether the path still resolves to the same file identity opened by
+    /// this document. A false result covers rename-based rotation and atomic
+    /// replacement even when the old file descriptor remains readable.
+    pub fn path_identity_matches(&self) -> bool {
+        std::fs::metadata(&self.path)
+            .map(|meta| FileIdentity::from_metadata(&meta) == self.identity)
+            .unwrap_or(false)
+    }
+
+    /// Identity comparison used to adopt an append-only refreshed document
+    /// into a running log-analysis session.
+    #[must_use]
+    pub fn same_file_identity(&self, other: &Document) -> bool {
+        self.identity == other.identity
+    }
+
     /// Poll the file for appended data and, when it grew, extend the line index
     /// incrementally over just the new bytes (the prefix is immutable, so it is
     /// never re-scanned). This is the core of the editor's `tail -f` follow.
@@ -267,6 +332,9 @@ impl Document {
     pub fn refresh_tail(&mut self) -> Result<TailRefresh> {
         if !self.base_ok() {
             // A read already hit a truncated page; the index cannot be trusted.
+            return Ok(TailRefresh::Reindex);
+        }
+        if !self.path_identity_matches() {
             return Ok(TailRefresh::Reindex);
         }
         let new_len = self._file.metadata()?.len();
@@ -314,6 +382,9 @@ impl Document {
             // The shared base already hit a truncated page: needs a full reopen.
             return Ok(None);
         }
+        if !self.path_identity_matches() {
+            return Ok(None);
+        }
         let observed_len = self._file.metadata()?.len();
         if observed_len <= self.len || self.len == 0 {
             return Ok(None);
@@ -341,6 +412,7 @@ impl Document {
         Ok(Some(Document {
             path: self.path.clone(),
             _file: file,
+            identity: self.identity,
             watch,
             mmap: Some(mmap),
             poisoned: AtomicBool::new(false),
@@ -770,6 +842,40 @@ impl Document {
             return Err(self.base_changed());
         }
         Ok(res)
+    }
+
+    /// Run a bounded-memory, multi-rule log analysis over this immutable view.
+    ///
+    /// The callback observes partial exact counts and fixed histograms after
+    /// each scan batch. Returning `false` cancels; `is_canceled` is also
+    /// sampled while high-match-density lines are being walked.
+    pub fn analyze_rules<F, C>(
+        &self,
+        opts: &AnalysisOptions,
+        on_progress: F,
+        is_canceled: C,
+    ) -> Result<AnalysisResult>
+    where
+        F: FnMut(AnalysisProgress<'_>) -> bool,
+        C: FnMut() -> bool,
+    {
+        self.verify_base()?;
+        let result = search::analyze_rules(
+            search::AnalysisSource::new(
+                self.buf(),
+                self.base,
+                self.len,
+                &self.index,
+                self.encoding,
+            ),
+            opts,
+            on_progress,
+            is_canceled,
+        )?;
+        if !self.base_ok() {
+            return Err(self.base_changed());
+        }
+        Ok(result)
     }
 
     pub fn find_next(

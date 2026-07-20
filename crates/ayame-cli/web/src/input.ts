@@ -101,6 +101,7 @@ export function anyModalOpen() {
     commandPaletteVisible() ||
     grepVisible() ||
     modalVisible("bookmark-modal") ||
+    modalVisible("analysis-modal") ||
     openerVisible() ||
     convertVisible() ||
     loadingVisible()
@@ -116,6 +117,7 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
   [keymapVisible, hideKeymap],
   [commandPaletteVisible, hideCommandPalette],
   [() => modalVisible("bookmark-modal"), () => $("bookmark-close").click()],
+  [() => modalVisible("analysis-modal"), () => $("analysis-close").click()],
   [grepVisible, hideGrep],
   [settingsVisible, hideSettings],
   [convertVisible, hideConvert],

@@ -181,32 +181,38 @@ async fn dirty_aware_input(state: &SharedState, kind: &'static str) -> Result<Wo
     })
 }
 
-/// What a dirty-aware *read* (find/search) runs against: the live document
-/// when the session is clean, or the revision-keyed materialized snapshot
-/// (built at most once per revision, cached in the app state) when it is
-/// dirty. Hit line numbers / byte offsets are then view-accurate, because the
-/// materialized file IS the view.
-enum DirtyView {
-    Clean(Arc<Document>),
-    Snapshot {
-        doc: Arc<Document>,
-        /// Keeps the materialized temp alive for this request, even if the
-        /// cache slot is invalidated while a search worker child still reads it.
-        _input: Arc<WorkerInput>,
-    },
+/// What a dirty-aware *read* (find/search/analysis) runs against. The live
+/// identity and edit revision pin the source generation; `doc` is either that
+/// clean mmap or the revision-keyed materialized snapshot. `_input` keeps a
+/// dirty snapshot alive for background analysis and on-demand navigation.
+#[derive(Clone)]
+pub(super) struct DirtyView {
+    live_doc: Arc<Document>,
+    edit_revision: u64,
+    doc: Arc<Document>,
+    _input: Option<Arc<WorkerInput>>,
 }
 
 impl DirtyView {
-    fn doc(&self) -> &Arc<Document> {
-        match self {
-            DirtyView::Clean(doc) => doc,
-            DirtyView::Snapshot { doc, .. } => doc,
-        }
+    pub(super) fn doc(&self) -> &Arc<Document> {
+        &self.doc
     }
 
     /// The on-disk file a worker child should read for this view.
     fn path(&self) -> &Path {
-        self.doc().path()
+        self.doc.path()
+    }
+
+    pub(super) fn live_doc(&self) -> &Arc<Document> {
+        &self.live_doc
+    }
+
+    pub(super) const fn edit_revision(&self) -> u64 {
+        self.edit_revision
+    }
+
+    pub(super) fn is_clean(&self) -> bool {
+        self._input.is_none()
     }
 }
 
@@ -217,19 +223,26 @@ impl DirtyView {
 /// the old snapshot. Two racing builders at the same revision produce
 /// equivalent snapshots; the last store wins and the loser's temp is cleaned
 /// up when its guard drops.
-async fn dirty_view(state: &SharedState) -> Result<DirtyView, ApiError> {
-    let (doc, dirty) = state.doc_and_dirty_edits()?;
+pub(super) async fn dirty_view(state: &SharedState) -> Result<DirtyView, ApiError> {
+    let (doc, dirty, edit_revision) = state.doc_dirty_view_source()?;
     let Some(edits) = dirty else {
         // Clean session: any cached snapshot is stale by definition (its
         // revision can't match a future dirty one) — drop it so its temp goes.
         state.invalidate_dirty_snapshot();
-        return Ok(DirtyView::Clean(doc));
+        return Ok(DirtyView {
+            live_doc: doc.clone(),
+            edit_revision,
+            doc,
+            _input: None,
+        });
     };
     let revision = edits.revision();
     if let Some((snapshot, input)) = state.cached_dirty_snapshot(&doc, revision) {
-        return Ok(DirtyView::Snapshot {
+        return Ok(DirtyView {
+            live_doc: doc,
+            edit_revision: revision,
             doc: snapshot,
-            _input: input,
+            _input: Some(input),
         });
     }
     let scratch_opts = ayame_core::OpenOptions {
@@ -256,14 +269,16 @@ async fn dirty_view(state: &SharedState) -> Result<DirtyView, ApiError> {
     .map_err(internal)?
     .map_err(internal)?;
     state.store_dirty_snapshot(DirtySnapshotCache {
-        doc,
+        doc: doc.clone(),
         revision,
         input: input.clone(),
         snapshot: snapshot.clone(),
     });
-    Ok(DirtyView::Snapshot {
+    Ok(DirtyView {
+        live_doc: doc,
+        edit_revision: revision,
         doc: snapshot,
-        _input: input,
+        _input: Some(input),
     })
 }
 

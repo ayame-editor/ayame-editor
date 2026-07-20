@@ -8,6 +8,7 @@ use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
 use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
 use serde::{Deserialize, Serialize};
 
+use super::analysis::{AnalysisProfile, AnalysisStore};
 use super::markers::MarkerSession;
 use super::ops::WorkerInput;
 use super::{bad_request, internal, ApiError};
@@ -454,6 +455,9 @@ pub(crate) struct AppState {
     /// failed post-save log reset; drained once by the next stat response.
     /// LEAF lock, same discipline as `find_snapshot`.
     wal_error: Mutex<Option<String>>,
+    /// Bounded multi-rule log-analysis operations. Each operation pins one
+    /// immutable document/edit generation and is evicted after four entries.
+    analysis: AnalysisStore,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -469,6 +473,10 @@ pub(super) struct UiState {
     pub(super) recent_files: Vec<String>,
     pub(super) search_history: Vec<String>,
     pub(super) session: SessionState,
+    #[serde(default)]
+    pub(super) analysis_profiles: Vec<AnalysisProfile>,
+    #[serde(default)]
+    pub(super) active_analysis_profile: Option<String>,
 }
 
 impl AppState {
@@ -512,7 +520,12 @@ impl AppState {
             find_snapshot: Mutex::new(None),
             snapshot_builds: AtomicU64::new(0),
             wal_error: Mutex::new(None),
+            analysis: AnalysisStore::default(),
         }
+    }
+
+    pub(super) fn analysis_store(&self) -> &AnalysisStore {
+        &self.analysis
     }
 
     /// Root directory for crash logs — the same per-user cache dir the index
@@ -535,7 +548,13 @@ impl AppState {
         let Ok(bytes) = std::fs::read(path) else {
             return UiState::default();
         };
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        let mut ui: UiState = serde_json::from_slice(&bytes).unwrap_or_default();
+        (ui.analysis_profiles, ui.active_analysis_profile) =
+            super::analysis::sanitize_persisted_profiles(
+                ui.analysis_profiles,
+                ui.active_analysis_profile,
+            );
+        ui
     }
 
     pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, ApiError> {
@@ -545,6 +564,11 @@ impl AppState {
         if let Some(active) = ui.session.active_path.take() {
             ui.session.active_path = clean_one_string(active);
         }
+        (ui.analysis_profiles, ui.active_analysis_profile) =
+            super::analysis::sanitize_persisted_profiles(
+                ui.analysis_profiles,
+                ui.active_analysis_profile,
+            );
         let Some(path) = self.ui_state_path() else {
             return Ok(ui);
         };
@@ -944,10 +968,21 @@ impl AppState {
     /// that path holds exactly the saved view). Sessions passing both checks
     /// skip the copy entirely.
     pub(super) fn doc_and_dirty_edits(&self) -> Result<(Shared, Option<EditSession>), ApiError> {
+        let (doc, dirty, _revision) = self.doc_dirty_view_source()?;
+        Ok((doc, dirty))
+    }
+
+    /// Atomic source pin for a dirty-aware read. The live document identity,
+    /// optional overlay snapshot, and edit revision come from one workspace
+    /// guard so a background analysis can reject results from a later edit or
+    /// tab without mixing generations.
+    pub(super) fn doc_dirty_view_source(
+        &self,
+    ) -> Result<(Shared, Option<EditSession>, u64), ApiError> {
         self.read(|ws| {
             let (doc, edits) = ws.doc_and_edits()?;
             let dirty = (edits.has_edits() || edits.is_dirty()).then(|| edits.clone());
-            Ok((doc.clone(), dirty))
+            Ok((doc.clone(), dirty, edits.revision()))
         })
     }
 
@@ -978,6 +1013,11 @@ impl AppState {
         let Some(snap) = snap else {
             return TailStatus::closed();
         };
+        if !snap.doc.path_identity_matches() {
+            let mut status = TailStatus::at(snap.known_lines, snap.known_bytes);
+            status.changed = true;
+            return status;
+        }
         let disk = match snap.doc.disk_len() {
             Ok(n) => n,
             // A stat failure (the file vanished) reads as "changed externally".

@@ -72,6 +72,11 @@ export function enqueueEdit(fn) {
       state.lastMatch = null;
       state.searchHits = null;
       state.searchTruncated = false;
+      if (result != null) {
+        void import("./analysis.js").then(({ invalidateAnalysisForEdit }) =>
+          invalidateAnalysisForEdit(),
+        );
+      }
       return result;
     })
     .catch((e) => {
@@ -156,6 +161,9 @@ export async function pollTail() {
     // Truncated / rotated / replaced under us: stop and let the user reopen.
     setFollowTail(false);
     flashCount(t("status.tailFileChanged"), "error");
+    void import("./analysis.js").then(({ handleAnalysisFileChanged }) =>
+      handleAnalysisFileChanged(),
+    );
     return;
   }
   // resp.pending_edits: growth seen but not followed (unsaved edits) — pause
@@ -165,6 +173,7 @@ export async function pollTail() {
   // total so the scrollbar grows but the user's position is left untouched.
   const stick = tailAtBottom();
   state.total = resp.lines;
+  await import("./analysis.js").then(({ refreshAnalysisTail }) => refreshAnalysisTail());
   if (stick) state.first = maxFirst();
   try {
     await reloadViewport();

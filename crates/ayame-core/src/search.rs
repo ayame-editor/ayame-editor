@@ -60,6 +60,101 @@ pub struct SearchResult {
     pub truncated: bool,
 }
 
+/// Fixed upper bound for one log-analysis distribution.
+///
+/// The histogram is byte-oriented rather than line-oriented so append-only
+/// files can extend it without allocating a document-sized line table. The
+/// bin width is a power of two and can be doubled while merging adjacent bins
+/// when a tail grows beyond the current extent.
+pub const ANALYSIS_HISTOGRAM_BINS: usize = 2_048;
+
+/// Server/UI admission bound for simultaneously compiled analysis rules.
+pub const ANALYSIS_MAX_RULES: usize = 12;
+
+/// Default sparse hit-position budget for one rule.
+pub const ANALYSIS_DEFAULT_MAX_HITS: usize = 20_000;
+
+/// One deterministic, line-local log-analysis rule.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AnalysisRule {
+    pub id: String,
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub enabled: bool,
+}
+
+/// Incrementally accumulated result for one [`AnalysisRule`].
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AnalysisRuleResult {
+    pub id: String,
+    /// Exact number of matches in the scanned range.
+    pub count: u64,
+    /// Sparse exact positions retained up to the caller's explicit cap.
+    pub hits: Vec<SearchHit>,
+    /// Fixed-size distribution indexed by `byte / histogram_bin_width`.
+    pub histogram: Vec<u64>,
+    /// Exact contribution of the final logical line. Tail-follow subtracts
+    /// this before rescanning that line plus the appended range.
+    pub last_line_count: u64,
+    pub last_line_histogram: Vec<u64>,
+}
+
+/// Result of one bounded-memory analysis pass.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AnalysisResult {
+    pub rules: Vec<AnalysisRuleResult>,
+    pub processed_bytes: u64,
+    pub processed_lines: u64,
+    pub total_bytes: u64,
+    pub total_lines: u64,
+    pub histogram_bin_width: u64,
+    pub last_line: Option<u64>,
+    pub last_line_start_byte: u64,
+}
+
+/// Scanner bounds. `start_line` supports append-only tail refreshes; a full
+/// scan starts at zero. `histogram_bin_width == 0` chooses a power-of-two width
+/// that covers the current document in [`ANALYSIS_HISTOGRAM_BINS`] bins.
+#[derive(Clone, Debug)]
+pub struct AnalysisOptions {
+    pub rules: Vec<AnalysisRule>,
+    pub start_line: u64,
+    pub max_hits_per_rule: usize,
+    pub histogram_bin_width: u64,
+}
+
+impl Default for AnalysisOptions {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            start_line: 0,
+            max_hits_per_rule: ANALYSIS_DEFAULT_MAX_HITS,
+            histogram_bin_width: 0,
+        }
+    }
+}
+
+/// Borrowed progress snapshot. The vectors stay owned by the scanner; callers
+/// can copy only the fixed counters/histograms they need for a UI poll.
+pub struct AnalysisProgress<'a> {
+    pub processed_bytes: u64,
+    pub processed_lines: u64,
+    pub total_bytes: u64,
+    pub total_lines: u64,
+    pub histogram_bin_width: u64,
+    pub rules: &'a [AnalysisRuleResult],
+}
+
+/// Smallest power-of-two byte width whose fixed histogram covers `bytes`.
+#[must_use]
+pub fn analysis_histogram_bin_width(bytes: u64) -> u64 {
+    let needed =
+        bytes.saturating_add(ANALYSIS_HISTOGRAM_BINS as u64 - 1) / ANALYSIS_HISTOGRAM_BINS as u64;
+    needed.max(1).checked_next_power_of_two().unwrap_or(1 << 63)
+}
+
 /// Options for interactive next/previous search.
 #[derive(Clone, Debug)]
 pub struct FindOptions {
@@ -285,6 +380,262 @@ pub fn search(
     Ok(SearchResult { hits, truncated })
 }
 
+/// Analyze several line-local rules in one sequential pass.
+///
+/// The scanner owns only:
+///
+/// * one compiled matcher per rule;
+/// * a fixed 2,048-bin histogram per rule;
+/// * at most `max_hits_per_rule` exact positions per rule; and
+/// * at most one decoded source line at a time.
+///
+/// `on_progress` runs after each 1,024-line batch and can publish partial exact
+/// counts/histograms. Returning `false`, or making `is_canceled` return true,
+/// aborts with a conflict error. This keeps cancellation and document-
+/// generation checks outside the engine while still checking them frequently.
+pub(crate) struct AnalysisSource<'a> {
+    buf: &'a [u8],
+    base: u64,
+    len: u64,
+    index: &'a LineIndex,
+    encoding: Encoding,
+}
+
+impl<'a> AnalysisSource<'a> {
+    pub(crate) fn new(
+        buf: &'a [u8],
+        base: u64,
+        len: u64,
+        index: &'a LineIndex,
+        encoding: Encoding,
+    ) -> Self {
+        Self {
+            buf,
+            base,
+            len,
+            index,
+            encoding,
+        }
+    }
+}
+
+pub(crate) fn analyze_rules<F, C>(
+    source: AnalysisSource<'_>,
+    opts: &AnalysisOptions,
+    mut on_progress: F,
+    mut is_canceled: C,
+) -> Result<AnalysisResult>
+where
+    F: FnMut(AnalysisProgress<'_>) -> bool,
+    C: FnMut() -> bool,
+{
+    const LINE_BATCH: u64 = 1_024;
+    const CANCEL_HIT_INTERVAL: u64 = 4_096;
+    let AnalysisSource {
+        buf,
+        base,
+        len,
+        index,
+        encoding: enc,
+    } = source;
+
+    if opts.rules.is_empty() {
+        return Err(Error::InvalidInput(
+            "analysis requires at least one rule".into(),
+        ));
+    }
+    if opts.rules.len() > ANALYSIS_MAX_RULES {
+        return Err(Error::InvalidInput(format!(
+            "analysis supports at most {ANALYSIS_MAX_RULES} rules"
+        )));
+    }
+    if opts.max_hits_per_rule == 0 {
+        return Err(Error::InvalidInput(
+            "analysis hit limit must be at least 1".into(),
+        ));
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for rule in &opts.rules {
+        if rule.id.trim().is_empty() {
+            return Err(Error::InvalidInput("analysis rule id is empty".into()));
+        }
+        if !ids.insert(rule.id.as_str()) {
+            return Err(Error::InvalidInput(format!(
+                "duplicate analysis rule id '{}'",
+                rule.id
+            )));
+        }
+        if rule.enabled && rule.query.is_empty() {
+            return Err(Error::InvalidInput(format!(
+                "analysis rule '{}' has an empty query",
+                rule.id
+            )));
+        }
+    }
+
+    let plans: Vec<Option<MatchPlan>> = opts
+        .rules
+        .iter()
+        .map(|rule| {
+            rule.enabled
+                .then(|| {
+                    MatchPlan::build(
+                        enc,
+                        &rule.query,
+                        rule.regex,
+                        rule.case_sensitive,
+                        Error::Search,
+                    )
+                })
+                .transpose()
+        })
+        .collect::<Result<_>>()?;
+    let histogram_bin_width = if opts.histogram_bin_width == 0 {
+        analysis_histogram_bin_width(len)
+    } else {
+        opts.histogram_bin_width
+    };
+    if histogram_bin_width == 0 {
+        return Err(Error::InvalidInput(
+            "analysis histogram bin width must be non-zero".into(),
+        ));
+    }
+
+    let mut results: Vec<AnalysisRuleResult> = opts
+        .rules
+        .iter()
+        .map(|rule| AnalysisRuleResult {
+            id: rule.id.clone(),
+            count: 0,
+            hits: Vec::new(),
+            histogram: vec![0; ANALYSIS_HISTOGRAM_BINS],
+            last_line_count: 0,
+            last_line_histogram: vec![0; ANALYSIS_HISTOGRAM_BINS],
+        })
+        .collect();
+    let total_lines = index.line_count();
+    let mut line = opts.start_line.min(total_lines);
+    let mut processed_bytes = if line >= total_lines {
+        len
+    } else {
+        index
+            .line_range(buf, line)
+            .map(|(start, _)| start)
+            .unwrap_or(base)
+    };
+    if is_canceled()
+        || !on_progress(AnalysisProgress {
+            processed_bytes,
+            processed_lines: line,
+            total_bytes: len,
+            total_lines,
+            histogram_bin_width,
+            rules: &results,
+        })
+    {
+        return Err(Error::Conflict("analysis canceled".into()));
+    }
+
+    let mut seen_hits = 0u64;
+    let mut overflowed = false;
+    while line < total_lines {
+        let ranges = index.line_ranges(buf, line, LINE_BATCH);
+        if ranges.is_empty() {
+            break;
+        }
+        for &(ln, ls, le) in &ranges {
+            let raw = &buf[ls as usize..le as usize];
+            let decoded = plans
+                .iter()
+                .any(|plan| matches!(plan, Some(MatchPlan::DecodeLine(_))))
+                .then(|| enc.decode_line(raw));
+            for (ri, plan) in plans.iter().enumerate() {
+                let Some(plan) = plan else {
+                    continue;
+                };
+                let rule = &opts.rules[ri];
+                let result = &mut results[ri];
+                let completed = for_each_line_match(
+                    plan,
+                    enc,
+                    raw,
+                    decoded.as_deref(),
+                    rule.whole_word,
+                    |column, byte_offset, byte_len| {
+                        let Some(count) = result.count.checked_add(1) else {
+                            overflowed = true;
+                            return false;
+                        };
+                        result.count = count;
+                        let byte = ls.saturating_add(byte_offset);
+                        let bin = usize::try_from(byte / histogram_bin_width)
+                            .unwrap_or(usize::MAX)
+                            .min(ANALYSIS_HISTOGRAM_BINS - 1);
+                        result.histogram[bin] = result.histogram[bin].saturating_add(1);
+                        if ln + 1 == total_lines {
+                            result.last_line_count = result.last_line_count.saturating_add(1);
+                            result.last_line_histogram[bin] =
+                                result.last_line_histogram[bin].saturating_add(1);
+                        }
+                        if result.hits.len() < opts.max_hits_per_rule {
+                            result.hits.push(SearchHit {
+                                line: ln,
+                                column,
+                                byte,
+                                byte_len,
+                            });
+                        }
+                        seen_hits = seen_hits.saturating_add(1);
+                        !seen_hits.is_multiple_of(CANCEL_HIT_INTERVAL) || !is_canceled()
+                    },
+                );
+                if !completed {
+                    if overflowed {
+                        return Err(Error::Search("analysis match count overflow".into()));
+                    }
+                    return Err(Error::Conflict("analysis canceled".into()));
+                }
+            }
+        }
+        line = line.saturating_add(ranges.len() as u64);
+        processed_bytes = if line >= total_lines {
+            len
+        } else {
+            index
+                .line_range(buf, line)
+                .map(|(start, _)| start)
+                .unwrap_or(processed_bytes)
+        };
+        if is_canceled()
+            || !on_progress(AnalysisProgress {
+                processed_bytes,
+                processed_lines: line,
+                total_bytes: len,
+                total_lines,
+                histogram_bin_width,
+                rules: &results,
+            })
+        {
+            return Err(Error::Conflict("analysis canceled".into()));
+        }
+    }
+
+    let last_line = total_lines.checked_sub(1);
+    let last_line_start_byte = last_line
+        .and_then(|line| index.line_range(buf, line).map(|(start, _)| start))
+        .unwrap_or(base);
+    Ok(AnalysisResult {
+        rules: results,
+        processed_bytes: len,
+        processed_lines: total_lines,
+        total_bytes: len,
+        total_lines,
+        histogram_bin_width,
+        last_line,
+        last_line_start_byte,
+    })
+}
+
 /// First match at or after `from_byte`.
 pub fn find_next(
     buf: &[u8],
@@ -480,6 +831,89 @@ pub(crate) fn line_has_match(
                 m.end() > m.start()
                     && (!whole_word || is_whole_word_text(&text, m.start(), m.end()))
             })
+        }
+    }
+}
+
+/// Visit every accepted match in one raw, terminator-free line.
+///
+/// The callback receives decoded character column plus raw byte offset/length
+/// relative to `raw`. Returning `false` stops immediately.
+fn for_each_line_match(
+    plan: &MatchPlan,
+    enc: Encoding,
+    raw: &[u8],
+    decoded: Option<&str>,
+    whole_word: bool,
+    mut on_match: impl FnMut(u64, u64, u64) -> bool,
+) -> bool {
+    match plan {
+        MatchPlan::Literal {
+            finder,
+            validate_legacy_boundary,
+        } => {
+            for pos in finder.find_iter(raw) {
+                if !utf16_hit_aligned(enc, pos) {
+                    continue;
+                }
+                if *validate_legacy_boundary && !is_legacy_char_boundary_in_line(enc, raw, pos) {
+                    continue;
+                }
+                if whole_word
+                    && !is_whole_word_match_encoded_in_line(enc, raw, pos, finder.needle().len())
+                {
+                    continue;
+                }
+                let column = enc.count_chars(&raw[..pos]);
+                if !on_match(column, pos as u64, finder.needle().len() as u64) {
+                    return false;
+                }
+            }
+            true
+        }
+        MatchPlan::Regex { bytes, .. } => {
+            for m in bytes.find_iter(raw) {
+                if m.end() == m.start() {
+                    continue;
+                }
+                if whole_word && !is_whole_word_match(raw, m.start(), m.end() - m.start()) {
+                    continue;
+                }
+                let column = enc.count_chars(&raw[..m.start()]);
+                if !on_match(column, m.start() as u64, (m.end() - m.start()) as u64) {
+                    return false;
+                }
+            }
+            true
+        }
+        MatchPlan::DecodeLine(re) => {
+            let owned;
+            let text = match decoded {
+                Some(text) => text,
+                None => {
+                    owned = enc.decode_line(raw);
+                    &owned
+                }
+            };
+            for m in re.find_iter(text) {
+                if m.end() == m.start() {
+                    continue;
+                }
+                if whole_word && !is_whole_word_text(text, m.start(), m.end()) {
+                    continue;
+                }
+                let char_start = text[..m.start()].chars().count();
+                let char_len = text[m.start()..m.end()].chars().count();
+                let (byte_offset, byte_len) =
+                    decoded_char_span(enc, raw, text, char_start, char_len);
+                if byte_len == 0 {
+                    continue;
+                }
+                if !on_match(char_start as u64, byte_offset as u64, byte_len as u64) {
+                    return false;
+                }
+            }
+            true
         }
     }
 }
@@ -1242,5 +1676,130 @@ mod tests {
         // Line 1 "X12Y": "12" starts at char 1 -> byte 2 within the line,
         // spans 2 chars -> 4 bytes.
         assert_eq!((h.line, h.column, h.byte_len), (1, 1, 4));
+    }
+
+    fn analysis_rule(id: &str, query: &str) -> AnalysisRule {
+        AnalysisRule {
+            id: id.into(),
+            query: query.into(),
+            regex: false,
+            case_sensitive: true,
+            whole_word: false,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn multi_rule_analysis_keeps_exact_counts_with_bounded_positions() {
+        let buf = b"INFO start\nWARN one\nERROR 42 ERROR 43\ninfo end\n".to_vec();
+        let idx = LineIndex::build(&buf, 0, 2);
+        let mut info = analysis_rule("info", "INFO");
+        info.case_sensitive = false;
+        let warn = analysis_rule("warn", "WARN");
+        let mut error = analysis_rule("error", r"ERROR \d+");
+        error.regex = true;
+        let opts = AnalysisOptions {
+            rules: vec![info, warn, error],
+            max_hits_per_rule: 1,
+            histogram_bin_width: 8,
+            ..Default::default()
+        };
+        let mut progress_calls = 0;
+        let result = analyze_rules(
+            AnalysisSource::new(&buf, 0, buf.len() as u64, &idx, Encoding::Utf8),
+            &opts,
+            |_| {
+                progress_calls += 1;
+                true
+            },
+            || false,
+        )
+        .unwrap();
+
+        assert!(progress_calls >= 2);
+        assert_eq!(
+            result
+                .rules
+                .iter()
+                .map(|rule| rule.count)
+                .collect::<Vec<_>>(),
+            vec![2, 1, 2]
+        );
+        assert_eq!(
+            result
+                .rules
+                .iter()
+                .map(|rule| rule.hits.len())
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        for rule in &result.rules {
+            assert_eq!(rule.histogram.iter().sum::<u64>(), rule.count);
+            assert_eq!(rule.histogram.len(), ANALYSIS_HISTOGRAM_BINS);
+        }
+        assert_eq!(result.rules[0].last_line_count, 1);
+        assert_eq!(result.rules[1].last_line_count, 0);
+    }
+
+    #[test]
+    fn analysis_progress_callback_can_cancel_between_line_batches() {
+        let buf = "match\n".repeat(2_500).into_bytes();
+        let idx = LineIndex::build(&buf, 0, 64);
+        let opts = AnalysisOptions {
+            rules: vec![analysis_rule("match", "match")],
+            ..Default::default()
+        };
+        let err = analyze_rules(
+            AnalysisSource::new(&buf, 0, buf.len() as u64, &idx, Encoding::Utf8),
+            &opts,
+            |progress| progress.processed_lines < 1_024,
+            || false,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Conflict(_)));
+    }
+
+    #[test]
+    fn tail_range_rescans_the_previous_final_line_and_append_only_suffix() {
+        let old = b"INFO first\nERROR old".to_vec();
+        let old_idx = LineIndex::build(&old, 0, 2);
+        let rules = vec![
+            analysis_rule("error", "ERROR"),
+            analysis_rule("warn", "WARN"),
+        ];
+        let initial = analyze_rules(
+            AnalysisSource::new(&old, 0, old.len() as u64, &old_idx, Encoding::Utf8),
+            &AnalysisOptions {
+                rules: rules.clone(),
+                histogram_bin_width: 4,
+                ..Default::default()
+            },
+            |_| true,
+            || false,
+        )
+        .unwrap();
+        assert_eq!(initial.rules[0].last_line_count, 1);
+        assert_eq!(initial.last_line, Some(1));
+
+        let grown = b"INFO first\nERROR old plus\nWARN new\n".to_vec();
+        let grown_idx = LineIndex::build(&grown, 0, 2);
+        let tail = analyze_rules(
+            AnalysisSource::new(&grown, 0, grown.len() as u64, &grown_idx, Encoding::Utf8),
+            &AnalysisOptions {
+                rules,
+                start_line: initial.last_line.unwrap(),
+                histogram_bin_width: 4,
+                ..Default::default()
+            },
+            |_| true,
+            || false,
+        )
+        .unwrap();
+        assert_eq!(
+            tail.rules.iter().map(|rule| rule.count).collect::<Vec<_>>(),
+            vec![1, 1]
+        );
+        assert_eq!(tail.last_line, Some(2));
+        assert_eq!(tail.rules[1].last_line_count, 1);
     }
 }

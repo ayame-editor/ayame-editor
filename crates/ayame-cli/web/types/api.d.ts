@@ -132,9 +132,27 @@ path: string | null, query: string, regex: boolean, ci: boolean, word: boolean,
  */
 overwrite: boolean, jobs: number | null, chunk_lines: bigint | null, };
 
+export type AnalysisRuleConfig = { id: string, name: string, pattern: string, regex: boolean, case_sensitive: boolean, whole_word: boolean, color: string, enabled: boolean, };
+
+export type AnalysisProfile = { id: string, name: string, file_glob: string | null, rules: Array<AnalysisRuleConfig>, };
+
+export type AnalysisStartRequest = { profile: AnalysisProfile, max_hits_per_rule: number | null, };
+
+export type AnalysisCancelRequest = { id: string, };
+
+export type AnalysisRuleStatus = { id: string, name: string, color: string, enabled: boolean, count: bigint, stored_hits: number, truncated: boolean, histogram: Array<bigint>, };
+
+export type AnalysisStatus = { id: string, profile_id: string, phase: string, processed_bytes: bigint, processed_lines: bigint, total_bytes: bigint, total_lines: bigint, percent: number, histogram_bin_width: bigint, tail_pending: boolean, message: string | null, rules: Array<AnalysisRuleStatus>, };
+
+export type AnalysisHit = { line: bigint, column: bigint, byte: bigint, byte_len: bigint, text: string, text_truncated: boolean, };
+
+export type AnalysisNavigateResponse = { rule: string, hit: AnalysisHit | null, wrapped: boolean, };
+
+export type AnalysisHitsResponse = { rule: string, total_count: bigint, stored_hits: number, truncated: boolean, start: number, hits: Array<AnalysisHit>, };
+
 export type SessionState = { paths: Array<string>, active_path: string | null, };
 
-export type UiState = { recent_files: Array<string>, search_history: Array<string>, session: SessionState, };
+export type UiState = { recent_files: Array<string>, search_history: Array<string>, session: SessionState, analysis_profiles: Array<AnalysisProfile>, active_analysis_profile: string | null, };
 
 export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
 

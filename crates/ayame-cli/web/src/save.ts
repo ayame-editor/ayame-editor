@@ -755,6 +755,30 @@ export async function grepToFile() {
   await runGrepSave(query, { ci: !!f.ci, word: !!f.word, regex: !!f.regex }, target);
 }
 
+/// Run the existing bounded grep-to-file worker with one saved analysis rule.
+/// The analysis UI supplies the rule; this helper deliberately reuses the same
+/// save picker, overwrite handling, progress/cancel flow, and result tab.
+export async function grepRuleToFile(rule) {
+  if (!state.stat?.open || !rule?.pattern) return;
+  Object.assign(lastGrep, {
+    query: rule.pattern,
+    ci: !rule.case_sensitive,
+    word: !!rule.whole_word,
+    regex: !!rule.regex,
+  });
+  const target = await showSaveDialog(t("menu.grepSave"), suggestedGrepPath());
+  if (!target) return;
+  await runGrepSave(
+    rule.pattern,
+    {
+      ci: !rule.case_sensitive,
+      word: !!rule.whole_word,
+      regex: !!rule.regex,
+    },
+    target,
+  );
+}
+
 // "app.log" → sibling "app.grep.log"; untitled buffers suggest grep.txt in
 // 前回の保存先 (the same folder save-as would suggest).
 function suggestedGrepPath() {

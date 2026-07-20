@@ -30,6 +30,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{first_opt, has_flag, open_opts, parse_checked};
 
+mod analysis;
 mod assets;
 mod edit;
 mod error;
@@ -211,6 +212,15 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/markers/add", post(markers::api_marker_add))
         .route("/api/markers/clear", post(markers::api_marker_clear))
         .route("/api/markers/save", post(markers::api_marker_save))
+        .route("/api/analysis/start", post(analysis::api_analysis_start))
+        .route("/api/analysis/status", get(analysis::api_analysis_status))
+        .route("/api/analysis/cancel", post(analysis::api_analysis_cancel))
+        .route(
+            "/api/analysis/navigate",
+            get(analysis::api_analysis_navigate),
+        )
+        .route("/api/analysis/hits", get(analysis::api_analysis_hits))
+        .route("/api/analysis/tail", post(analysis::api_analysis_tail))
         .route("/api/ops/status", get(ops::api_operation_status))
         .route("/api/ops/cancel", post(ops::api_operation_cancel))
         .route("/api/sort/save", post(ops::api_sort_save))
@@ -628,6 +638,66 @@ mod tests {
         )
     }
 
+    fn response_json(body: &str) -> serde_json::Value {
+        serde_json::from_str(body.trim()).unwrap_or_else(|error| {
+            panic!("invalid JSON response ({error}): {body}");
+        })
+    }
+
+    fn analysis_profile_json() -> serde_json::Value {
+        serde_json::json!({
+            "id": "test-logs",
+            "name": "Test logs",
+            "file_glob": "*.log",
+            "rules": [
+                {
+                    "id": "error",
+                    "name": "ERROR",
+                    "pattern": "ERROR",
+                    "regex": false,
+                    "case_sensitive": true,
+                    "whole_word": true,
+                    "color": "danger",
+                    "enabled": true
+                },
+                {
+                    "id": "warn",
+                    "name": "WARN",
+                    "pattern": "WARN",
+                    "regex": false,
+                    "case_sensitive": true,
+                    "whole_word": true,
+                    "color": "warn",
+                    "enabled": true
+                },
+                {
+                    "id": "request",
+                    "name": "Request",
+                    "pattern": "request(?:_id)?=[a-z0-9]+",
+                    "regex": true,
+                    "case_sensitive": false,
+                    "whole_word": false,
+                    "color": "link",
+                    "enabled": true
+                }
+            ]
+        })
+    }
+
+    async fn wait_for_analysis(addr: SocketAddr, host: &str, id: &str) -> serde_json::Value {
+        for _ in 0..300 {
+            let path = format!("/api/analysis/status?id={id}");
+            let (status, body) = send(addr, get(&path, host)).await;
+            assert_eq!(status, 200, "body: {body}");
+            let json = response_json(&body);
+            if !matches!(json["phase"].as_str(), Some("scanning" | "updating")) {
+                return json;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("analysis {id} did not finish");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn responses_include_browser_security_headers() {
         let f = scratch_file("security-headers.txt", b"hello\n");
@@ -879,6 +949,27 @@ mod tests {
         let _ = std::fs::remove_file(&f);
     }
 
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tail_poll_detects_rename_rotation_even_when_old_inode_did_not_shrink() {
+        let f = scratch_file("tail-rotation.log", b"old 0\nold 1\n");
+        let rotated = f.with_extension("log.1");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        std::fs::rename(&f, &rotated).unwrap();
+        std::fs::write(&f, b"new file is deliberately longer\n").unwrap();
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert!(body.contains("\"changed\":true"), "body: {body}");
+        assert!(body.contains("\"grew\":false"), "body: {body}");
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_file(&rotated);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn tail_poll_does_not_write_a_new_index_cache_per_append() {
         fn idx_count(cache: &Path) -> usize {
@@ -922,6 +1013,187 @@ mod tests {
 
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn multi_rule_analysis_is_exact_capped_navigable_and_stale_after_edit() {
+        let f = scratch_file(
+            "analysis.log",
+            b"ERROR request=abc\nWARN request=abc\nINFO request=xyz\nERROR request=abc\n",
+        );
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let request = serde_json::json!({
+            "profile": analysis_profile_json(),
+            "max_hits_per_rule": 1
+        })
+        .to_string();
+        let (status, body) = send(
+            addr,
+            post_json("/api/analysis/start", &host, Some(&origin), &request),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let id = response_json(&body)["id"].as_str().unwrap().to_string();
+        let result = wait_for_analysis(addr, &host, &id).await;
+        assert_eq!(result["phase"], "complete");
+        let rules = result["rules"].as_array().unwrap();
+        let by_id = |rule_id: &str| rules.iter().find(|rule| rule["id"] == rule_id).unwrap();
+        assert_eq!(by_id("error")["count"], 2);
+        assert_eq!(by_id("error")["stored_hits"], 1);
+        assert_eq!(by_id("error")["truncated"], true);
+        assert_eq!(by_id("warn")["count"], 1);
+        assert_eq!(by_id("request")["count"], 4);
+        assert_eq!(
+            by_id("request")["histogram"].as_array().unwrap().len(),
+            ayame_core::ANALYSIS_HISTOGRAM_BINS
+        );
+
+        let (status, body) = send(
+            addr,
+            get(
+                &format!("/api/analysis/navigate?id={id}&rule=error&direction=next&from=0"),
+                &host,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        assert_eq!(response_json(&body)["hit"]["line"], 0);
+
+        let (status, body) = send(
+            addr,
+            get(
+                &format!("/api/analysis/hits?id={id}&rule=error&start=0&limit=10"),
+                &host,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let hits = response_json(&body);
+        assert_eq!(hits["total_count"], 2);
+        assert_eq!(hits["stored_hits"], 1);
+        assert_eq!(hits["truncated"], true);
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":0,"c0":0,"l1":0,"c1":0,"text":"X"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(addr, get(&format!("/api/analysis/status?id={id}"), &host)).await;
+        assert_eq!(response_json(&body)["phase"], "stale");
+
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn analysis_tail_rescans_only_previous_final_line_and_append() {
+        let f = scratch_file("analysis-tail.log", b"ERROR first\npartial");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let mut profile = analysis_profile_json();
+        profile["rules"][2]["id"] = "partial".into();
+        profile["rules"][2]["name"] = "Partial".into();
+        profile["rules"][2]["pattern"] = "partial".into();
+        profile["rules"][2]["regex"] = false.into();
+        profile["rules"][2]["case_sensitive"] = true.into();
+        let request = serde_json::json!({
+            "profile": profile,
+            "max_hits_per_rule": 10
+        })
+        .to_string();
+        let (status, body) = send(
+            addr,
+            post_json("/api/analysis/start", &host, Some(&origin), &request),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let id = response_json(&body)["id"].as_str().unwrap().to_string();
+        let initial = wait_for_analysis(addr, &host, &id).await;
+        assert_eq!(initial["phase"], "complete");
+
+        {
+            let mut writer = std::fs::OpenOptions::new().append(true).open(&f).unwrap();
+            writer.write_all(b" ERROR\nWARN\n").unwrap();
+            writer.flush().unwrap();
+        }
+        let (status, body) =
+            send(addr, post_json("/api/tail/poll", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        assert_eq!(response_json(&body)["grew"], true);
+
+        let (_, body) = send(addr, get(&format!("/api/analysis/status?id={id}"), &host)).await;
+        assert_eq!(response_json(&body)["tail_pending"], true);
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/analysis/tail",
+                &host,
+                Some(&origin),
+                &serde_json::json!({ "id": id }).to_string(),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let result = response_json(&body);
+        assert_eq!(result["phase"], "complete");
+        assert_eq!(result["tail_pending"], false);
+        let rules = result["rules"].as_array().unwrap();
+        let count = |rule_id: &str| {
+            rules.iter().find(|rule| rule["id"] == rule_id).unwrap()["count"]
+                .as_u64()
+                .unwrap()
+        };
+        assert_eq!(count("error"), 2);
+        assert_eq!(count("warn"), 1);
+        assert_eq!(count("partial"), 1);
+
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn large_synthetic_analysis_keeps_fixed_histograms_and_sparse_hits() {
+        const LINES: usize = 100_000;
+        let mut data = Vec::with_capacity(LINES * 32);
+        for index in 0..LINES {
+            writeln!(&mut data, "ERROR WARN request_id={index:x}").unwrap();
+        }
+        let f = scratch_file("analysis-large.log", &data);
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+        let request = serde_json::json!({
+            "profile": analysis_profile_json(),
+            "max_hits_per_rule": 7
+        })
+        .to_string();
+        let (status, body) = send(
+            addr,
+            post_json("/api/analysis/start", &host, Some(&origin), &request),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let id = response_json(&body)["id"].as_str().unwrap().to_string();
+        let result = wait_for_analysis(addr, &host, &id).await;
+        assert_eq!(result["phase"], "complete");
+        for rule in result["rules"].as_array().unwrap() {
+            assert_eq!(rule["count"], LINES as u64);
+            assert_eq!(rule["stored_hits"], 7);
+            assert_eq!(rule["truncated"], true);
+            assert_eq!(
+                rule["histogram"].as_array().unwrap().len(),
+                ayame_core::ANALYSIS_HISTOGRAM_BINS
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
