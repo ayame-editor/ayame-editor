@@ -34,6 +34,7 @@ describe("Ayame spacing tokens (#149)", () => {
     }
     expect(css).toContain("--gutter-pad-start: var(--space-2)");
     expect(css).toContain("--gutter-pad-end: var(--space-5)");
+    expect(css).toContain("--gutter-border-width: 1px");
     expect(css).toMatch(
       /--modal-body-padding:\s*var\(--space-3\)\s+var\(--space-3-5\)\s+var\(--space-3-5\)/,
     );

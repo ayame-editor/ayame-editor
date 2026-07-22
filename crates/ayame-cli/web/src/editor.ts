@@ -187,6 +187,13 @@ export function formatLineNo(n) {
   return state.settings.lineNumberCommas === false ? String(n) : commas(n);
 }
 
+// Width of the largest displayed line number. Keep this as a character count
+// so the editor and auxiliary result panes can share the same CSS geometry
+// without baking a pixel width (or a generous fixed digit floor) into either.
+export function lineNumberChars(maxLine) {
+  return formatLineNo(Math.max(0, maxLine)).length;
+}
+
 export function fillRow(row, line, rec) {
   const ln = row.firstChild;
   const tx = row.lastChild;
@@ -348,7 +355,14 @@ export function gutterPixels() {
       return row.firstChild.getBoundingClientRect().width;
     }
   }
-  return 7 * charWidth() + 29; // fallback: 8 + 20 padding + 1 border
+  const rootStyle = getComputedStyle(document.documentElement);
+  const tokenPixels = (name) => Number.parseFloat(rootStyle.getPropertyValue(name).trim()) || 0;
+  return (
+    lineNumberChars(state.total) * charWidth() +
+    tokenPixels("--gutter-pad-start") +
+    tokenPixels("--gutter-pad-end") +
+    tokenPixels("--gutter-border-width")
+  );
 }
 
 // Map a mouse event to a {line, col} position in the document.
@@ -517,9 +531,9 @@ export function render() {
   ensureHKeeper(content);
 
   // Size the gutter to the widest visible line number (commas included). Every
-  // `.ln` reads this via `min-width: var(--gutter-ch)`, so normal rows and the
-  // empty [EOF] gutter share one width and the numbers right-align.
-  const gutterCh = Math.max(7, formatLineNo(state.total).length);
+  // `.ln` reads this through its tokenized width calculation, so normal rows
+  // and the empty [EOF] gutter share one width and the numbers right-align.
+  const gutterCh = lineNumberChars(state.total);
   content.style.setProperty("--gutter-ch", `${gutterCh}ch`);
   let loading = false;
   for (let r = 0; r < pool.length; r++) {

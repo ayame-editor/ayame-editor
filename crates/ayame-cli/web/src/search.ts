@@ -5,8 +5,10 @@ import { serverMessage, t } from "./i18n.js";
 import { api, apiPost, type FindResponse, type LinesResponse, type SearchResponse } from "./api.js";
 import {
   focusEditor,
+  formatLineNo,
   lineByte,
   lineChars,
+  lineNumberChars,
   revealLine,
   rowsVisible,
   scheduleRender,
@@ -668,6 +670,8 @@ export function renderGrepResults(res, query, regex) {
   const view = $("grep-results");
   view.textContent = "";
   const hits = res.hits || [];
+  const maxLine = hits.reduce((max, hit) => Math.max(max, hit.line + 1), 0);
+  view.style.setProperty("--gutter-ch", `${lineNumberChars(maxLine)}ch`);
   if (hits.length === 0) {
     const empty = document.createElement("div");
     empty.className = "grep-empty";
@@ -695,7 +699,7 @@ export function renderGrepResults(res, query, regex) {
     row.type = "button";
     const ln = document.createElement("span");
     ln.className = "grep-ln";
-    ln.textContent = commas(h.line + 1);
+    ln.textContent = formatLineNo(h.line + 1);
     const tx = document.createElement("span");
     tx.className = "grep-tx";
     appendGrepText(tx, h.text, h.col, query, regex);

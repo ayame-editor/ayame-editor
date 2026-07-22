@@ -27,6 +27,14 @@ function contrast(a: string, b: string): number {
   const lo = Math.min(luminance(a), luminance(b));
   return (hi + 0.05) / (lo + 0.05);
 }
+function mixHex(foreground: string, background: string, share: number): string {
+  const channelAt = (hex: string, offset: number) =>
+    parseInt(hex.replace("#", "").slice(offset, offset + 2), 16);
+  const mixed = [0, 2, 4].map((offset) =>
+    Math.round(channelAt(foreground, offset) * share + channelAt(background, offset) * (1 - share)),
+  );
+  return `#${mixed.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
 // Read a `--token: #hex` value from a CSS block body.
 function token(block: string, name: string): string | undefined {
   return block.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1];
@@ -129,6 +137,50 @@ describe("Ayame design tokens", () => {
       expect(bg, theme).toBeTruthy();
       expect(faint, theme).toBeTruthy();
       expect(contrast(faint!, bg!), `${theme} --fg-faint on --bg`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("derives an opaque, separated gutter palette with accessible text (#251, #253)", () => {
+    const root = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+    for (const declaration of [
+      "--gutter-surface: color-mix(in srgb, var(--accent) 12%, var(--gutter-bg))",
+      "--gutter-border: var(--accent)",
+      "--gutter-text: color-mix(in srgb, var(--fg) 55%, var(--gutter-fg))",
+    ]) {
+      expect(root).toContain(declaration);
+    }
+
+    const themes: [string, string][] = [
+      ["iris-light", root],
+      ...["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"].map(
+        (name) =>
+          [
+            name,
+            css.match(new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1] ||
+              "",
+          ] as [string, string],
+      ),
+    ];
+
+    for (const [name, block] of themes) {
+      const required = (variable: string) => token(block, variable) || token(root, variable);
+      const gutter = required("--gutter-bg");
+      const editor = required("--edit-bg");
+      const accent = required("--accent");
+      const foreground = required("--fg");
+      const gutterForeground = required("--gutter-fg");
+      for (const value of [gutter, editor, accent, foreground, gutterForeground]) {
+        expect(value, name).toBeTruthy();
+      }
+
+      const surface = mixHex(accent!, gutter!, 0.12);
+      const text = mixHex(foreground!, gutterForeground!, 0.55);
+      expect(surface.toLowerCase(), `${name} gutter surface`).not.toBe(editor!.toLowerCase());
+      expect(contrast(accent!, editor!), `${name} gutter divider/editor`).toBeGreaterThanOrEqual(3);
+      expect(contrast(accent!, surface), `${name} gutter divider/surface`).toBeGreaterThanOrEqual(
+        3,
+      );
+      expect(contrast(text, surface), `${name} gutter text`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
