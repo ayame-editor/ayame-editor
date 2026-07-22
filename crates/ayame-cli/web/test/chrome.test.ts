@@ -434,6 +434,34 @@ describe("application chrome", () => {
     expect(block(".replace-btn")).not.toMatch(/border\s*:/);
   });
 
+  it("centralizes change-history visuals and exposes every requested toggle (#243)", () => {
+    const css = read("style.css");
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    const gutterStart = css.indexOf(".row:is(.change-saved, .change-unsaved)");
+    const tickStart = css.indexOf(".vtick.change-vtick");
+    const gutterRules = css.slice(
+      gutterStart,
+      css.indexOf(".tx {", gutterStart),
+    );
+    const tickRules = css.slice(tickStart, css.indexOf("#vthumb", tickStart));
+
+    for (const token of [
+      "--change-saved",
+      "--change-unsaved",
+      "--change-marker-w",
+      "--change-marker-offset",
+      "--change-deleted-size",
+      "--change-tick-saved-w",
+      "--change-tick-unsaved-w",
+    ]) {
+      expect(css).toContain(`${token}:`);
+      expect(`${gutterRules}\n${tickRules}`).toContain(`var(${token})`);
+    }
+    expect(`${gutterRules}\n${tickRules}`).not.toMatch(/#[0-9a-f]{3,8}/i);
+    expect(doc.querySelector('#view-menu [data-menu-action="toggleChangeHistory"]')).not.toBeNull();
+    expect(doc.querySelector('#settings input[id="set-change-history"]')).not.toBeNull();
+  });
+
   it("uses consistent modal edges and body padding with visible status actions (#157)", () => {
     const css = read("style.css");
     const block = (selector: string) => css.split(`${selector} {`, 2)[1]?.split("}", 1)[0] ?? "";

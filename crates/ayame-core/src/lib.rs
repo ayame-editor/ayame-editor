@@ -49,7 +49,7 @@ pub mod transform;
 pub mod wal;
 
 pub use document::{Document, FileStat, Line, OpenOptions, TailRefresh};
-pub use edit::{BatchEdit, EditLine, EditSession, EditStats, SaveResult};
+pub use edit::{BatchEdit, ChangeHistory, EditLine, EditSession, EditStats, SaveResult};
 pub use encoding::{Encoding, Eol};
 pub use grep::{grep_dir, GrepHit, GrepOptions, GrepResult};
 pub use index::{LineIndex, CHECKPOINT_BYTES, DEFAULT_STRIDE, MINIMUM_SUPPORTED_LINES};

@@ -84,6 +84,7 @@ export function loadSettings() {
     if (merged.bgMode === "image" && !merged.bgImage) merged.bgMode = "watercolor";
     merged.language = normalizeLanguage(merged.language);
     merged.updateCheckOnStartup = merged.updateCheckOnStartup !== false;
+    merged.showChangeHistory = merged.showChangeHistory !== false;
     merged.keymap = sanitizeKeymap(merged.keymap);
     if (hadLegacyZoom) saveSettings(merged);
     return merged;
@@ -673,6 +674,7 @@ export function syncSettingsControls() {
   $("set-line-commas").checked = state.settings.lineNumberCommas !== false;
   $("set-show-whitespace").checked = !!state.settings.showWhitespace;
   $("set-syntax-highlight").checked = state.settings.syntaxHighlight !== false;
+  $("set-change-history").checked = state.settings.showChangeHistory !== false;
   $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
   $("set-word-wrap").checked = !!state.settings.wordWrap;
   $("set-restore-session").checked = state.settings.restoreSession !== false;
@@ -788,6 +790,9 @@ export function initSettings() {
   );
   $("set-syntax-highlight").addEventListener("change", () =>
     updateSetting("syntaxHighlight", $("set-syntax-highlight").checked),
+  );
+  $("set-change-history").addEventListener("change", () =>
+    updateSetting("showChangeHistory", $("set-change-history").checked),
   );
   $("set-zenkaku-underline").addEventListener("change", () =>
     updateSetting("zenkakuUnderline", $("set-zenkaku-underline").checked),

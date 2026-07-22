@@ -9,6 +9,7 @@ import {
   cachedLine,
   focusEditor,
   maxFirst,
+  refreshChangeHistoryOverview,
   render,
   revealCaret,
   revealLine,
@@ -91,7 +92,15 @@ export function enqueueEdit(fn) {
 export async function reloadViewport() {
   const start = Math.max(0, state.first - PAD);
   const count = rowsVisible() + OVERSCAN + 2 * PAD;
-  const res = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
+  const [res] = await Promise.all([
+    api<LinesResponse>(`/api/lines?start=${start}&count=${count}`),
+    refreshChangeHistoryOverview().catch((error) => {
+      // Never leave position-pane ticks from an older marker revision beside
+      // a successfully refreshed gutter. A later viewport refresh retries.
+      state.changeHistoryOverview = null;
+      console.error("change-history overview fetch failed", error);
+    }),
+  ]);
   cacheLineResponse(start, res);
   state.loadToken++; // cancel any in-flight ensureData for the old contents
 }

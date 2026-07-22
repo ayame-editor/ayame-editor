@@ -28,9 +28,10 @@ use super::edit::{
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
 use super::markers::{
-    MarkerBulkRequest, MarkerBulkResponse, MarkerClearRequest, MarkerListQuery, MarkerListResponse,
-    MarkerMutationResponse, MarkerNavigateQuery, MarkerNavigateResponse, MarkerPreview,
-    MarkerPreviewResponse, MarkerSaveRequest, MarkerSaveResponse, MarkerToggleRequest,
+    ChangeHistoryResponse, ChangeMarkerOverview, MarkerBulkRequest, MarkerBulkResponse,
+    MarkerClearRequest, MarkerListQuery, MarkerListResponse, MarkerMutationResponse,
+    MarkerNavigateQuery, MarkerNavigateResponse, MarkerPreview, MarkerPreviewResponse,
+    MarkerSaveRequest, MarkerSaveResponse, MarkerToggleRequest,
 };
 use super::ops::{
     ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest,
@@ -72,6 +73,8 @@ fn bridge() -> Bridge {
         .decl(&decl::<MarkerNavigateResponse>())
         .decl(&decl::<MarkerPreview>())
         .decl(&decl::<MarkerPreviewResponse>())
+        .decl(&decl::<ChangeMarkerOverview>())
+        .decl(&decl::<ChangeHistoryResponse>())
         .decl(&decl::<SelectionSaveRequest>())
         .decl(&decl::<SelectionSaveResponse>())
         .decl(&decl::<ArtifactOpStatus>())

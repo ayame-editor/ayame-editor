@@ -206,6 +206,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/recover", post(edit::api_edit_recover))
         .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
         .route("/api/markers", get(markers::api_markers))
+        .route("/api/change-history", get(markers::api_change_history))
         .route("/api/markers/previews", get(markers::api_marker_previews))
         .route("/api/markers/navigate", get(markers::api_marker_navigate))
         .route("/api/markers/toggle", post(markers::api_marker_toggle))
@@ -877,6 +878,141 @@ mod tests {
 
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_file(exported);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn change_history_uses_one_sparse_source_for_viewport_save_and_overview() {
+        let f = scratch_file("change-history.txt", b"zero\none\ntwo\n");
+        let addr = start_server(&f).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let origin = format!("http://{host}");
+
+        // Replace line 2, then remove the final line by deleting the newline
+        // boundary plus its text. The deletion marker belongs to logical EOF.
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":1,"c0":0,"l1":1,"c1":3,"text":"ONE"}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/replace_range",
+                &host,
+                Some(&origin),
+                r#"{"l0":1,"c0":3,"l1":2,"c1":3,"text":""}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+
+        let (status, body) = send(addr, get("/api/lines?start=0&count=20", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        let viewport = response_json(&body);
+        assert_eq!(viewport["total"], 2);
+        let markers = viewport["markers"].as_array().unwrap();
+        assert!(markers
+            .iter()
+            .any(|m| { m["kind"] == "change-unsaved" && m["line"] == 1 }));
+        assert!(markers
+            .iter()
+            .any(|m| { m["kind"] == "change-unsaved" && m["line"] == 2 }));
+        assert!(markers
+            .iter()
+            .any(|m| { m["kind"] == "change-deleted" && m["line"] == 2 }));
+
+        let (status, body) = send(addr, get("/api/change-history", &host)).await;
+        assert_eq!(status, 200, "body: {body}");
+        let overview = response_json(&body);
+        assert_eq!(overview["total_lines"], 2);
+        assert_eq!(overview["unsaved"]["count"], 2);
+        assert_eq!(overview["deleted"]["count"], 1);
+        assert_eq!(
+            overview["unsaved"]["histogram"].as_array().unwrap().len(),
+            2_048
+        );
+
+        // A failed write cannot move the save baseline or recolor markers.
+        let bad_parent = f.parent().unwrap().join("change-history-missing-parent");
+        let _ = std::fs::remove_dir_all(&bad_parent);
+        let bad_target = bad_parent.join("target.txt");
+        let bad_save = serde_json::json!({
+            "path": bad_target.to_string_lossy(),
+            "overwrite": true
+        })
+        .to_string();
+        let (status, _) = send(
+            addr,
+            post_json("/api/edit/save", &host, Some(&origin), &bad_save),
+        )
+        .await;
+        assert_ne!(status, 200);
+        let (_, body) = send(addr, get("/api/change-history", &host)).await;
+        let after_failure = response_json(&body);
+        assert_eq!(after_failure["saved"]["count"], 0);
+        assert_eq!(after_failure["unsaved"]["count"], 2);
+
+        // Derived partitions cannot be forged through the generic marker API.
+        let (status, _) = send(
+            addr,
+            post_json(
+                "/api/markers/toggle",
+                &host,
+                Some(&origin),
+                r#"{"kind":"change-unsaved","line":0}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 400);
+
+        let (status, body) = send(
+            addr,
+            post_json(
+                "/api/edit/save",
+                &host,
+                Some(&origin),
+                r#"{"overwrite":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(addr, get("/api/change-history", &host)).await;
+        let saved = response_json(&body);
+        assert_eq!(saved["saved"]["count"], 2);
+        assert_eq!(saved["unsaved"]["count"], 0);
+        assert_eq!(saved["deleted"]["count"], 1);
+
+        // Undo across the save makes the restored final line unsaved while
+        // the persisted replacement remains a saved marker.
+        let (status, body) =
+            send(addr, post_json("/api/edit/undo", &host, Some(&origin), "")).await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(addr, get("/api/change-history", &host)).await;
+        let undone = response_json(&body);
+        assert_eq!(undone["saved"]["count"], 1);
+        assert_eq!(undone["unsaved"]["count"], 1);
+        assert_eq!(undone["deleted"]["count"], 0);
+
+        let (status, body) = send(
+            addr,
+            post_json("/api/edit/revert", &host, Some(&origin), ""),
+        )
+        .await;
+        assert_eq!(status, 200, "body: {body}");
+        let (_, body) = send(addr, get("/api/change-history", &host)).await;
+        let reverted = response_json(&body);
+        assert_eq!(reverted["saved"]["count"], 0);
+        assert_eq!(reverted["unsaved"]["count"], 0);
+        assert_eq!(reverted["deleted"]["count"], 0);
+
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir_all(bad_parent);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1824,6 +1960,10 @@ mod tests {
         assert!(body.contains("\"dirty\":true"), "body: {body}");
         let (_, lines) = send(addr2, get("/api/lines?start=0&count=10", &host2)).await;
         assert!(lines.contains("ALPHA"), "post-recover view: {lines}");
+        let (_, history) = send(addr2, get("/api/change-history", &host2)).await;
+        let history = response_json(&history);
+        assert_eq!(history["saved"]["count"], 0);
+        assert_eq!(history["unsaved"]["count"], 1);
         // The recovered suffix carries real undo history.
         let (status, body) = send(
             addr2,
@@ -1832,6 +1972,10 @@ mod tests {
         .await;
         assert_eq!(status, 200);
         assert!(body.contains("\"dirty\":false"), "body: {body}");
+        let (_, history) = send(addr2, get("/api/change-history", &host2)).await;
+        let history = response_json(&history);
+        assert_eq!(history["saved"]["count"], 0);
+        assert_eq!(history["unsaved"]["count"], 0);
         // The flag is gone: a second recover has nothing to do.
         let (_, stat) = send(addr2, get("/api/stat", &host2)).await;
         assert!(!stat.contains("recoverable"), "stat: {stat}");

@@ -1,7 +1,12 @@
 // Ayame Editor — editor module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas } from "./dom.js";
 import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
-import { api, type LineByteResponse, type LinesResponse } from "./api.js";
+import {
+  api,
+  type ChangeHistoryResponse,
+  type LineByteResponse,
+  type LinesResponse,
+} from "./api.js";
 import { t } from "./i18n.js";
 import { hasSelection, renderSelection } from "./selection.js";
 import { highlightSpans } from "./syntax.js";
@@ -10,6 +15,7 @@ import { anyModalOpen } from "./input.js";
 import { analysisRanges } from "./analysis-model.js";
 
 export const pool = [];
+const MAX_CHANGE_TICKS = 512;
 
 export let renderQueued = false;
 
@@ -113,12 +119,21 @@ export function cachedLine(line) {
 
 export function cacheLineResponse(start: number, response: LinesResponse) {
   state.cache = { start, lines: response.lines };
-  state.bookmarks = new Set(
-    (response.markers || [])
-      .filter((marker) => marker.kind === "bookmark")
-      .map((marker) => marker.line),
-  );
+  const markerLines = (kind) =>
+    new Set(
+      (response.markers || [])
+        .filter((marker) => marker.kind === kind)
+        .map((marker) => marker.line),
+    );
+  state.bookmarks = markerLines("bookmark");
+  state.changeSaved = markerLines("change-saved");
+  state.changeUnsaved = markerLines("change-unsaved");
+  state.changeDeleted = markerLines("change-deleted");
   state.total = response.total;
+}
+
+export async function refreshChangeHistoryOverview() {
+  state.changeHistoryOverview = await api<ChangeHistoryResponse>("/api/change-history");
 }
 
 export function ensureData(start, count) {
@@ -194,6 +209,33 @@ export function lineNumberChars(maxLine) {
   return formatLineNo(Math.max(0, maxLine)).length;
 }
 
+function changeStateForLine(line) {
+  if (state.settings.showChangeHistory === false) return null;
+  const status = state.changeUnsaved.has(line)
+    ? "unsaved"
+    : state.changeSaved.has(line)
+      ? "saved"
+      : null;
+  if (!status) return null;
+  return { status, deleted: state.changeDeleted.has(line) };
+}
+
+function changeStateLabel(change) {
+  if (!change) return "";
+  const status = t(`changeHistory.${change.status}`);
+  return change.deleted
+    ? t("changeHistory.deletedState", { state: status, deleted: t("changeHistory.deleted") })
+    : status;
+}
+
+function applyRowChangeState(row, line) {
+  const change = changeStateForLine(line);
+  row.classList.toggle("change-unsaved", change?.status === "unsaved");
+  row.classList.toggle("change-saved", change?.status === "saved");
+  row.classList.toggle("change-deleted", !!change?.deleted);
+  return change;
+}
+
 export function fillRow(row, line, rec) {
   const ln = row.firstChild;
   const tx = row.lastChild;
@@ -201,18 +243,21 @@ export function fillRow(row, line, rec) {
   row.dataset.line = String(line);
   ln.textContent = formatLineNo(line + 1);
   const bookmarked = state.bookmarks.has(line);
+  const change = applyRowChangeState(row, line);
   row.classList.toggle("bookmarked", bookmarked);
   ln.setAttribute("role", "button");
-  ln.setAttribute("tabindex", "-1");
-  ln.setAttribute(
-    "aria-label",
-    t(bookmarked ? "bookmark.gutterRemove" : "bookmark.gutterAdd", {
-      line: formatLineNo(line + 1),
-    }),
-  );
-  ln.title = t(bookmarked ? "bookmark.gutterRemove" : "bookmark.gutterAdd", {
+  ln.setAttribute("tabindex", change ? "0" : "-1");
+  const bookmarkLabel = t(bookmarked ? "bookmark.gutterRemove" : "bookmark.gutterAdd", {
     line: formatLineNo(line + 1),
   });
+  const changeLabel = changeStateLabel(change);
+  ln.setAttribute(
+    "aria-label",
+    changeLabel
+      ? t("changeHistory.gutterLabel", { bookmark: bookmarkLabel, state: changeLabel })
+      : bookmarkLabel,
+  );
+  ln.title = changeLabel ? `${bookmarkLabel}\n${changeLabel}` : bookmarkLabel;
   tx.textContent = "";
   tx.classList.remove("pending");
   row.classList.toggle("inserted", !!rec?.inserted);
@@ -239,10 +284,19 @@ export function fillEofRow(row) {
   row.dataset.line = "-1";
   const ln = row.firstChild;
   ln.textContent = "";
-  ln.removeAttribute("role");
-  ln.removeAttribute("tabindex");
-  ln.removeAttribute("aria-label");
-  ln.removeAttribute("title");
+  const change = applyRowChangeState(row, state.total);
+  if (change) {
+    const label = t("changeHistory.eofLabel", { state: changeStateLabel(change) });
+    ln.setAttribute("role", "img");
+    ln.setAttribute("tabindex", "0");
+    ln.setAttribute("aria-label", label);
+    ln.title = label;
+  } else {
+    ln.removeAttribute("role");
+    ln.removeAttribute("tabindex");
+    ln.removeAttribute("aria-label");
+    ln.removeAttribute("title");
+  }
   const tx = row.lastChild;
   tx.className = "tx";
   tx.textContent = t("editor.eofMarker");
@@ -641,6 +695,50 @@ export function renderSearchTicks(vh) {
       frag.append(tick);
     });
   }
+
+  const change = state.settings.showChangeHistory === false ? null : state.changeHistoryOverview;
+  if (change) {
+    const groups = [
+      ["saved", change.saved],
+      ["unsaved", change.unsaved],
+    ];
+    const occupiedChanges = groups.reduce(
+      (sum, [, group]) => sum + group.histogram.reduce((n, value) => n + (value > 0 ? 1 : 0), 0),
+      0,
+    );
+    const changeStep = Math.max(1, Math.ceil(occupiedChanges / MAX_CHANGE_TICKS));
+    let changeSeen = 0;
+    for (const [status, group] of groups) {
+      const denominator = Math.max(1, group.histogram.length - 1);
+      group.histogram.forEach((value, bin) => {
+        if (!value || changeSeen++ % changeStep !== 0) return;
+        const tick = document.createElement("div");
+        tick.className = `vtick change-vtick change-${status}-vtick`;
+        if (change.deleted.histogram[bin]) tick.classList.add("change-deleted-vtick");
+        const y = Math.max(0, Math.min(vh - 3, (bin / denominator) * (vh - 3)));
+        tick.style.transform = `translateY(${y}px)`;
+        tick.setAttribute("aria-hidden", "true");
+        frag.append(tick);
+      });
+    }
+    if (change.saved.count || change.unsaved.count) {
+      ticks.setAttribute("role", "img");
+      const summary = t("changeHistory.overviewLabel", {
+        saved: commas(change.saved.count),
+        unsaved: commas(change.unsaved.count),
+      });
+      ticks.setAttribute(
+        "aria-label",
+        change.limit_reached ? `${summary} ${t("changeHistory.limited")}` : summary,
+      );
+    } else {
+      ticks.removeAttribute("role");
+      ticks.removeAttribute("aria-label");
+    }
+  } else {
+    ticks.removeAttribute("role");
+    ticks.removeAttribute("aria-label");
+  }
   ticks.append(frag);
 }
 
@@ -695,6 +793,10 @@ export function clearLineCache() {
   state.cache = { start: 0, lines: [] };
   state.bookmarks = new Set();
   state.bookmarkCount = 0;
+  state.changeSaved = new Set();
+  state.changeUnsaved = new Set();
+  state.changeDeleted = new Set();
+  state.changeHistoryOverview = null;
   state.loadToken++;
 }
 

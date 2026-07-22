@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS = {
   updateCheckOnStartup: true,
   showWhitespace: false,
   syntaxHighlight: true,
+  showChangeHistory: true,
   zenkakuUnderline: false,
   wordWrap: false,
   bgMode: "watercolor", // "watercolor" (theme default) | "solid" | "image"
@@ -167,6 +168,10 @@ export const state = {
   // line-number markers behind.
   bookmarks: new Set<number>(),
   bookmarkCount: 0,
+  changeSaved: new Set<number>(),
+  changeUnsaved: new Set<number>(),
+  changeDeleted: new Set<number>(),
+  changeHistoryOverview: null,
   findOpen: false,
   replaceOpen: false,
   history: [],

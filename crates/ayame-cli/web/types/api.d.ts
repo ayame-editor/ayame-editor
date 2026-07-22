@@ -76,6 +76,10 @@ export type MarkerPreview = { line: bigint, text: string, truncated: boolean, };
 
 export type MarkerPreviewResponse = { kind: string, total: bigint, entries: Array<MarkerPreview>, truncated: boolean, };
 
+export type ChangeMarkerOverview = { count: bigint, histogram: Array<number>, };
+
+export type ChangeHistoryResponse = { revision: bigint, total_lines: bigint, saved: ChangeMarkerOverview, unsaved: ChangeMarkerOverview, deleted: ChangeMarkerOverview, limit_reached: boolean, };
+
 export type SelectionSaveRequest = { path: string, overwrite: boolean, rect: boolean, l0: bigint, c0: number, l1: bigint, c1: number, };
 
 export type SelectionSaveResponse = { path: string, lines: bigint, bytes: bigint, };

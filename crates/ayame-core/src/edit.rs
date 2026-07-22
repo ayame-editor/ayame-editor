@@ -8,10 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::fsync::{fsync_parent, replace_with_staged};
+use crate::markers::MAX_MARKERS_PER_KIND;
 use crate::wal::{LoggedOp, WalWriter};
 use crate::{Document, Error, Result};
 
@@ -34,6 +36,13 @@ pub struct EditSession {
     /// The content generation last written to disk (0 = the document as
     /// opened). See [`EditSession::mark_saved`].
     saved_gen: u64,
+    /// Sparse overlay that produced the last successfully saved bytes. Both
+    /// this map and `events` stay anchored to the immutable, as-opened mmap,
+    /// so change-history markers can compare the two without rereading or
+    /// materializing the document. A save clones only edited anchors, then
+    /// read-only viewport snapshots share that immutable map through `Arc`;
+    /// memory remains proportional to edits, never to the document line count.
+    saved_events: Arc<BTreeMap<u64, EditEvent>>,
     /// Attached crash log ([`crate::wal`]): every committed transaction is
     /// mirrored into it. Deliberately excluded from `Clone` — see the manual
     /// impl below.
@@ -54,6 +63,7 @@ impl Default for EditSession {
             content_gen: 0,
             next_gen: 1,
             saved_gen: 0,
+            saved_events: Arc::new(BTreeMap::new()),
             wal: None,
             wal_error: None,
         }
@@ -76,6 +86,7 @@ impl Clone for EditSession {
             content_gen: self.content_gen,
             next_gen: self.next_gen,
             saved_gen: self.saved_gen,
+            saved_events: Arc::clone(&self.saved_events),
             wal: None,
             wal_error: None,
         }
@@ -86,9 +97,8 @@ impl EditSession {
     /// Clone only the content needed to render a stable read-only view.
     ///
     /// Unlike [`Clone`], this deliberately omits undo/redo records, WAL state,
-    /// and pending WAL errors. Viewport requests only need the sparse overlay
-    /// and generation metadata, so copying history here would make scrolling
-    /// cost proportional to up to 256 prior edit transactions.
+    /// and pending WAL errors. The immutable last-saved overlay is shared, so
+    /// viewport requests preserve read semantics without cloning it.
     #[must_use]
     pub fn view_clone(&self) -> EditSession {
         EditSession {
@@ -99,6 +109,7 @@ impl EditSession {
             content_gen: self.content_gen,
             next_gen: self.next_gen,
             saved_gen: self.saved_gen,
+            saved_events: Arc::clone(&self.saved_events),
             wal: None,
             wal_error: None,
         }
@@ -348,6 +359,135 @@ pub struct EditStats {
     pub can_redo: bool,
 }
 
+/// Sparse change-history image for the CURRENT logical view.
+///
+/// `saved` and `unsaved` are status rails. `deleted` is an orthogonal shape
+/// flag at the next surviving line, or at `total_lines` (the logical EOF row),
+/// and is therefore always paired with one of the status sets. Every vector is
+/// sorted, deduplicated, and capped by [`MAX_MARKERS_PER_KIND`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChangeHistory {
+    pub saved: Vec<u64>,
+    pub unsaved: Vec<u64>,
+    pub deleted: Vec<u64>,
+    pub limit_reached: bool,
+}
+
+#[derive(Default)]
+struct ChangeHistoryBuilder {
+    saved: BTreeSet<u64>,
+    unsaved: BTreeSet<u64>,
+    deleted: BTreeSet<u64>,
+    limit_reached: bool,
+}
+
+impl ChangeHistoryBuilder {
+    fn insert_limited(&mut self, kind: ChangeHistoryKind, line: u64) {
+        let target = match kind {
+            ChangeHistoryKind::Saved => &mut self.saved,
+            ChangeHistoryKind::Unsaved => &mut self.unsaved,
+            ChangeHistoryKind::Deleted => &mut self.deleted,
+        };
+        if target.contains(&line) {
+            return;
+        }
+        if target.len() == MAX_MARKERS_PER_KIND {
+            self.limit_reached = true;
+            return;
+        }
+        target.insert(line);
+    }
+
+    fn saved_line(&mut self, line: u64) {
+        self.insert_limited(ChangeHistoryKind::Saved, line);
+    }
+
+    fn unsaved_line(&mut self, line: u64) {
+        self.insert_limited(ChangeHistoryKind::Unsaved, line);
+    }
+
+    fn saved_deletion(&mut self, line: u64) {
+        self.saved_line(line);
+        self.insert_limited(ChangeHistoryKind::Deleted, line);
+    }
+
+    fn unsaved_deletion(&mut self, line: u64) {
+        self.unsaved_line(line);
+        self.insert_limited(ChangeHistoryKind::Deleted, line);
+    }
+
+    fn finish(self) -> ChangeHistory {
+        ChangeHistory {
+            saved: self.saved.into_iter().collect(),
+            unsaved: self.unsaved.into_iter().collect(),
+            deleted: self.deleted.into_iter().collect(),
+            limit_reached: self.limit_reached,
+        }
+    }
+}
+
+enum ChangeHistoryKind {
+    Saved,
+    Unsaved,
+    Deleted,
+}
+
+/// Compare the insertion lists at one immutable original anchor. Exact common
+/// prefixes/suffixes retain their saved state; only the bounded middle is
+/// paired positionally. This linear alignment correctly localizes ordinary
+/// insert/delete/replace edits without an unbounded `O(n²)` sequence diff.
+fn classify_insert_changes(
+    out: &mut ChangeHistoryBuilder,
+    position: u64,
+    current: &[String],
+    saved: &[String],
+) {
+    let mut prefix = 0usize;
+    while prefix < current.len() && prefix < saved.len() && current[prefix] == saved[prefix] {
+        out.saved_line(position.saturating_add(prefix as u64));
+        prefix += 1;
+    }
+
+    let max_suffix = current
+        .len()
+        .saturating_sub(prefix)
+        .min(saved.len().saturating_sub(prefix));
+    let mut suffix = 0usize;
+    while suffix < max_suffix
+        && current[current.len() - 1 - suffix] == saved[saved.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+
+    let current_end = current.len() - suffix;
+    let saved_end = saved.len() - suffix;
+    let current_middle = current_end - prefix;
+    let saved_middle = saved_end - prefix;
+    let paired = current_middle.min(saved_middle);
+    for offset in 0..paired {
+        let current_index = prefix + offset;
+        let line = position.saturating_add(current_index as u64);
+        if current[current_index] == saved[prefix + offset] {
+            out.saved_line(line);
+        } else {
+            out.unsaved_line(line);
+        }
+    }
+    for current_index in (prefix + paired)..current_end {
+        out.unsaved_line(position.saturating_add(current_index as u64));
+    }
+    if saved_middle > current_middle {
+        // Missing saved insertions collapse onto the first surviving suffix
+        // line, the original anchor line, or the logical EOF row.
+        out.unsaved_deletion(position.saturating_add(current_end as u64));
+    }
+
+    for offset in (0..suffix).rev() {
+        let current_index = current.len() - 1 - offset;
+        out.saved_line(position.saturating_add(current_index as u64));
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SaveResult {
     pub path: PathBuf,
@@ -409,6 +549,7 @@ impl EditSession {
     /// undo across the save — keeps working.
     pub fn mark_saved(&mut self) {
         self.saved_gen = self.content_gen;
+        self.saved_events = Arc::new(self.events.clone());
     }
 
     /// Record that the content identified by `gen` (a value previously
@@ -418,6 +559,104 @@ impl EditSession {
     /// the generation that was actually saved.
     pub fn mark_saved_at(&mut self, gen: u64) {
         self.saved_gen = gen;
+        if let Some(events) = self.events_at_generation(gen) {
+            self.saved_events = Arc::new(events);
+        }
+    }
+
+    /// Record the exact snapshot that reached disk. This is the preferred
+    /// optimistic-save commit: it remains exact even when later edits race the
+    /// filesystem swap or the target generation has fallen out of the bounded
+    /// undo stack.
+    pub fn mark_saved_from(&mut self, saved: &EditSession) {
+        self.saved_gen = saved.content_gen;
+        self.saved_events = Arc::new(saved.events.clone());
+    }
+
+    /// Reconstruct a retained content generation without disturbing the live
+    /// session. History is capped at 256 entries, and each replay touches only
+    /// one sparse undo record. `mark_saved_from` avoids this walk whenever the
+    /// caller still owns the save snapshot.
+    fn events_at_generation(&self, gen: u64) -> Option<BTreeMap<u64, EditEvent>> {
+        if self.content_gen == gen {
+            return Some(self.events.clone());
+        }
+        let mut older = self.clone();
+        while older.undo() {
+            if older.content_gen == gen {
+                return Some(older.events);
+            }
+        }
+        let mut newer = self.clone();
+        while newer.redo() {
+            if newer.content_gen == gen {
+                return Some(newer.events);
+            }
+        }
+        None
+    }
+
+    /// Derive saved/unsaved change markers from the two sparse overlays that
+    /// are authoritative for the editor view: `events` (current content) and
+    /// `saved_events` (the last bytes that successfully reached disk).
+    ///
+    /// The walk merges edited ORIGINAL anchors only. Untouched spans are never
+    /// visited, no original line text is decoded, and no line-count-sized
+    /// bitmap is allocated. Runtime is `O(E + M)` and memory `O(M)`, where `E`
+    /// is the number of edited anchors and `M` the admitted change markers.
+    #[must_use]
+    pub fn change_history(&self, doc: &Document) -> ChangeHistory {
+        let original_lines = doc.line_count();
+        let mut anchors = BTreeSet::new();
+        anchors.extend(self.events.keys().copied());
+        anchors.extend(self.saved_events.keys().copied());
+
+        let empty = EditEvent::default();
+        let mut out = ChangeHistoryBuilder::default();
+        let mut inserted_before = 0u64;
+        let mut deleted_before = 0u64;
+
+        for anchor in anchors {
+            let current = self.events.get(&anchor).unwrap_or(&empty);
+            let saved = self.saved_events.get(&anchor).unwrap_or(&empty);
+            let original = anchor.min(original_lines);
+            let position = original
+                .checked_add(inserted_before)
+                .and_then(|line| line.checked_sub(deleted_before))
+                // A valid overlay cannot overflow. Saturating to EOF keeps a
+                // corrupt/internally impossible anchor from producing a
+                // wrapped marker coordinate in release builds.
+                .unwrap_or_else(|| self.total_lines(doc));
+
+            classify_insert_changes(&mut out, position, &current.inserts, &saved.inserts);
+
+            if anchor < original_lines {
+                let current_line = position.saturating_add(current.inserts.len() as u64);
+                match (current.deleted, saved.deleted) {
+                    (true, true) => {
+                        // Both views omit the original line. The saved view
+                        // differs from the as-opened document, so this is a
+                        // persisted deletion at the next line / EOF boundary.
+                        out.saved_deletion(current_line);
+                    }
+                    (true, false) => out.unsaved_deletion(current_line),
+                    (false, true) => out.unsaved_line(current_line),
+                    (false, false) if current.replacement == saved.replacement => {
+                        if saved.replacement.is_some() {
+                            out.saved_line(current_line);
+                        }
+                    }
+                    (false, false) => out.unsaved_line(current_line),
+                }
+            }
+
+            inserted_before = inserted_before.saturating_add(current.inserts.len() as u64);
+            if anchor < original_lines && current.deleted {
+                deleted_before = deleted_before.saturating_add(1);
+            }
+        }
+
+        out.finish()
     }
 
     /// Attach (or detach) a crash log: every committed transaction is mirrored
@@ -1619,6 +1858,7 @@ impl EditSession {
     /// disk holds the as-opened content after a crash, so `saved_gen` is 0).
     pub(crate) fn restore_overlay(&mut self, snap: OverlaySnapshot) {
         self.events = snap.events;
+        self.saved_events = Arc::new(BTreeMap::new());
         self.undo.clear();
         self.redo.clear();
         self.saved_gen = 0;
@@ -2236,11 +2476,13 @@ mod tests {
         edits.replace_line(&doc, 0, "c".into()).unwrap();
         edits.mark_saved_at(staged);
         assert!(edits.is_dirty(), "the racing edit is not on disk");
+        assert_eq!(edits.change_history(&doc).unsaved, vec![0]);
         assert!(edits.undo());
         assert!(
             !edits.is_dirty(),
             "undo back to the staged content is clean"
         );
+        assert_eq!(edits.change_history(&doc).saved, vec![0]);
     }
 
     #[test]
@@ -2258,6 +2500,145 @@ mod tests {
             edits.is_dirty(),
             "the disk holds the saved text, not the as-opened text"
         );
+    }
+
+    #[test]
+    fn change_history_transitions_through_save_and_undo_redo() {
+        let (_f, doc) = doc_from(b"a\nb\nc\n");
+        let mut edits = EditSession::default();
+        assert_eq!(edits.change_history(&doc), ChangeHistory::default());
+
+        edits.replace_line(&doc, 1, "B".into()).unwrap();
+        edits.insert_line_before(&doc, 0, "x".into()).unwrap();
+        edits.delete_line(&doc, 3).unwrap();
+        assert_eq!(
+            edits.change_history(&doc),
+            ChangeHistory {
+                saved: vec![],
+                unsaved: vec![0, 2, 3],
+                deleted: vec![3], // logical EOF after deleting final `c`
+                limit_reached: false,
+            }
+        );
+
+        edits.mark_saved();
+        assert_eq!(
+            edits.change_history(&doc),
+            ChangeHistory {
+                saved: vec![0, 2, 3],
+                unsaved: vec![],
+                deleted: vec![3],
+                limit_reached: false,
+            }
+        );
+
+        assert!(edits.undo()); // restore c: this now differs from saved disk
+        assert_eq!(
+            edits.change_history(&doc),
+            ChangeHistory {
+                saved: vec![0, 2],
+                unsaved: vec![3],
+                deleted: vec![],
+                limit_reached: false,
+            }
+        );
+        assert!(edits.redo());
+        assert_eq!(edits.change_history(&doc).saved, vec![0, 2, 3]);
+        assert!(edits.change_history(&doc).unsaved.is_empty());
+    }
+
+    #[test]
+    fn change_history_clears_when_undo_or_retyping_restores_baseline() {
+        let (_f, doc) = doc_from(b"same\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 0, "different".into()).unwrap();
+        assert_eq!(edits.change_history(&doc).unsaved, vec![0]);
+        assert!(edits.undo());
+        assert_eq!(edits.change_history(&doc), ChangeHistory::default());
+
+        assert!(edits.redo());
+        edits.replace_line(&doc, 0, "same".into()).unwrap();
+        assert!(
+            edits.change_history(&doc).unsaved.is_empty(),
+            "text equality, not the UI's dirty flag, owns change rails"
+        );
+    }
+
+    #[test]
+    fn change_history_places_leading_middle_and_all_deletions_at_next_or_eof() {
+        let (_f, doc) = doc_from(b"a\nb\nc\n");
+        let mut edits = EditSession::default();
+        edits.delete_line(&doc, 1).unwrap(); // a c: boundary is current c
+        assert_eq!(edits.change_history(&doc).deleted, vec![1]);
+        edits.delete_line(&doc, 1).unwrap(); // a: boundary is EOF
+        assert_eq!(edits.change_history(&doc).deleted, vec![1]);
+        edits.delete_line(&doc, 0).unwrap(); // empty: boundary is EOF row 0
+        let history = edits.change_history(&doc);
+        assert_eq!(history.unsaved, vec![0]);
+        assert_eq!(history.deleted, vec![0]);
+    }
+
+    #[test]
+    fn change_history_covers_rectangles_and_multi_cursor_batches() {
+        let (_f, doc) = doc_from(b"aa\nbb\ncc\ndd\n");
+        let mut edits = EditSession::default();
+        edits.replace_rect(&doc, 0, 2, 1, 2, "X").unwrap();
+        assert_eq!(edits.change_history(&doc).unsaved, vec![0, 1, 2]);
+        edits.mark_saved();
+
+        edits
+            .replace_batch(
+                &doc,
+                &[
+                    BatchEdit {
+                        l0: 0,
+                        c0: 0,
+                        l1: 0,
+                        c1: 1,
+                        text: "A".into(),
+                    },
+                    BatchEdit {
+                        l0: 3,
+                        c0: 0,
+                        l1: 3,
+                        c1: 1,
+                        text: "D".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        let history = edits.change_history(&doc);
+        assert_eq!(history.saved, vec![1, 2]);
+        assert_eq!(history.unsaved, vec![0, 3]);
+    }
+
+    #[test]
+    fn mark_saved_from_pins_racing_snapshot_for_change_history() {
+        let (_f, doc) = doc_from(b"a\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 0, "b".into()).unwrap();
+        let staged = edits.clone();
+        edits.replace_line(&doc, 0, "c".into()).unwrap();
+
+        edits.mark_saved_from(&staged);
+        assert_eq!(edits.change_history(&doc).unsaved, vec![0]);
+        assert!(edits.undo());
+        let history = edits.change_history(&doc);
+        assert_eq!(history.saved, vec![0]);
+        assert!(history.unsaved.is_empty());
+    }
+
+    #[test]
+    fn recovered_overlay_rebuilds_only_unsaved_change_history() {
+        let (_f, doc) = doc_from(b"a\nb\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 1, "B".into()).unwrap();
+        let snapshot = edits.overlay_snapshot();
+        let mut recovered = EditSession::default();
+        recovered.restore_overlay(snapshot);
+
+        assert_eq!(recovered.change_history(&doc).unsaved, vec![1]);
+        assert!(recovered.change_history(&doc).saved.is_empty());
     }
 
     #[test]
@@ -2694,11 +3075,15 @@ mod tests {
         edits
             .insert_line_before(&doc, 1, "inserted".into())
             .unwrap();
+        edits.mark_saved();
+        edits.replace_line(&doc, 1, "changed again".into()).unwrap();
         assert_eq!(edits.undo.len(), HISTORY_LIMIT);
+        assert!(!edits.saved_events.is_empty());
 
         let view = edits.view_clone();
         assert!(view.undo.is_empty());
         assert!(view.redo.is_empty());
+        assert!(Arc::ptr_eq(&view.saved_events, &edits.saved_events));
         assert_eq!(view.revision, edits.revision);
         assert_eq!(view.content_gen, edits.content_gen);
         assert_eq!(view.saved_gen, edits.saved_gen);
