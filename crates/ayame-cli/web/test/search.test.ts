@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   charLenOf,
   COUNT_DEBOUNCE_MS,
+  renderGrepResults,
   scheduleCount,
   updateCount,
   utf16IndexOfCol,
@@ -42,6 +43,34 @@ describe("search pure helpers", () => {
     expect(utf16IndexOfCol(text, 1)).toBe(1);
     expect(utf16IndexOfCol(text, 2)).toBe(3);
     expect(utf16IndexOfCol(text, 3)).toBe(4);
+  });
+
+  it("shares exact comma-aware gutter sizing with grep results (#252)", () => {
+    document.body.innerHTML = '<div id="grep-results"></div>';
+    const response = {
+      hits: [
+        { path: "/tmp/a.log", line: 66, col: 0, text: "small" },
+        { path: "/tmp/a.log", line: 999, col: 0, text: "large" },
+      ],
+      truncated: false,
+      files_scanned: 1,
+      files_truncated: false,
+    };
+
+    state.settings.lineNumberCommas = true;
+    renderGrepResults(response, "", false);
+    const view = document.getElementById("grep-results")!;
+    expect(view.style.getPropertyValue("--gutter-ch")).toBe("5ch");
+    expect([...view.querySelectorAll(".grep-ln")].map((el) => el.textContent)).toEqual([
+      "67",
+      "1,000",
+    ]);
+
+    state.settings.lineNumberCommas = false;
+    renderGrepResults(response, "", false);
+    expect(view.style.getPropertyValue("--gutter-ch")).toBe("4ch");
+    expect(view.querySelectorAll(".grep-ln")[1]?.textContent).toBe("1000");
+    state.settings.lineNumberCommas = true;
   });
 });
 

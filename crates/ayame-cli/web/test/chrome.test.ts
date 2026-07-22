@@ -406,7 +406,7 @@ describe("application chrome", () => {
     }
   });
 
-  it("shares gutter spacing and keeps find controls border-consistent (#194)", () => {
+  it("shares exact, opaque gutter geometry and spacing (#194, #251-#253)", () => {
     const css = read("style.css");
     const padding =
       /padding:\s*var\(--space-0\)\s+var\(--gutter-pad-end\)\s+var\(--space-0\)\s+var\(--gutter-pad-start\)/;
@@ -415,6 +415,22 @@ describe("application chrome", () => {
 
     expect(block(".ln")).toMatch(padding);
     expect(block(".grep-ln")).toMatch(padding);
+    expect(block(".ln")).toContain("width: calc(");
+    expect(block(".ln")).toContain("var(--gutter-ch, 1ch)");
+    expect(block(".ln")).toContain("var(--gutter-border-width)");
+    expect(block(".ln")).toContain("background: var(--gutter-surface)");
+    expect(block(".ln")).toContain(
+      "border-right: var(--gutter-border-width) solid var(--gutter-border)",
+    );
+    expect(block(".grep-ln")).toContain("background: var(--gutter-surface)");
+    expect(block(".grep-ln")).toContain(
+      "border-right: var(--gutter-border-width) solid var(--gutter-border)",
+    );
+    expect(block(".grep-hit")).toContain("var(--gutter-ch, 1ch)");
+    expect(block(".grep-hit")).toContain("var(--gutter-border-width)");
+    expect(css).not.toContain("7ch");
+    expect(block(".ln")).not.toContain("transparent");
+    expect(block(".grep-ln")).not.toContain("transparent");
     expect(block(".replace-btn")).not.toMatch(/border\s*:/);
   });
 

@@ -88,6 +88,18 @@
   --status: rgba(255,253,248,.72);
   --status-fg: #6E6383;
   --gutter-fg: #B3A7C9;
+  /* Derived gutter palette: every built-in/custom theme supplies the base
+     colors above, while editor and auxiliary gutters consume this one set of
+     opaque, contrast-aware surfaces. */
+  --gutter-surface: color-mix(in srgb, var(--accent) 12%, var(--gutter-bg));
+  --gutter-border: var(--accent);
+  --gutter-text: color-mix(in srgb, var(--fg) 55%, var(--gutter-fg));
+  --gutter-active-bg:
+    color-mix(in srgb, var(--bg-active-line) 72%, var(--gutter-surface));
+  --gutter-hover-bg: color-mix(in srgb, var(--mark-bg) 70%, var(--gutter-surface));
+  --gutter-bookmark-bg: color-mix(in srgb, var(--mark-bg) 82%, var(--gutter-surface));
+  --gutter-active-bookmark-bg:
+    color-mix(in srgb, var(--mark-bg) 64%, var(--gutter-active-bg));
   --mark-bg: #FBEBB0;
   --mark-fg: #6B5510;
   --mark-active-bg: #E8B84B;
@@ -114,6 +126,7 @@
   --chrome-top-h: 38px;
   --gutter-pad-start: var(--space-2);
   --gutter-pad-end: var(--space-5);
+  --gutter-border-width: 1px;
   --marker-rail-w: var(--space-1);
   --bookmark-panel-w: 44rem;
   --bookmark-list-max-h: 55vh;
@@ -968,8 +981,8 @@ html.replace-open .find-group .replace-row {
   top: 0;
   left: 0;
   height: 100%;
-  background: var(--gutter-bg);
-  border-right: 1px solid var(--border);
+  background: var(--gutter-surface);
+  border-right: var(--gutter-border-width) solid var(--gutter-border);
 }
 
 .row {
@@ -1072,7 +1085,10 @@ html.replace-open .find-group .replace-row {
   /* Width is driven from the widest line number (commas included) via a CSS
      variable set in render(), so every gutter — including the empty [EOF]
      row — reserves the same width and the numbers right-align cleanly. */
-  min-width: var(--gutter-ch, 7ch);
+  width: calc(
+    var(--gutter-ch, 1ch) + var(--gutter-pad-start) + var(--gutter-pad-end) +
+      var(--gutter-border-width)
+  );
   /* The whole gutter→text gap lives inside the padding (border box), so
      getBoundingClientRect().width in gutterPixels() measures the true text
      origin — a margin here would be excluded and shift the caret 8px left. */
@@ -1080,25 +1096,25 @@ html.replace-open .find-group .replace-row {
     var(--space-0) var(--gutter-pad-end)
     var(--space-0) var(--gutter-pad-start);
   text-align: right;
-  color: var(--gutter-fg);
-  background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
-  border-right: 1px solid var(--border);
+  color: var(--gutter-text);
+  background: var(--gutter-surface);
+  border-right: var(--gutter-border-width) solid var(--gutter-border);
   user-select: none;
 }
-.row.active .ln { background: var(--bg-active-line); }
+.row.active .ln { background: var(--gutter-active-bg); }
 .ln[role="button"] { cursor: pointer; }
 .ln[role="button"]:hover {
   color: var(--fg);
-  background: color-mix(in srgb, var(--mark-bg) 70%, var(--gutter-bg));
+  background: var(--gutter-hover-bg);
 }
 .row.bookmarked .ln {
   color: var(--mark-fg);
   font-weight: 600;
-  background: color-mix(in srgb, var(--mark-bg) 82%, var(--gutter-bg));
+  background: var(--gutter-bookmark-bg);
   box-shadow: inset var(--marker-rail-w) 0 var(--mark-fg);
 }
 .row.active.bookmarked .ln {
-  background: color-mix(in srgb, var(--mark-bg) 64%, var(--bg-active-line));
+  background: var(--gutter-active-bookmark-bg);
 }
 
 .tx { color: var(--fg); }
@@ -2357,7 +2373,11 @@ html.saving .caret.extra { visibility: hidden; }
 .grep-hit {
   display: grid;
   grid-template-columns:
-    calc(7ch + var(--gutter-pad-start) + var(--gutter-pad-end)) minmax(0, 1fr);
+    calc(
+      var(--gutter-ch, 1ch) + var(--gutter-pad-start) + var(--gutter-pad-end) +
+        var(--gutter-border-width)
+    )
+    minmax(0, 1fr);
   width: 100%;
   min-height: var(--lh-editor);
   text-align: left;
@@ -2376,9 +2396,9 @@ html.saving .caret.extra { visibility: hidden; }
     var(--space-0) var(--gutter-pad-end)
     var(--space-0) var(--gutter-pad-start);
   text-align: right;
-  color: var(--gutter-fg);
-  background: color-mix(in srgb, var(--gutter-bg) 96%, transparent);
-  border-right: 1px solid var(--border);
+  color: var(--gutter-text);
+  background: var(--gutter-surface);
+  border-right: var(--gutter-border-width) solid var(--gutter-border);
   user-select: none;
 }
 .grep-tx {
@@ -2494,6 +2514,13 @@ html.saving .caret.extra { visibility: hidden; }
     --hover: var(--bg-active-line);
     --invalid-ring: inset 0 0 0 1px var(--danger);
     --match-ring: 0 0 0 1px var(--gold);
+    --gutter-surface: var(--gutter-bg);
+    --gutter-border: var(--accent);
+    --gutter-text: var(--fg);
+    --gutter-active-bg: var(--bg-active-line);
+    --gutter-hover-bg: var(--mark-bg);
+    --gutter-bookmark-bg: var(--mark-bg);
+    --gutter-active-bookmark-bg: var(--mark-bg);
   }
 
   #menubar,
@@ -2534,9 +2561,10 @@ html.saving .caret.extra { visibility: hidden; }
     box-shadow: 0 0 0 1px var(--edit-bg);
   }
   #ruler,
+  #ruler-corner,
   .ln,
   .grep-ln {
-    background: var(--gutter-bg);
+    background: var(--gutter-surface);
   }
   .row:hover,
   .opener-row:hover,

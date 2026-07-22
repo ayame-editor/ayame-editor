@@ -7,7 +7,13 @@ vi.mock("../src/selection.js", () => ({
 vi.mock("../src/menus.js", () => ({ updateStatusPos: vi.fn() }));
 vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
 
-import { cacheLineResponse, ensureData, fillRow, formatLineNo } from "../src/editor.js";
+import {
+  cacheLineResponse,
+  ensureData,
+  fillRow,
+  formatLineNo,
+  lineNumberChars,
+} from "../src/editor.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -38,6 +44,20 @@ describe("line-number formatting (#49)", () => {
   it("treats an unset flag as commas-on (the default)", () => {
     delete state.settings.lineNumberCommas;
     expect(formatLineNo(1000)).toBe("1,000");
+    state.settings.lineNumberCommas = true;
+  });
+
+  it("sizes the gutter to exactly the maximum formatted line number (#252)", () => {
+    state.settings.lineNumberCommas = true;
+    expect(lineNumberChars(0)).toBe(1);
+    expect(lineNumberChars(67)).toBe(2);
+    expect(lineNumberChars(999)).toBe(3);
+    expect(lineNumberChars(1000)).toBe(5);
+    expect(lineNumberChars(10_000_000_000)).toBe(14);
+
+    state.settings.lineNumberCommas = false;
+    expect(lineNumberChars(1000)).toBe(4);
+    expect(lineNumberChars(10_000_000_000)).toBe(11);
     state.settings.lineNumberCommas = true;
   });
 });
