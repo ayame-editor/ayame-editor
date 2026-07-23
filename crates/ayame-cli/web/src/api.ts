@@ -13,6 +13,20 @@ export type LinesResponse = {
   total: number;
 };
 
+export type ChangeMarkerOverview = {
+  count: number;
+  histogram: number[];
+};
+
+export type ChangeHistoryResponse = {
+  revision: number;
+  total_lines: number;
+  saved: ChangeMarkerOverview;
+  unsaved: ChangeMarkerOverview;
+  deleted: ChangeMarkerOverview;
+  limit_reached: boolean;
+};
+
 export type LineByteResponse = {
   byte?: number;
 };

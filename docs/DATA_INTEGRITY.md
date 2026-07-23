@@ -56,6 +56,32 @@ transaction. On restart:
 - A **stale** log, whose base file changed underneath it, is refused so edits
   are never applied to the wrong content.
 
+## Change-history marker consistency
+
+Change-history markers are a derived view of the same sparse `EditSession`
+overlays used for rendering and saving; the browser never compares document
+text. The current overlay is compared with the exact overlay snapshot from the
+last successful save, both anchored to the immutable as-opened mmap.
+
+- `unsaved` marks current lines that differ from the saved snapshot.
+- `saved` marks lines in the saved snapshot that differ from the content as it
+  was opened. An unsaved state takes visual precedence when both histories meet
+  at one boundary.
+- A deletion is placed on the next surviving logical line. A trailing or
+  whole-document deletion is placed at `total_lines`, the editor's existing
+  `[EOF]` row, so it is not silently clamped onto unrelated content.
+- The save commit records the overlay that actually produced the staged bytes
+  and changes marker status only after the atomic file swap succeeds. A failed
+  or conflicted save leaves both the saved baseline and marker colors intact.
+- Undo/redo recomputes from restored overlay generations. Revert/reload clears
+  the session history. WAL recovery starts from the on-disk file as the saved
+  baseline and reconstructs recovered edits as `unsaved`; saved markers remain
+  intentionally session-only.
+
+Storage is capped sparse state (`BTreeSet`, one million entries per marker
+kind), not a line-count-sized bitmap. Viewport reads enumerate only the fetched
+range; the position pane folds the same marker set into exactly 2,048 bins.
+
 ## Scratch and spill placement
 
 Out-of-core work needs disk: dirty sessions materialize a worker input, the

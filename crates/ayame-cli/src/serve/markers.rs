@@ -19,8 +19,8 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use ayame_core::{
-    BatchEdit, Document, EditLine, LineEdit, LineMarker, MarkerKind, MarkerSet, MarkerTransform,
-    MAX_MARKERS_PER_KIND,
+    BatchEdit, Document, EditLine, EditSession, LineEdit, LineMarker, MarkerKind, MarkerSet,
+    MarkerTransform, MAX_MARKERS_PER_KIND,
 };
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,7 @@ const MAX_LIST_LIMIT: usize = 2_000;
 const MAX_BULK_LINES: usize = 100_000;
 const MARKER_SAVE_BATCH: usize = 2_048;
 const PREVIEW_CHARS: usize = 160;
+const CHANGE_OVERVIEW_BINS: usize = 2_048;
 
 type MarkerRecord = Vec<MarkerTransform>;
 
@@ -43,6 +44,7 @@ pub(super) struct MarkerSession {
     undo: Vec<MarkerRecord>,
     redo: Vec<MarkerRecord>,
     revision: u64,
+    change_limit_reached: bool,
 }
 
 impl MarkerSession {
@@ -75,7 +77,12 @@ impl MarkerSession {
     }
 
     /// The content edit succeeded: keep its inverse as one undo generation.
-    pub(super) fn commit(&mut self, inverse: MarkerRecord) {
+    pub(super) fn commit(&mut self, mut inverse: MarkerRecord) {
+        // Change-history partitions are regenerated from EditSession after
+        // every successful content transition. Do not duplicate their old
+        // rows inside up to 256 coordinate-history records; rollback still
+        // receives the unmodified record before this commit point.
+        scrub_change_restores(&mut inverse);
         push_history(&mut self.undo, inverse);
         self.redo.clear();
         self.bump();
@@ -92,7 +99,8 @@ impl MarkerSession {
         let Some(record) = self.undo.pop() else {
             return;
         };
-        let inverse = self.apply_record(record);
+        let mut inverse = self.apply_record(record);
+        scrub_change_restores(&mut inverse);
         push_history(&mut self.redo, inverse);
         self.bump();
     }
@@ -102,7 +110,8 @@ impl MarkerSession {
         let Some(record) = self.redo.pop() else {
             return;
         };
-        let inverse = self.apply_record(record);
+        let mut inverse = self.apply_record(record);
+        scrub_change_restores(&mut inverse);
         push_history(&mut self.undo, inverse);
         self.bump();
     }
@@ -161,6 +170,32 @@ impl MarkerSession {
         }
     }
 
+    /// Rebuild the three change-history partitions from the core's sparse
+    /// overlay comparison. Bookmarks and future marker kinds stay untouched;
+    /// this is the one source consumed by both viewport rows and overview
+    /// histograms.
+    pub(super) fn sync_change_history(&mut self, edits: &EditSession, doc: &Document) {
+        let history = edits.change_history(doc);
+        let limit_changed = self.change_limit_reached != history.limit_reached;
+        self.change_limit_reached = history.limit_reached;
+        let mut changed = limit_changed;
+        changed |= self
+            .set
+            .replace_lines(MarkerKind::ChangeSaved, history.saved)
+            .expect("core change history respects the marker admission cap");
+        changed |= self
+            .set
+            .replace_lines(MarkerKind::ChangeUnsaved, history.unsaved)
+            .expect("core change history respects the marker admission cap");
+        changed |= self
+            .set
+            .replace_lines(MarkerKind::ChangeDeleted, history.deleted)
+            .expect("core change history respects the marker admission cap");
+        if changed {
+            self.bump();
+        }
+    }
+
     fn apply_record(&mut self, record: MarkerRecord) -> MarkerRecord {
         let mut inverse = Vec::with_capacity(record.len());
         for op in record.into_iter().rev() {
@@ -184,6 +219,21 @@ fn push_history(stack: &mut Vec<MarkerRecord>, record: MarkerRecord) {
         stack.remove(0);
     }
     stack.push(record);
+}
+
+fn is_change_kind(kind: MarkerKind) -> bool {
+    matches!(
+        kind,
+        MarkerKind::ChangeSaved | MarkerKind::ChangeUnsaved | MarkerKind::ChangeDeleted
+    )
+}
+
+fn scrub_change_restores(record: &mut MarkerRecord) {
+    for transform in record {
+        transform
+            .restore
+            .retain(|marker| !is_change_kind(marker.kind));
+    }
 }
 
 /// Marker transforms in the same bottom-to-top order used by
@@ -236,6 +286,16 @@ fn parse_kind(value: &str) -> Result<MarkerKind, ApiError> {
     MarkerKind::from_str(value).map_err(bad_request)
 }
 
+fn parse_mutable_kind(value: &str) -> Result<MarkerKind, ApiError> {
+    let kind = parse_kind(value)?;
+    if is_change_kind(kind) {
+        return Err(bad_request(
+            "change-history markers are derived from document edits",
+        ));
+    }
+    Ok(kind)
+}
+
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct MarkerToggleRequest {
@@ -257,7 +317,7 @@ pub(super) async fn api_marker_toggle(
     State(state): State<SharedState>,
     Json(req): Json<MarkerToggleRequest>,
 ) -> Result<Json<MarkerMutationResponse>, ApiError> {
-    let kind = parse_kind(&req.kind)?;
+    let kind = parse_mutable_kind(&req.kind)?;
     state.write(|ws| {
         let total = {
             let (doc, edits) = ws.doc_and_edits()?;
@@ -304,7 +364,7 @@ pub(super) async fn api_marker_add(
     State(state): State<SharedState>,
     Json(req): Json<MarkerBulkRequest>,
 ) -> Result<Json<MarkerBulkResponse>, ApiError> {
-    let kind = parse_kind(&req.kind)?;
+    let kind = parse_mutable_kind(&req.kind)?;
     if req.lines.len() > MAX_BULK_LINES {
         return Err(bad_request(format!(
             "marker page exceeds {MAX_BULK_LINES} lines"
@@ -343,7 +403,7 @@ pub(super) async fn api_marker_clear(
     State(state): State<SharedState>,
     Json(req): Json<MarkerClearRequest>,
 ) -> Result<Json<MarkerMutationResponse>, ApiError> {
-    let kind = parse_kind(&req.kind)?;
+    let kind = parse_mutable_kind(&req.kind)?;
     state.write(|ws| {
         ws.doc_and_edits()?;
         let markers = ws.markers_mut();
@@ -355,6 +415,52 @@ pub(super) async fn api_marker_clear(
             count: 0,
             limit: MAX_MARKERS_PER_KIND as u64,
         }))
+    })
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct ChangeMarkerOverview {
+    count: u64,
+    histogram: Vec<u32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct ChangeHistoryResponse {
+    revision: u64,
+    total_lines: u64,
+    saved: ChangeMarkerOverview,
+    unsaved: ChangeMarkerOverview,
+    deleted: ChangeMarkerOverview,
+    limit_reached: bool,
+}
+
+fn change_overview(set: &MarkerSet, kind: MarkerKind, total_lines: u64) -> ChangeMarkerOverview {
+    ChangeMarkerOverview {
+        count: set.len(kind) as u64,
+        histogram: set.histogram(kind, total_lines, CHANGE_OVERVIEW_BINS),
+    }
+}
+
+/// Fixed-size position-pane image of the same sparse MarkerSet used by
+/// `/api/lines`. Even one million admitted change rows produce exactly 2,048
+/// bins per shape/status kind and never one DOM/API entry per document line.
+pub(super) async fn api_change_history(
+    State(state): State<SharedState>,
+) -> Json<ChangeHistoryResponse> {
+    state.read(|ws| {
+        let total_lines = ws.doc().map(|doc| ws.edits.total_lines(doc)).unwrap_or(0);
+        let markers = ws.markers();
+        let set = markers.set();
+        Json(ChangeHistoryResponse {
+            revision: markers.revision(),
+            total_lines,
+            saved: change_overview(set, MarkerKind::ChangeSaved, total_lines),
+            unsaved: change_overview(set, MarkerKind::ChangeUnsaved, total_lines),
+            deleted: change_overview(set, MarkerKind::ChangeDeleted, total_lines),
+            limit_reached: markers.change_limit_reached,
+        })
     })
 }
 
@@ -738,6 +844,34 @@ mod tests {
             session.set().range(MarkerKind::Bookmark, 0, 20, 20),
             vec![2, 11]
         );
+    }
+
+    #[test]
+    fn derived_change_markers_never_enter_coordinate_history() {
+        let mut session = MarkerSession::default();
+        let pending = session.begin([LineEdit::replacement(0, 1, 2)]).unwrap();
+        session.commit(pending);
+
+        // This is the state a change-history resync can produce on the newly
+        // inserted second line. A user bookmark at the same coordinate must
+        // retain ordinary marker undo/redo semantics.
+        session.set.insert(MarkerKind::ChangeUnsaved, 1).unwrap();
+        session.set.insert(MarkerKind::Bookmark, 1).unwrap();
+        session.undo();
+        let redo_restore = &session.redo.last().unwrap()[0].restore;
+        assert!(redo_restore
+            .iter()
+            .any(|marker| marker.kind == MarkerKind::Bookmark));
+        assert!(redo_restore
+            .iter()
+            .all(|marker| !is_change_kind(marker.kind)));
+
+        session.redo();
+        assert!(session.set.contains(MarkerKind::Bookmark, 1));
+        assert!(session.undo.iter().flatten().all(|transform| transform
+            .restore
+            .iter()
+            .all(|marker| !is_change_kind(marker.kind))));
     }
 
     #[test]

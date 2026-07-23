@@ -134,6 +134,12 @@ export function showAppMenu(id) {
       syntax.classList.toggle("checked", on);
       syntax.setAttribute("aria-checked", String(on));
     }
+    const changeHistory = $("menu-toggle-change-history");
+    if (changeHistory) {
+      const on = state.settings.showChangeHistory !== false;
+      changeHistory.classList.toggle("checked", on);
+      changeHistory.setAttribute("aria-checked", String(on));
+    }
     const zu = $("menu-toggle-zsp-underline");
     if (zu) {
       const zon = !!state.settings.zenkakuUnderline;
@@ -760,6 +766,9 @@ export const ACTIONS: Record<
   },
   toggleSyntaxHighlight: {
     run: () => updateSetting("syntaxHighlight", state.settings.syntaxHighlight === false),
+  },
+  toggleChangeHistory: {
+    run: () => updateSetting("showChangeHistory", state.settings.showChangeHistory === false),
   },
   toggleZenkakuUnderline: {
     run: () => updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline),

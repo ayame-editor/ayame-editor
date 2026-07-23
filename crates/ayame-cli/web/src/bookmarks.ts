@@ -395,6 +395,14 @@ export function initBookmarks() {
     event.stopPropagation();
     void toggleBookmark(line);
   });
+  content.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const line = gutterLine(event.target);
+    if (line == null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void toggleBookmark(line);
+  });
   content.addEventListener(
     "contextmenu",
     (event) => {

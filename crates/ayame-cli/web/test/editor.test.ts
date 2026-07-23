@@ -10,9 +10,11 @@ vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
 import {
   cacheLineResponse,
   ensureData,
+  fillEofRow,
   fillRow,
   formatLineNo,
   lineNumberChars,
+  renderSearchTicks,
 } from "../src/editor.js";
 import { state } from "../src/state.js";
 
@@ -87,6 +89,82 @@ describe("sparse bookmark gutter rendering (#241)", () => {
 
     fillRow(row, 42, { text: "plain" });
     expect(row.classList.contains("bookmarked")).toBe(false);
+  });
+});
+
+describe("sparse change-history rendering (#243)", () => {
+  beforeEach(() => {
+    state.settings.showChangeHistory = true;
+    state.changeSaved = new Set();
+    state.changeUnsaved = new Set();
+    state.changeDeleted = new Set();
+  });
+
+  it("replaces all change partitions with the viewport marker generation", () => {
+    state.changeSaved = new Set([99]);
+    cacheLineResponse(4, {
+      lines: [{ number: 4, text: "changed" }],
+      markers: [
+        { kind: "change-unsaved", line: 4 },
+        { kind: "change-deleted", line: 4 },
+        { kind: "change-saved", line: 5 },
+      ],
+      total: 5,
+    });
+    expect(state.changeUnsaved).toEqual(new Set([4]));
+    expect(state.changeSaved).toEqual(new Set([5]));
+    expect(state.changeDeleted).toEqual(new Set([4]));
+  });
+
+  it("uses status plus a non-color deletion shape and exposes focus text", () => {
+    const row = document.createElement("div");
+    row.append(document.createElement("span"), document.createElement("span"));
+    state.changeUnsaved = new Set([7]);
+    state.changeDeleted = new Set([7]);
+
+    fillRow(row, 7, { text: "next line" });
+    expect(row.classList.contains("change-unsaved")).toBe(true);
+    expect(row.classList.contains("change-deleted")).toBe(true);
+    expect(row.firstElementChild?.getAttribute("tabindex")).toBe("0");
+    expect(row.firstElementChild?.getAttribute("aria-label")).toMatch(/未保存|Unsaved/);
+  });
+
+  it("renders a deletion at logical EOF and obeys the display toggle", () => {
+    const row = document.createElement("div");
+    row.append(document.createElement("span"), document.createElement("span"));
+    state.total = 3;
+    state.changeSaved = new Set([3]);
+    state.changeDeleted = new Set([3]);
+
+    fillEofRow(row);
+    expect(row.classList.contains("change-saved")).toBe(true);
+    expect(row.classList.contains("change-deleted")).toBe(true);
+    expect(row.firstElementChild?.getAttribute("role")).toBe("img");
+
+    state.settings.showChangeHistory = false;
+    fillEofRow(row);
+    expect(row.classList.contains("change-saved")).toBe(false);
+    expect(row.firstElementChild?.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("renders bounded saved/unsaved overview bins from the shared marker summary", () => {
+    document.body.innerHTML = '<div id="vticks"></div>';
+    state.query = "";
+    state.searchHits = null;
+    state.analysisStatus = null;
+    state.changeHistoryOverview = {
+      revision: 4,
+      total_lines: 10_000_000_000,
+      saved: { count: 1, histogram: [0, 1, 0, 0] },
+      unsaved: { count: 1, histogram: [0, 0, 0, 1] },
+      deleted: { count: 1, histogram: [0, 0, 0, 1] },
+      limit_reached: false,
+    };
+
+    renderSearchTicks(100);
+    expect(document.querySelectorAll(".change-vtick")).toHaveLength(2);
+    expect(document.querySelector(".change-unsaved-vtick.change-deleted-vtick")).not.toBeNull();
+    expect(document.getElementById("vticks")?.getAttribute("aria-label")).toMatch(/1/);
   });
 });
 

@@ -32,14 +32,20 @@ pub enum MarkerKind {
     SearchRule,
     ChangeSaved,
     ChangeUnsaved,
+    /// Shape flag paired with `ChangeSaved` or `ChangeUnsaved` at the line
+    /// immediately following a deletion (or at the logical EOF row). Keeping
+    /// deletion as an orthogonal marker lets the status color and the
+    /// non-color diamond shape come from the same sparse source.
+    ChangeDeleted,
 }
 
 impl MarkerKind {
-    pub const ALL: [MarkerKind; 4] = [
+    pub const ALL: [MarkerKind; 5] = [
         MarkerKind::Bookmark,
         MarkerKind::SearchRule,
         MarkerKind::ChangeSaved,
         MarkerKind::ChangeUnsaved,
+        MarkerKind::ChangeDeleted,
     ];
 
     const fn index(self) -> usize {
@@ -48,6 +54,7 @@ impl MarkerKind {
             MarkerKind::SearchRule => 1,
             MarkerKind::ChangeSaved => 2,
             MarkerKind::ChangeUnsaved => 3,
+            MarkerKind::ChangeDeleted => 4,
         }
     }
 
@@ -57,6 +64,7 @@ impl MarkerKind {
             MarkerKind::SearchRule => "search-rule",
             MarkerKind::ChangeSaved => "change-saved",
             MarkerKind::ChangeUnsaved => "change-unsaved",
+            MarkerKind::ChangeDeleted => "change-deleted",
         }
     }
 }
@@ -70,6 +78,7 @@ impl FromStr for MarkerKind {
             "search-rule" => Ok(MarkerKind::SearchRule),
             "change-saved" => Ok(MarkerKind::ChangeSaved),
             "change-unsaved" => Ok(MarkerKind::ChangeUnsaved),
+            "change-deleted" => Ok(MarkerKind::ChangeDeleted),
             other => Err(Error::InvalidInput(format!(
                 "unknown marker kind '{other}'"
             ))),
@@ -145,7 +154,7 @@ impl MarkerTransform {
 /// Sparse, ordered markers partitioned by marker kind.
 #[derive(Clone, Debug, Default)]
 pub struct MarkerSet {
-    lines: [BTreeSet<u64>; 4],
+    lines: [BTreeSet<u64>; 5],
 }
 
 impl MarkerSet {
@@ -203,6 +212,29 @@ impl MarkerSet {
 
     pub fn clear(&mut self, kind: MarkerKind) {
         self.lines[kind.index()].clear();
+    }
+
+    /// Atomically replace one marker partition from a sparse iterator.
+    /// Duplicate lines are collapsed and the same explicit admission cap as
+    /// [`MarkerSet::insert`] applies before the live set is changed.
+    pub fn replace_lines(
+        &mut self,
+        kind: MarkerKind,
+        lines: impl IntoIterator<Item = u64>,
+    ) -> Result<bool> {
+        let replacement: BTreeSet<u64> = lines.into_iter().collect();
+        if replacement.len() > MAX_MARKERS_PER_KIND {
+            return Err(Error::InvalidInput(format!(
+                "{} marker limit reached ({MAX_MARKERS_PER_KIND})",
+                kind.as_str()
+            )));
+        }
+        let target = &mut self.lines[kind.index()];
+        if *target == replacement {
+            return Ok(false);
+        }
+        *target = replacement;
+        Ok(true)
     }
 
     /// First marker at or after `line`, in `O(log M)`.
@@ -266,6 +298,27 @@ impl MarkerSet {
                     .into_iter()
                     .map(|line| LineMarker { kind, line }),
             );
+        }
+        out
+    }
+
+    /// Fold one sparse marker kind into a fixed-size document-position
+    /// histogram. The output allocation is `O(bins)` and the walk is `O(M)`
+    /// for the selected kind, independent of the document's line count.
+    ///
+    /// `last_line` is the logical EOF coordinate, so a deletion at EOF maps
+    /// to the final bin rather than disappearing beyond the position pane.
+    #[must_use]
+    pub fn histogram(&self, kind: MarkerKind, last_line: u64, bins: usize) -> Vec<u32> {
+        if bins == 0 {
+            return Vec::new();
+        }
+        let mut out = vec![0u32; bins];
+        let denominator = u128::from(last_line.max(1));
+        let last_bin = bins - 1;
+        for &line in &self.lines[kind.index()] {
+            let bin = ((u128::from(line.min(last_line)) * last_bin as u128) / denominator) as usize;
+            out[bin] = out[bin].saturating_add(1);
         }
         out
     }
@@ -381,6 +434,29 @@ mod tests {
             markers.range(MarkerKind::Bookmark, 0, 10_000_000_000, 10),
             vec![3, 4_000_000_000, 9_999_999_999]
         );
+    }
+
+    #[test]
+    fn fixed_histogram_and_partition_replace_stay_sparse_at_ten_billion_lines() {
+        let mut markers = MarkerSet::default();
+        assert!(markers
+            .replace_lines(
+                MarkerKind::ChangeUnsaved,
+                [3, 4_000_000_000, 10_000_000_000],
+            )
+            .unwrap());
+        assert!(!markers
+            .replace_lines(
+                MarkerKind::ChangeUnsaved,
+                [3, 4_000_000_000, 10_000_000_000],
+            )
+            .unwrap());
+
+        let histogram = markers.histogram(MarkerKind::ChangeUnsaved, 10_000_000_000, 8);
+        assert_eq!(histogram.len(), 8);
+        assert_eq!(histogram.iter().sum::<u32>(), 3);
+        assert_eq!(histogram[0], 1);
+        assert_eq!(histogram[7], 1, "logical EOF maps to the final bin");
     }
 
     #[test]

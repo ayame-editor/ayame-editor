@@ -358,11 +358,6 @@ pub(super) struct EditSnapshot {
     pub(super) doc: Shared,
     pub(super) edits: EditSession,
     revision: u64,
-    /// Content generation the snapshot carries — what
-    /// [`AppState::commit_in_place_save`] records as "on disk" after the
-    /// staged bytes land, so a save stays correct even if edits (or undo)
-    /// arrive between the commit-point validation and the marker update.
-    content_gen: u64,
 }
 
 impl EditSnapshot {
@@ -955,7 +950,6 @@ impl AppState {
                 doc: doc.clone(),
                 edits: edits.clone(),
                 revision: edits.revision(),
-                content_gen: edits.content_gen(),
             })
         })
     }
@@ -1169,7 +1163,8 @@ impl AppState {
     pub(super) fn commit_in_place_save(&self, snap: &EditSnapshot, aside: Option<PathBuf>) {
         let mut reset_err = None;
         let pending = self.write(|ws| {
-            ws.edits.mark_saved_at(snap.content_gen);
+            ws.edits.mark_saved_from(&snap.edits);
+            ws.markers.sync_change_history(&ws.edits, &snap.doc);
             // The saved bytes ARE the file now: the base identity (len/mtime)
             // changed, so the crash log must restart from the new header —
             // its old records must never replay onto the new base.
@@ -1664,6 +1659,7 @@ impl AppState {
             // have no marker sidecar in the WAL. Keeping pre-recovery line
             // numbers would silently misplace them, so invalidate safely.
             ws.markers = MarkerSession::default();
+            ws.markers.sync_change_history(&ws.edits, &doc);
             let (doc, edits) = ws.doc_and_edits()?;
             Ok((edits.stats(doc), n))
         })?;

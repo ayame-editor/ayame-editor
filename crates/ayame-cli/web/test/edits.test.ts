@@ -8,6 +8,7 @@ vi.mock("../src/editor.js", () => ({
   cachedLine: vi.fn(() => null),
   focusEditor: vi.fn(),
   maxFirst: vi.fn(() => 0),
+  refreshChangeHistoryOverview: vi.fn(() => Promise.resolve()),
   render: vi.fn(),
   revealCaret: vi.fn(),
   revealLine: vi.fn(),
@@ -34,7 +35,7 @@ import {
   settleEditQueue,
 } from "../src/edits.js";
 import { state } from "../src/state.js";
-import { setCaret } from "../src/editor.js";
+import { refreshChangeHistoryOverview, setCaret } from "../src/editor.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -122,6 +123,19 @@ describe("edit generation guards", () => {
 
     expect(state.loadToken).toBe(42);
     expect(state.cache.lines).toEqual([{ number: 0, text: "alpha" }]);
+  });
+
+  it("drops a stale position overview when its refresh fails", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ lines: [], total: 1 }));
+    vi.mocked(refreshChangeHistoryOverview).mockRejectedValueOnce(new Error("overview offline"));
+    state.changeHistoryOverview = { revision: 1 };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await reloadViewport();
+
+    expect(state.changeHistoryOverview).toBeNull();
+    expect(consoleError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
   });
 
   it("does not restore a zero-width rectangle after the user moves mid-delete", async () => {

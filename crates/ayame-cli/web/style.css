@@ -50,6 +50,7 @@
   --stroke-folder: 1.5px;
   --stroke-tab-drop: 2px;
   --offset-pressed: 0.5px;
+  --offset-focus-inset: -1px;
   --offset-glyph-underline: 0.12em;
 
   /* Layer order, low to high. Ten-point steps leave room for local states
@@ -128,6 +129,21 @@
   --gutter-pad-end: var(--space-5);
   --gutter-border-width: 1px;
   --marker-rail-w: var(--space-1);
+  /* Change-history semantics and geometry are shared by gutter rails and the
+     fixed-bin position pane. Built-in/custom themes only provide their normal
+     accent/string/danger colors; feature selectors never hardcode a theme. */
+  --change-saved: color-mix(in srgb, var(--syn-string) 82%, var(--fg));
+  --change-unsaved: var(--accent-bright);
+  --change-deleted-outline: var(--danger);
+  --change-marker-w: var(--space-0-5);
+  --change-marker-offset: var(--space-1);
+  --change-marker-saved-h: var(--space-2);
+  --change-marker-unsaved-h: calc(var(--lh-editor) - var(--space-1));
+  --change-deleted-size: var(--space-1-5);
+  --change-deleted-stroke: 1px;
+  --change-tick-saved-w: var(--space-1);
+  --change-tick-unsaved-w: var(--space-2);
+  --change-tick-deleted-size: var(--space-1);
   --bookmark-panel-w: 44rem;
   --bookmark-list-max-h: 55vh;
   --analysis-panel-w: 62rem;
@@ -1116,6 +1132,33 @@ html.replace-open .find-group .replace-row {
 .row.active.bookmarked .ln {
   background: var(--gutter-active-bookmark-bg);
 }
+.row:is(.change-saved, .change-unsaved) .ln::before {
+  content: "";
+  position: absolute;
+  right: var(--change-marker-offset);
+  top: 50%;
+  width: var(--change-marker-w);
+  height: var(--change-marker-saved-h);
+  border-radius: var(--radius-control);
+  background: var(--change-saved);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.row.change-unsaved .ln::before {
+  height: var(--change-marker-unsaved-h);
+  background: var(--change-unsaved);
+}
+.row.change-deleted .ln::before {
+  width: var(--change-deleted-size);
+  height: var(--change-deleted-size);
+  border-radius: var(--space-0);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: inset 0 0 0 var(--change-deleted-stroke) var(--change-deleted-outline);
+}
+.row:is(.change-saved, .change-unsaved) .ln:focus-visible {
+  outline: var(--gutter-border-width) solid var(--focus-ring);
+  outline-offset: var(--offset-focus-inset);
+}
 
 .tx { color: var(--fg); }
 .tx.pending { color: var(--fg-faint); }
@@ -1249,6 +1292,28 @@ mark.current {
   width: var(--analysis-tick-w);
   background: var(--analysis-color);
   box-shadow: none;
+}
+.vtick.change-vtick {
+  height: var(--change-marker-w);
+  box-shadow: none;
+  opacity: 1;
+}
+.vtick.change-saved-vtick {
+  right: var(--space-2);
+  width: var(--change-tick-saved-w);
+  background: var(--change-saved);
+}
+.vtick.change-unsaved-vtick {
+  right: var(--space-0-5);
+  width: var(--change-tick-unsaved-w);
+  background: var(--change-unsaved);
+}
+.vtick.change-deleted-vtick {
+  width: var(--change-tick-deleted-size);
+  height: var(--change-tick-deleted-size);
+  border-radius: var(--space-0);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: inset 0 0 0 var(--change-deleted-stroke) var(--change-deleted-outline);
 }
 #vthumb {
   position: absolute;

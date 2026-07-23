@@ -39,14 +39,13 @@ pub(super) async fn api_lines(
         // An empty workspace has no lines; answer with an empty page rather
         // than an error so the viewport can render nothing gracefully.
         ws.doc().map(|doc| {
+            let total = ws.edits.total_lines(doc);
+            let page_end = q.start.saturating_add(count).min(total);
+            let marker_end = page_end.saturating_add(u64::from(page_end == total));
             (
                 doc.clone(),
                 ws.edits.view_clone(),
-                super::markers::visible_markers(
-                    ws.markers(),
-                    q.start,
-                    q.start.saturating_add(count),
-                ),
+                super::markers::visible_markers(ws.markers(), q.start, marker_end),
             )
         })
     });
@@ -118,6 +117,7 @@ pub(super) async fn api_edit_replace_range(
             markers.rollback(pending);
         } else {
             markers.commit(pending);
+            markers.sync_change_history(edits, doc);
         }
         Ok(Json(ReplaceRangeResponse {
             stats: edits.stats(doc),
@@ -170,6 +170,7 @@ pub(super) async fn api_edit_replace_batch(
             markers.rollback(pending);
         } else {
             markers.commit(pending);
+            markers.sync_change_history(edits, doc);
         }
         Ok(Json(ReplaceBatchResponse {
             stats: edits.stats(doc),
@@ -214,6 +215,7 @@ pub(super) async fn api_edit_replace_rect(
             markers.rollback(pending);
         } else {
             markers.commit(pending);
+            markers.sync_change_history(edits, doc);
         }
         Ok(Json(ReplaceRangeResponse {
             stats: edits.stats(doc),
@@ -628,6 +630,7 @@ pub(super) async fn api_edit_undo(
         let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
         if edits.undo() {
             markers.undo();
+            markers.sync_change_history(edits, doc);
         }
         Ok(Json(edits.stats(doc)))
     })
@@ -640,6 +643,7 @@ pub(super) async fn api_edit_redo(
         let (doc, edits, markers) = ws.doc_edits_markers_mut()?;
         if edits.redo() {
             markers.redo();
+            markers.sync_change_history(edits, doc);
         }
         Ok(Json(edits.stats(doc)))
     })

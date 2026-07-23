@@ -155,6 +155,7 @@
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" id="menu-toggle-ws" data-menu-action="toggleWhitespace" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.showWhitespace">空白・改行を表示</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-syntax" data-menu-action="toggleSyntaxHighlight" role="menuitemcheckbox" aria-checked="true"><span class="menu-label" data-i18n="menu.syntaxHighlight">シンタックスハイライト</span><span class="menu-key"></span></button>
+            <button class="menu-item" id="menu-toggle-change-history" data-menu-action="toggleChangeHistory" role="menuitemcheckbox" aria-checked="true"><span class="menu-label" data-i18n="changeHistory.toggle">変更履歴マーカー</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-zsp-underline" data-menu-action="toggleZenkakuUnderline" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.zenkakuUnderline">全角空白を下線で表示</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-wrap" data-menu-action="toggleWordWrap" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.wordWrap">折り返し</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-tail" data-menu-action="toggleFollowTail" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.followTail">末尾に追従 (tail -f)</span><span class="menu-key"></span></button>
@@ -459,6 +460,11 @@
               <label class="set-row">
                 <span class="set-label" data-i18n="menu.syntaxHighlight">シンタックスハイライト</span>
                 <input id="set-syntax-highlight" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="changeHistory.toggle">変更履歴マーカー</span>
+                <input id="set-change-history" type="checkbox" />
                 <span class="set-val"></span>
               </label>
               <label class="set-row">
