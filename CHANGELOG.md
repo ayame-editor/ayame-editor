@@ -4,6 +4,25 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+## v0.8.3 - 2026-07-23
+
+- Added a sparse, ordered marker foundation and line bookmarks that keep
+  storage proportional to admitted markers rather than document line count.
+  Bookmark navigation, viewport rendering, edit/undo coordinate tracking,
+  bounded previews, matched-line registration, and streaming export remain
+  usable for multi-billion-line documents (#241).
+- Added progressive multi-rule log analysis with persisted literal/regex
+  profiles, semantic colors, exact counts, bounded sparse positions, fixed
+  2,048-bin overviews, cancellation, tail-aware incremental scanning, result
+  export, and matched-line bookmarks (#242).
+- Added saved, unsaved, and deletion change-history markers derived from the
+  editor's sparse overlays. The gutter and position pane share one marker
+  source across save races, failures, undo/redo, rectangular and multi-cursor
+  edits, logical EOF deletions, and WAL recovery (#243).
+- Kept line numbers and their change markers visible during horizontal scroll,
+  sized each gutter to the document's actual maximum line-number digits, and
+  separated the gutter from editor content with tokenized semantic surfaces
+  and borders (#251, #252, #253).
 - Added same-window drag reordering for tabs, automatic active-tab scrolling,
   a localized All Tabs menu for overflow navigation, and a larger tab-close
   target (#166).
