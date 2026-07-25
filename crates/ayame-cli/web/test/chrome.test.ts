@@ -9,7 +9,16 @@ const read = (file: string) => readFileSync(path.join(webRoot, file), "utf8");
 describe("application chrome", () => {
   it("removes the unfinished Explorer UI from PR #90", () => {
     const html = read("index.html");
-    const sources = ["state.ts", "workspace.ts", "settings.ts", "menus.ts", "main.ts"]
+    const sources = [
+      "state.ts",
+      "workspace.ts",
+      "settings.ts",
+      "menus.ts",
+      "menu-actions.ts",
+      "menu-ui.ts",
+      "menubar.ts",
+      "main.ts",
+    ]
       .map((file) => read(path.join("src", file)))
       .join("\n");
 
@@ -54,7 +63,9 @@ describe("application chrome", () => {
     expect(
       doc.querySelector('#edit-menu [data-menu-action="paste"] [data-i18n="menu.paste"]'),
     ).not.toBeNull();
-    expect(read("src/menus.ts")).toContain("paste: { run: pasteFromClipboard, editorOnly: true }");
+    expect(read("src/menu-actions.ts")).toContain(
+      "paste: { run: pasteFromClipboard, editorOnly: true }",
+    );
   });
 
   it("exposes tab close, Save All, and recent files from the File menu (#167)", () => {
@@ -68,7 +79,7 @@ describe("application chrome", () => {
     expect(file?.querySelector('[data-key-action="closeTab"]')).not.toBeNull();
     expect(file?.querySelector("#file-menu-recents[role=group]")).not.toBeNull();
     expect(read("src/save.ts")).toContain("export async function saveAllTabs()");
-    expect(read("src/menus.ts")).toContain("export function renderFileMenuRecentFiles()");
+    expect(read("src/menu-ui.ts")).toContain("export function renderFileMenuRecentFiles()");
   });
 
   it("groups, searches, and restores defaults from the Settings dialog (#165)", () => {
@@ -177,9 +188,8 @@ describe("application chrome", () => {
     expect(input?.getAttribute("role")).toBe("combobox");
     expect(input?.getAttribute("aria-controls")).toBe("palette-list");
 
-    const menus = read("src/menus.ts");
-    expect(menus).toContain('setAttribute("aria-pressed", String(pressed))');
-    expect(menus).toContain('setAttribute("aria-activedescendant", active.id)');
+    expect(read("src/menu-actions.ts")).toContain('setAttribute("aria-pressed", String(pressed))');
+    expect(read("src/palette.ts")).toContain('setAttribute("aria-activedescendant", active.id)');
   });
 
   it("exposes one effective font-size value instead of multiplying font size and zoom (#170)", () => {
@@ -300,7 +310,7 @@ describe("application chrome", () => {
   it("uses shared motion and state treatments for interactive feedback (#193)", () => {
     const css = read("style.css");
     const html = new DOMParser().parseFromString(read("index.html"), "text/html");
-    const search = read("src/search.ts");
+    const search = read("src/findbar.ts");
     const block = (selector: string) =>
       css.match(new RegExp(`^${selector.replaceAll(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
 
@@ -386,11 +396,11 @@ describe("application chrome", () => {
     );
 
     const dialogs = read("src/dialogs.ts");
-    const menus = read("src/menus.ts");
+    const keymapMenu = read("src/keymap-menu.ts");
     expect(dialogs).toContain('input.className = "input-control input-control--mono"');
     expect(dialogs).toContain('sel.className = "input-control"');
     expect(dialogs).toContain('input.className = "input-control"');
-    expect(menus).toContain('input.className = "keymap-input input-control"');
+    expect(keymapMenu).toContain('input.className = "keymap-input input-control"');
 
     for (const selector of [
       ".opener-path input",
@@ -439,10 +449,7 @@ describe("application chrome", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     const gutterStart = css.indexOf(".row:is(.change-saved, .change-unsaved)");
     const tickStart = css.indexOf(".vtick.change-vtick");
-    const gutterRules = css.slice(
-      gutterStart,
-      css.indexOf(".tx {", gutterStart),
-    );
+    const gutterRules = css.slice(gutterStart, css.indexOf(".tx {", gutterStart));
     const tickRules = css.slice(tickStart, css.indexOf("#vthumb", tickStart));
 
     for (const token of [

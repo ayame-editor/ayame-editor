@@ -2,15 +2,17 @@
 import { $, commas, displayPath } from "./dom.js";
 import { LINE_HEIGHT, MAX_COPY_LINES, OVERSCAN, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
-import { api, apiPost, isApiErrorCode, type LinesResponse } from "./api.js";
+import { api, apiPost, isApiErrorCode, type FindResponse, type LinesResponse } from "./api.js";
 import {
   caretX,
   charWidth,
   coordsFromEvent,
   focusEditor,
+  lineByte,
   lineChars,
   lineLen,
   moveCaret,
+  revealLine,
   rowsVisible,
   scheduleRender,
   setCaret,
@@ -38,6 +40,7 @@ import {
   selectionRanges,
 } from "./selection-model.js";
 import { selectedTextForRange } from "./selection-text.js";
+import { isWordChar } from "./text.js";
 import type { SelectionSaveRequest, SelectionSaveResponse } from "./types/api.js";
 
 export {
@@ -58,6 +61,125 @@ export {
   selectionLineCount,
   selectionRanges,
 };
+
+// ---- select next occurrence -----------------------------------------------
+
+export function wordRangeAt(p) {
+  const cs = lineChars(p.line);
+  if (!cs.length) return null;
+  let i = Math.min(p.col, cs.length - 1);
+  if (!isWordChar(cs[i]) && p.col > 0 && isWordChar(cs[p.col - 1])) i = p.col - 1;
+  if (!isWordChar(cs[i])) return null;
+  let a = i;
+  let b = i + 1;
+  while (a > 0 && isWordChar(cs[a - 1])) a--;
+  while (b < cs.length && isWordChar(cs[b])) b++;
+  return { start: { line: p.line, col: a }, end: { line: p.line, col: b } };
+}
+
+export function selectPrimaryRange(r) {
+  state.sel = { anchor: clonePoint(r.start), head: clonePoint(r.end) };
+  state.caret = clonePoint(r.end);
+  state.activeLine = state.caret.line;
+  state.goalCol = state.caret.col;
+  state.editGen++;
+  revealLine(state.caret.line);
+  focusEditor();
+  scheduleRender();
+}
+
+export function promoteSelectionRange(r) {
+  const nextKey = rangeKey(r);
+  const old =
+    state.sel && !state.sel.rect ? normalizedRange(state.sel.anchor, state.sel.head) : null;
+  if (old && !rangeEmpty(old) && rangeKey(old) !== nextKey) {
+    const exists = state.extraCursors.some((c) => {
+      const cr = cursorSelectionRange(c);
+      return cr && rangeKey(cr) === rangeKey(old);
+    });
+    if (!exists) {
+      state.extraCursors.push({
+        line: state.sel.head.line,
+        col: state.sel.head.col,
+        sel: cloneSelection(state.sel),
+      });
+    }
+  }
+  state.extraCursors = state.extraCursors.filter((c) => {
+    const cr = cursorSelectionRange(c);
+    return !cr || rangeKey(cr) !== nextKey;
+  });
+  selectPrimaryRange(r);
+}
+
+export async function findNextOccurrenceRange(query, fromByte, existing) {
+  const selected = new Set(existing.map(rangeKey));
+  const charLen = Array.from(query).length;
+  let from = fromByte;
+  let wrapped = false;
+  for (let i = 0; i < existing.length + 3; i++) {
+    const params = new URLSearchParams({
+      dir: "next",
+      from: String(from),
+      q: query,
+      regex: "false",
+      ci: "false",
+      word: "false",
+    });
+    const res = await api<FindResponse>(`/api/find?${params.toString()}`);
+    if (!res.hit) {
+      if (wrapped) return null;
+      from = 0;
+      wrapped = true;
+      continue;
+    }
+    const h = res.hit;
+    const r = {
+      start: { line: h.line, col: h.column },
+      end: { line: h.line, col: h.column + charLen },
+    };
+    if (!selected.has(rangeKey(r))) return r;
+    from = h.byte + Math.max(1, h.byte_len);
+  }
+  return null;
+}
+
+export async function selectNextOccurrence() {
+  if (!state.stat?.open) return;
+  if (rectRange()) {
+    flashCount(t("find.rectNoCtrlD"), "error");
+    return;
+  }
+  let ranges = selectionRanges();
+  if (!ranges.length) {
+    const r = wordRangeAt(state.caret);
+    if (!r) {
+      flashCount(t("find.noWordToSelect"));
+      return;
+    }
+    selectPrimaryRange(r);
+    return;
+  }
+  const query = await selectedTextForRange(ranges[0]);
+  if (!query || query.includes("\n")) {
+    flashCount(t("find.multiLineNoCtrlD"), "error");
+    return;
+  }
+  ranges = selectionRanges();
+  const last = ranges[ranges.length - 1];
+  const from = await lineByte(last.end.line, last.end.col);
+  try {
+    const next = await findNextOccurrenceRange(query, from, ranges);
+    if (!next) {
+      flashCount(t("find.noNextOccurrence"));
+      return;
+    }
+    promoteSelectionRange(next);
+  } catch (e) {
+    flashCount(t("find.searchError"), "error");
+    console.error(e);
+  }
+}
 
 export function appendSelectionRect(layer, line, startCol, endCol, trailingNewline = false) {
   const left = caretX(line, startCol);
