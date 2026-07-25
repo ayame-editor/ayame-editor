@@ -28,6 +28,7 @@ import {
 } from "./workspace.js";
 import { initSettings } from "./settings.js";
 import { initBookmarks } from "./bookmarks.js";
+import { initMinimap } from "./minimap.js";
 import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest } from "./types/api.js";
@@ -58,6 +59,7 @@ export async function boot() {
   initAnalysis();
   initCommandPalette();
   initScrollbar();
+  initMinimap();
   initEvents();
   initEditor();
   initBookmarks();

@@ -140,6 +140,12 @@ export function showAppMenu(id) {
       changeHistory.classList.toggle("checked", on);
       changeHistory.setAttribute("aria-checked", String(on));
     }
+    const minimap = $("menu-toggle-minimap");
+    if (minimap) {
+      const on = state.settings.minimap !== false;
+      minimap.classList.toggle("checked", on);
+      minimap.setAttribute("aria-checked", String(on));
+    }
     const zu = $("menu-toggle-zsp-underline");
     if (zu) {
       const zon = !!state.settings.zenkakuUnderline;
@@ -769,6 +775,9 @@ export const ACTIONS: Record<
   },
   toggleChangeHistory: {
     run: () => updateSetting("showChangeHistory", state.settings.showChangeHistory === false),
+  },
+  toggleMinimap: {
+    run: () => updateSetting("minimap", state.settings.minimap === false),
   },
   toggleZenkakuUnderline: {
     run: () => updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline),

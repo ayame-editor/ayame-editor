@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS = {
   showWhitespace: false,
   syntaxHighlight: true,
   showChangeHistory: true,
+  minimap: true,
   zenkakuUnderline: false,
   wordWrap: false,
   bgMode: "watercolor", // "watercolor" (theme default) | "solid" | "image"

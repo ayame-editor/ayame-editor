@@ -85,6 +85,7 @@ export function loadSettings() {
     merged.language = normalizeLanguage(merged.language);
     merged.updateCheckOnStartup = merged.updateCheckOnStartup !== false;
     merged.showChangeHistory = merged.showChangeHistory !== false;
+    merged.minimap = merged.minimap !== false;
     merged.keymap = sanitizeKeymap(merged.keymap);
     if (hadLegacyZoom) saveSettings(merged);
     return merged;
@@ -396,6 +397,7 @@ export function applySettings(s) {
   // fit the viewport render (and caret/select) exactly as before. See style.css
   // #content.wrap for the documented limitations on genuinely wrapped lines.
   $("content").classList.toggle("wrap", !!s.wordWrap);
+  $("viewport").classList.toggle("has-minimap", s.minimap !== false);
   updateThemeColorMeta(root); // reflect the resolved theme in the browser chrome
   scheduleRender();
 }
@@ -675,6 +677,7 @@ export function syncSettingsControls() {
   $("set-show-whitespace").checked = !!state.settings.showWhitespace;
   $("set-syntax-highlight").checked = state.settings.syntaxHighlight !== false;
   $("set-change-history").checked = state.settings.showChangeHistory !== false;
+  $("set-minimap").checked = state.settings.minimap !== false;
   $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
   $("set-word-wrap").checked = !!state.settings.wordWrap;
   $("set-restore-session").checked = state.settings.restoreSession !== false;
@@ -793,6 +796,9 @@ export function initSettings() {
   );
   $("set-change-history").addEventListener("change", () =>
     updateSetting("showChangeHistory", $("set-change-history").checked),
+  );
+  $("set-minimap").addEventListener("change", () =>
+    updateSetting("minimap", $("set-minimap").checked),
   );
   $("set-zenkaku-underline").addEventListener("change", () =>
     updateSetting("zenkakuUnderline", $("set-zenkaku-underline").checked),

@@ -41,6 +41,7 @@
   --space-6: 24px;
   --space-7: 28px;
   --space-8: 32px;
+  --minimap-width: 88px;
   /* Optical-only nudge for inline glyph ink; never use this for layout. */
   --space-optical: 1px;
 
@@ -848,6 +849,9 @@ html.replace-open .find-group .replace-row {
   user-select: none; /* rows use a custom (line,col) selection, not native */
   z-index: var(--z-content);
 }
+#viewport.has-minimap #content {
+  right: calc(var(--space-3-5) + var(--minimap-width));
+}
 
 /* Zero-height spacer that holds #content's horizontal scroll width while rows
    are still loading, so scrolling vertically into not-yet-fetched lines can't
@@ -965,6 +969,31 @@ html.replace-open .find-group .replace-row {
 }
 #viewport.has-ruler #content { top: 18px; }
 
+#minimap {
+  position: absolute;
+  top: 0;
+  right: var(--space-3-5);
+  width: var(--minimap-width);
+  height: 100%;
+  box-sizing: border-box;
+  display: none;
+  background: color-mix(in srgb, var(--gutter-bg) 88%, var(--edit-bg));
+  border-left: 1px solid var(--border);
+  cursor: grab;
+  touch-action: none;
+  z-index: var(--z-scrollbar);
+}
+#viewport.has-minimap #minimap { display: block; }
+#viewport.has-ruler #minimap {
+  top: 18px;
+  height: calc(100% - 18px);
+}
+#minimap.drag { cursor: grabbing; }
+#minimap:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 /* ---- column ruler ---------------------------------------------------- */
 
 #ruler {
@@ -983,6 +1012,9 @@ html.replace-open .find-group .replace-row {
   user-select: none;
 }
 #viewport.has-ruler #ruler { display: block; }
+#viewport.has-minimap #ruler {
+  right: calc(var(--space-3-5) + var(--minimap-width));
+}
 #ruler-inner { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
 .rtick {
   position: absolute;

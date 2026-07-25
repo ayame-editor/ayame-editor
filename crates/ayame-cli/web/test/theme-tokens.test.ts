@@ -221,9 +221,9 @@ describe("Ayame design tokens", () => {
     }
 
     const layers = [...css.matchAll(/(?<!-)z-index:\s*([^;]+);/g)].map((match) => match[1].trim());
-    // The progressive analysis strip adds one positioned surface while reusing
-    // the existing semantic --z-find layer.
-    expect(layers).toHaveLength(17);
+    // The progressive analysis strip and bounded minimap add positioned
+    // surfaces while reusing the existing semantic layers.
+    expect(layers).toHaveLength(18);
     for (const layer of layers) {
       expect(layer).toMatch(/^var\(--z-[\w-]+\)$/);
     }

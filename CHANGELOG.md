@@ -4,6 +4,18 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+## v0.8.4 - 2026-07-25
+
+- Added an 88px document minimap with cached line shapes, inserted-line,
+  selection, search, caret, and viewport overlays, mouse scrubbing, keyboard
+  navigation, and View/Settings toggles. Its proportional window reads only
+  the existing bounded line cache, including for ten-billion-line files
+  (#144).
+- Split the GitHub Actions validation pipeline into independent frontend,
+  formatting, lint, test, feature-matrix, release-build, MSRV, type-binding,
+  and Windows metadata jobs so pull requests use repository-native
+  parallelism without moving CI providers.
+
 ## v0.8.3 - 2026-07-23
 
 - Added a sparse, ordered marker foundation and line bookmarks that keep

@@ -19,6 +19,12 @@ const MAX_CHANGE_TICKS = 512;
 
 export let renderQueued = false;
 
+let minimapRenderer = () => {};
+
+export function setMinimapRenderer(renderer) {
+  minimapRenderer = renderer;
+}
+
 // Horizontal-scroll preservation. A not-yet-loaded row renders as a narrow "⋯"
 // placeholder (see fillRow); when a vertical scroll lands on such rows every
 // visible row collapses to that width, #content's scroll width shrinks, and the
@@ -622,6 +628,7 @@ export function render() {
   renderSelection();
   positionCaret();
   updateScrollbar();
+  minimapRenderer();
   updateStatusPos();
 }
 
