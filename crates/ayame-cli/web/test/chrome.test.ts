@@ -12,6 +12,10 @@ describe("application chrome", () => {
     const sources = [
       "state.ts",
       "workspace.ts",
+      "opener.ts",
+      "browse.ts",
+      "recent.ts",
+      "tabs.ts",
       "settings.ts",
       "menus.ts",
       "menu-actions.ts",
@@ -117,7 +121,7 @@ describe("application chrome", () => {
     const tabbar = doc.querySelector("#tabbar");
     const allTabs = tabbar?.querySelector("#tab-list");
     const css = read("style.css");
-    const workspace = read("src/workspace.ts");
+    const tabs = read("src/tabs.ts");
 
     expect(tabbar?.querySelector("#tabs")).not.toBeNull();
     expect(tabbar?.querySelector("#new-tab")).not.toBeNull();
@@ -129,8 +133,8 @@ describe("application chrome", () => {
     expect(css).toMatch(
       /\.tab \.tab-x\s*\{[^}]*width:\s*var\(--space-6\)[^}]*height:\s*var\(--space-6\)/s,
     );
-    expect(workspace).toContain('"/api/tabs/reorder"');
-    expect(workspace).toContain("export function ensureActiveTabVisible(");
+    expect(tabs).toContain('"/api/tabs/reorder"');
+    expect(tabs).toContain("export function ensureActiveTabVisible(");
   });
 
   it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
@@ -230,12 +234,11 @@ describe("application chrome", () => {
       expect(list?.getAttribute("tabindex")).toBe("0");
     }
 
-    const workspace = read("src/workspace.ts");
-    expect(workspace).toContain('row.setAttribute("role", "option")');
-    expect(workspace).toContain('owner?.setAttribute("aria-activedescendant", active.id)');
-    expect(workspace).toContain(
-      '$("opener-input").addEventListener("keydown", onOpenerInputKeydown)',
-    );
+    const browse = read("src/browse.ts");
+    const opener = read("src/opener.ts");
+    expect(browse).toContain('row.setAttribute("role", "option")');
+    expect(browse).toContain('owner?.setAttribute("aria-activedescendant", active.id)');
+    expect(opener).toContain('$("opener-input").addEventListener("keydown", onOpenerInputKeydown)');
   });
 
   it("gives controls stable names and hides decorative icons from assistive technology (#182)", () => {
