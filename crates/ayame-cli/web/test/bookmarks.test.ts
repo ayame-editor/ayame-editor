@@ -20,9 +20,9 @@ vi.mock("../src/i18n.js", () => ({
 }));
 vi.mock("../src/popup-menu.js", () => ({ showPopupMenu: vi.fn() }));
 vi.mock("../src/search.js", () => ({
-  flashCount: vi.fn(),
   qs: () => "q=error&regex=false&ci=false&word=false",
 }));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 vi.mock("../src/dialogs.js", () => ({
   askConfirm: vi.fn(async () => true),
   hideLoading: vi.fn(),
@@ -37,7 +37,7 @@ import {
 } from "../src/bookmarks.js";
 import { setCaret } from "../src/editor.js";
 import { settleEditQueue } from "../src/edits.js";
-import { flashCount } from "../src/search.js";
+import { flashCount } from "../src/notifications.js";
 import { DEFAULT_KEYMAP, MAX_BOOKMARK_SELECTIONS, state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {

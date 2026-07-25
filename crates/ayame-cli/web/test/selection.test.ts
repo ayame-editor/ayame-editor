@@ -5,7 +5,7 @@ vi.mock("../src/edits.js", () => ({
   pasteText: vi.fn(),
   typeText: vi.fn(),
 }));
-vi.mock("../src/search.js", () => ({ flashCount: vi.fn() }));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 vi.mock("../src/editor.js", () => ({
   caretX: vi.fn(() => 0),
   charWidth: vi.fn(() => 8),

@@ -22,18 +22,20 @@ import {
   rangeEmpty,
   rangeKey,
   rectRange,
-  selectedTextForRange,
   selectionRanges,
-} from "./selection.js";
+} from "./selection-model.js";
+import { selectedTextForRange } from "./selection-text.js";
 import { applyBatchPlain, applyRange, enqueueEdit, gotoLine } from "./edits.js";
 import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
-import { anyModalOpen, isWordChar, setQueryFromInput } from "./input.js";
+import { anyModalOpen } from "./modal-state.js";
 import { openPath, showFolderDialog } from "./workspace.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import { flashCount } from "./notifications.js";
+import { charLenOf, isWordChar, utf16IndexOfCol, utf8ByteLength } from "./text.js";
+import { lastGrep } from "./grep-state.js";
 import type { GrepRequest } from "./types/api.js";
 
-export { flashCount };
+export { lastGrep };
 
 type GrepResponse = {
   hits: { path: string; line: number; col: number; text: string }[];
@@ -97,6 +99,17 @@ export function buildMatcher() {
     state.matcher = null; // invalid regex while typing — just don't highlight
     $("find").parentElement.classList.add("error");
   }
+}
+
+export function setQueryFromInput() {
+  state.query = $("find").value;
+  state.lastMatch = null;
+  state.searchHits = null;
+  state.searchTruncated = false;
+  buildMatcher();
+  $("find-count").textContent = state.regexError ? t("find.regexError") : "";
+  scheduleCount(); // keep the "N / total" label in sync with the live highlights
+  scheduleRender();
 }
 
 export function qs() {
@@ -385,26 +398,6 @@ export function showSearchHistory(delta) {
 export const REPLACE_ALL_MAX = 20000;
 // hits per pass; the message says when to rerun
 
-export function charLenOf(str) {
-  return Array.from(str).length;
-}
-
-export function utf8ByteLength(str) {
-  return new TextEncoder().encode(str).length;
-}
-
-// UTF-16 index of Unicode-scalar column `col` in `text` (surrogate-safe).
-export function utf16IndexOfCol(text, col) {
-  let idx = 0;
-  let c = 0;
-  for (const ch of text) {
-    if (c >= col) break;
-    idx += ch.length;
-    c++;
-  }
-  return idx;
-}
-
 // The replacement string sent to the document for one concrete match.
 export function replacementFor(matchText, replacement) {
   if (!state.regex) return replacement;
@@ -557,8 +550,6 @@ export async function replaceAll() {
 // Prompts for a query + options, streams the hits from /api/grep, and shows
 // them in a standalone results panel. Clicking a hit opens that
 // file and jumps to the line.
-export let lastGrep = { query: "", dir: "", glob: "", ci: false, word: false, regex: false };
-
 export function grepVisible() {
   return !$("grep-modal").classList.contains("hidden");
 }
@@ -607,14 +598,14 @@ export async function grepFolder() {
   if (!form) return;
   const query = (form.query || "").trim();
   if (!query) return;
-  lastGrep = {
+  Object.assign(lastGrep, {
     query: form.query,
     dir: (form.dir || "").trim(),
     glob: form.glob || "",
     ci: !!form.ci,
     word: !!form.word,
     regex: !!form.regex,
-  };
+  });
   showLoading(t("dialog.grep.searching"));
   try {
     const res = await apiPost<GrepResponse, GrepRequest>("/api/grep", {

@@ -1,16 +1,8 @@
 // Ayame Editor — menus module. Type-stripped to JS at build time (build.rs, oxc).
-import {
-  $,
-  commas,
-  displayName,
-  displayPath,
-  humanBytes,
-  pathDirName,
-  setModalOpen,
-} from "./dom.js";
+import { $, displayName, displayPath, pathDirName, setModalOpen } from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
-import { applyStaticI18n, currentLocale, t } from "./i18n.js";
-import { openNewWindow, setAppTitle } from "./app.js";
+import { applyStaticI18n, t } from "./i18n.js";
+import { openNewWindow } from "./app.js";
 import {
   bookmarksToFile,
   grepToFile,
@@ -46,7 +38,6 @@ import {
 } from "./edits.js";
 import {
   buildMatcher,
-  flashCount,
   findStep,
   grepFolder,
   selectNextOccurrence,
@@ -54,8 +45,9 @@ import {
   updateCount,
   updateFindCountLabel,
 } from "./search.js";
+import { flashCount } from "./notifications.js";
 import { askPrompt, formVisible, promptVisible, showMessage } from "./dialogs.js";
-import { anyModalOpen } from "./input.js";
+import { anyModalOpen } from "./modal-state.js";
 import {
   displayShortcut,
   eventShortcut,
@@ -78,11 +70,10 @@ import {
 } from "./workspace.js";
 import {
   hideSettings,
-  isKeymapDoc,
-  isThemeDoc,
   populateLanguageSelect,
   saveSettings,
   showSettings,
+  setSettingsMenuService,
   updateSetting,
 } from "./settings.js";
 import {
@@ -94,12 +85,12 @@ import {
   showBookmarkList,
   toggleBookmark,
 } from "./bookmarks.js";
+import { APP_MENUS, DROPDOWN_MENUS, fileMenuVisible, hideFileMenu } from "./menu-surface.js";
+import { updateStatusMeta, updateStatusPos } from "./status.js";
 
 export { showPopupMenu } from "./popup-menu.js";
 export { isBindableShortcut, normalizeShortcut, sanitizeKeymap };
-
-export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
-const DROPDOWN_MENUS = [...APP_MENUS, "tools"];
+export { APP_MENUS, fileMenuVisible, hideFileMenu, updateStatusMeta, updateStatusPos };
 
 export const MENU_ID_ACTIONS = [
   ["new-file", "newFile"],
@@ -107,10 +98,6 @@ export const MENU_ID_ACTIONS = [
   ["save-file", "saveFile"],
   ["save-copy", "saveAs"],
 ];
-
-export function fileMenuVisible() {
-  return DROPDOWN_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));
-}
 
 export function showAppMenu(id) {
   hideFileMenu();
@@ -178,22 +165,6 @@ export function showAppMenu(id) {
   $(`${id}-menu`).classList.remove("hidden");
   $(`${id}-menu-button`).classList.add("on");
   $(`${id}-menu-button`).setAttribute("aria-expanded", "true");
-}
-
-export function hideFileMenu(focusButton = false) {
-  let focused = false;
-  for (const id of DROPDOWN_MENUS) {
-    const menu = $(`${id}-menu`);
-    const button = $(`${id}-menu-button`);
-    const wasOpen = !menu.classList.contains("hidden");
-    menu.classList.add("hidden");
-    button.classList.remove("on");
-    button.setAttribute("aria-expanded", "false");
-    if (focusButton && wasOpen && !focused) {
-      button.focus();
-      focused = true;
-    }
-  }
 }
 
 export function renderFileMenuRecentFiles() {
@@ -586,107 +557,6 @@ export function initContextMenu() {
   document.addEventListener("pointerdown", (e) => {
     if (ctxMenuVisible() && !(e.target as any).closest("#ctx-menu")) hideCtxMenu();
   });
-}
-
-// ---- status bar ------------------------------------------------------------
-
-export function updateStatusMeta() {
-  const s = state.stat;
-  if (!s) {
-    setAppTitle("Ayame Editor");
-    return;
-  }
-  if (!s.open) {
-    for (const id of ["st-enc", "st-eol", "st-edit", "st-index"]) {
-      $(id).textContent = "—";
-    }
-    $("st-edit").title = "";
-    $("st-index").title = "";
-    $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: "—" }));
-    $("st-eol").setAttribute("aria-label", t("status.eolValue", { value: "—" }));
-    $("st-pos").textContent = t("status.line0");
-    $("undo-edit").disabled = true;
-    $("redo-edit").disabled = true;
-    $("apply-theme").classList.add("hidden");
-    $("apply-keymap").classList.add("hidden");
-    setAppTitle("Ayame Editor");
-    return;
-  }
-  const name = displayName(s.path);
-  const dirtyMark = s.dirty ? "* " : "";
-  setAppTitle(`${dirtyMark}${name} - Ayame Editor`);
-  $("apply-theme").classList.toggle("hidden", !isThemeDoc(s.path));
-  $("apply-keymap").classList.toggle("hidden", !isKeymapDoc(s.path));
-  const lines = s.view_lines ?? s.lines;
-  const encoding =
-    s.bom_bytes > 0 ? t("status.encWithBom", { enc: enc(s.encoding) }) : enc(s.encoding);
-  const lineEnding = eol(s.eol);
-  $("st-enc").textContent = encoding;
-  $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: encoding }));
-  $("st-eol").textContent = lineEnding;
-  $("st-eol").setAttribute("aria-label", t("status.eolValue", { value: lineEnding }));
-  // Deliberately terse: the bar shows state, the tooltip carries the numbers.
-  $("st-edit").textContent = s.dirty ? t("status.unsaved") : t("status.saved");
-  $("st-edit").title = s.dirty
-    ? t("status.unsavedDetail", {
-        added: commas(s.inserted_lines),
-        changed: commas(s.replaced_lines),
-        deleted: commas(s.deleted_lines),
-      })
-    : t("status.allSaved");
-  $("undo-edit").disabled = !s.can_undo;
-  $("redo-edit").disabled = !s.can_redo;
-  $("st-index").textContent = t("status.indexOk");
-  $("st-index").title = t("status.indexDetail", {
-    lines: commas(lines),
-    bytes: humanBytes(s.bytes, currentLocale()),
-    checkpoints: commas(s.checkpoints),
-    indexBytes: humanBytes(s.index_bytes, currentLocale()),
-    indexMs: s.index_ms,
-  });
-  // Keep the active tab's unsaved-dot (and the tabs model behind
-  // beforeunload / close confirmations) in sync as you type.
-  const at = $("tabs").querySelector(".tab.active");
-  if (at) at.classList.toggle("dirty", !!s.dirty);
-  const activeTab = (state.tabs || []).find((t) => t.active);
-  if (activeTab) activeTab.dirty = !!s.dirty;
-}
-
-export function enc(e) {
-  // Keys match the core Encoding enum's kebab-case serialization (Utf8 → "utf8").
-  return (
-    {
-      utf8: "UTF-8",
-      "utf-8": "UTF-8",
-      "utf-16le": "UTF-16 LE",
-      "utf-16be": "UTF-16 BE",
-      "shift-jis": "Shift_JIS",
-      "euc-jp": "EUC-JP",
-      ascii: "ASCII",
-    }[e] || String(e)
-  );
-}
-
-export function eol(e) {
-  // LF/CRLF/CR are universal; "混在"/"なし" (Mixed/None) are words, so localize.
-  return (
-    { lf: "LF", crlf: "CRLF", cr: "CR", mixed: t("status.eolMixed"), none: t("status.eolNone") }[
-      e
-    ] || String(e)
-  );
-}
-
-export function updateStatusPos() {
-  if (state.total === 0) {
-    $("st-pos").textContent = t("status.line0");
-    return;
-  }
-  const pos = t("status.pos", {
-    line: commas(state.caret.line + 1),
-    col: commas(state.caret.col + 1),
-  });
-  const n = state.extraCursors.length;
-  $("st-pos").textContent = n ? t("status.posCursors", { pos, n: n + 1 }) : pos;
 }
 
 const closeActiveTab = () => {
@@ -1120,3 +990,12 @@ export function initMenuBar() {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));
   });
 }
+
+setSettingsMenuService({
+  applyLocale,
+  hideKeymap,
+  renderKeymapRows,
+  resetKeymap,
+  showKeymap,
+  updateKeyHints,
+});

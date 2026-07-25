@@ -22,6 +22,7 @@ import {
   rowsVisible,
   scheduleRender,
   setFirst,
+  setModalOpenProvider,
 } from "./editor.js";
 import { addCursorAbove, addCursorBelow, clearExtraCursors, caretToDocEnd } from "./selection.js";
 import {
@@ -57,26 +58,24 @@ import {
   undoEdit,
 } from "./edits.js";
 import {
-  buildMatcher,
   findStep,
-  flashCount,
   grepVisible,
   hideFind,
   hideGrep,
   replaceAll,
   replaceCurrent,
-  scheduleCount,
   selectNextOccurrence,
+  setQueryFromInput,
   setReplaceRow,
   showSearchHistory,
   updateCount,
 } from "./search.js";
+import { flashCount } from "./notifications.js";
 import {
   cancelLoading,
   confirmVisible,
   formVisible,
   loadingCancelable,
-  loadingVisible,
   promptVisible,
 } from "./dialogs.js";
 import { hideOpener, openerVisible } from "./workspace.js";
@@ -90,23 +89,10 @@ import {
   settingsVisible,
   setFontSize,
 } from "./settings.js";
+import { isWordChar } from "./text.js";
+import { anyModalOpen } from "./modal-state.js";
 
-export function anyModalOpen() {
-  return (
-    promptVisible() ||
-    formVisible() ||
-    confirmVisible() ||
-    settingsVisible() ||
-    keymapVisible() ||
-    commandPaletteVisible() ||
-    grepVisible() ||
-    modalVisible("bookmark-modal") ||
-    modalVisible("analysis-modal") ||
-    openerVisible() ||
-    convertVisible() ||
-    loadingVisible()
-  );
-}
+export { anyModalOpen };
 
 const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
   // A cancelable long operation: Esc requests cancel instead of being swallowed
@@ -141,17 +127,6 @@ export function onConvertModalKey(e) {
   if (e.key !== "Enter") return;
   e.preventDefault();
   (document.activeElement === $("reopen-go") ? $("reopen-go") : $("convert-go")).click();
-}
-
-export function setQueryFromInput() {
-  state.query = $("find").value;
-  state.lastMatch = null;
-  state.searchHits = null;
-  state.searchTruncated = false;
-  buildMatcher();
-  $("find-count").textContent = state.regexError ? t("find.regexError") : "";
-  scheduleCount(); // keep the "N / total" label in sync with the live highlights
-  scheduleRender();
 }
 
 export function initEvents() {
@@ -313,8 +288,6 @@ export function onGlobalKey(e) {
 }
 
 // ---- editor keyboard: caret motion + structural edits ----------------------
-
-export const isWordChar = (ch) => /[\p{L}\p{N}_]/u.test(ch || "");
 
 export function wordLeft(line, col) {
   const cs = lineChars(line);
@@ -617,6 +590,7 @@ export function onCompEnd(e) {
 }
 
 export function initEditor() {
+  setModalOpenProvider(anyModalOpen);
   const hi = $("hidden-input");
   hi.addEventListener("keydown", onEditKey);
   hi.addEventListener("beforeinput", onBeforeInput);

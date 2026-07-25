@@ -12,11 +12,18 @@ import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { apiPost } from "./api.js";
 import { postNativeMessage } from "./app.js";
-import { expectWalHandoff, maybeOfferWalRecovery, refreshStat } from "./save.js";
-import { focusEditor, initScrollbar, render } from "./editor.js";
+import {
+  expectWalHandoff,
+  maybeOfferWalRecovery,
+  refreshStat,
+  setSaveSettingsWriter,
+} from "./save.js";
+import { focusEditor, initScrollbar, render, setStatusPositionRenderer } from "./editor.js";
 import { initSelection } from "./selection.js";
-import { initCommandPalette, initContextMenu, updateStatusMeta } from "./menus.js";
-import { flashCount, loadSearchHistory } from "./search.js";
+import { initCommandPalette, initContextMenu, initMenuBar } from "./menus.js";
+import { updateStatusMeta, updateStatusPos } from "./status.js";
+import { flashCount } from "./notifications.js";
+import { loadSearchHistory } from "./search.js";
 import { hideLoading, showLoading } from "./dialogs.js";
 import { initEditor, initEvents } from "./input.js";
 import {
@@ -26,7 +33,7 @@ import {
   openPath,
   refreshTabs,
 } from "./workspace.js";
-import { initSettings } from "./settings.js";
+import { initSettings, saveSettings } from "./settings.js";
 import { initBookmarks } from "./bookmarks.js";
 import { initMinimap } from "./minimap.js";
 import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
@@ -52,6 +59,8 @@ window.__ayameOpenNativePaths = (paths) => {
 };
 
 export async function boot() {
+  setSaveSettingsWriter(saveSettings);
+  setStatusPositionRenderer(updateStatusPos);
   state.history = loadSearchHistory();
   initSettings();
   await hydrateSharedUiState();
@@ -64,6 +73,7 @@ export async function boot() {
   initEditor();
   initBookmarks();
   initSelection();
+  initMenuBar();
   initWorkspace();
   initContextMenu();
   try {

@@ -20,7 +20,8 @@ import { focusEditor, render, revealCaret, scheduleRender, setCaret } from "./ed
 import { lineLensFor, reloadViewport, settleEditQueue } from "./edits.js";
 import { t } from "./i18n.js";
 import { showPopupMenu } from "./popup-menu.js";
-import { flashCount, qs } from "./search.js";
+import { flashCount } from "./notifications.js";
+import { qs } from "./search.js";
 import { MAX_BOOKMARK_SELECTIONS, state } from "./state.js";
 import { askConfirm, hideLoading, showLoading } from "./dialogs.js";
 
