@@ -85,6 +85,8 @@ let nativeSaveResolve = null;
 
 let nativeOpenResolve = null;
 
+let appInitialized = false;
+
 // Ask the OS save dialog for a target path. Resolves with the chosen absolute
 // path, or null when the user cancels. The OS dialog handles the overwrite
 // confirmation itself.
@@ -108,19 +110,24 @@ export function nativeOpenDialog(dir = ""): Promise<string[]> {
   });
 }
 
-window.__ayameSaveDialogDone = (path) => {
-  const resolve = nativeSaveResolve;
-  nativeSaveResolve = null;
-  if (resolve) resolve(typeof path === "string" && path.trim() ? path : null);
-};
-
-window.__ayameOpenDialogDone = (paths) => {
-  const resolve = nativeOpenResolve;
-  nativeOpenResolve = null;
-  if (!resolve) return;
-  const list = Array.isArray(paths) ? paths.filter((p) => typeof p === "string" && p.trim()) : [];
-  resolve(list);
-};
+// Install the callbacks only during application boot. Keeping module import
+// pure lets unit tests use the app helpers without mutating the shared window.
+export function initApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+  window.__ayameSaveDialogDone = (path) => {
+    const resolve = nativeSaveResolve;
+    nativeSaveResolve = null;
+    if (resolve) resolve(typeof path === "string" && path.trim() ? path : null);
+  };
+  window.__ayameOpenDialogDone = (paths) => {
+    const resolve = nativeOpenResolve;
+    nativeOpenResolve = null;
+    if (!resolve) return;
+    const list = Array.isArray(paths) ? paths.filter((p) => typeof p === "string" && p.trim()) : [];
+    resolve(list);
+  };
+}
 
 export async function confirmCloseLastTab(tab) {
   if (tab?.dirty) {

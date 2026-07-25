@@ -1,22 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/selection.js", () => ({
-  hasSelection: vi.fn(() => false),
-  renderSelection: vi.fn(),
-}));
-vi.mock("../src/menus.js", () => ({ updateStatusPos: vi.fn() }));
-vi.mock("../src/input.js", () => ({ anyModalOpen: vi.fn(() => false) }));
-
 import {
   cacheLineResponse,
+  coordsFromEvent,
   ensureData,
   fillEofRow,
   fillRow,
   formatLineNo,
   lineNumberChars,
+  maxFirst,
+  revealCaret,
   renderSearchTicks,
+  rowsFullyVisible,
+  rowsVisible,
 } from "../src/editor.js";
-import { state } from "../src/state.js";
+import { LINE_HEIGHT, setLineHeight, state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -28,6 +26,90 @@ function jsonResponse(body: unknown): Response {
 async function flushPromises() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+describe("viewport row calculations (#129)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="viewport"></div>';
+    setLineHeight(18);
+    state.settings.ruler = false;
+  });
+
+  function setViewportHeight(height: number) {
+    Object.defineProperty(document.getElementById("viewport"), "clientHeight", {
+      configurable: true,
+      value: height,
+    });
+  }
+
+  it.each([
+    ["exact rows", 3 * LINE_HEIGHT, 3, 3],
+    ["partial bottom row", 3 * LINE_HEIGHT + 1, 4, 3],
+    ["less than one row", LINE_HEIGHT - 1, 1, 1],
+  ])("distinguishes visible and fully visible rows: %s", (_label, height, visible, fully) => {
+    setViewportHeight(height as number);
+    expect(rowsVisible()).toBe(visible);
+    expect(rowsFullyVisible()).toBe(fully);
+  });
+
+  it("subtracts the ruler height before calculating rows", () => {
+    state.settings.ruler = true;
+    setViewportHeight(3 * LINE_HEIGHT + 18);
+    expect(rowsVisible()).toBe(3);
+    expect(rowsFullyVisible()).toBe(3);
+  });
+
+  it("clamps the final first row so the last line and EOF marker are fully visible", () => {
+    state.total = 10;
+    setViewportHeight(3 * LINE_HEIGHT);
+    expect(maxFirst()).toBe(8);
+
+    state.total = 2;
+    expect(maxFirst()).toBe(0);
+  });
+
+  it("clamps revealCaret against fully visible rows", () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="content"></div>');
+    const content = document.getElementById("content")!;
+    Object.defineProperty(content, "clientWidth", { configurable: true, value: 200 });
+    setViewportHeight(3 * LINE_HEIGHT);
+    state.total = 20;
+    state.first = 0;
+    state.caret = { line: 10, col: 0 };
+
+    revealCaret();
+    expect(state.first).toBe(8);
+
+    state.first = 10;
+    state.caret = { line: 2, col: 0 };
+    revealCaret();
+    expect(state.first).toBe(2);
+  });
+
+  it("maps pointer rows and clamps them to document bounds", () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="content"></div>');
+    const content = document.getElementById("content")!;
+    vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      left: 50,
+      right: 250,
+      bottom: 300,
+      width: 200,
+      height: 200,
+      x: 50,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    state.first = 10;
+    state.total = 20;
+
+    expect(coordsFromEvent({ clientX: 40, clientY: 100 + 2 * LINE_HEIGHT + 1 })).toEqual({
+      line: 12,
+      col: 0,
+    });
+    expect(coordsFromEvent({ clientX: 40, clientY: 0 }).line).toBe(10);
+    expect(coordsFromEvent({ clientX: 40, clientY: 1000 }).line).toBe(19);
+  });
+});
 
 describe("line-number formatting (#49)", () => {
   it("groups line numbers with commas by default", () => {

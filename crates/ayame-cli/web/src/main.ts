@@ -11,16 +11,17 @@ import { $, displayName } from "./dom.js";
 import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { apiPost } from "./api.js";
-import { postNativeMessage } from "./app.js";
+import { initApp, postNativeMessage } from "./app.js";
 import {
   expectWalHandoff,
+  initSave,
   maybeOfferWalRecovery,
   refreshStat,
   setSaveSettingsWriter,
 } from "./save.js";
 import { focusEditor, initScrollbar, render, setStatusPositionRenderer } from "./editor.js";
 import { initSelection } from "./selection.js";
-import { initCommandPalette, initContextMenu, initMenuBar } from "./menus.js";
+import { initCommandPalette, initContextMenu, initMenuBar, initMenus } from "./menus.js";
 import { updateStatusMeta, updateStatusPos } from "./status.js";
 import { flashCount } from "./notifications.js";
 import { loadSearchHistory } from "./search.js";
@@ -59,6 +60,9 @@ window.__ayameOpenNativePaths = (paths) => {
 };
 
 export async function boot() {
+  initApp();
+  initSave();
+  initMenus();
   setSaveSettingsWriter(saveSettings);
   setStatusPositionRenderer(updateStatusPos);
   state.history = loadSearchHistory();

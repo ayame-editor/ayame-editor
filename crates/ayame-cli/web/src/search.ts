@@ -82,22 +82,29 @@ export function buildMatcher() {
   }
   const src = state.regex ? state.query : escapeRegExp(state.query);
   const flags = "g" + (state.ci ? "i" : "");
+  let plain;
   try {
-    // Mirror the server's whole-word rule so the highlight matches the count.
-    state.matcher = state.word
-      ? new RegExp(`(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`, flags + "u")
-      : new RegExp(src, flags);
-    return;
-  } catch {
-    // The word/unicode wrapper can reject patterns the plain form accepts.
-  }
-  try {
-    state.matcher = new RegExp(src, flags); // fall back: highlight the superset
-    state.matcherWordFallback = !!state.word;
+    // Validate the user's pattern on its own before embedding it in the word
+    // wrapper. An unmatched "[" can otherwise consume syntax from the wrapper
+    // and accidentally turn an invalid query into a valid expression.
+    plain = new RegExp(src, flags);
   } catch {
     state.regexError = true;
     state.matcher = null; // invalid regex while typing — just don't highlight
     $("find").parentElement.classList.add("error");
+    return;
+  }
+  if (!state.word) {
+    state.matcher = plain;
+    return;
+  }
+  try {
+    // Mirror the server's whole-word rule so the highlight matches the count.
+    state.matcher = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`, flags + "u");
+  } catch {
+    // The Unicode wrapper can reject patterns the plain form accepts.
+    state.matcher = plain; // fall back: highlight the superset
+    state.matcherWordFallback = true;
   }
 }
 
