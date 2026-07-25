@@ -92,12 +92,6 @@ export function waitForSavingDone(): Promise<void> {
   return new Promise((resolve) => savingWaiters.push(resolve));
 }
 
-setEditSaveService({
-  refreshStat,
-  savingCount: () => savingCount,
-  waitForSavingDone,
-});
-
 export let pendingNativeClose = false;
 
 async function confirmNativeCloseOk() {
@@ -105,7 +99,7 @@ async function confirmNativeCloseOk() {
   postNativeMessage("ayame:close-ok");
 }
 
-window.__ayameNativeCloseRequested = () => {
+function onNativeCloseRequested() {
   if (savingCount > 0) {
     pendingNativeClose = true;
     flashCount(t("dialog.exit.savingWillClose"));
@@ -126,27 +120,44 @@ window.__ayameNativeCloseRequested = () => {
   }).then((ok) => {
     if (ok) void confirmNativeCloseOk();
   });
-};
+}
 
-window.addEventListener("pagehide", () => {
+function onPageHide() {
   // A plain fetch is aborted as the page unloads; use sendBeacon so the final
   // snapshot survives (issue #73). Fall back to the async save only if the
   // browser refuses the beacon.
   if (!beaconSessionSnapshot()) void saveSessionSnapshot();
-});
+}
+
+function onBeforeUnload(e) {
+  if (!hasDirtyDocuments()) return;
+  e.preventDefault();
+  e.returnValue = "";
+}
+
+let saveInitialized = false;
+
+// Register cross-module services and browser lifecycle hooks explicitly during
+// boot so importing save helpers has no global side effects.
+export function initSave() {
+  if (saveInitialized) return;
+  saveInitialized = true;
+  setEditSaveService({
+    refreshStat,
+    savingCount: () => savingCount,
+    waitForSavingDone,
+  });
+  window.__ayameNativeCloseRequested = onNativeCloseRequested;
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("beforeunload", onBeforeUnload);
+}
 
 export function retryPendingNativeClose() {
   if (pendingNativeClose && savingCount === 0) {
     pendingNativeClose = false;
-    window.__ayameNativeCloseRequested();
+    onNativeCloseRequested();
   }
 }
-
-window.addEventListener("beforeunload", (e) => {
-  if (!hasDirtyDocuments()) return;
-  e.preventDefault();
-  e.returnValue = "";
-});
 
 export async function refreshStat() {
   state.stat = await api("/api/stat");

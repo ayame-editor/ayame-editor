@@ -801,9 +801,23 @@ export function runMenuAction(action) {
   return runAction(action);
 }
 
-// Native menu dispatcher: the macOS (Rust) side calls this via evaluate_script
-// with the same action ids the in-page menus use.
-window.__ayameMenu = runMenuAction;
+let menusInitialized = false;
+
+// Register the native dispatcher and the settings-to-menu service during boot.
+// The service must be ready before initSettings() applies the initial locale.
+export function initMenus() {
+  if (menusInitialized) return;
+  menusInitialized = true;
+  window.__ayameMenu = runMenuAction;
+  setSettingsMenuService({
+    applyLocale,
+    hideKeymap,
+    renderKeymapRows,
+    resetKeymap,
+    showKeymap,
+    updateKeyHints,
+  });
+}
 
 // ---- ARIA menubar keyboard contract (#161) ---------------------------------
 // The five triggers that make up the role=menubar. The ツール dropdown lives in
@@ -990,12 +1004,3 @@ export function initMenuBar() {
     item.addEventListener("click", () => runMenuAction((item as any).dataset.menuAction));
   });
 }
-
-setSettingsMenuService({
-  applyLocale,
-  hideKeymap,
-  renderKeymapRows,
-  resetKeymap,
-  showKeymap,
-  updateKeyHints,
-});
