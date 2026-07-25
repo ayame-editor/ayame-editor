@@ -18,7 +18,7 @@ vi.mock("../src/menus.js", () => ({
 }));
 vi.mock("../src/dialogs.js", () => ({ askConfirm: vi.fn() }));
 vi.mock("../src/edits.js", () => ({ settleEditQueue: vi.fn() }));
-vi.mock("../src/search.js", () => ({ flashCount: vi.fn() }));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 vi.mock("../src/workspace.js", () => ({ onDocumentOpened: vi.fn() }));
 vi.mock("../src/app.js", () => ({ postNativeMessage: vi.fn() }));
 vi.mock("../src/api.js", () => ({ api: vi.fn() }));

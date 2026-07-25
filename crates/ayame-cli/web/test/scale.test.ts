@@ -19,10 +19,7 @@ vi.mock("../src/save.js", () => ({
   savingCount: 0,
   waitForSavingDone: vi.fn(async () => {}),
 }));
-vi.mock("../src/search.js", () => ({
-  charLenOf: (s: string) => Array.from(s).length,
-  flashCount: vi.fn(),
-}));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 
 import { commas } from "../src/dom.js";
 import { setCaret } from "../src/editor.js";

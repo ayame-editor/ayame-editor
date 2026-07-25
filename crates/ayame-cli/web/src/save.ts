@@ -11,9 +11,10 @@ import {
 } from "./api.js";
 import { dirtyCloseMessage, hasDirtyDocuments, postNativeMessage } from "./app.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
-import { enc, eol, hideFileMenu, updateStatusMeta } from "./menus.js";
-import { reloadViewport, settleEditQueue } from "./edits.js";
-import { flashCount, lastGrep } from "./search.js";
+import { enc, eol, updateStatusMeta } from "./status.js";
+import { reloadViewport, setEditSaveService, settleEditQueue } from "./edits.js";
+import { flashCount } from "./notifications.js";
+import { lastGrep } from "./grep-state.js";
 import {
   askConfirm,
   askForm,
@@ -22,8 +23,6 @@ import {
   showLoading,
   showMessage,
 } from "./dialogs.js";
-import { onDocumentOpened, openPath, refreshTabs, selectTab, showSaveDialog } from "./workspace.js";
-import { saveSettings } from "./settings.js";
 import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
 import type {
   ArtifactResponse,
@@ -37,6 +36,25 @@ import type {
   SortSaveRequest,
   SplitSaveRequest,
 } from "./types/api.js";
+
+let onDocumentOpened = (_stat) => {};
+let openPath = async (_path) => {};
+let refreshTabs = async () => {};
+let selectTab = async (_id) => {};
+let showSaveDialog = async (_title, _suggestedPath) => null;
+let saveSettings = (_settings) => false;
+
+export function setSaveWorkspaceService(service) {
+  onDocumentOpened = service.onDocumentOpened;
+  openPath = service.openPath;
+  refreshTabs = service.refreshTabs;
+  selectTab = service.selectTab;
+  showSaveDialog = service.showSaveDialog;
+}
+
+export function setSaveSettingsWriter(writer) {
+  saveSettings = writer;
+}
 
 // Never let the native window kill the process while a save is in flight; the
 // close request is answered "cancel" and retried once the save settles.
@@ -73,6 +91,12 @@ export function waitForSavingDone(): Promise<void> {
   if (savingCount === 0) return Promise.resolve();
   return new Promise((resolve) => savingWaiters.push(resolve));
 }
+
+setEditSaveService({
+  refreshStat,
+  savingCount: () => savingCount,
+  waitForSavingDone,
+});
 
 export let pendingNativeClose = false;
 
@@ -454,7 +478,6 @@ export function showConvert() {
     saveCopy();
     return;
   }
-  hideFileMenu();
   // Prefill the pickers with the file's current encoding / line ending. The
   // stat strings are the core enum's kebab-case (Utf8 → "utf8"); map them onto
   // the select's option values.

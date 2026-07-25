@@ -8,11 +8,9 @@ import {
   type LinesResponse,
 } from "./api.js";
 import { t } from "./i18n.js";
-import { hasSelection, renderSelection } from "./selection.js";
 import { highlightSpans } from "./syntax.js";
-import { updateStatusPos } from "./menus.js";
-import { anyModalOpen } from "./input.js";
 import { analysisRanges } from "./analysis-model.js";
+import { flashCount } from "./notifications.js";
 
 export const pool = [];
 const MAX_CHANGE_TICKS = 512;
@@ -20,9 +18,26 @@ const MAX_CHANGE_TICKS = 512;
 export let renderQueued = false;
 
 let minimapRenderer = () => {};
+let selectionRenderer = () => {};
+let selectionPresent = () => false;
+let modalOpenProvider = () => false;
+let statusPositionRenderer = () => {};
 
 export function setMinimapRenderer(renderer) {
   minimapRenderer = renderer;
+}
+
+export function setSelectionRenderer(renderer, hasSelection) {
+  selectionRenderer = renderer;
+  selectionPresent = hasSelection;
+}
+
+export function setModalOpenProvider(provider) {
+  modalOpenProvider = provider;
+}
+
+export function setStatusPositionRenderer(renderer) {
+  statusPositionRenderer = renderer;
 }
 
 // Horizontal-scroll preservation. A not-yet-loaded row renders as a narrow "⋯"
@@ -166,9 +181,7 @@ export function ensureData(start, count) {
     .catch((e) => {
       if (token !== state.loadToken) return;
       console.error("lines fetch failed", e);
-      import("./search.js")
-        .then((m) => m.flashCount(t("editor.reloadError"), "error"))
-        .catch(() => {});
+      flashCount(t("editor.reloadError"), "error");
     });
 }
 
@@ -282,7 +295,7 @@ export function fillRow(row, line, rec) {
   if (rec != null && state.settings.showWhitespace) appendEol(tx);
   // Hide the current-line highlight while a selection exists — the two
   // washes stack otherwise and the selection becomes hard to read.
-  row.classList.toggle("active", line === state.activeLine && !hasSelection());
+  row.classList.toggle("active", line === state.activeLine && !selectionPresent());
 }
 
 export function fillEofRow(row) {
@@ -625,11 +638,11 @@ export function render() {
     contentWidth = content.scrollWidth;
   }
   buildRuler();
-  renderSelection();
+  selectionRenderer();
   positionCaret();
   updateScrollbar();
   minimapRenderer();
-  updateStatusPos();
+  statusPositionRenderer();
 }
 
 export function scheduleRender() {
@@ -793,7 +806,7 @@ export function revealLine(line) {
   } else {
     scheduleRender();
   }
-  updateStatusPos();
+  statusPositionRenderer();
 }
 
 export function clearLineCache() {
@@ -885,11 +898,11 @@ export function positionCaret() {
   const hi = $("hidden-input");
   if (!caretEl || !hi) return;
   const vis = rowsVisible();
-  const focusVisible = state.focused && !anyModalOpen() && !state.composing;
+  const focusVisible = state.focused && !modalOpenProvider() && !state.composing;
   positionExtraCarets(vis, focusVisible);
   const onScreen =
     !!state.stat?.open && state.caret.line >= state.first && state.caret.line < state.first + vis;
-  const show = onScreen && state.focused && !anyModalOpen();
+  const show = onScreen && state.focused && !modalOpenProvider();
   caretEl.classList.toggle("on", show && !state.composing);
   if (!onScreen) return;
   const x = caretX(state.caret.line, state.caret.col);

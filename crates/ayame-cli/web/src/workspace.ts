@@ -28,18 +28,15 @@ import {
   maybeOfferWalRecovery,
   noteWalError,
   saveCopy,
+  setSaveWorkspaceService,
   savingCount,
 } from "./save.js";
 import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
-import {
-  fileMenuVisible,
-  hideFileMenu,
-  initMenuBar,
-  showPopupMenu,
-  updateStatusMeta,
-} from "./menus.js";
+import { fileMenuVisible, hideFileMenu } from "./menu-surface.js";
+import { showPopupMenu } from "./popup-menu.js";
+import { updateStatusMeta } from "./status.js";
 import { setFollowTail, settleEditQueue } from "./edits.js";
-import { flashCount } from "./search.js";
+import { flashCount } from "./notifications.js";
 import { askConfirm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import type {
@@ -1182,7 +1179,6 @@ export async function newUntitled() {
 }
 
 export function initWorkspace() {
-  initMenuBar();
   document.addEventListener("pointerdown", (e) => {
     if (fileMenuVisible() && !(e.target as any).closest(".menu-shell")) hideFileMenu();
   });
@@ -1215,3 +1211,11 @@ export function initWorkspace() {
   initTabDropTarget();
   initDropZone();
 }
+
+setSaveWorkspaceService({
+  onDocumentOpened,
+  openPath,
+  refreshTabs,
+  selectTab,
+  showSaveDialog,
+});

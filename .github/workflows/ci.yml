@@ -158,6 +158,8 @@ jobs:
           cache: npm
           cache-dependency-path: crates/ayame-cli/web/package-lock.json
       - run: npm ci
+      - name: Circular imports
+        run: npm run cycles
       - name: Type check
         run: npm run typecheck
       - name: Unit tests

@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  charLenOf,
   COUNT_DEBOUNCE_MS,
   renderGrepResults,
   scheduleCount,
   updateCount,
-  utf16IndexOfCol,
 } from "../src/search.js";
+import { charLenOf, utf16IndexOfCol } from "../src/text.js";
 import { state } from "../src/state.js";
 
 function jsonResponse(body: unknown): Response {

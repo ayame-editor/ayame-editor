@@ -7,7 +7,7 @@
 import { api, apiPost, type LineByteResponse, type MarkerBulkResponse } from "./api.js";
 import { $, commas, modalVisible, setModalOpen } from "./dom.js";
 import { focusEditor, render, revealCaret, scheduleRender, setCaret } from "./editor.js";
-import { reloadViewport, settleEditQueue } from "./edits.js";
+import { reloadViewport, setEditAnalysisService, settleEditQueue } from "./edits.js";
 import { serverMessage, t } from "./i18n.js";
 import {
   ANALYSIS_COLOR_TOKENS,
@@ -20,7 +20,7 @@ import {
   normalizeAnalysisProfiles,
 } from "./analysis-model.js";
 import { loadAnalysisProfilesShared, saveAnalysisProfilesShared } from "./persistence.js";
-import { flashCount } from "./search.js";
+import { flashCount } from "./notifications.js";
 import { grepRuleToFile } from "./save.js";
 import { askConfirm, askPrompt, showMessage } from "./dialogs.js";
 import { state } from "./state.js";
@@ -785,6 +785,11 @@ export async function refreshAnalysisTail() {
 }
 
 export function initAnalysis() {
+  setEditAnalysisService({
+    invalidateForEdit: invalidateAnalysisForEdit,
+    handleFileChanged: handleAnalysisFileChanged,
+    refreshTail: refreshAnalysisTail,
+  });
   const persisted = loadAnalysisProfilesShared();
   state.analysisProfiles = normalizeAnalysisProfiles(
     state.analysisProfiles.length ? state.analysisProfiles : persisted.profiles,

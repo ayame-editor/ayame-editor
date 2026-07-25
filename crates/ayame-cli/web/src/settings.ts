@@ -15,18 +15,29 @@ import { sanitizeKeymap } from "./keys.js";
 import { api, type LinesResponse } from "./api.js";
 import { focusEditor, invalidateFontMetrics, scheduleRender } from "./editor.js";
 import { postNativeMessage } from "./app.js";
-import {
-  applyLocale,
-  hideKeymap,
-  renderKeymapRows,
-  resetKeymap,
-  showKeymap,
-  updateKeyHints,
-} from "./menus.js";
 import { askConfirm } from "./dialogs.js";
 import { settleEditQueue } from "./edits.js";
-import { flashCount } from "./search.js";
+import { flashCount } from "./notifications.js";
 import { onDocumentOpened } from "./workspace.js";
+import { isKeymapDoc, isThemeDoc } from "./document-kind.js";
+
+export { isKeymapDoc, isThemeDoc };
+
+let applyLocale = () => {};
+let hideKeymap = () => {};
+let renderKeymapRows = () => {};
+let resetKeymap = () => {};
+let showKeymap = () => {};
+let updateKeyHints = () => {};
+
+export function setSettingsMenuService(service) {
+  applyLocale = service.applyLocale;
+  hideKeymap = service.hideKeymap;
+  renderKeymapRows = service.renderKeymapRows;
+  resetKeymap = service.resetKeymap;
+  showKeymap = service.showKeymap;
+  updateKeyHints = service.updateKeyHints;
+}
 
 // ---- settings (theme / font) -----------------------------------------------
 
@@ -595,10 +606,6 @@ export async function applyThemeFromBuffer() {
   }
 }
 
-export function isThemeDoc(path) {
-  return !!path && /\.ayame-theme\.json$/i.test(path);
-}
-
 export function keymapJSONForEditor() {
   const out = {};
   for (const [action] of KEYMAP_ACTIONS) {
@@ -641,10 +648,6 @@ export async function applyKeymapFromBuffer() {
     flashCount(t("keymap.jsonError"));
     console.error(e);
   }
-}
-
-export function isKeymapDoc(path) {
-  return !!path && /\.ayame-keys\.json$/i.test(path);
 }
 
 function notifyNativeUpdateCheckSetting() {

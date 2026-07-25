@@ -3,7 +3,6 @@ import { $, commas } from "./dom.js";
 import { MAX_COPY_LINES, OVERSCAN, PAD, state } from "./state.js";
 import { t } from "./i18n.js";
 import { api, apiPost, type BatchEditResponse, type LinesResponse } from "./api.js";
-import { refreshStat, savingCount, waitForSavingDone } from "./save.js";
 import {
   cacheLineResponse,
   cachedLine,
@@ -27,10 +26,11 @@ import {
   rangeEmpty,
   rectRange,
   selRange,
-  selectedTextForRange,
   selectionLineCount,
-} from "./selection.js";
-import { charLenOf, flashCount } from "./search.js";
+} from "./selection-model.js";
+import { selectedTextForRange } from "./selection-text.js";
+import { flashCount } from "./notifications.js";
+import { charLenOf } from "./text.js";
 import type { ReplaceRangeRequest, ReplaceRectRequest } from "./types/api.js";
 
 type ReplaceEditResponse = {
@@ -42,6 +42,24 @@ type ReplaceEditResponse = {
 // ---- the serialized edit queue --------------------------------------------
 
 export let editChain = Promise.resolve();
+let analysisService = {
+  invalidateForEdit: () => Promise.resolve(),
+  handleFileChanged: () => Promise.resolve(),
+  refreshTail: () => Promise.resolve(),
+};
+let refreshStat = () => Promise.resolve();
+let savingCount = () => 0;
+let waitForSavingDone = () => Promise.resolve();
+
+export function setEditAnalysisService(service) {
+  analysisService = service;
+}
+
+export function setEditSaveService(service) {
+  refreshStat = service.refreshStat;
+  savingCount = service.savingCount;
+  waitForSavingDone = service.waitForSavingDone;
+}
 
 export function editContext() {
   return { docGen: state.docGen };
@@ -60,7 +78,7 @@ export function enqueueEdit(fn) {
   editChain = editChain
     .then(async () => {
       if (!sameEditContext(ctx)) return null;
-      if (savingCount > 0) {
+      if (savingCount() > 0) {
         flashCount(t("editor.savingWaitInput"));
         await waitForSavingDone();
         if (!sameEditContext(ctx)) return null;
@@ -74,9 +92,7 @@ export function enqueueEdit(fn) {
       state.searchHits = null;
       state.searchTruncated = false;
       if (result != null) {
-        void import("./analysis.js").then(({ invalidateAnalysisForEdit }) =>
-          invalidateAnalysisForEdit(),
-        );
+        void analysisService.invalidateForEdit();
       }
       return result;
     })
@@ -154,7 +170,7 @@ export function setFollowTail(on) {
 
 export async function pollTail() {
   if (!state.followTail || !state.stat?.open) return;
-  if (savingCount > 0) return; // never poll mid-save
+  if (savingCount() > 0) return; // never poll mid-save
   let resp;
   try {
     resp = await apiPost("/api/tail/poll");
@@ -170,9 +186,7 @@ export async function pollTail() {
     // Truncated / rotated / replaced under us: stop and let the user reopen.
     setFollowTail(false);
     flashCount(t("status.tailFileChanged"), "error");
-    void import("./analysis.js").then(({ handleAnalysisFileChanged }) =>
-      handleAnalysisFileChanged(),
-    );
+    void analysisService.handleFileChanged();
     return;
   }
   // resp.pending_edits: growth seen but not followed (unsaved edits) — pause
@@ -182,7 +196,7 @@ export async function pollTail() {
   // total so the scrollbar grows but the user's position is left untouched.
   const stick = tailAtBottom();
   state.total = resp.lines;
-  await import("./analysis.js").then(({ refreshAnalysisTail }) => refreshAnalysisTail());
+  await analysisService.refreshTail();
   if (stick) state.first = maxFirst();
   try {
     await reloadViewport();

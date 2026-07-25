@@ -15,49 +15,49 @@ import {
   scheduleRender,
   setCaret,
   setFirst,
+  setSelectionRenderer,
 } from "./editor.js";
 import { lineLensFor, pasteText, typeText } from "./edits.js";
-import { flashCount } from "./search.js";
+import { flashCount } from "./notifications.js";
 import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import {
+  allCursors,
+  clonePoint,
+  cloneSelection,
+  cursorSelectionRange,
+  hasCursorSelections,
+  hasSelection,
+  hasTextSelection,
+  normalizedRange,
+  rangeEmpty,
+  rangeKey,
+  rangeLineCount,
+  rectRange,
+  selRange,
+  selectionLineCount,
+  selectionRanges,
+} from "./selection-model.js";
+import { selectedTextForRange } from "./selection-text.js";
 import type { SelectionSaveRequest, SelectionSaveResponse } from "./types/api.js";
 
-// Normalized selection: { start, end } with start <= end, or null.
-export function selRange() {
-  if (!state.sel) return null;
-  const { anchor: a, head: h } = state.sel;
-  const forward = a.line < h.line || (a.line === h.line && a.col <= h.col);
-  const r: any = forward ? { start: a, end: h } : { start: h, end: a };
-  r.rect = !!state.sel.rect;
-  return r;
-}
-
-export function rectRange() {
-  if (!state.sel?.rect) return null;
-  const a = state.sel.anchor;
-  const h = state.sel.head;
-  return {
-    l0: Math.min(a.line, h.line),
-    l1: Math.max(a.line, h.line),
-    c0: Math.min(a.col, h.col),
-    c1: Math.max(a.col, h.col),
-  };
-}
-
-export function hasSelection() {
-  const rr = rectRange();
-  if (rr) return rr.l0 !== rr.l1 || rr.c0 !== rr.c1;
-  const r = selRange();
-  return (!!r && !rangeEmpty(r)) || selectionRanges().length > 0;
-}
-
-// Like hasSelection(), but a zero-width rect (c0 == c1 across several lines)
-// counts as empty: it selects no characters, so text-producing actions
-// (copy / cut / save-selection) treat it as "no selection".
-export function hasTextSelection() {
-  const rr = rectRange();
-  if (rr) return rr.c0 !== rr.c1;
-  return selectionRanges().length > 0;
-}
+export {
+  allCursors,
+  clonePoint,
+  cloneSelection,
+  cursorSelectionRange,
+  hasCursorSelections,
+  hasSelection,
+  hasTextSelection,
+  normalizedRange,
+  rangeEmpty,
+  rangeKey,
+  rangeLineCount,
+  rectRange,
+  selRange,
+  selectedTextForRange,
+  selectionLineCount,
+  selectionRanges,
+};
 
 export function appendSelectionRect(layer, line, startCol, endCol, trailingNewline = false) {
   const left = caretX(line, startCol);
@@ -103,6 +103,7 @@ export function renderSelection() {
 }
 
 export function initSelection() {
+  setSelectionRenderer(renderSelection, hasSelection);
   const content = $("content");
   content.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
@@ -338,38 +339,6 @@ export async function caretToDocEnd(extend) {
   state.goalCol = state.caret.col;
 }
 
-export function rangeLineCount(r) {
-  return r.end.line - r.start.line + 1;
-}
-
-export function selectionLineCount(r = null) {
-  const rr = rectRange();
-  if (rr) return rr.l1 - rr.l0 + 1;
-  if (r) return rangeLineCount(r);
-  return selectionRanges().reduce((n, range) => n + rangeLineCount(range), 0);
-}
-
-export async function selectedTextForRange(r, maxLines = MAX_COPY_LINES) {
-  const count = Math.min(rangeLineCount(r), maxLines);
-  const res = await api<LinesResponse>(`/api/lines?start=${r.start.line}&count=${count}`);
-  // Columns are Unicode scalar counts (the server contract); slicing UTF-16
-  // units here would split surrogate pairs (emoji etc.).
-  const L = res.lines.map((x) => Array.from(x.text ?? ""));
-  if (!L.length) return "";
-  const complete = count >= rangeLineCount(r);
-  if (L.length === 1) {
-    const endCol = complete && r.start.line === r.end.line ? r.end.col : L[0].length;
-    return L[0].slice(r.start.col, endCol).join("");
-  }
-  const out = [L[0].slice(r.start.col).join("")];
-  for (let i = 1; i < L.length - 1; i++) out.push(L[i].join(""));
-  if (L.length > 1) {
-    const last = L[L.length - 1];
-    out.push(last.slice(0, complete ? r.end.col : last.length).join(""));
-  }
-  return out.join("\n");
-}
-
 // Fetch the selected text (bounded) and join with newlines.
 export async function selectedText(r = null) {
   const rr = rectRange();
@@ -452,88 +421,6 @@ export async function cutSelection() {
 }
 
 // ---- multi-cursor -----------------------------------------------------------
-
-export function clonePoint(p) {
-  return { line: p.line, col: p.col };
-}
-
-export function cloneSelection(sel) {
-  return sel
-    ? { anchor: clonePoint(sel.anchor), head: clonePoint(sel.head), rect: !!sel.rect }
-    : null;
-}
-
-export function normalizedRange(anchor, head) {
-  const forward = anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
-  return forward
-    ? { start: clonePoint(anchor), end: clonePoint(head) }
-    : { start: clonePoint(head), end: clonePoint(anchor) };
-}
-
-export function rangeEmpty(r) {
-  return r.start.line === r.end.line && r.start.col === r.end.col;
-}
-
-export function rangeKey(r) {
-  return `${r.start.line}:${r.start.col}:${r.end.line}:${r.end.col}`;
-}
-
-// Primary caret plus the extra cursors, deduped and in document order. The
-// entry carrying `primary: true` mirrors state.caret.
-export function allCursors() {
-  const out = [];
-  const seen = new Set();
-  const push = (c, primary) => {
-    const k = `${c.line}:${c.col}`;
-    if (seen.has(k)) return;
-    seen.add(k);
-    out.push({
-      line: c.line,
-      col: c.col,
-      primary,
-      sel: primary
-        ? cloneSelection(state.sel && !state.sel.rect ? state.sel : null)
-        : cloneSelection(c.sel),
-    });
-  };
-  push(state.caret, true);
-  for (const c of state.extraCursors) push(c, false);
-  out.sort((a, b) => a.line - b.line || a.col - b.col);
-  return out;
-}
-
-export function cursorSelectionRange(c) {
-  const sel = c.primary ? state.sel : c.sel;
-  if (!sel || sel.rect) return null;
-  const r = normalizedRange(sel.anchor, sel.head);
-  return rangeEmpty(r) ? null : r;
-}
-
-export function selectionRanges() {
-  const ranges = [];
-  const seen = new Set();
-  const add = (r, primary = false) => {
-    if (!r || rangeEmpty(r)) return;
-    const key = rangeKey(r);
-    if (seen.has(key)) return;
-    seen.add(key);
-    ranges.push({ ...r, primary });
-  };
-  const rr = rectRange();
-  if (rr) return ranges;
-  add(selRange(), true);
-  for (const c of state.extraCursors) add(cursorSelectionRange(c), false);
-  ranges.sort((a, b) => a.start.line - b.start.line || a.start.col - b.start.col);
-  return ranges;
-}
-
-export function hasCursorSelections() {
-  if (state.sel && !state.sel.rect && selRange() && !rangeEmpty(selRange())) return true;
-  return state.extraCursors.some((c) => {
-    const r = cursorSelectionRange(c);
-    return r && !rangeEmpty(r);
-  });
-}
 
 export function clearExtraCursors() {
   if (state.extraCursors.length) {

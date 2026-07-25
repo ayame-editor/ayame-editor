@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "cycles": "node scripts/check-cycles.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "fmt": "oxfmt src",
     "fmt:check": "oxfmt --check src",

@@ -15,19 +15,21 @@ vi.mock("../src/save.js", () => ({
   expectWalHandoff: vi.fn(),
   maybeOfferWalRecovery: vi.fn(),
   noteWalError: vi.fn(),
+  setSaveWorkspaceService: vi.fn(),
   savingCount: 0,
 }));
-vi.mock("../src/menus.js", () => ({
+vi.mock("../src/menu-surface.js", () => ({
   fileMenuVisible: vi.fn(() => false),
   hideFileMenu: vi.fn(),
-  initMenuBar: vi.fn(),
+}));
+vi.mock("../src/status.js", () => ({
   updateStatusMeta: vi.fn(),
 }));
 vi.mock("../src/edits.js", () => ({
   setFollowTail: vi.fn(),
   settleEditQueue: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../src/search.js", () => ({ flashCount: vi.fn() }));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 vi.mock("../src/app.js", () => ({
   confirmCloseLastTab: vi.fn(),
   isNativeApp: vi.fn(() => false),

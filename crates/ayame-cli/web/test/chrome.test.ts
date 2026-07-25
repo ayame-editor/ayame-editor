@@ -133,11 +133,11 @@ describe("application chrome", () => {
     expect(doc.querySelector('#edit-menu [data-menu-action="settings"]')).not.toBeNull();
     expect(doc.querySelector("#toolbar #tools-menu-button")).not.toBeNull();
 
-    const menus = read("src/menus.ts");
-    expect(menus).toContain(
+    const menuSurface = read("src/menu-surface.ts");
+    expect(menuSurface).toContain(
       'export const APP_MENUS = ["file", "edit", "selection", "view", "help"]',
     );
-    expect(menus).toContain('const DROPDOWN_MENUS = [...APP_MENUS, "tools"]');
+    expect(menuSurface).toContain('export const DROPDOWN_MENUS = [...APP_MENUS, "tools"]');
   });
 
   it("places the menubar and compact toolbar in one fixed-height chrome row (#148)", () => {

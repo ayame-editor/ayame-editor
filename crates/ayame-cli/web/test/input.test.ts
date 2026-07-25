@@ -60,17 +60,18 @@ vi.mock("../src/edits.js", () => ({
 vi.mock("../src/search.js", () => ({
   buildMatcher: vi.fn(),
   findStep: vi.fn(),
-  flashCount: vi.fn(),
   grepVisible: vi.fn(() => false),
   hideFind: vi.fn(),
   hideGrep: vi.fn(),
   replaceAll: vi.fn(),
   replaceCurrent: vi.fn(),
   selectNextOccurrence: vi.fn(),
+  setQueryFromInput: vi.fn(),
   setReplaceRow: vi.fn(),
   showSearchHistory: vi.fn(() => false),
   updateCount: vi.fn(),
 }));
+vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 vi.mock("../src/dialogs.js", () => ({
   confirmVisible: vi.fn(() => false),
   formVisible: vi.fn(() => false),
