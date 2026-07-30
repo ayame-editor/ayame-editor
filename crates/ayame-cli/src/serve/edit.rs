@@ -543,25 +543,7 @@ pub(super) fn overwrite_stage_path(target: &Path) -> PathBuf {
 /// is deliberately KEPT (its path is in the error) — it holds the only copy of
 /// the user's saved data at that point.
 pub(super) fn replace_existing_file(stage: &Path, target: &Path) -> std::io::Result<u64> {
-    match std::fs::rename(stage, target) {
-        Ok(()) => {}
-        Err(first) if target.exists() => {
-            let aside = workspace::aside_path(target);
-            std::fs::rename(target, &aside).map_err(|e| keep_stage_error(e, stage))?;
-            if let Err(second) = std::fs::rename(stage, target) {
-                let _ = std::fs::rename(&aside, target);
-                return Err(keep_stage_error(
-                    std::io::Error::new(
-                        second.kind(),
-                        format!("replace failed after initial rename error: {first}; {second}"),
-                    ),
-                    stage,
-                ));
-            }
-            let _ = std::fs::remove_file(&aside);
-        }
-        Err(e) => return Err(keep_stage_error(e, stage)),
-    }
+    ayame_core::replace_with_staged(stage, target).map_err(|e| keep_stage_error(e, stage))?;
     Ok(std::fs::metadata(target)?.len())
 }
 
@@ -897,6 +879,37 @@ mod tests {
         ));
         std::fs::write(&path, contents).unwrap();
         path
+    }
+
+    #[test]
+    fn staged_export_uses_the_shared_replacement_primitive() {
+        let target = scratch_file("shared-replace-target.txt", b"old bytes\n");
+        let stage = target.with_extension("stage");
+        std::fs::write(&stage, b"complete new bytes\n").unwrap();
+
+        let bytes = replace_existing_file(&stage, &target).unwrap();
+
+        assert_eq!(bytes, b"complete new bytes\n".len() as u64);
+        assert_eq!(std::fs::read(&target).unwrap(), b"complete new bytes\n");
+        assert!(!stage.exists());
+        let _ = std::fs::remove_file(target);
+    }
+
+    #[test]
+    fn in_place_swap_keeps_the_old_file_for_the_live_mmap() {
+        let target = scratch_file("live-mmap-target.txt", b"old mapped bytes\n");
+        let stage = target.with_extension("stage");
+        std::fs::write(&stage, b"new saved bytes\n").unwrap();
+        let aside = super::super::workspace::aside_path(&target);
+
+        let aside_used = swap_in_staged_file(&stage, &target, aside.clone()).unwrap();
+
+        assert_eq!(aside_used.as_deref(), Some(aside.as_path()));
+        assert_eq!(std::fs::read(&target).unwrap(), b"new saved bytes\n");
+        assert_eq!(std::fs::read(&aside).unwrap(), b"old mapped bytes\n");
+        assert!(!stage.exists());
+        let _ = std::fs::remove_file(target);
+        let _ = std::fs::remove_file(aside);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

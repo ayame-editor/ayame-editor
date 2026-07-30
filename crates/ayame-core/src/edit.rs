@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fsync::{fsync_parent, replace_with_staged};
+use crate::fsync::{fsync_parent, replace_with_staged, temp_path};
 use crate::markers::MAX_MARKERS_PER_KIND;
 use crate::wal::{LoggedOp, WalWriter};
 use crate::{Document, Error, Result};
@@ -2148,26 +2148,6 @@ fn commit_temp_file(tmp: &Path, target: &Path, overwrite: bool) -> Result<()> {
 fn document_ends_with_newline(doc: &Document) -> bool {
     let n = doc.line_count();
     n != 0 && doc.line_terminator(n - 1).is_some_and(|t| !t.is_empty())
-}
-
-fn temp_path(target: &Path) -> PathBuf {
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let name = target
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("ayame-save");
-    parent.join(format!(
-        ".{name}.ayame-tmp-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ))
-}
-
-fn unique_suffix() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

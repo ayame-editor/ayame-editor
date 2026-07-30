@@ -39,6 +39,19 @@ A reader therefore only ever observes the complete old file or the complete new
 file — never a partial write. `tests/crash_recovery.rs` asserts the postcondition
 (complete target, no temp residue, source untouched on a save-as).
 
+The implementation has one ordinary publication primitive and two explicitly
+different state-transition protocols:
+
+| Path | Implementation | Why |
+| --- | --- | --- |
+| Edit saves, transforms, split parts, and server exports | `fsync::replace_with_staged` | Publishes a complete staged sibling and makes the directory entry durable. |
+| In-place save with a live document | `serve/edit.rs::swap_in_staged_file` | Keeps the old inode under a session-owned aside path until the mmap-backed state transition commits. |
+| WAL compaction | `wal::rename_via_aside` | WAL readers know the `.old` aside name and fall back to it during the rename crash window. |
+
+The shared primitive is covered by its fallback/rollback unit tests plus the
+transform overwrite, split round-trip, and server save tests. The WAL suite
+separately exercises target-missing fallback and staged compaction.
+
 ## Crash recovery (write-ahead log)
 
 While a file is open for editing, the edit overlay lives in memory. Its only

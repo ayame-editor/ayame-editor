@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn fsync_parent(path: &Path) {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -12,10 +15,29 @@ pub(crate) fn fsync_parent(path: &Path) {
 /// the fallback renames the old target aside before promoting the staged file.
 /// That keeps a complete old or new copy available through every step, and
 /// restores the target if the final promotion fails.
-pub(crate) fn replace_with_staged(stage: &Path, target: &Path) -> std::io::Result<()> {
+pub fn replace_with_staged(stage: &Path, target: &Path) -> std::io::Result<()> {
     replace_with_staged_by(&RealFs, stage, target)?;
     fsync_parent(target);
     Ok(())
+}
+
+/// Return a unique hidden sibling used while streaming a replacement file.
+///
+/// Keeping every stage beside its target guarantees that the final rename
+/// stays on one filesystem. The process id prevents cross-process collisions;
+/// the monotonic sequence prevents two writers in this process from choosing
+/// the same path even when the clock has coarse resolution.
+pub(crate) fn temp_path(target: &Path) -> PathBuf {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("ayame");
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        ".{name}.ayame-tmp-{}-{sequence}",
+        std::process::id()
+    ))
 }
 
 fn replace_with_staged_by(fs: &impl ReplaceFs, stage: &Path, target: &Path) -> std::io::Result<()> {
@@ -191,5 +213,21 @@ mod tests {
         assert!(fs.has(target));
         assert!(fs.has(stage));
         assert!(!fs.has(&aside));
+    }
+
+    #[test]
+    fn temp_paths_are_unique_siblings_of_the_target() {
+        let target = Path::new("/work/export.txt");
+        let first = temp_path(target);
+        let second = temp_path(target);
+
+        assert_eq!(first.parent(), target.parent());
+        assert_eq!(second.parent(), target.parent());
+        assert_ne!(first, second);
+        assert!(first
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(".export.txt.ayame-tmp-"));
     }
 }
