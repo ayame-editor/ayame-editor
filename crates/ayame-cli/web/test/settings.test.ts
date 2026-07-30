@@ -10,7 +10,7 @@ import {
   migratedFontSize,
   normalizeSettingsSearch,
 } from "../src/settings.js";
-import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../src/state.js";
+import { DEFAULT_SETTINGS, SETTINGS_BG_IMAGE_KEY, SETTINGS_KEY } from "../src/state.js";
 
 describe("editor font size (#170)", () => {
   it("clamps the single effective pixel value", () => {
@@ -34,7 +34,9 @@ describe("editor font size (#170)", () => {
   it("rewrites legacy storage once without the zoom field", () => {
     const setItem = vi.fn();
     vi.stubGlobal("localStorage", {
-      getItem: vi.fn(() => JSON.stringify({ fontSize: 16, zoom: 125 })),
+      getItem: vi.fn((key: string) =>
+        key === SETTINGS_KEY ? JSON.stringify({ fontSize: 16, zoom: 125 }) : null,
+      ),
       setItem,
     });
     try {
@@ -44,6 +46,28 @@ describe("editor font size (#170)", () => {
       expect(key).toBe(SETTINGS_KEY);
       expect(JSON.parse(json)).toMatchObject({ fontSize: 20 });
       expect(JSON.parse(json)).not.toHaveProperty("zoom");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("migrates a legacy wallpaper out of the settings JSON", () => {
+    const image = "data:image/png;base64,legacy";
+    const setItem = vi.fn();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key: string) =>
+        key === SETTINGS_KEY
+          ? JSON.stringify({ bgMode: "image", bgImage: image, bgImageName: "iris.png" })
+          : null,
+      ),
+      setItem,
+    });
+    try {
+      expect(loadSettings().bgImage).toBe(image);
+      expect(setItem).toHaveBeenCalledTimes(2);
+      expect(setItem.mock.calls[0][0]).toBe(SETTINGS_KEY);
+      expect(JSON.parse(setItem.mock.calls[0][1])).not.toHaveProperty("bgImage");
+      expect(setItem).toHaveBeenNthCalledWith(2, SETTINGS_BG_IMAGE_KEY, image);
     } finally {
       vi.unstubAllGlobals();
     }

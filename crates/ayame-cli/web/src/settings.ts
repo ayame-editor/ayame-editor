@@ -6,9 +6,11 @@ import {
   FONT_STACKS,
   KEYMAP_ACTIONS,
   MAX_COPY_LINES,
+  SETTINGS_BG_IMAGE_KEY,
   SETTINGS_KEY,
   setLineHeight,
   state,
+  type Settings,
 } from "./state.js";
 import { availableLocales, localeLabel, normalizeLanguage, t } from "./i18n.js";
 import { sanitizeKeymap } from "./keys.js";
@@ -44,6 +46,11 @@ export function setSettingsMenuService(service) {
 export const FONT_SIZE_MIN = 6;
 export const FONT_SIZE_MAX = 48;
 export const FONT_SIZE_STEP = 1;
+export const SETTINGS_SAVE_DELAY_MS = 200;
+
+let pendingSettings: Settings | null = null;
+let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let preserveLegacyBgImage = false;
 
 export function clampFontSize(value) {
   const parsed = Number(value);
@@ -81,10 +88,14 @@ export function freshDefaultSettings(preserved: Record<string, any> = {}) {
 
 export function loadSettings() {
   try {
-    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    const rawJson = localStorage.getItem(SETTINGS_KEY) || "{}";
+    const raw = JSON.parse(rawJson);
     const hadLegacyZoom =
       raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "zoom");
+    const legacyBgImage = typeof raw?.bgImage === "string" ? raw.bgImage : null;
+    const storedBgImage = localStorage.getItem(SETTINGS_BG_IMAGE_KEY);
     const merged = { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+    merged.bgImage = storedBgImage || legacyBgImage || DEFAULT_SETTINGS.bgImage;
     merged.fontSize = migratedFontSize(raw);
     delete merged.zoom;
     // Explorer/sidebar settings existed before PR #90's removal was completed.
@@ -98,21 +109,78 @@ export function loadSettings() {
     merged.showChangeHistory = merged.showChangeHistory !== false;
     merged.minimap = merged.minimap !== false;
     merged.keymap = sanitizeKeymap(merged.keymap);
-    if (hadLegacyZoom) saveSettings(merged);
+    preserveLegacyBgImage = !!legacyBgImage && !storedBgImage;
+    if (legacyBgImage && !storedBgImage) {
+      // Free the quota occupied by the legacy monolithic JSON before writing
+      // the image to its dedicated key. Roll back the old JSON if the image
+      // write still fails so an existing wallpaper is never silently lost.
+      if (writeSettingsNow(merged, false)) {
+        try {
+          localStorage.setItem(SETTINGS_BG_IMAGE_KEY, legacyBgImage);
+          preserveLegacyBgImage = false;
+        } catch {
+          try {
+            localStorage.setItem(SETTINGS_KEY, rawJson);
+          } catch {
+            // The original read value remains the best recovery source. Loading
+            // still succeeds for this session even if private mode rejects the
+            // rollback write too.
+          }
+        }
+      }
+    } else if (hadLegacyZoom || legacyBgImage) {
+      preserveLegacyBgImage = false;
+      writeSettingsNow(merged);
+    } else {
+      preserveLegacyBgImage = false;
+    }
     return merged;
   } catch {
+    preserveLegacyBgImage = false;
     return freshDefaultSettings();
   }
 }
 
-export function saveSettings(s) {
+function persistedSettings(s, includeBackground = preserveLegacyBgImage) {
+  const persisted = { ...s };
+  delete persisted.zoom;
+  if (!includeBackground) delete persisted.bgImage;
+  return persisted;
+}
+
+function writeSettingsNow(s, includeBackground = preserveLegacyBgImage) {
   try {
-    const persisted = { ...s };
-    delete persisted.zoom;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(persisted));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(persistedSettings(s, includeBackground)));
     return true;
   } catch {
-    return false; // private-mode / quota errors (e.g. a large bgImage)
+    return false; // private-mode / quota errors
+  }
+}
+
+export function flushSettings(s: Settings | null = pendingSettings) {
+  if (settingsSaveTimer != null) {
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = null;
+  }
+  pendingSettings = null;
+  return s ? writeSettingsNow(s) : true;
+}
+
+export function saveSettings(s) {
+  pendingSettings = { ...s };
+  if (settingsSaveTimer != null) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => flushSettings(), SETTINGS_SAVE_DELAY_MS);
+  return true;
+}
+
+export function persistBackgroundImage(dataUrl) {
+  try {
+    if (dataUrl) localStorage.setItem(SETTINGS_BG_IMAGE_KEY, dataUrl);
+    else localStorage.removeItem(SETTINGS_BG_IMAGE_KEY);
+    preserveLegacyBgImage = false;
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -707,6 +775,7 @@ export function resetSettingsToDefaults() {
 export function initSettings() {
   state.settings = loadSettings();
   applySettings(state.settings);
+  window.addEventListener("pagehide", () => flushSettings(), { once: true });
   // Follow live OS light/dark changes while the theme is on "auto" (#153).
   if (typeof matchMedia !== "undefined") {
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -759,7 +828,8 @@ export function initSettings() {
         bgImage: String(reader.result),
         bgImageName: file.name,
       };
-      if (!saveSettings(state.settings)) flashCount(t("settings.bgImagePersistError"));
+      if (!persistBackgroundImage(state.settings.bgImage) || !flushSettings(state.settings))
+        flashCount(t("settings.bgImagePersistError"));
       applySettings(state.settings);
       $("set-bg").value = "image";
       syncBgImageRow();

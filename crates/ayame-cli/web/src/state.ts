@@ -25,6 +25,8 @@ export const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 
 export const SETTINGS_KEY = "ayame.settings.v1";
 
+export const SETTINGS_BG_IMAGE_KEY = "ayame.settings.bgImage.v1";
+
 export const BROWSE_KEY = "ayame.browseDir.v1";
 
 export const RECENT_KEY = "ayame.recentFiles.v1";
