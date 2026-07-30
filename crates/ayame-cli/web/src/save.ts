@@ -96,14 +96,14 @@ export let pendingNativeClose = false;
 
 async function confirmNativeCloseOk() {
   await saveSessionSnapshot();
-  postNativeMessage("ayame:close-ok");
+  postNativeMessage({ type: "close_confirmed" });
 }
 
 function onNativeCloseRequested() {
   if (savingCount > 0) {
     pendingNativeClose = true;
     flashCount(t("dialog.exit.savingWillClose"));
-    postNativeMessage("ayame:close-cancel");
+    postNativeMessage({ type: "close_canceled" });
     return;
   }
   if (!hasDirtyDocuments()) {
@@ -113,7 +113,7 @@ function onNativeCloseRequested() {
   // Release the native close request first (it times out after a few
   // seconds), then ask with the in-app dialog; a confirmed close posts the
   // ok separately — the Rust side exits on it regardless of timing.
-  postNativeMessage("ayame:close-cancel");
+  postNativeMessage({ type: "close_canceled" });
   askConfirm(t("dialog.exit.title"), dirtyCloseMessage(), {
     okLabel: t("dialog.exit.withoutSaving"),
     danger: true,

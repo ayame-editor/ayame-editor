@@ -489,7 +489,7 @@ export function updateSetting(key, value) {
   saveSettings(state.settings);
   if (key === "language") {
     applyLocale();
-    postNativeMessage(`ayame:language:${state.settings.language}`);
+    postNativeMessage({ type: "language", language: state.settings.language });
     filterSettings();
   }
   if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
@@ -719,9 +719,10 @@ export async function applyKeymapFromBuffer() {
 }
 
 function notifyNativeUpdateCheckSetting() {
-  postNativeMessage(
-    `ayame:update-check-startup:${state.settings.updateCheckOnStartup === false ? "off" : "on"}`,
-  );
+  postNativeMessage({
+    type: "update_check_startup",
+    enabled: state.settings.updateCheckOnStartup !== false,
+  });
 }
 
 function syncBgImageRow() {
@@ -763,7 +764,7 @@ export function resetSettingsToDefaults() {
   saveSettings(state.settings);
   applySettings(state.settings);
   notifyNativeUpdateCheckSetting();
-  postNativeMessage(`ayame:language:${state.settings.language}`);
+  postNativeMessage({ type: "language", language: state.settings.language });
   syncSettingsControls();
   updateKeyHints();
   renderKeymapRows();

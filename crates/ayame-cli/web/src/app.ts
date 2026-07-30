@@ -6,10 +6,22 @@ import { askConfirm } from "./dialogs.js";
 
 export let lastNativeTitle = "";
 
-export function postNativeMessage(msg) {
+export type NativeMessage =
+  | { type: "close_confirmed" }
+  | { type: "close_canceled" }
+  | { type: "ready" }
+  | { type: "set_title"; title: string }
+  | { type: "update_check_startup"; enabled: boolean }
+  | { type: "new_window" }
+  | { type: "new_window_path"; path: string; recover: boolean }
+  | { type: "pick_save"; dir: string; name: string }
+  | { type: "pick_open"; dir: string }
+  | { type: "language"; language: string };
+
+export function postNativeMessage(message: NativeMessage) {
   try {
     if (window.ipc && typeof window.ipc.postMessage === "function") {
-      window.ipc.postMessage(msg);
+      window.ipc.postMessage(JSON.stringify(message));
     }
   } catch {
     // The web build has no native IPC; title/close still work in the browser.
@@ -21,7 +33,7 @@ export function setAppTitle(title) {
   document.title = next;
   if (lastNativeTitle !== next) {
     lastNativeTitle = next;
-    postNativeMessage(`ayame:title:${next}`);
+    postNativeMessage({ type: "set_title", title: next });
   }
 }
 
@@ -52,7 +64,7 @@ export function isNativeApp() {
 
 export function requestEditorClose() {
   if (isNativeApp()) {
-    postNativeMessage("ayame:close-ok");
+    postNativeMessage({ type: "close_confirmed" });
     return true;
   }
   window.close();
@@ -60,14 +72,16 @@ export function requestEditorClose() {
 }
 
 // 新規ウィンドウ: native builds ask the Rust side to spawn a fresh window
-// process (contract: the "ayame:new-window" IPC message); the plain browser
+// process (contract: a typed "new_window" IPC message); the plain browser
 // build just opens the app URL in a new tab/window. `recover` marks a
 // dirty-tab handoff: the new window auto-replays the detached crash log
-// (contract: "ayame:new-window-recover", issue #35).
+// (contract: "new_window_path" with recover=true, issue #35).
 export function openNewWindow(path = "", recover = false) {
   if (isNativeApp()) {
-    const msg = !path ? "ayame:new-window" : `ayame:new-window${recover ? "-recover" : ""}:${path}`;
-    postNativeMessage(msg);
+    const message: NativeMessage = !path
+      ? { type: "new_window" }
+      : { type: "new_window_path", path, recover };
+    postNativeMessage(message);
     return;
   }
   window.open(location.href, "_blank");
@@ -94,9 +108,11 @@ export function nativeSaveDialog(dir, name): Promise<string | null> {
   return new Promise((resolve) => {
     if (nativeSaveResolve) nativeSaveResolve(null);
     nativeSaveResolve = resolve;
-    postNativeMessage(
-      `ayame:pick-save:${JSON.stringify({ dir: String(dir || ""), name: String(name || "") })}`,
-    );
+    postNativeMessage({
+      type: "pick_save",
+      dir: String(dir || ""),
+      name: String(name || ""),
+    });
   });
 }
 
@@ -106,7 +122,7 @@ export function nativeOpenDialog(dir = ""): Promise<string[]> {
   return new Promise((resolve) => {
     if (nativeOpenResolve) nativeOpenResolve([]);
     nativeOpenResolve = resolve;
-    postNativeMessage(`ayame:pick-open:${JSON.stringify({ dir: String(dir || "") })}`);
+    postNativeMessage({ type: "pick_open", dir: String(dir || "") });
   });
 }
 

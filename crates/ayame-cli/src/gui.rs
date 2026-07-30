@@ -17,7 +17,7 @@ use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
-use wry::{http::Request, DragDropEvent, WebContext, WebViewBuilder};
+use wry::{http::Request, DragDropEvent, WebContext, WebView, WebViewBuilder};
 
 use crate::{has_flag, parse_checked};
 
@@ -63,7 +63,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     let event_loop = EventLoopBuilder::<GuiEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let ipc_proxy = proxy.clone();
-    // Created hidden: the page reveals it with "ayame:ready" (fallback timer
+    // Created hidden: the page reveals it with a "ready" IPC event (fallback timer
     // below), which removes the white flash before first paint.
     let saved_state = load_window_state();
     let start_maximized = saved_state.as_ref().is_some_and(|s| s.maximized);
@@ -139,45 +139,15 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             }
             true // consume all drag events: never fall back to the upload path
         })
-        .with_ipc_handler(move |req: Request<String>| match req.body().as_str() {
-            "ayame:close-ok" => {
-                let _ = ipc_proxy.send_event(GuiEvent::CloseConfirmed);
-            }
-            "ayame:close-cancel" => {
-                let _ = ipc_proxy.send_event(GuiEvent::CloseCanceled);
-            }
-            "ayame:ready" => {
-                let _ = ipc_proxy.send_event(GuiEvent::Ready);
-            }
-            "ayame:new-window" => {
-                let _ = ipc_proxy.send_event(GuiEvent::NewWindow);
-            }
-            msg => {
-                if let Some(path) = msg.strip_prefix("ayame:new-window-recover:") {
-                    // Dirty-tab handoff: the page already detached the tab
-                    // (crash log kept + fsynced); the new window replays it.
-                    let _ = ipc_proxy.send_event(GuiEvent::NewWindowPathRecover(path.to_string()));
-                } else if let Some(path) = msg.strip_prefix("ayame:new-window:") {
-                    let _ = ipc_proxy.send_event(GuiEvent::NewWindowPath(path.to_string()));
-                } else if let Some(payload) = msg.strip_prefix("ayame:pick-save:") {
-                    let req = serde_json::from_str(payload).unwrap_or_default();
-                    let _ = ipc_proxy.send_event(GuiEvent::PickSave(req));
-                } else if let Some(payload) = msg.strip_prefix("ayame:pick-open:") {
-                    let req = serde_json::from_str(payload).unwrap_or_default();
-                    let _ = ipc_proxy.send_event(GuiEvent::PickOpen(req));
-                } else if let Some(lang) = msg.strip_prefix("ayame:language:") {
-                    #[cfg(target_os = "macos")]
-                    let _ = ipc_proxy.send_event(GuiEvent::Language(lang.to_string()));
-                    #[cfg(not(target_os = "macos"))]
-                    let _ = lang;
-                } else if let Some(value) = msg.strip_prefix("ayame:update-check-startup:") {
-                    let enabled = matches!(value, "1" | "true" | "on");
-                    let _ = ipc_proxy.send_event(GuiEvent::UpdateCheckStartup(enabled));
-                } else if let Some(title) = msg.strip_prefix("ayame:title:") {
-                    let _ = ipc_proxy.send_event(GuiEvent::SetTitle(clean_window_title(title)));
+        .with_ipc_handler(
+            move |req: Request<String>| match decode_ipc_message(req.body()) {
+                Ok(Some(event)) => {
+                    let _ = ipc_proxy.send_event(event);
                 }
-            }
-        });
+                Ok(None) => {}
+                Err(error) => eprintln!("ayame: invalid native IPC message: {error}"),
+            },
+        );
     // On macOS/Windows the webview attaches to the native window handle; on
     // Linux the webview must live inside the window's GTK container.
     #[cfg(not(target_os = "linux"))]
@@ -233,14 +203,11 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         let _ = &macos_menu;
         match event {
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) if !shown => {
-                shown = true;
-                window.set_visible(true);
-                if start_maximized {
-                    window.set_maximized(true);
-                }
-                maybe_start_startup_update_check(
+                reveal_window(
+                    &window,
                     &proxy,
-                    shown,
+                    &mut shown,
+                    start_maximized,
                     update_check_enabled,
                     &mut update_check_started,
                 );
@@ -267,15 +234,15 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                if close_pending {
-                    return;
-                }
-                close_pending = true;
-                close_deadline = Some(Instant::now() + close_timeout);
-                if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
-                    save_window_state(&window, last_normal.as_ref());
-                    *control_flow = ControlFlow::Exit;
-                }
+                request_close(
+                    &webview,
+                    &window,
+                    last_normal.as_ref(),
+                    &mut close_pending,
+                    &mut close_deadline,
+                    close_timeout,
+                    control_flow,
+                );
             }
             Event::UserEvent(GuiEvent::CloseConfirmed) => {
                 save_window_state(&window, last_normal.as_ref());
@@ -289,16 +256,11 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 window.set_title(&title);
             }
             Event::UserEvent(GuiEvent::Ready) => {
-                if !shown {
-                    shown = true;
-                    window.set_visible(true);
-                    if start_maximized {
-                        window.set_maximized(true);
-                    }
-                }
-                maybe_start_startup_update_check(
+                reveal_window(
+                    &window,
                     &proxy,
-                    shown,
+                    &mut shown,
+                    start_maximized,
                     update_check_enabled,
                     &mut update_check_started,
                 );
@@ -335,15 +297,15 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 if id == "quit" {
                     // Cmd+Q takes the same path as the window close button so
                     // unsaved changes get the same confirmation dialog.
-                    if close_pending {
-                        return;
-                    }
-                    close_pending = true;
-                    close_deadline = Some(Instant::now() + close_timeout);
-                    if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
-                        save_window_state(&window, last_normal.as_ref());
-                        *control_flow = ControlFlow::Exit;
-                    }
+                    request_close(
+                        &webview,
+                        &window,
+                        last_normal.as_ref(),
+                        &mut close_pending,
+                        &mut close_deadline,
+                        close_timeout,
+                        control_flow,
+                    );
                 } else if id == "newWindow" {
                     // Same native path as the IPC request — a new window is a
                     // new process, never a round-trip through __ayameMenu.
@@ -440,21 +402,164 @@ enum GuiEvent {
     Menu(String),
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum IpcMessage {
+    CloseConfirmed,
+    CloseCanceled,
+    Ready,
+    SetTitle { title: String },
+    UpdateCheckStartup { enabled: bool },
+    NewWindow,
+    NewWindowPath { path: String, recover: bool },
+    PickSave { dir: String, name: String },
+    PickOpen { dir: String },
+    Language { language: String },
+}
+
 /// What the page suggests for the OS save dialog: a starting folder and a
-/// pre-filled file name. Both optional — the dialog falls back to the OS's
-/// own last-used location.
-#[derive(Debug, Default, Deserialize)]
+/// pre-filled file name. Empty strings let the OS choose its last-used values.
+#[derive(Debug)]
 struct PickSaveRequest {
-    #[serde(default)]
     dir: String,
-    #[serde(default)]
     name: String,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug)]
 struct PickOpenRequest {
-    #[serde(default)]
     dir: String,
+}
+
+fn decode_ipc_message(body: &str) -> serde_json::Result<Option<GuiEvent>> {
+    let event = match serde_json::from_str::<IpcMessage>(body)? {
+        IpcMessage::CloseConfirmed => GuiEvent::CloseConfirmed,
+        IpcMessage::CloseCanceled => GuiEvent::CloseCanceled,
+        IpcMessage::Ready => GuiEvent::Ready,
+        IpcMessage::SetTitle { title } => GuiEvent::SetTitle(clean_window_title(&title)),
+        IpcMessage::UpdateCheckStartup { enabled } => GuiEvent::UpdateCheckStartup(enabled),
+        IpcMessage::NewWindow => GuiEvent::NewWindow,
+        IpcMessage::NewWindowPath { path, recover } if recover => {
+            GuiEvent::NewWindowPathRecover(path)
+        }
+        IpcMessage::NewWindowPath { path, .. } => GuiEvent::NewWindowPath(path),
+        IpcMessage::PickSave { dir, name } => GuiEvent::PickSave(PickSaveRequest { dir, name }),
+        IpcMessage::PickOpen { dir } => GuiEvent::PickOpen(PickOpenRequest { dir }),
+        IpcMessage::Language { language } => {
+            #[cfg(target_os = "macos")]
+            {
+                GuiEvent::Language(language)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = language;
+                return Ok(None);
+            }
+        }
+    };
+    Ok(Some(event))
+}
+
+fn reveal_window(
+    window: &Window,
+    proxy: &EventLoopProxy<GuiEvent>,
+    shown: &mut bool,
+    start_maximized: bool,
+    update_check_enabled: Option<bool>,
+    update_check_started: &mut bool,
+) {
+    if !*shown {
+        *shown = true;
+        window.set_visible(true);
+        if start_maximized {
+            window.set_maximized(true);
+        }
+    }
+    maybe_start_startup_update_check(proxy, *shown, update_check_enabled, update_check_started);
+}
+
+fn request_close(
+    webview: &WebView,
+    window: &Window,
+    last_normal: Option<&WindowState>,
+    close_pending: &mut bool,
+    close_deadline: &mut Option<Instant>,
+    close_timeout: Duration,
+    control_flow: &mut ControlFlow,
+) {
+    if *close_pending {
+        return;
+    }
+    *close_pending = true;
+    *close_deadline = Some(Instant::now() + close_timeout);
+    if webview.evaluate_script(NATIVE_CLOSE_SCRIPT).is_err() {
+        save_window_state(window, last_normal);
+        *control_flow = ControlFlow::Exit;
+    }
+}
+
+#[cfg(test)]
+mod ipc_tests {
+    use super::*;
+
+    fn event(body: &str) -> GuiEvent {
+        decode_ipc_message(body)
+            .expect("valid native IPC message")
+            .expect("message maps to an event on this platform")
+    }
+
+    #[test]
+    fn decodes_control_messages() {
+        assert!(matches!(
+            event(r#"{"type":"close_confirmed"}"#),
+            GuiEvent::CloseConfirmed
+        ));
+        assert!(matches!(
+            event(r#"{"type":"close_canceled"}"#),
+            GuiEvent::CloseCanceled
+        ));
+        assert!(matches!(event(r#"{"type":"ready"}"#), GuiEvent::Ready));
+        assert!(matches!(
+            event(r#"{"type":"new_window"}"#),
+            GuiEvent::NewWindow
+        ));
+        assert!(matches!(
+            event(r#"{"type":"update_check_startup","enabled":true}"#),
+            GuiEvent::UpdateCheckStartup(true)
+        ));
+    }
+
+    #[test]
+    fn decodes_structured_payloads_without_delimiter_ambiguity() {
+        match event(r#"{"type":"new_window_path","path":"C:\\tmp:a.txt","recover":true}"#) {
+            GuiEvent::NewWindowPathRecover(path) => assert_eq!(path, r"C:\tmp:a.txt"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match event(r#"{"type":"pick_save","dir":"/tmp:a","name":"draft.json"}"#) {
+            GuiEvent::PickSave(request) => {
+                assert_eq!(request.dir, "/tmp:a");
+                assert_eq!(request.name, "draft.json");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match event(r#"{"type":"pick_open","dir":"/tmp:b"}"#) {
+            GuiEvent::PickOpen(request) => assert_eq!(request.dir, "/tmp:b"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match event(r#"{"type":"set_title","title":"draft\u0000"}"#) {
+            GuiEvent::SetTitle(title) => assert_eq!(title, "draft"),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_or_unknown_payloads() {
+        assert!(decode_ipc_message("not json").is_err());
+        assert!(decode_ipc_message(r#"{"type":"pick_save","dir":""}"#).is_err());
+        assert!(
+            decode_ipc_message(r#"{"type":"new_window_path","path":7,"recover":false}"#).is_err()
+        );
+        assert!(decode_ipc_message(r#"{"type":"not_a_message"}"#).is_err());
+    }
 }
 
 fn maybe_start_startup_update_check(
@@ -911,7 +1016,7 @@ const NATIVE_CLOSE_SCRIPT: &str = r#"
 if (window.__ayameNativeCloseRequested) {
   window.__ayameNativeCloseRequested();
 } else if (window.ipc && window.ipc.postMessage) {
-  window.ipc.postMessage("ayame:close-ok");
+  window.ipc.postMessage(JSON.stringify({ type: "close_confirmed" }));
 }
 "#;
 

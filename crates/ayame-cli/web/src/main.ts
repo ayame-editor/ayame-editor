@@ -85,7 +85,7 @@ export async function boot() {
   } catch (e) {
     $("overlay").classList.remove("hidden");
     $("overlay").textContent = `${t("error.serverUnreachable")}: ${e.message}`;
-    postNativeMessage("ayame:ready"); // still show the window so the error is visible
+    postNativeMessage({ type: "ready" }); // still show the window so the error is visible
     return;
   }
   updateStatusMeta();
@@ -95,7 +95,7 @@ export async function boot() {
   const pending = typeof window.__ayamePendingOpen === "string" ? window.__ayamePendingOpen : "";
   if (!state.doc.stat.open && pending) {
     showLoading(t("dialog.open.openingName", { name: displayName(pending) }));
-    postNativeMessage("ayame:ready");
+    postNativeMessage({ type: "ready" });
     try {
       // A window spawned by a dirty-tab handoff (issue #35): the detached
       // tab's crash log replays silently instead of prompting.
@@ -112,7 +112,7 @@ export async function boot() {
   }
   if (!state.doc.stat.open && state.settings.restoreSession !== false) {
     showLoading(t("dialog.open.loading"));
-    postNativeMessage("ayame:ready");
+    postNativeMessage({ type: "ready" });
     try {
       const stat = await restoreSessionSnapshot();
       if (stat?.open) {
@@ -137,7 +137,7 @@ export async function boot() {
     // onDocumentOpened — offer its crash recovery here.
     maybeOfferWalRecovery(state.doc.stat);
   }
-  postNativeMessage("ayame:ready");
+  postNativeMessage({ type: "ready" });
 }
 
 boot();
