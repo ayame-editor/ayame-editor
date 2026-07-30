@@ -41,6 +41,7 @@ unicode-normalization = "0.1"
 sha2 = "0.10"
 
 # Release builds favor raw throughput for the indexing/scan hot paths.
+# Keep ayame-core at one codegen unit so ThinLTO sees the whole engine at once.
 # NOTE: we deliberately do NOT set `panic = "abort"`: the web server isolates
 # per-request panics by unwinding, which is part of the stability story.
 [profile.release]
@@ -48,3 +49,10 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"  # ~15% smaller binaries; release scripts no longer rely on a host `strip`
+
+# ayame-cli is mostly CLI/server/UI orchestration around ayame-core. Compiling
+# that much larger crate in parallel cuts release iteration time substantially
+# without relaxing the engine's one-unit optimization policy (see #262).
+[profile.release.package.ayame-cli]
+codegen-units = 16
+strip = "symbols"

@@ -143,6 +143,11 @@ jobs:
             echo "server-only build unexpectedly includes the self-update dependency stack"
             exit 1
           fi
+          if cargo tree --locked -p ayame-cli --no-default-features --edges all --prefix none \
+            | grep -Eq '^oxc_sourcemap v'; then
+            echo "TypeScript transform unexpectedly includes unused source-map support"
+            exit 1
+          fi
 
   frontend:
     name: Frontend checks

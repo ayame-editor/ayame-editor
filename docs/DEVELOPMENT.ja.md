@@ -67,6 +67,27 @@ oxlint --max-warnings 0 crates/ayame-cli/web/src
 `cargo xtask release` は release preflight、任意の version bump、local artifact
 smoke test、tag 作成、GitHub Actions release への handoff を行います。
 
+### Release build profile
+
+release build は `opt-level = 3` と ThinLTO を維持し、index/search の hot path
+を持つ `ayame-core` は 1 codegen unit のまま最適化します。大きな
+`ayame-cli` orchestration crate だけは 16 codegen units を使い、rustc が並列に
+最適化できるようにしています。小幅な binary size 増との意図的な交換なので、
+throughput benchmark を取り直さず workspace 全体へ override を広げないでください。
+
+cold build を計測するときは、既存 artifact が dependency/codegen cost を隠さない
+よう空の target directory を使います。
+
+```sh
+bench_target="$(mktemp -d "${TMPDIR:-/tmp}/ayame-build.XXXXXX")"
+CARGO_TARGET_DIR="$bench_target" cargo build --release --locked -p ayame-cli --timings
+cargo tree -i oxc_sourcemap --target all
+```
+
+timings report は `$CARGO_TARGET_DIR/cargo-timings/` 以下に生成されます。
+TypeScript transform は source map を出力しないため、`oxc_sourcemap` は依存に
+含まれないのが正常です。
+
 ## Windows
 
 PowerShell を使います。

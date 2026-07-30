@@ -68,6 +68,28 @@ oxlint --max-warnings 0 crates/ayame-cli/web/src
 runs the release preflight, optional version bump, local artifact smoke tests,
 tag creation, and GitHub Actions release handoff.
 
+### Release build profile
+
+Release builds keep `opt-level = 3`, ThinLTO, and one codegen unit for
+`ayame-core`, where indexing and scanning hot paths live. The larger
+`ayame-cli` orchestration crate uses 16 codegen units so rustc can optimize it
+in parallel. The small binary-size tradeoff is intentional; do not move the
+package override to the workspace-wide profile without re-running throughput
+benchmarks.
+
+Use a fresh target directory when measuring cold builds so existing artifacts
+do not hide dependency or codegen costs:
+
+```sh
+bench_target="$(mktemp -d "${TMPDIR:-/tmp}/ayame-build.XXXXXX")"
+CARGO_TARGET_DIR="$bench_target" cargo build --release --locked -p ayame-cli --timings
+cargo tree -i oxc_sourcemap --target all
+```
+
+The timings report is written below `$CARGO_TARGET_DIR/cargo-timings/`.
+`oxc_sourcemap` should not be present: the TypeScript transform emits no source
+maps.
+
 ## Windows
 
 Use PowerShell.
