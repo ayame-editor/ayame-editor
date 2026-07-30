@@ -90,13 +90,7 @@ export function buildRuler() {
   }
   vp.classList.add("has-ruler");
   // Gutter width, measured from a visible row so ticks line up with the text.
-  let gutterPx = 0;
-  for (const row of pool) {
-    if (row.style.display !== "none") {
-      gutterPx = row.firstChild.getBoundingClientRect().width;
-      break;
-    }
-  }
+  const gutterPx = gutterPixels();
   const cw = charWidth();
   const inner = $("ruler-inner");
   const key = `${Math.round(gutterPx)}|${cw.toFixed(2)}`;
@@ -354,6 +348,7 @@ export function charWidth() {
 export function invalidateFontMetrics() {
   _charW = 0;
   _rulerKey = "";
+  resetGeometryMeasurements(true);
 }
 
 // Measure the rendered pixel width of `str` in the content font. One reused,
@@ -394,7 +389,27 @@ export let _rowProbeSpacer = null;
 
 export let _rowProbeText = null;
 
-export function measureRowPrefix(str) {
+let _rowProbeRange: Range | null = null;
+let _rowProbeSource: string | null = null;
+let _rowProbeGutter = -1;
+let _gutterPixelsCache: number | null = null;
+const _rowPrefixWidths = new Map<string, Map<number, number>>();
+const _rowGeometry = new Map<string, { chars: string[]; offsets: number[] }>();
+
+// Geometry is shared by selection, caret and ruler rendering. Clear the
+// frame-local memo before a new render (or pointer hit-test) so a changed
+// gutter can never leak into the next layout pass.
+export function resetGeometryMeasurements(clearProbe = false) {
+  _gutterPixelsCache = null;
+  _rowPrefixWidths.clear();
+  _rowGeometry.clear();
+  if (clearProbe) {
+    _rowProbeSource = null;
+    _rowProbeGutter = -1;
+  }
+}
+
+function ensureRowProbe() {
   if (!_rowProbe) {
     _rowProbe = document.createElement("span");
     _rowProbe.style.cssText =
@@ -404,34 +419,97 @@ export function measureRowPrefix(str) {
     _rowProbeText = document.createTextNode("");
     _rowProbe.append(_rowProbeSpacer, _rowProbeText);
     $("content").appendChild(_rowProbe);
+    _rowProbeRange = document.createRange();
   }
-  _rowProbeSpacer.style.width = `${gutterPixels()}px`;
-  _rowProbeText.data = str;
-  return _rowProbe.getBoundingClientRect().width;
+}
+
+function prepareRowProbe(str) {
+  ensureRowProbe();
+  const gutter = gutterPixels();
+  if (_rowProbeGutter !== gutter) {
+    _rowProbeSpacer.style.width = `${gutter}px`;
+    _rowProbeGutter = gutter;
+    _rowProbeSource = null;
+  }
+  if (_rowProbeSource !== str) {
+    _rowProbeText.data = str;
+    _rowProbeSource = str;
+  }
+}
+
+function scalarOffsets(chars: string[]) {
+  const offsets = [0];
+  for (const ch of chars) offsets.push(offsets[offsets.length - 1] + ch.length);
+  return offsets;
+}
+
+function geometryForText(str: string) {
+  let geometry = _rowGeometry.get(str);
+  if (!geometry) {
+    const chars = Array.from(str);
+    geometry = { chars, offsets: scalarOffsets(chars) };
+    _rowGeometry.set(str, geometry);
+  }
+  return geometry;
+}
+
+function measureLinePrefix(str: string, chars: string[], offsets: number[], col: number) {
+  const clamped = Math.max(0, Math.min(col, chars.length));
+  let widths = _rowPrefixWidths.get(str);
+  if (!widths) {
+    widths = new Map();
+    _rowPrefixWidths.set(str, widths);
+  }
+  const cached = widths.get(clamped);
+  if (cached != null) return cached;
+
+  prepareRowProbe(str);
+  let width;
+  if (_rowProbeRange && typeof _rowProbeRange.getBoundingClientRect === "function") {
+    // Install the full line once, then move only the Range boundary. The first
+    // read resolves layout; the binary-search reads that follow do not
+    // alternate DOM writes with synchronous layout reads.
+    _rowProbeRange.setStart(_rowProbe, 0);
+    _rowProbeRange.setEnd(_rowProbeText, offsets[clamped]);
+    width = _rowProbeRange.getBoundingClientRect().width;
+  } else {
+    // jsdom and older embedded engines may not expose Range geometry.
+    _rowProbeText.data = chars.slice(0, clamped).join("");
+    width = _rowProbe.getBoundingClientRect().width;
+    _rowProbeText.data = str;
+  }
+  widths.set(clamped, width);
+  return width;
+}
+
+export function measureRowPrefix(str) {
+  const { chars, offsets } = geometryForText(str);
+  return measureLinePrefix(str, chars, offsets, chars.length);
 }
 
 // Pixel x (in #content coordinates, gutter included) of column `col` on `line`.
 export function caretX(line, col) {
-  const cs = lineChars(line);
-  const head = cs.slice(0, Math.max(0, Math.min(col, cs.length))).join("");
-  return measureRowPrefix(head);
+  const text = cachedLine(line)?.text ?? "";
+  const { chars, offsets } = geometryForText(text);
+  return measureLinePrefix(text, chars, offsets, col);
 }
 
 // Inverse of caretX: nearest column boundary to pixel x (content coordinates).
 export function colFromX(line, x) {
-  const cs = lineChars(line);
+  const text = cachedLine(line)?.text ?? "";
+  const { chars, offsets } = geometryForText(text);
   if (x <= gutterPixels()) return 0;
-  const full = measureRowPrefix(cs.join(""));
-  if (x >= full) return cs.length;
+  const full = measureLinePrefix(text, chars, offsets, chars.length);
+  if (x >= full) return chars.length;
   let lo = 0,
-    hi = cs.length;
+    hi = chars.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (measureRowPrefix(cs.slice(0, mid).join("")) < x) lo = mid + 1;
+    if (measureLinePrefix(text, chars, offsets, mid) < x) lo = mid + 1;
     else hi = mid;
   }
-  const wLo = measureRowPrefix(cs.slice(0, lo).join(""));
-  const wPrev = lo > 0 ? measureRowPrefix(cs.slice(0, lo - 1).join("")) : gutterPixels();
+  const wLo = measureLinePrefix(text, chars, offsets, lo);
+  const wPrev = lo > 0 ? measureLinePrefix(text, chars, offsets, lo - 1) : gutterPixels();
   return x - wPrev < wLo - x ? lo - 1 : lo;
 }
 
@@ -439,23 +517,26 @@ export function colFromX(line, x) {
 
 // Width in px of the line-number gutter, measured from a visible row.
 export function gutterPixels() {
+  if (_gutterPixelsCache != null) return _gutterPixelsCache;
   for (const row of pool) {
     if (row.style.display !== "none" && row.firstChild) {
-      return row.firstChild.getBoundingClientRect().width;
+      _gutterPixelsCache = row.firstChild.getBoundingClientRect().width;
+      return _gutterPixelsCache;
     }
   }
   const rootStyle = getComputedStyle(document.documentElement);
   const tokenPixels = (name) => Number.parseFloat(rootStyle.getPropertyValue(name).trim()) || 0;
-  return (
+  _gutterPixelsCache =
     lineNumberChars(state.view.total) * charWidth() +
     tokenPixels("--gutter-pad-start") +
     tokenPixels("--gutter-pad-end") +
-    tokenPixels("--gutter-border-width")
-  );
+    tokenPixels("--gutter-border-width");
+  return _gutterPixelsCache;
 }
 
 // Map a mouse event to a {line, col} position in the document.
 export function coordsFromEvent(e) {
+  resetGeometryMeasurements();
   const content = $("content");
   const rect = content.getBoundingClientRect();
   const rowInView = Math.floor((e.clientY - rect.top) / LINE_HEIGHT);
@@ -612,6 +693,7 @@ export function appendSyntaxHighlighted(container, text) {
 
 export function render() {
   renderQueued = false;
+  resetGeometryMeasurements();
   const content = $("content");
   const vis = rowsVisible();
   const count = vis + OVERSCAN;
@@ -687,9 +769,44 @@ export function updateScrollbar() {
   renderSearchTicks(vh);
 }
 
+let tickRenderCache = null;
+let searchTickNodes: HTMLElement[] = [];
+
+function visibleAnalysisRulesKey() {
+  return [...state.analysis.visibleRuleIds].sort().join("\u0000");
+}
+
+function updateCurrentSearchTick() {
+  const current = state.search.lastMatch ? String(state.search.lastMatch.byte) : null;
+  for (const tick of searchTickNodes) {
+    tick.classList.toggle("current", current != null && tick.dataset.searchByte === current);
+  }
+}
+
 export function renderSearchTicks(vh) {
   const ticks = $("vticks");
   if (!ticks) return;
+  const nextCache = {
+    ticks,
+    vh,
+    total: state.view.total,
+    queryActive: !!state.search.query,
+    hits: state.search.hits,
+    analysisStatus: state.analysis.status,
+    visibleAnalysisRules: visibleAnalysisRulesKey(),
+    changeHistory:
+      state.settings.showChangeHistory === false ? null : state.markers.changeHistoryOverview,
+    language: state.settings.language,
+  };
+  if (
+    tickRenderCache &&
+    Object.keys(nextCache).every((key) => tickRenderCache[key] === nextCache[key])
+  ) {
+    updateCurrentSearchTick();
+    return;
+  }
+  tickRenderCache = nextCache;
+  searchTickNodes = [];
   ticks.textContent = "";
   const frag = document.createDocumentFragment();
   const maxTicks = 700;
@@ -701,11 +818,11 @@ export function renderSearchTicks(vh) {
       if (typeof h.line !== "number") continue;
       const tick = document.createElement("div");
       tick.className = "vtick";
-      if (state.search.lastMatch && h.byte === state.search.lastMatch.byte)
-        tick.classList.add("current");
+      tick.dataset.searchByte = String(h.byte);
       const y = Math.max(0, Math.min(vh - 3, (h.line / denom) * (vh - 3)));
       tick.style.transform = `translateY(${y}px)`;
       frag.append(tick);
+      searchTickNodes.push(tick);
     }
   }
   const analysisRules = (state.analysis.status?.rules || []).filter(
@@ -778,6 +895,7 @@ export function renderSearchTicks(vh) {
     ticks.removeAttribute("aria-label");
   }
   ticks.append(frag);
+  updateCurrentSearchTick();
 }
 
 export function initScrollbar() {
