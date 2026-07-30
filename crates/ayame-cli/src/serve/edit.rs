@@ -279,7 +279,7 @@ pub(super) async fn api_edit_save(
     Json(req): Json<EditSaveRequest>,
 ) -> Result<Json<EditSaveResponse>, ApiError> {
     // Consistent snapshot (doc + edits + revision) under one lock acquisition.
-    let mut snap = state.edit_snapshot()?;
+    let snap = state.edit_snapshot()?;
     let active_path = snap.doc.path().to_path_buf();
     let target = req
         .path
@@ -294,86 +294,111 @@ pub(super) async fn api_edit_save(
                 default_save_copy_path(&active_path)
             }
         });
-    // ---- 変換して保存: re-encode every line to a chosen 文字コード / 改行コード.
-    // This rewrites the whole file (the fast path copies untouched lines raw),
-    // so it runs as save-then-reload: the active tab reopens the converted
-    // bytes, refreshing the encoding/eol shown in the status bar.
-    if req.encoding.is_some() || req.eol.is_some() {
-        let cur = snap.doc.stat();
-        let enc = match req.encoding.as_deref() {
-            Some(name) => Encoding::parse(name)
-                .map(|e| {
-                    if e == Encoding::Ascii {
-                        Encoding::Utf8
-                    } else {
-                        e
-                    }
-                })
-                .ok_or_else(|| bad_request(format!("unknown encoding '{name}'")))?,
-            None => cur.encoding,
-        };
-        let eol = match req.eol.as_deref() {
-            Some(name) => Eol::parse(name)
-                .ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?,
-            None => match cur.eol {
-                Eol::Mixed | Eol::None => Eol::Lf,
-                other => other,
-            },
-        };
-        // Default to the file's current BOM state so an unspecified request
-        // round-trips it for Unicode encodings.
-        let with_bom = req.bom.unwrap_or(cur.bom_bytes > 0);
-        let overwrite = req.overwrite || same_path(&target, &active_path);
-        let target_for_save = target.clone();
-        let doc_for_save = snap.doc.clone();
-        let edits_for_save = snap.take_edits();
-        let res = tokio::task::spawn_blocking(move || {
-            edits_for_save.save_converted(
-                &doc_for_save,
-                target_for_save,
-                enc,
-                eol,
-                with_bom,
-                overwrite,
-            )
-        })
-        .await
-        .map_err(internal)?
-        .map_err(ApiError::from)?;
-        // Refresh the active tab from the converted file. Skipped (switched =
-        // false) if edits landed while the rewrite was streaming, so no newer
-        // edit is dropped — the client then falls back to a normal open.
-        let switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
-        return Ok(Json(EditSaveResponse::from_result(res, switched)));
-    }
+    let response = if req.encoding.is_some() || req.eol.is_some() {
+        save_converted_mode(&state, snap, &active_path, target, &req).await?
+    } else if req.overwrite && same_path(&target, &active_path) {
+        save_in_place_mode(&state, snap, target).await?
+    } else {
+        save_copy_mode(&state, snap, &active_path, target, &req).await?
+    };
+    Ok(Json(response))
+}
 
-    let reload_active = req.overwrite && same_path(&target, &active_path);
-    if !reload_active {
-        // Saving a copy elsewhere never mutates workspace state, so the
-        // snapshot alone is enough — edits made during the save simply stay
-        // pending against the still-open document.
-        let target_for_save = target.clone();
-        let doc_for_save = snap.doc.clone();
-        let edits_for_save = snap.take_edits();
-        let res = tokio::task::spawn_blocking(move || {
-            if req.overwrite {
-                edits_for_save.save_to_path_overwrite(&doc_for_save, target_for_save)
-            } else {
-                edits_for_save.save_to_path(&doc_for_save, target_for_save)
-            }
-        })
-        .await
-        .map_err(internal)?
-        .map_err(ApiError::from)?;
-        let mut switched = false;
-        if req.switch_to_saved {
-            switched = switch_active_to_saved(&state, &snap, &res.path, &active_path).await;
+/// Re-encode every line, then optionally install the saved bytes as the active
+/// tab. Lock order: the caller has already released the workspace read lock
+/// after taking `snap`; the rewrite holds no app lock; only the final
+/// revision-checked tab switch acquires the transition lock.
+async fn save_converted_mode(
+    state: &SharedState,
+    mut snap: super::state::EditSnapshot,
+    active_path: &Path,
+    target: PathBuf,
+    req: &EditSaveRequest,
+) -> Result<EditSaveResponse, ApiError> {
+    let cur = snap.doc.stat();
+    let enc = match req.encoding.as_deref() {
+        Some(name) => parse_save_encoding(name)?,
+        None => cur.encoding,
+    };
+    let eol = match req.eol.as_deref() {
+        Some(name) => {
+            Eol::parse(name).ok_or_else(|| bad_request(format!("unknown line ending '{name}'")))?
         }
-        return Ok(Json(EditSaveResponse::from_result(res, switched)));
-    }
+        None => match cur.eol {
+            Eol::Mixed | Eol::None => Eol::Lf,
+            other => other,
+        },
+    };
+    // Default to the file's current BOM state so an unspecified request
+    // round-trips it for Unicode encodings.
+    let with_bom = req.bom.unwrap_or(cur.bom_bytes > 0);
+    let overwrite = req.overwrite || same_path(&target, active_path);
+    let target_for_save = target;
+    let doc_for_save = snap.doc.clone();
+    let edits_for_save = snap.take_edits();
+    let res = tokio::task::spawn_blocking(move || {
+        edits_for_save.save_converted(
+            &doc_for_save,
+            target_for_save,
+            enc,
+            eol,
+            with_bom,
+            overwrite,
+        )
+    })
+    .await
+    .map_err(internal)?
+    .map_err(ApiError::from)?;
+    // Skipped if edits landed while the rewrite was streaming, so no newer
+    // edit is dropped — the client then falls back to a normal open.
+    let switched = switch_active_to_saved(state, &snap, &res.path, active_path).await;
+    Ok(EditSaveResponse::from_result(res, switched))
+}
 
-    // In-place overwrite. Phase 1 — stream the snapshot to a stage file
-    // without holding any lock, so typing stays live during a long save.
+/// Save to a separate path without changing the live workspace unless
+/// `switch_to_saved` was requested. Lock order: stream the immutable snapshot
+/// without app locks, then acquire the transition lock only for the optional
+/// revision-checked tab switch.
+async fn save_copy_mode(
+    state: &SharedState,
+    mut snap: super::state::EditSnapshot,
+    active_path: &Path,
+    target: PathBuf,
+    req: &EditSaveRequest,
+) -> Result<EditSaveResponse, ApiError> {
+    let overwrite = req.overwrite;
+    let switch_to_saved = req.switch_to_saved;
+    let doc_for_save = snap.doc.clone();
+    let edits_for_save = snap.take_edits();
+    let res = tokio::task::spawn_blocking(move || {
+        if overwrite {
+            edits_for_save.save_to_path_overwrite(&doc_for_save, target)
+        } else {
+            edits_for_save.save_to_path(&doc_for_save, target)
+        }
+    })
+    .await
+    .map_err(internal)?
+    .map_err(ApiError::from)?;
+    let switched = if switch_to_saved {
+        switch_active_to_saved(state, &snap, &res.path, active_path).await
+    } else {
+        false
+    };
+    Ok(EditSaveResponse::from_result(res, switched))
+}
+
+/// Atomically overwrite the active path while preserving the live mmap and
+/// undo history. Lock order: phase 1 streams to a sibling stage with no app
+/// lock; phase 2 acquires the transition lock, verifies the snapshot, swaps
+/// files on a blocking thread, then commits the saved marker before unlock.
+async fn save_in_place_mode(
+    state: &SharedState,
+    mut snap: super::state::EditSnapshot,
+    target: PathBuf,
+) -> Result<EditSaveResponse, ApiError> {
+    // Phase 1 — stream the snapshot to a stage file without holding any lock,
+    // so typing stays live during a long save.
     let stage = overwrite_stage_path(&target);
     let stage_for_save = stage.clone();
     let doc_for_save = snap.doc.clone();
@@ -419,18 +444,30 @@ pub(super) async fn api_edit_save(
             // The active tab already shows the saved path: report it as
             // switched so 名前を付けて保存 onto the same file refreshes in
             // place instead of opening anything.
-            Ok(Json(EditSaveResponse {
+            Ok(EditSaveResponse {
                 path: workspace::display_path(&target),
                 bytes: saved.bytes,
                 lines: saved.lines,
                 switched: true,
-            }))
+            })
         }
         // The swap either rolled back (target intact) or kept the stage (its
         // path is in the error). The session is untouched either way — the
         // user's edits are still pending, nothing was lost.
         Err(e) => Err(internal(e)),
     }
+}
+
+fn parse_save_encoding(name: &str) -> Result<Encoding, ApiError> {
+    Encoding::parse(name)
+        .map(|encoding| {
+            if encoding == Encoding::Ascii {
+                Encoding::Utf8
+            } else {
+                encoding
+            }
+        })
+        .ok_or_else(|| bad_request(format!("unknown encoding '{name}'")))
 }
 
 /// Move the fully-written stage file onto `target`, preserving the current
@@ -605,15 +642,7 @@ pub(super) async fn api_reopen_encoding(
     State(state): State<SharedState>,
     Json(req): Json<ReopenRequest>,
 ) -> Result<Json<EditStats>, ApiError> {
-    let enc = Encoding::parse(&req.encoding)
-        .map(|e| {
-            if e == Encoding::Ascii {
-                Encoding::Utf8
-            } else {
-                e
-            }
-        })
-        .ok_or_else(|| bad_request(format!("unknown encoding '{}'", req.encoding)))?;
+    let enc = parse_save_encoding(&req.encoding)?;
     let _transitions = state.lock_transitions().await;
     let path = state.read(|ws| ws.doc_and_edits().map(|(doc, _)| doc.path().to_path_buf()))?;
     state.reload_with_encoding(path, enc).await?;
@@ -841,6 +870,19 @@ mod tests {
 
     use super::super::state::AppState;
     use super::*;
+
+    #[test]
+    fn save_encoding_parser_promotes_ascii_and_rejects_unknown_labels() {
+        assert_eq!(parse_save_encoding("ascii").unwrap(), Encoding::Utf8);
+        assert_eq!(
+            parse_save_encoding("shift_jis").unwrap(),
+            Encoding::ShiftJis
+        );
+
+        let error = parse_save_encoding("not-an-encoding").unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(error.message(), "unknown encoding 'not-an-encoding'");
+    }
 
     fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ayame-edit-test-{}", std::process::id()));

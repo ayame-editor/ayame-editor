@@ -893,8 +893,9 @@ impl AppState {
         // could hand off a log a power loss would tear.
         if let Some(f) = sync_file {
             f.sync_data().map_err(|e| {
-                (
+                ApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal",
                     format!("crash log sync failed: {e}"),
                 )
             })?;
