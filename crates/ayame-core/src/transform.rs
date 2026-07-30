@@ -13,7 +13,7 @@ use memchr::memmem;
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::fsync::fsync_parent;
+use crate::fsync::{replace_with_staged, temp_path};
 use crate::search::{is_legacy_char_boundary_in_line, MatchPlan};
 use crate::{Document, Encoding, Error, Result};
 
@@ -500,8 +500,7 @@ where
         // prefix bytes above were read here — check once more before the
         // rename makes the output visible.
         doc.verify_base()?;
-        rename_over(&tmp, target)?;
-        fsync_parent(target);
+        commit_transform(&tmp, target)?;
         let bytes = std::fs::metadata(target)?.len();
         Ok(TransformResult {
             path: target.to_path_buf(),
@@ -567,9 +566,8 @@ where
     w.flush()?;
     w.get_ref().sync_all()?;
     drop(w);
-    match rename_over(&tmp, target) {
+    match commit_transform(&tmp, target) {
         Ok(()) => {
-            fsync_parent(target);
             let bytes = std::fs::metadata(target)?.len();
             Ok(TransformResult {
                 path: target.to_path_buf(),
@@ -579,10 +577,7 @@ where
                 replacements,
             })
         }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(Error::Io(e))
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -597,8 +592,7 @@ fn write_empty_transform(doc: &Document, target: &Path) -> Result<TransformResul
     w.flush()?;
     w.get_ref().sync_all()?;
     drop(w);
-    rename_over(&tmp, target)?;
-    fsync_parent(target);
+    commit_transform(&tmp, target)?;
     let bytes = std::fs::metadata(target)?.len();
     Ok(TransformResult {
         path: target.to_path_buf(),
@@ -609,30 +603,15 @@ fn write_empty_transform(doc: &Document, target: &Path) -> Result<TransformResul
     })
 }
 
-/// `rename` that also replaces an existing `target` on platforms where a
-/// plain rename cannot (Windows): move the old file aside, move the new one
-/// in, then drop the old copy. Overwrite *intent* is still gated by
-/// [`ensure_new_target`] in each transform's entry point — by the time this
-/// runs, replacing whatever sits at `target` is deliberate.
-fn rename_over(tmp: &Path, target: &Path) -> std::io::Result<()> {
-    match std::fs::rename(tmp, target) {
-        Ok(()) => Ok(()),
-        Err(_first) if target.exists() => {
-            let aside = temp_path(target);
-            std::fs::rename(target, &aside)?;
-            match std::fs::rename(tmp, target) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&aside);
-                    Ok(())
-                }
-                Err(second) => {
-                    let _ = std::fs::rename(&aside, target);
-                    Err(second)
-                }
-            }
-        }
-        Err(e) => Err(e),
+/// Publish a transform through the canonical staged replacement primitive.
+/// Transform output is reproducible, so discard its stage after a failed
+/// publication instead of leaving an internal artifact beside the target.
+fn commit_transform(tmp: &Path, target: &Path) -> Result<()> {
+    if let Err(e) = replace_with_staged(tmp, target) {
+        let _ = std::fs::remove_file(tmp);
+        return Err(Error::Io(e));
     }
+    Ok(())
 }
 
 struct ReplaceChunk {
@@ -1029,19 +1008,6 @@ fn ensure_new_target(target: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn temp_path(target: &Path) -> PathBuf {
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let name = target
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("ayame-transform");
-    parent.join(format!(
-        ".{name}.ayame-tmp-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ))
-}
-
 fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
@@ -1049,13 +1015,6 @@ fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or("ayame-transform");
     parent.join(format!("{name}.{suffix}"))
-}
-
-fn unique_suffix() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

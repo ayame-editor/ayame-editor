@@ -575,7 +575,9 @@ fn aside_path(path: &Path) -> PathBuf {
 /// into place, then the aside copy dropped. A crash between the two renames
 /// leaves the previous log under the aside name, which [`inspect`] and
 /// [`replay`] fall back to; at every other point the target itself is a
-/// complete log.
+/// complete log. This intentionally does not use
+/// [`crate::replace_with_staged`]: the `.old` name is part of the WAL reader's
+/// crash-recovery protocol, not a temporary implementation detail.
 fn rename_via_aside(tmp: &Path, path: &Path) -> std::io::Result<()> {
     let aside = aside_path(path);
     if path.exists() {
