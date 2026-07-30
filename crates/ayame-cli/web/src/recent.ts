@@ -1,9 +1,9 @@
 // Ayame Editor — recent file persistence and opener rows.
 import { $, iconSvg, isUntitled, pathBaseName, pathDirName } from "./dom.js";
-import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import { prepareOpenerOption, resetOpenerSelection } from "./browse.js";
+import { currentOpenerMode } from "./opener-state.js";
 
 let openRecentPath = async (_path) => false;
 
@@ -41,7 +41,7 @@ export async function openRecent(path) {
 export function renderRecentFiles() {
   const box = $("opener-recent");
   if (!box) return;
-  const list = state.openerMode === "open" ? loadRecentFiles() : [];
+  const list = currentOpenerMode() === "open" ? loadRecentFiles() : [];
   box.textContent = "";
   resetOpenerSelection();
   if (!list.length) {

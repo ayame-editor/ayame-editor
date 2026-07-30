@@ -1,7 +1,7 @@
 // Ayame Editor — editor context menu.
 import { $ } from "./dom.js";
 import { state } from "./state.js";
-import { coordsFromEvent, focusEditor, scheduleRender, setCaret } from "./editor.js";
+import { coordsFromEvent, focusEditor, scheduleRender, setCaret, setSelection } from "./editor.js";
 import { hasTextSelection, posInsideSelection, saveSelectionToFile } from "./selection.js";
 import { anyModalOpen } from "./modal-state.js";
 import { runMenuAction } from "./menu-actions.js";
@@ -20,7 +20,7 @@ export function runCtxAction(action) {
   if (action === "saveSelection") out = saveSelectionToFile();
   else out = runMenuAction(action);
   return Promise.resolve(out).finally(() => {
-    if (!anyModalOpen() && !state.findOpen) focusEditor();
+    if (!anyModalOpen() && !state.search.findOpen) focusEditor();
   });
 }
 
@@ -28,10 +28,10 @@ export function initContextMenu() {
   const menu = $("ctx-menu");
   $("viewport").addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    if (!state.stat?.open || anyModalOpen()) return;
+    if (!state.doc.stat?.open || anyModalOpen()) return;
     const p = coordsFromEvent(e);
     if (!posInsideSelection(p)) {
-      state.sel = null;
+      setSelection(null);
       setCaret(p.line, p.col);
       scheduleRender();
     }

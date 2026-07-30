@@ -3,18 +3,18 @@ import { state } from "./state.js";
 
 // Normalized selection: { start, end } with start <= end, or null.
 export function selRange() {
-  if (!state.sel) return null;
-  const { anchor: a, head: h } = state.sel;
+  if (!state.caret.selection) return null;
+  const { anchor: a, head: h } = state.caret.selection;
   const forward = a.line < h.line || (a.line === h.line && a.col <= h.col);
   const range: any = forward ? { start: a, end: h } : { start: h, end: a };
-  range.rect = !!state.sel.rect;
+  range.rect = !!state.caret.selection.rect;
   return range;
 }
 
 export function rectRange() {
-  if (!state.sel?.rect) return null;
-  const a = state.sel.anchor;
-  const h = state.sel.head;
+  if (!state.caret.selection?.rect) return null;
+  const a = state.caret.selection.anchor;
+  const h = state.caret.selection.head;
   return {
     l0: Math.min(a.line, h.line),
     l1: Math.max(a.line, h.line),
@@ -65,18 +65,20 @@ export function allCursors() {
       col: cursor.col,
       primary,
       sel: primary
-        ? cloneSelection(state.sel && !state.sel.rect ? state.sel : null)
+        ? cloneSelection(
+            state.caret.selection && !state.caret.selection.rect ? state.caret.selection : null,
+          )
         : cloneSelection(cursor.sel),
     });
   };
-  push(state.caret, true);
-  for (const cursor of state.extraCursors) push(cursor, false);
+  push(state.caret.position, true);
+  for (const cursor of state.caret.extraCursors) push(cursor, false);
   cursors.sort((a, b) => a.line - b.line || a.col - b.col);
   return cursors;
 }
 
 export function cursorSelectionRange(cursor) {
-  const selection = cursor.primary ? state.sel : cursor.sel;
+  const selection = cursor.primary ? state.caret.selection : cursor.sel;
   if (!selection || selection.rect) return null;
   const range = normalizedRange(selection.anchor, selection.head);
   return rangeEmpty(range) ? null : range;
@@ -94,7 +96,7 @@ export function selectionRanges() {
   };
   if (rectRange()) return ranges;
   add(selRange(), true);
-  for (const cursor of state.extraCursors) add(cursorSelectionRange(cursor), false);
+  for (const cursor of state.caret.extraCursors) add(cursorSelectionRange(cursor), false);
   ranges.sort((a, b) => a.start.line - b.start.line || a.start.col - b.start.col);
   return ranges;
 }
@@ -125,9 +127,9 @@ export function selectionLineCount(range = null) {
 }
 
 export function hasCursorSelections() {
-  const primary = state.sel && !state.sel.rect ? selRange() : null;
+  const primary = state.caret.selection && !state.caret.selection.rect ? selRange() : null;
   if (primary && !rangeEmpty(primary)) return true;
-  return state.extraCursors.some((cursor) => {
+  return state.caret.extraCursors.some((cursor) => {
     const range = cursorSelectionRange(cursor);
     return range && !rangeEmpty(range);
   });

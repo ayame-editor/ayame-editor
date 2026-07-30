@@ -6,7 +6,7 @@ vi.mock("../src/editor.js", () => ({
   revealCaret: vi.fn(),
   scheduleRender: vi.fn(),
   setCaret: vi.fn((line: number, col: number) => {
-    state.caret = { line, col };
+    state.caret.position = { line, col };
   }),
 }));
 vi.mock("../src/edits.js", () => ({
@@ -49,17 +49,17 @@ function jsonResponse(body: unknown): Response {
 
 describe("sparse bookmark commands (#241)", () => {
   beforeEach(() => {
-    state.stat = { open: true };
-    state.total = 10_000_000_000;
-    state.caret = { line: 10, col: 4 };
-    state.bookmarks = new Set();
-    state.bookmarkCount = 0;
-    state.query = "error";
-    state.regex = false;
-    state.ci = false;
-    state.word = false;
-    state.regexError = false;
-    state.extraCursors = [];
+    state.doc.stat = { open: true };
+    state.view.total = 10_000_000_000;
+    state.caret.position = { line: 10, col: 4 };
+    state.markers.bookmarks = new Set();
+    state.markers.bookmarkCount = 0;
+    state.search.query = "error";
+    state.search.regex = false;
+    state.search.caseInsensitive = false;
+    state.search.word = false;
+    state.search.regexError = false;
+    state.caret.extraCursors = [];
     vi.clearAllMocks();
     vi.stubGlobal("fetch", vi.fn());
   });
@@ -91,8 +91,8 @@ describe("sparse bookmark commands (#241)", () => {
         body: JSON.stringify({ kind: "bookmark", line: 9_999_999_999 }),
       }),
     );
-    expect(state.bookmarks).toEqual(new Set([9_999_999_999]));
-    expect(state.bookmarkCount).toBe(1);
+    expect(state.markers.bookmarks).toEqual(new Set([9_999_999_999]));
+    expect(state.markers.bookmarkCount).toBe(1);
     expect(settleEditQueue).toHaveBeenCalledOnce();
   });
 
@@ -113,7 +113,7 @@ describe("sparse bookmark commands (#241)", () => {
       undefined,
     );
     expect(setCaret).toHaveBeenCalledWith(2, 0, 0);
-    expect(state.bookmarkCount).toBe(3);
+    expect(state.markers.bookmarkCount).toBe(3);
   });
 
   it("refuses a document-sized multi-selection above the safety cap", async () => {
@@ -128,7 +128,7 @@ describe("sparse bookmark commands (#241)", () => {
 
     await selectBookmarkedLines();
 
-    expect(state.extraCursors).toEqual([]);
+    expect(state.caret.extraCursors).toEqual([]);
     expect(flashCount).toHaveBeenCalledWith("bookmark.selectLimit", "error");
   });
 
@@ -171,7 +171,7 @@ describe("sparse bookmark commands (#241)", () => {
         body: JSON.stringify({ kind: "bookmark", lines: [2, 8] }),
       }),
     );
-    expect(state.bookmarkCount).toBe(2);
+    expect(state.markers.bookmarkCount).toBe(2);
     expect(flashCount).toHaveBeenCalledWith("bookmark.matchesAdded");
   });
 });

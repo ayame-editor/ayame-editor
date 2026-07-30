@@ -65,10 +65,10 @@ export async function boot() {
   initMenus();
   setSaveSettingsWriter(saveSettings);
   setStatusPositionRenderer(updateStatusPos);
-  state.history = loadSearchHistory();
+  state.search.history = loadSearchHistory();
   initSettings();
   await hydrateSharedUiState();
-  state.history = loadSearchHistory();
+  state.search.history = loadSearchHistory();
   initAnalysis();
   initCommandPalette();
   initScrollbar();
@@ -89,11 +89,11 @@ export async function boot() {
     return;
   }
   updateStatusMeta();
-  if (state.stat?.open) handleAnalysisDocumentOpened(state.stat.path);
+  if (state.doc.stat?.open) handleAnalysisDocumentOpened(state.doc.stat.path);
   // Native launch with a FILE argument: the window appears immediately and the
   // (possibly long) first-index happens behind this progress overlay.
   const pending = typeof window.__ayamePendingOpen === "string" ? window.__ayamePendingOpen : "";
-  if (!state.stat.open && pending) {
+  if (!state.doc.stat.open && pending) {
     showLoading(t("dialog.open.openingName", { name: displayName(pending) }));
     postNativeMessage("ayame:ready");
     try {
@@ -110,7 +110,7 @@ export async function boot() {
     }
     return;
   }
-  if (!state.stat.open && state.settings.restoreSession !== false) {
+  if (!state.doc.stat.open && state.settings.restoreSession !== false) {
     showLoading(t("dialog.open.loading"));
     postNativeMessage("ayame:ready");
     try {
@@ -127,7 +127,7 @@ export async function boot() {
     }
     return;
   }
-  if (!state.stat.open) {
+  if (!state.doc.stat.open) {
     await newUntitled(); // open to a blank untitled page, not the file dialog
   } else {
     focusEditor();
@@ -135,7 +135,7 @@ export async function boot() {
     refreshTabs();
     // A document passed on the command line goes through refreshStat, not
     // onDocumentOpened — offer its crash recovery here.
-    maybeOfferWalRecovery(state.stat);
+    maybeOfferWalRecovery(state.doc.stat);
   }
   postNativeMessage("ayame:ready");
 }

@@ -3,15 +3,23 @@ import { $, commas, escapeRegExp } from "./dom.js";
 import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { api, type FindResponse, type SearchResponse } from "./api.js";
-import { lineByte, revealLine, rowsVisible, scheduleRender, setCaret } from "./editor.js";
+import {
+  lineByte,
+  revealLine,
+  rowsVisible,
+  scheduleRender,
+  setCaret,
+  setSearchHits,
+  setSelection,
+} from "./editor.js";
 import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
 import { flashCount } from "./notifications.js";
 
 export function showFind(withReplace = false) {
-  state.findOpen = true;
+  state.search.findOpen = true;
   document.documentElement.classList.add("find-open");
   if (withReplace) setReplaceRow(true);
-  const f = withReplace && state.query ? $("replace-input") : $("find");
+  const f = withReplace && state.search.query ? $("replace-input") : $("find");
   queueMicrotask(() => {
     f.focus();
     f.select();
@@ -19,13 +27,13 @@ export function showFind(withReplace = false) {
 }
 
 export function hideFind() {
-  state.findOpen = false;
+  state.search.findOpen = false;
   document.documentElement.classList.remove("find-open");
   setReplaceRow(false);
 }
 
 export function setReplaceRow(open) {
-  state.replaceOpen = open;
+  state.search.replaceOpen = open;
   document.documentElement.classList.toggle("replace-open", open);
   $("find-expand").setAttribute("aria-expanded", open ? "true" : "false");
   const row = $("replace-row");
@@ -34,15 +42,15 @@ export function setReplaceRow(open) {
 }
 
 export function buildMatcher() {
-  state.regexError = false;
-  state.matcherWordFallback = false;
+  state.search.regexError = false;
+  state.search.matcherWordFallback = false;
   $("find").parentElement.classList.remove("error");
-  if (!state.query) {
-    state.matcher = null;
+  if (!state.search.query) {
+    state.search.matcher = null;
     return;
   }
-  const src = state.regex ? state.query : escapeRegExp(state.query);
-  const flags = "g" + (state.ci ? "i" : "");
+  const src = state.search.regex ? state.search.query : escapeRegExp(state.search.query);
+  const flags = "g" + (state.search.caseInsensitive ? "i" : "");
   let plain;
   try {
     // Validate the user's pattern on its own before embedding it in the word
@@ -50,57 +58,60 @@ export function buildMatcher() {
     // and accidentally turn an invalid query into a valid expression.
     plain = new RegExp(src, flags);
   } catch {
-    state.regexError = true;
-    state.matcher = null; // invalid regex while typing — just don't highlight
+    state.search.regexError = true;
+    state.search.matcher = null; // invalid regex while typing — just don't highlight
     $("find").parentElement.classList.add("error");
     return;
   }
-  if (!state.word) {
-    state.matcher = plain;
+  if (!state.search.word) {
+    state.search.matcher = plain;
     return;
   }
   try {
     // Mirror the server's whole-word rule so the highlight matches the count.
-    state.matcher = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`, flags + "u");
+    state.search.matcher = new RegExp(
+      `(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`,
+      flags + "u",
+    );
   } catch {
     // The Unicode wrapper can reject patterns the plain form accepts.
-    state.matcher = plain; // fall back: highlight the superset
-    state.matcherWordFallback = true;
+    state.search.matcher = plain; // fall back: highlight the superset
+    state.search.matcherWordFallback = true;
   }
 }
 
 export function setQueryFromInput() {
-  state.query = $("find").value;
-  state.lastMatch = null;
-  state.searchHits = null;
-  state.searchTruncated = false;
+  state.search.query = $("find").value;
+  state.search.lastMatch = null;
+  setSearchHits(null);
+  state.search.truncated = false;
   buildMatcher();
-  $("find-count").textContent = state.regexError ? t("find.regexError") : "";
+  $("find-count").textContent = state.search.regexError ? t("find.regexError") : "";
   scheduleCount(); // keep the "N / total" label in sync with the live highlights
   scheduleRender();
 }
 
 export function qs() {
-  return `q=${encodeURIComponent(state.query)}&regex=${state.regex}&ci=${state.ci}&word=${state.word}`;
+  return `q=${encodeURIComponent(state.search.query)}&regex=${state.search.regex}&ci=${state.search.caseInsensitive}&word=${state.search.word}`;
 }
 
 export async function findStep(dir) {
-  if (!state.query) return;
+  if (!state.search.query) return;
   buildMatcher();
-  if (state.regexError) {
+  if (state.search.regexError) {
     flashCount(t("find.regexError"), "error");
     return;
   }
-  saveSearchHistory(state.query);
+  saveSearchHistory(state.search.query);
   let from;
   if (dir === "next") {
-    from = state.lastMatch
-      ? state.lastMatch.byte + Math.max(1, state.lastMatch.len)
-      : await lineByte(state.first);
+    from = state.search.lastMatch
+      ? state.search.lastMatch.byte + Math.max(1, state.search.lastMatch.len)
+      : await lineByte(state.view.first);
   } else {
-    from = state.lastMatch
-      ? state.lastMatch.byte
-      : await lineByte(Math.min(state.total, state.first + rowsVisible()));
+    from = state.search.lastMatch
+      ? state.search.lastMatch.byte
+      : await lineByte(Math.min(state.view.total, state.view.first + rowsVisible()));
   }
   try {
     let res = await api<FindResponse>(`/api/find?dir=${dir}&from=${from}&${qs()}`);
@@ -108,7 +119,7 @@ export async function findStep(dir) {
     if (!res.hit) {
       // Wrap around: search again from the opposite end so "next" past the last
       // match rolls to the first, and "prev" past the first rolls to the last.
-      const wrapFrom = dir === "next" ? 0 : await lineByte(state.total);
+      const wrapFrom = dir === "next" ? 0 : await lineByte(state.view.total);
       res = await api<FindResponse>(`/api/find?dir=${dir}&from=${wrapFrom}&${qs()}`);
       wrapped = true;
     }
@@ -117,8 +128,8 @@ export async function findStep(dir) {
       return;
     }
     const h = res.hit;
-    state.lastMatch = { byte: h.byte, len: h.byte_len };
-    state.sel = null;
+    state.search.lastMatch = { byte: h.byte, len: h.byte_len };
+    setSelection(null);
     setCaret(h.line, 0);
     revealLine(h.line);
     if (wrapped) flashCount(dir === "next" ? t("find.wrapTop") : t("find.wrapBottom"));
@@ -151,7 +162,7 @@ function abortPendingCount() {
 export function scheduleCount() {
   clearTimeout(countDebounceTimer);
   countDebounceTimer = 0;
-  if (!state.query || state.regexError) {
+  if (!state.search.query || state.search.regexError) {
     abortPendingCount();
     return;
   }
@@ -166,10 +177,10 @@ export async function updateCount() {
   countDebounceTimer = 0;
   abortPendingCount();
   const token = countRequestToken;
-  if (!state.query) {
+  if (!state.search.query) {
     $("find-count").textContent = "";
-    state.searchHits = null;
-    state.searchTruncated = false;
+    setSearchHits(null);
+    state.search.truncated = false;
     return;
   }
   const controller = new AbortController();
@@ -179,8 +190,8 @@ export async function updateCount() {
       signal: controller.signal,
     });
     if (token !== countRequestToken || controller.signal.aborted) return;
-    state.searchHits = res.hits;
-    state.searchTruncated = res.truncated;
+    setSearchHits(res.hits);
+    state.search.truncated = res.truncated;
     updateFindCountLabel();
     scheduleRender();
   } catch {
@@ -194,14 +205,14 @@ export async function updateCount() {
 }
 
 export function updateFindCountLabel() {
-  const hits = state.searchHits;
-  if (!hits || !state.query) {
+  const hits = state.search.hits;
+  if (!hits || !state.search.query) {
     $("find-count").textContent = "";
     return;
   }
-  const total = state.searchTruncated ? `${commas(hits.length)}+` : commas(hits.length);
-  if (state.lastMatch) {
-    const idx = hits.findIndex((h) => h.byte === state.lastMatch.byte);
+  const total = state.search.truncated ? `${commas(hits.length)}+` : commas(hits.length);
+  if (state.search.lastMatch) {
+    const idx = hits.findIndex((h) => h.byte === state.search.lastMatch.byte);
     if (idx >= 0) {
       $("find-count").textContent = `${commas(idx + 1)} / ${total}`;
       return;
@@ -217,22 +228,22 @@ export function loadSearchHistory() {
 export function saveSearchHistory(q) {
   const value = q.trim();
   if (!value) return;
-  state.history = [value, ...state.history.filter((x) => x !== value)].slice(0, 50);
-  state.historyIndex = -1;
-  saveSearchHistoryShared(state.history);
+  state.search.history = [value, ...state.search.history.filter((x) => x !== value)].slice(0, 50);
+  state.search.historyIndex = -1;
+  saveSearchHistoryShared(state.search.history);
 }
 
 export function showSearchHistory(delta) {
-  if (!state.history.length) return false;
-  if (state.historyIndex < 0) {
-    state.historyIndex = delta < 0 ? 0 : state.history.length - 1;
+  if (!state.search.history.length) return false;
+  if (state.search.historyIndex < 0) {
+    state.search.historyIndex = delta < 0 ? 0 : state.search.history.length - 1;
   } else {
-    state.historyIndex = Math.min(
-      state.history.length - 1,
-      Math.max(0, state.historyIndex + delta),
+    state.search.historyIndex = Math.min(
+      state.search.history.length - 1,
+      Math.max(0, state.search.historyIndex + delta),
     );
   }
-  $("find").value = state.history[state.historyIndex];
+  $("find").value = state.search.history[state.search.historyIndex];
   setQueryFromInput();
   return true;
 }

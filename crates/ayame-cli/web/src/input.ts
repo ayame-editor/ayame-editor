@@ -23,6 +23,7 @@ import {
   scheduleRender,
   setFirst,
   setModalOpenProvider,
+  setSelection,
 } from "./editor.js";
 import { addCursorAbove, addCursorBelow, clearExtraCursors, caretToDocEnd } from "./selection.js";
 import {
@@ -109,7 +110,7 @@ const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
   [convertVisible, hideConvert],
   [openerVisible, hideOpener],
   [
-    () => state.findOpen,
+    () => state.search.findOpen,
     () => {
       hideFind();
       focusEditor();
@@ -145,10 +146,10 @@ export function initEvents() {
       let dy = e.deltaY;
       if (e.deltaMode === 1) dy *= LINE_HEIGHT;
       else if (e.deltaMode === 2) dy *= vp.clientHeight;
-      state.fracAcc += dy / LINE_HEIGHT;
-      const whole = Math.trunc(state.fracAcc);
-      state.fracAcc -= whole;
-      if (whole !== 0) setFirst(state.first + whole);
+      state.view.fracAcc += dy / LINE_HEIGHT;
+      const whole = Math.trunc(state.view.fracAcc);
+      state.view.fracAcc -= whole;
+      if (whole !== 0) setFirst(state.view.first + whole);
     },
     { passive: false },
   );
@@ -174,7 +175,7 @@ export function initEvents() {
     hideFind();
     focusEditor();
   });
-  $("find-expand").addEventListener("click", () => setReplaceRow(!state.replaceOpen));
+  $("find-expand").addEventListener("click", () => setReplaceRow(!state.search.replaceOpen));
   $("replace-one").addEventListener("click", () => replaceCurrent());
   $("replace-all").addEventListener("click", () => replaceAll());
   $("replace-input").addEventListener("keydown", (e) => {
@@ -238,7 +239,7 @@ export function initEvents() {
       })),
     );
   });
-  $("st-tail").addEventListener("click", () => setFollowTail(!state.followTail));
+  $("st-tail").addEventListener("click", () => setFollowTail(!state.doc.followTail));
   $("apply-theme").addEventListener("click", applyThemeFromBuffer);
   $("apply-keymap").addEventListener("click", applyKeymapFromBuffer);
   $("undo-edit").addEventListener("click", undoEdit);
@@ -301,7 +302,7 @@ export function wordLeft(line, col) {
 export function wordRight(line, col) {
   const cs = lineChars(line);
   const len = cs.length;
-  if (col >= len) return line < state.total - 1 ? [line + 1, 0] : [line, len];
+  if (col >= len) return line < state.view.total - 1 ? [line + 1, 0] : [line, len];
   let i = col;
   while (i < len && !isWordChar(cs[i])) i++;
   while (i < len && isWordChar(cs[i])) i++;
@@ -313,7 +314,7 @@ export function deleteWordBack() {
     const del = deleteSelectionEdit();
     if (del) return del;
     clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
-    const c = state.caret;
+    const c = state.caret.position;
     const [l, col] = wordLeft(c.line, c.col);
     if (l === c.line && col === c.col) return null;
     return applyRange(l, col, c.line, c.col, "");
@@ -325,7 +326,7 @@ export function deleteWordFwd() {
     const del = deleteSelectionEdit();
     if (del) return del;
     clearExtraCursors(); // word-delete is single-cursor: collapse to the primary
-    const c = state.caret;
+    const c = state.caret.position;
     const [l, col] = wordRight(c.line, c.col);
     if (l === c.line && col === c.col) return null;
     return applyRange(c.line, c.col, l, col, "");
@@ -336,7 +337,7 @@ export function deleteWordFwd() {
 let compositionEndedAt = -1;
 
 export function onEditKey(e) {
-  if (state.composing || e.isComposing) return; // IME owns the keyboard
+  if (state.caret.composing || e.isComposing) return; // IME owns the keyboard
   // WebKit / WKWebView (Safari, the macOS native build) dispatch the keydown
   // for the Enter that COMMITTED an IME composition *after* compositionend,
   // with isComposing already false — so it slips past the guard above and
@@ -357,7 +358,7 @@ export function onEditKey(e) {
   }
   const mod = e.ctrlKey || e.metaKey;
   const shift = e.shiftKey;
-  const c = state.caret;
+  const c = state.caret.position;
   const take = () => {
     e.preventDefault();
     e.stopPropagation();
@@ -428,7 +429,7 @@ export function onEditKey(e) {
         moveCaret(l, col, shift);
       } else if (c.col > 0) moveCaret(c.line, c.col - 1, shift);
       else if (c.line > 0) moveCaret(c.line - 1, lineLen(c.line - 1), shift);
-      state.goalCol = state.caret.col;
+      state.caret.goalCol = state.caret.position.col;
       return;
     case "ArrowRight":
       take();
@@ -436,23 +437,23 @@ export function onEditKey(e) {
         const [l, col] = wordRight(c.line, c.col);
         moveCaret(l, col, shift);
       } else if (c.col < lineLen(c.line)) moveCaret(c.line, c.col + 1, shift);
-      else if (c.line < state.total - 1) moveCaret(c.line + 1, 0, shift);
-      state.goalCol = state.caret.col;
+      else if (c.line < state.view.total - 1) moveCaret(c.line + 1, 0, shift);
+      state.caret.goalCol = state.caret.position.col;
       return;
     case "ArrowUp":
       take();
-      if (mod) setFirst(state.first - 1);
-      else if (c.line > 0) moveCaret(c.line - 1, state.goalCol, shift);
+      if (mod) setFirst(state.view.first - 1);
+      else if (c.line > 0) moveCaret(c.line - 1, state.caret.goalCol, shift);
       return;
     case "ArrowDown":
       take();
-      if (mod) setFirst(state.first + 1);
-      else if (c.line < state.total - 1) moveCaret(c.line + 1, state.goalCol, shift);
+      if (mod) setFirst(state.view.first + 1);
+      else if (c.line < state.view.total - 1) moveCaret(c.line + 1, state.caret.goalCol, shift);
       return;
     case "Home":
       take();
       moveCaret(mod ? 0 : c.line, 0, shift);
-      state.goalCol = state.caret.col;
+      state.caret.goalCol = state.caret.position.col;
       return;
     case "End":
       take();
@@ -460,16 +461,16 @@ export function onEditKey(e) {
         caretToDocEnd(shift); // async: resolves the uncached last line's length
       } else {
         moveCaret(c.line, lineLen(c.line), shift);
-        state.goalCol = state.caret.col;
+        state.caret.goalCol = state.caret.position.col;
       }
       return;
     case "PageUp":
       take();
-      moveCaret(c.line - rowsVisible(), state.goalCol, shift);
+      moveCaret(c.line - rowsVisible(), state.caret.goalCol, shift);
       return;
     case "PageDown":
       take();
-      moveCaret(c.line + rowsVisible(), state.goalCol, shift);
+      moveCaret(c.line + rowsVisible(), state.caret.goalCol, shift);
       return;
     case "Backspace":
       take();
@@ -493,17 +494,17 @@ export function onEditKey(e) {
     case "Escape":
       // Collapsing multi-cursor wins over every other Escape meaning here
       // (modals never reach this handler — see the guards above).
-      if (state.extraCursors.length) {
+      if (state.caret.extraCursors.length) {
         take();
         clearExtraCursors();
         return;
       }
-      if (state.sel) {
+      if (state.caret.selection) {
         take();
-        state.sel = null;
+        setSelection(null);
         scheduleRender();
       }
-      if (state.findOpen) {
+      if (state.search.findOpen) {
         take();
         hideFind();
         focusEditor();
@@ -515,7 +516,7 @@ export function onEditKey(e) {
 }
 
 export function onBeforeInput(e) {
-  if (state.composing) return; // composition text is committed on compositionend
+  if (state.caret.composing) return; // composition text is committed on compositionend
   if (anyModalOpen()) {
     e.preventDefault();
     return;
@@ -563,7 +564,7 @@ export function onPaste(e) {
 }
 
 export function onCompStart() {
-  state.composing = true;
+  state.caret.composing = true;
   $("hidden-input").classList.add("composing");
   positionCaret();
 }
@@ -573,7 +574,7 @@ export function onCompUpdate() {
 }
 
 export function onCompEnd(e) {
-  state.composing = false;
+  state.caret.composing = false;
   compositionEndedAt = e.timeStamp; // arm the WebKit stray-Enter guard (#71)
   const hi = $("hidden-input");
   hi.classList.remove("composing");
@@ -595,18 +596,18 @@ export function initEditor() {
   hi.addEventListener("keydown", onEditKey);
   hi.addEventListener("beforeinput", onBeforeInput);
   hi.addEventListener("input", () => {
-    if (!state.composing) hi.value = "";
+    if (!state.caret.composing) hi.value = "";
   });
   hi.addEventListener("paste", onPaste);
   hi.addEventListener("compositionstart", onCompStart);
   hi.addEventListener("compositionupdate", onCompUpdate);
   hi.addEventListener("compositionend", onCompEnd);
   hi.addEventListener("focus", () => {
-    state.focused = true;
+    state.caret.focused = true;
     scheduleRender();
   });
   hi.addEventListener("blur", () => {
-    state.focused = false;
+    state.caret.focused = false;
     scheduleRender();
   });
   // Keep the caret glued to its cell during horizontal scroll.

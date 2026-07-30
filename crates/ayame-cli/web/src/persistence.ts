@@ -82,9 +82,9 @@ export async function hydrateSharedUiState() {
       analysis_profiles: remote.analysis_profiles.length ? remote.analysis_profiles : localProfiles,
     });
     sharedUiState = merged;
-    state.history = merged.search_history;
-    state.analysisProfiles = merged.analysis_profiles;
-    state.activeAnalysisProfile = merged.active_analysis_profile;
+    state.search.history = merged.search_history;
+    state.analysis.profiles = merged.analysis_profiles;
+    state.analysis.activeProfile = merged.active_analysis_profile;
     if (
       merged.recent_files.length !== remote.recent_files.length ||
       merged.search_history.length !== remote.search_history.length ||
@@ -163,7 +163,7 @@ export function loadAnalysisProfilesShared(): {
     const profiles = normalizeAnalysisProfiles(
       JSON.parse(localStorage.getItem(ANALYSIS_PROFILES_KEY) || "[]"),
     );
-    return { profiles, active: state.activeAnalysisProfile };
+    return { profiles, active: state.analysis.activeProfile };
   } catch {
     return { profiles: [], active: null };
   }
@@ -172,8 +172,8 @@ export function loadAnalysisProfilesShared(): {
 export function saveAnalysisProfilesShared(profiles, active) {
   const clean = normalizeAnalysisProfiles(profiles);
   const activeId = clean.some((profile) => profile.id === active) ? active : null;
-  state.analysisProfiles = clean;
-  state.activeAnalysisProfile = activeId;
+  state.analysis.profiles = clean;
+  state.analysis.activeProfile = activeId;
   try {
     localStorage.setItem(ANALYSIS_PROFILES_KEY, JSON.stringify(clean));
   } catch {

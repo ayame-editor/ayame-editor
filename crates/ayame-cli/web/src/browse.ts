@@ -4,6 +4,7 @@ import { BROWSE_KEY, state } from "./state.js";
 import { currentLocale, serverMessage, t } from "./i18n.js";
 import { api } from "./api.js";
 import type { BrowseResponse } from "./types/api.js";
+import { currentOpenerMode } from "./opener-state.js";
 
 let commitPickedFile = () => {};
 let openPickedPath = (_path) => {};
@@ -132,15 +133,15 @@ export async function browse(dir) {
 }
 
 export function renderBrowse(response) {
-  state.openerDir = response.dir;
-  state.openerEntries = response.entries || [];
+  state.opener.dir = response.dir;
+  state.opener.entries = response.entries || [];
   try {
     localStorage.setItem(BROWSE_KEY, response.dir);
   } catch {
     // Browser storage is only a convenience.
   }
   renderCwdCrumbs(response.dir);
-  if (state.openerMode === "folder") $("opener-input").value = response.dir;
+  if (currentOpenerMode() === "folder") $("opener-input").value = response.dir;
   const list = $("opener-list");
   list.textContent = "";
   if (response.parent) {
@@ -209,16 +210,16 @@ export function browseRow(entry, isUp) {
   row.append(icon, name, size);
   row.addEventListener("click", () => {
     if (entry.is_dir) browse(entry.path);
-    else if (state.openerMode === "save") {
+    else if (currentOpenerMode() === "save") {
       $("opener-input").value = entry.name;
       markPickedFile(entry.name);
       $("opener-input").focus();
-    } else if (state.openerMode === "open") {
+    } else if (currentOpenerMode() === "open") {
       openPickedPath(entry.path);
     }
   });
   row.addEventListener("dblclick", () => {
-    if (!entry.is_dir && state.openerMode === "save") commitPickedFile();
+    if (!entry.is_dir && currentOpenerMode() === "save") commitPickedFile();
   });
   return row;
 }

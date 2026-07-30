@@ -13,8 +13,11 @@ export const REPLACE_ALL_MAX = 20000;
 
 // The replacement string sent to the document for one concrete match.
 export function replacementFor(matchText, replacement) {
-  if (!state.regex) return replacement;
-  const single = new RegExp(state.matcher.source, state.matcher.flags.replace("g", ""));
+  if (!state.search.regex) return replacement;
+  const single = new RegExp(
+    state.search.matcher.source,
+    state.search.matcher.flags.replace("g", ""),
+  );
   return matchText.replace(single, replacement);
 }
 
@@ -24,17 +27,17 @@ export function literalReplacement(replacement) {
 }
 
 export function replaceReady() {
-  if (!state.stat?.open) return false;
-  if (!state.query) {
+  if (!state.doc.stat?.open) return false;
+  if (!state.search.query) {
     flashCount(t("find.enterQuery"), "error");
     return false;
   }
   buildMatcher();
-  if (state.regexError || !state.matcher) {
+  if (state.search.regexError || !state.search.matcher) {
     flashCount(t("find.regexError"), "error");
     return false;
   }
-  if (state.matcherWordFallback) {
+  if (state.search.matcherWordFallback) {
     flashCount(t("find.regexError"), "error");
     return false;
   }
@@ -45,21 +48,23 @@ export function replaceReady() {
 export async function replaceCurrent() {
   if (!replaceReady()) return;
   const replacement = $("replace-input").value;
-  if (!state.lastMatch) {
+  if (!state.search.lastMatch) {
     await findStep("next");
     return;
   }
   try {
-    const res = await api<FindResponse>(`/api/find?dir=next&from=${state.lastMatch.byte}&${qs()}`);
+    const res = await api<FindResponse>(
+      `/api/find?dir=next&from=${state.search.lastMatch.byte}&${qs()}`,
+    );
     const h = res.hit;
-    if (!h || h.byte !== state.lastMatch.byte) {
+    if (!h || h.byte !== state.search.lastMatch.byte) {
       await findStep("next");
       return;
     }
     const lr = await api<LinesResponse>(`/api/lines?start=${h.line}&count=1`);
     const text = lr.lines?.[0]?.text ?? "";
     const u16 = utf16IndexOfCol(text, h.column);
-    const re = new RegExp(state.matcher.source, state.matcher.flags);
+    const re = new RegExp(state.search.matcher.source, state.search.matcher.flags);
     re.lastIndex = u16;
     const m = re.exec(text);
     if (!m || m.index !== u16) {
@@ -71,7 +76,7 @@ export async function replaceCurrent() {
     const c1 = h.column + charLenOf(m[0]);
     await enqueueEdit(() => applyRange(h.line, c0, h.line, c1, rep));
     // Resume just past inserted text so replacement containing the query cannot loop.
-    state.lastMatch = { byte: h.byte, len: Math.max(1, utf8ByteLength(rep)) };
+    state.search.lastMatch = { byte: h.byte, len: Math.max(1, utf8ByteLength(rep)) };
     await updateCount();
     await findStep("next");
   } catch (e) {
@@ -133,10 +138,10 @@ export async function replaceAll() {
     for (const line of lines) {
       const text = texts.get(line);
       if (text == null) continue;
-      const re = new RegExp(state.matcher.source, state.matcher.flags);
+      const re = new RegExp(state.search.matcher.source, state.search.matcher.flags);
       const count = [...text.matchAll(re)].length;
       if (!count) continue;
-      const next = text.replace(re, state.regex ? replacement : literal);
+      const next = text.replace(re, state.search.regex ? replacement : literal);
       if (next === text) continue;
       replaced += count;
       edits.push({ l0: line, c0: 0, l1: line, c1: charLenOf(text), text: next });
@@ -144,7 +149,7 @@ export async function replaceAll() {
       if (edits.length >= 2000 || pendingBytes > 512 * 1024) await flush();
     }
     await flush();
-    state.lastMatch = null;
+    state.search.lastMatch = null;
     await updateCount();
     flashCount(replaced ? t("find.replacedCount", { n: commas(replaced) }) : t("find.noMatch"));
   } catch (e) {

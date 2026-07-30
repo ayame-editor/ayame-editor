@@ -16,7 +16,15 @@ import {
   type SearchResponse,
 } from "./api.js";
 import { $, commas, modalVisible, setModalOpen } from "./dom.js";
-import { focusEditor, render, revealCaret, scheduleRender, setCaret } from "./editor.js";
+import {
+  focusEditor,
+  render,
+  revealCaret,
+  scheduleRender,
+  setActiveLine,
+  setCaret,
+  setSelection,
+} from "./editor.js";
 import { lineLensFor, reloadViewport, settleEditQueue } from "./edits.js";
 import { t } from "./i18n.js";
 import { showPopupMenu } from "./popup-menu.js";
@@ -37,14 +45,14 @@ function markerQuery(path, params) {
 }
 
 function updateCachedBookmark(line, marked) {
-  const next = new Set(state.bookmarks);
+  const next = new Set(state.markers.bookmarks);
   if (marked) next.add(line);
   else next.delete(line);
-  state.bookmarks = next;
+  state.markers.bookmarks = next;
 }
 
-export async function toggleBookmark(line = state.caret.line) {
-  if (!state.stat?.open || state.total === 0) return;
+export async function toggleBookmark(line = state.caret.position.line) {
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   try {
     await settleEditQueue();
     const res = await apiPost<MarkerMutationResponse, { kind: string; line: number }>(
@@ -52,7 +60,7 @@ export async function toggleBookmark(line = state.caret.line) {
       { kind: KIND, line },
     );
     updateCachedBookmark(line, res.marked);
-    state.bookmarkCount = res.count;
+    state.markers.bookmarkCount = res.count;
     scheduleRender();
     flashCount(
       t(res.marked ? "bookmark.added" : "bookmark.removed", {
@@ -66,18 +74,18 @@ export async function toggleBookmark(line = state.caret.line) {
 }
 
 async function goToBookmark(direction) {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   try {
     await settleEditQueue();
     const res = await api<MarkerNavigateResponse>(
       markerQuery("/api/markers/navigate", {
         kind: KIND,
-        from: state.caret.line,
+        from: state.caret.position.line,
         direction,
         wrap: true,
       }),
     );
-    state.bookmarkCount = res.count;
+    state.markers.bookmarkCount = res.count;
     if (res.line == null) {
       flashCount(t("bookmark.none"), "error");
       return;
@@ -103,8 +111,8 @@ export function previousBookmark() {
 }
 
 export async function clearBookmarks() {
-  if (!state.stat?.open) return;
-  let count = state.bookmarkCount;
+  if (!state.doc.stat?.open) return;
+  let count = state.markers.bookmarkCount;
   try {
     await settleEditQueue();
     if (!count) {
@@ -124,8 +132,8 @@ export async function clearBookmarks() {
     );
     if (!confirmed) return;
     await apiPost<MarkerMutationResponse, { kind: string }>("/api/markers/clear", { kind: KIND });
-    state.bookmarks = new Set();
-    state.bookmarkCount = 0;
+    state.markers.bookmarks = new Set();
+    state.markers.bookmarkCount = 0;
     scheduleRender();
     flashCount(t("bookmark.cleared", { count: commas(count) }));
   } catch (error) {
@@ -134,15 +142,15 @@ export async function clearBookmarks() {
 }
 
 export async function bookmarkSearchMatches() {
-  if (!state.stat?.open) return;
-  if (!state.query || state.regexError) {
-    flashCount(t(state.regexError ? "find.regexError" : "bookmark.noSearch"), "error");
+  if (!state.doc.stat?.open) return;
+  if (!state.search.query || state.search.regexError) {
+    flashCount(t(state.search.regexError ? "find.regexError" : "bookmark.noSearch"), "error");
     return;
   }
   showLoading(t("bookmark.markingMatches"));
   let start = 0;
   let added = 0;
-  let count = state.bookmarkCount;
+  let count = state.markers.bookmarkCount;
   let limited = false;
   let sawMatch = false;
   try {
@@ -174,7 +182,7 @@ export async function bookmarkSearchMatches() {
       start = next;
       limited = page + 1 === MAX_SEARCH_PAGES;
     }
-    state.bookmarkCount = count;
+    state.markers.bookmarkCount = count;
     await reloadViewport();
     render();
     if (!sawMatch) {
@@ -199,7 +207,8 @@ export async function bookmarkSearchMatches() {
 
 function wholeLineSelection(line, lastLength) {
   const start = { line, col: 0 };
-  const end = line + 1 < state.total ? { line: line + 1, col: 0 } : { line, col: lastLength ?? 0 };
+  const end =
+    line + 1 < state.view.total ? { line: line + 1, col: 0 } : { line, col: lastLength ?? 0 };
   // Put the caret at the line start while keeping the trailing newline in the
   // range. This makes the active line and each extra caret stay on the marked
   // line, including for adjacent bookmarks.
@@ -207,7 +216,7 @@ function wholeLineSelection(line, lastLength) {
 }
 
 export async function selectBookmarkedLines() {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   try {
     await settleEditQueue();
     const res = await api<MarkerListResponse>(
@@ -217,7 +226,7 @@ export async function selectBookmarkedLines() {
         limit: MAX_BOOKMARK_SELECTIONS + 1,
       }),
     );
-    state.bookmarkCount = res.total;
+    state.markers.bookmarkCount = res.total;
     if (!res.total) {
       flashCount(t("bookmark.none"), "error");
       return;
@@ -233,7 +242,7 @@ export async function selectBookmarkedLines() {
       return;
     }
 
-    const last = res.lines.includes(state.total - 1) ? state.total - 1 : null;
+    const last = res.lines.includes(state.view.total - 1) ? state.view.total - 1 : null;
     const lengths = last == null ? new Map() : await lineLensFor([last]);
     const selections = res.lines.map((line) => ({
       line,
@@ -242,24 +251,24 @@ export async function selectBookmarkedLines() {
     let primary = 0;
     let distance = Number.POSITIVE_INFINITY;
     selections.forEach((entry, index) => {
-      const next = Math.abs(entry.line - state.caret.line);
+      const next = Math.abs(entry.line - state.caret.position.line);
       if (next < distance) {
         primary = index;
         distance = next;
       }
     });
     const chosen = selections[primary];
-    state.caret = { line: chosen.line, col: 0 };
-    state.activeLine = chosen.line;
-    state.sel = chosen.sel;
-    state.extraCursors = selections
+    state.caret.position = { line: chosen.line, col: 0 };
+    setActiveLine(chosen.line);
+    setSelection(chosen.sel);
+    state.caret.extraCursors = selections
       .filter((_, index) => index !== primary)
       .map((entry) => ({
         line: entry.line,
         col: 0,
         sel: entry.sel,
       }));
-    state.editGen++;
+    state.caret.editGeneration++;
     revealCaret();
     scheduleRender();
     focusEditor();
@@ -319,7 +328,7 @@ async function loadBookmarkPreviews(start = 0, append = false) {
       limit: PREVIEW_PAGE,
     }),
   );
-  state.bookmarkCount = res.total;
+  state.markers.bookmarkCount = res.total;
   renderPreviewEntries(res.entries, append);
   $("bookmark-summary").textContent = t("bookmark.summary", { count: commas(res.total) });
   const more = $("bookmark-more") as HTMLButtonElement;
@@ -331,7 +340,7 @@ async function loadBookmarkPreviews(start = 0, append = false) {
 }
 
 export async function showBookmarkList() {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   await settleEditQueue();
   setModalOpen($("bookmark-modal"), true);
   $("bookmark-list").textContent = "";
@@ -355,7 +364,7 @@ function gutterLine(target) {
 }
 
 function showGutterMenu(event, line) {
-  const marked = state.bookmarks.has(line);
+  const marked = state.markers.bookmarks.has(line);
   showPopupMenu(event.clientX, event.clientY, [
     {
       label: t(marked ? "bookmark.remove" : "bookmark.add"),
@@ -370,7 +379,7 @@ function showGutterMenu(event, line) {
     { separator: true },
     {
       label: t("bookmark.clear"),
-      disabled: state.bookmarkCount === 0 && state.bookmarks.size === 0,
+      disabled: state.markers.bookmarkCount === 0 && state.markers.bookmarks.size === 0,
       action: () => void clearBookmarks(),
     },
   ]);

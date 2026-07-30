@@ -13,7 +13,15 @@ import { serverMessage, t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
 import { isNativeApp, nativeOpenDialog, nativeSaveDialog } from "./app.js";
 import { maybeOfferWalRecovery, noteWalError } from "./save.js";
-import { clearLineCache, focusEditor, render, setCaret } from "./editor.js";
+import {
+  clearLineCache,
+  focusEditor,
+  render,
+  setActiveLine,
+  setCaret,
+  setSearchHits,
+  setSelection,
+} from "./editor.js";
 import { updateStatusMeta } from "./status.js";
 import { setFollowTail, settleEditQueue } from "./edits.js";
 import { flashCount } from "./notifications.js";
@@ -30,6 +38,12 @@ import {
 import { pushRecentFile, renderRecentFiles } from "./recent.js";
 import { refreshTabs } from "./tabs.js";
 import type { OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
+import {
+  currentOpenerMode,
+  resolveOpener,
+  setOpenerMode,
+  setOpenerResolver,
+} from "./opener-state.js";
 
 export function onOpenerListKeydown(event) {
   handleOpenerListKeydown(event, hideOpener);
@@ -66,7 +80,7 @@ export async function openFileDialog() {
     showOpener();
     return;
   }
-  const current = state.stat?.path || "";
+  const current = state.doc.stat?.path || "";
   const directory = !isUntitled(current) ? pathDirName(current) || "" : "";
   const paths = await nativeOpenDialog(directory);
   for (const path of paths) await openPath(path);
@@ -81,7 +95,7 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
   }
   return new Promise((resolve) => {
     configureOpener("save", title);
-    state.openerResolve = resolve;
+    setOpenerResolver(resolve);
     const input = $("opener-input");
     const directory = pathDirName(suggestedPath) || localStorage.getItem(BROWSE_KEY) || ".";
     input.value = pathBaseName(suggestedPath) || "untitled.txt";
@@ -97,7 +111,7 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
 export function showFolderDialog(title, startDir): Promise<string | null> {
   return new Promise((resolve) => {
     configureOpener("folder", title);
-    state.openerResolve = resolve;
+    setOpenerResolver(resolve);
     setModalOpen($("opener"), true);
     void browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
     queueMicrotask(() => ($("opener-open") as HTMLButtonElement).focus());
@@ -105,16 +119,14 @@ export function showFolderDialog(title, startDir): Promise<string | null> {
 }
 
 export function finishFolderDialog(value) {
-  const resolve = state.openerResolve;
-  state.openerResolve = null;
-  state.openerMode = "open";
+  setOpenerMode("open");
   setModalOpen($("opener"), false);
   configureOpener("open");
-  if (resolve) resolve(value);
+  resolveOpener(value);
 }
 
 export function configureOpener(mode, title?) {
-  state.openerMode = mode;
+  setOpenerMode(mode);
   const save = mode === "save";
   const folder = mode === "folder";
   const modal = $("opener");
@@ -145,16 +157,16 @@ export function configureOpener(mode, title?) {
 
 export function hideOpener() {
   resetOpenerSelection();
-  if (state.openerMode === "save") {
+  if (currentOpenerMode() === "save") {
     finishSaveDialog(null);
     return;
   }
-  if (state.openerMode === "folder") {
+  if (currentOpenerMode() === "folder") {
     finishFolderDialog(null);
     return;
   }
   setModalOpen($("opener"), false);
-  if (!state.stat?.open) {
+  if (!state.doc.stat?.open) {
     void newUntitled();
     return;
   }
@@ -162,13 +174,11 @@ export function hideOpener() {
 }
 
 export function finishSaveDialog(value) {
-  const resolve = state.openerResolve;
-  state.openerResolve = null;
-  state.openerMode = "open";
+  setOpenerMode("open");
   setModalOpen($("opener"), false);
   configureOpener("open");
   focusEditor();
-  if (resolve) resolve(value);
+  resolveOpener(value);
 }
 
 export async function saveDialogTarget() {
@@ -177,13 +187,13 @@ export async function saveDialogTarget() {
     openerMsg(t("dialog.open.enterFileName"));
     return null;
   }
-  if (!isAbsolutePath(raw) && state.openerDir === DRIVES_DIR) {
+  if (!isAbsolutePath(raw) && state.opener.dir === DRIVES_DIR) {
     openerMsg(t("dialog.open.pickFolderFirst"));
     return null;
   }
-  const path = isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw);
+  const path = isAbsolutePath(raw) ? raw : joinPath(state.opener.dir, raw);
   const base = pathBaseName(path);
-  const existing = state.openerEntries.find((entry) => !entry.is_dir && entry.name === base);
+  const existing = state.opener.entries.find((entry) => !entry.is_dir && entry.name === base);
   const overwrite = !!existing;
   if (overwrite) {
     const ok = await askConfirm(
@@ -197,9 +207,9 @@ export async function saveDialogTarget() {
 }
 
 export async function commitOpener() {
-  if (state.openerMode === "folder") {
+  if (currentOpenerMode() === "folder") {
     const raw = $("opener-input").value.trim();
-    const directory = raw && isAbsolutePath(raw) ? raw : state.openerDir;
+    const directory = raw && isAbsolutePath(raw) ? raw : state.opener.dir;
     if (!directory || directory === DRIVES_DIR) {
       openerMsg(t("dialog.open.pickFolderFirst"));
       return;
@@ -207,20 +217,20 @@ export async function commitOpener() {
     finishFolderDialog(directory);
     return;
   }
-  if (state.openerMode === "save") {
+  if (currentOpenerMode() === "save") {
     const target = await saveDialogTarget();
     if (target) finishSaveDialog(target);
     return;
   }
   const raw = $("opener-input").value.trim();
   if (!raw) return;
-  void openPath(isAbsolutePath(raw) ? raw : joinPath(state.openerDir, raw));
+  void openPath(isAbsolutePath(raw) ? raw : joinPath(state.opener.dir, raw));
 }
 
 export function pristineUntitledTabId() {
-  const active = (state.tabs || []).find((tab) => tab.active);
+  const active = (state.doc.tabs || []).find((tab) => tab.active);
   if (!active || active.dirty || !isUntitled(active.path)) return null;
-  if (state.stat?.dirty || state.stat?.can_undo) return null;
+  if (state.doc.stat?.dirty || state.doc.stat?.can_undo) return null;
   return active.id;
 }
 
@@ -286,7 +296,7 @@ export async function uploadFiles(files) {
 export function reportOpenError(message) {
   if (openerVisible()) {
     openerMsg(message);
-  } else if (state.stat?.open) {
+  } else if (state.doc.stat?.open) {
     flashCount(t("error.loadError"), "error");
     showMessage(t("error.loadError"), message);
   } else {
@@ -296,21 +306,21 @@ export function reportOpenError(message) {
 }
 
 export function onDocumentOpened(stat) {
-  state.docGen++;
-  state.editGen++;
+  state.doc.generation++;
+  state.caret.editGeneration++;
   setFollowTail(false);
-  state.stat = stat;
+  state.doc.stat = stat;
   pushRecentFile(stat.path);
-  state.total = stat.view_lines ?? stat.lines ?? 0;
-  state.first = 0;
-  state.caret = { line: 0, col: 0 };
-  state.goalCol = 0;
-  state.activeLine = 0;
-  state.sel = null;
-  state.extraCursors = [];
-  state.lastMatch = null;
-  state.searchHits = null;
-  state.searchTruncated = false;
+  state.view.total = stat.view_lines ?? stat.lines ?? 0;
+  state.view.first = 0;
+  state.caret.position = { line: 0, col: 0 };
+  state.caret.goalCol = 0;
+  setActiveLine(0);
+  setSelection(null);
+  state.caret.extraCursors = [];
+  state.search.lastMatch = null;
+  setSearchHits(null);
+  state.search.truncated = false;
   $("find-count").textContent = "";
   clearLineCache();
   setModalOpen($("opener"), false);

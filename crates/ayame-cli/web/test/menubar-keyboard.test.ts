@@ -70,8 +70,8 @@ describe("menubar keyboard navigation (#161)", () => {
         </nav>
       </div>
       ${shell("tools", item("sortSave", "Sort"))}`;
-    state.sel = null;
-    state.extraCursors = [];
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
     initMenuBar();
   });
 
@@ -79,7 +79,7 @@ describe("menubar keyboard navigation (#161)", () => {
     document.querySelector<HTMLButtonElement>(`#edit-menu [data-menu-action="${action}"]`)!;
 
   it("disables Cut/Copy in the edit menu when there is no selection (#186)", () => {
-    state.sel = null;
+    state.caret.selection = null;
     const edit = document.getElementById("edit-menu-button")!;
     edit.focus();
     key(edit, "ArrowDown"); // opens the edit menu → showAppMenu("edit")
@@ -88,7 +88,7 @@ describe("menubar keyboard navigation (#161)", () => {
   });
 
   it("enables Cut/Copy in the edit menu when text is selected (#186)", () => {
-    state.sel = { anchor: { line: 0, col: 0 }, head: { line: 0, col: 4 } } as never;
+    state.caret.selection = { anchor: { line: 0, col: 0 }, head: { line: 0, col: 4 } } as never;
     const edit = document.getElementById("edit-menu-button")!;
     edit.focus();
     key(edit, "ArrowDown");
