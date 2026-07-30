@@ -13,7 +13,7 @@ import {
   sortSave,
   splitFile,
 } from "./save.js";
-import { scheduleRender } from "./editor.js";
+import { scheduleRender, setSearchHits } from "./editor.js";
 import {
   addCursorAbove,
   addCursorBelow,
@@ -63,7 +63,7 @@ import { setPaletteActionRunner, showCommandPalette } from "./palette.js";
 import { applyLocale } from "./menu-ui.js";
 
 const closeActiveTab = () => {
-  const active = state.tabs.find((tab) => tab.active);
+  const active = state.doc.tabs.find((tab) => tab.active);
   if (active) closeTab(active.id);
 };
 
@@ -76,8 +76,17 @@ const promptGotoLine = () => {
 const showHelp = () => showMessage(t("help.title"), t("help.body"));
 const showAbout = () => showMessage(t("help.about"), t("help.aboutBody"));
 
-function optButtonLit(key): boolean {
-  return key === "ci" ? !state.ci : !!state[key];
+const SEARCH_OPTION_KEYS = {
+  ci: "caseInsensitive",
+  word: "word",
+  regex: "regex",
+} as const;
+
+type SearchOptionKey = keyof typeof SEARCH_OPTION_KEYS;
+
+function optButtonLit(key: SearchOptionKey): boolean {
+  const value = state.search[SEARCH_OPTION_KEYS[key]];
+  return key === "ci" ? !value : value;
 }
 
 export function refreshFindOptButtons() {
@@ -85,24 +94,25 @@ export function refreshFindOptButtons() {
     ["opt-case", "ci"],
     ["opt-word", "word"],
     ["opt-regex", "regex"],
-  ]) {
+  ] as const) {
     const pressed = optButtonLit(key);
     $(id).classList.toggle("on", pressed);
     $(id).setAttribute("aria-pressed", String(pressed));
   }
 }
 
-export function toggleOpt(key, id) {
-  state[key] = !state[key];
+export function toggleOpt(key: SearchOptionKey, id: string) {
+  const property = SEARCH_OPTION_KEYS[key];
+  state.search[property] = !state.search[property];
   const pressed = optButtonLit(key);
   $(id).classList.toggle("on", pressed);
   $(id).setAttribute("aria-pressed", String(pressed));
-  state.lastMatch = null;
-  state.searchHits = null;
-  state.searchTruncated = false;
+  state.search.lastMatch = null;
+  setSearchHits(null);
+  state.search.truncated = false;
   buildMatcher();
   scheduleRender();
-  if (state.query) updateCount();
+  if (state.search.query) updateCount();
 }
 
 export const ACTIONS: Record<
@@ -150,7 +160,7 @@ export const ACTIONS: Record<
     run: () => updateSetting("zenkakuUnderline", !state.settings.zenkakuUnderline),
   },
   toggleWordWrap: { run: () => updateSetting("wordWrap", !state.settings.wordWrap) },
-  toggleFollowTail: { run: () => setFollowTail(!state.followTail) },
+  toggleFollowTail: { run: () => setFollowTail(!state.doc.followTail) },
   nextTab: { run: () => selectRelativeTab(1), globalShortcut: true },
   prevTab: { run: () => selectRelativeTab(-1), globalShortcut: true },
   settings: { run: showSettings, globalShortcut: true },

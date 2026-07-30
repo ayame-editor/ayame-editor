@@ -60,7 +60,7 @@ export function showTabList() {
   showPopupMenu(
     rect.right,
     rect.bottom,
-    (state.tabs || []).map((tab) => {
+    (state.doc.tabs || []).map((tab) => {
       const folder = tab.path && !isUntitled(tab.path) ? pathDirName(displayPath(tab.path)) : "";
       return {
         label: folder ? `${tab.name} — ${folder}` : tab.name,
@@ -74,9 +74,9 @@ export function showTabList() {
 }
 
 export async function reorderTab(id, beforeId) {
-  const reordered = tabOrderAfterMove(state.tabs || [], id, beforeId);
+  const reordered = tabOrderAfterMove(state.doc.tabs || [], id, beforeId);
   if (!reordered) return false;
-  if (reordered.every((tab, index) => tab.id === state.tabs[index]?.id)) return true;
+  if (reordered.every((tab, index) => tab.id === state.doc.tabs[index]?.id)) return true;
   try {
     const response = await apiPost<TabsResponse, TabReorderRequest>("/api/tabs/reorder", {
       id,
@@ -100,7 +100,7 @@ function beforeIdAtPointer(event: DragEvent, draggedId: number) {
   if (!target) return null;
   const box = target.getBoundingClientRect();
   return tabDropBeforeId(
-    state.tabs || [],
+    state.doc.tabs || [],
     draggedId,
     Number(target.dataset.id),
     event.clientX >= box.left + box.width / 2,
@@ -139,7 +139,7 @@ export async function closeTabsSequentially(ids, close = closeTab) {
 }
 
 export function renderTabs(list) {
-  state.tabs = list;
+  state.doc.tabs = list;
   const container = $("tabs");
   const listButton = document.getElementById("tab-list") as HTMLButtonElement | null;
   if (listButton) listButton.disabled = list.length === 0;
@@ -205,9 +205,9 @@ export function renderTabs(list) {
         { separator: true },
         {
           label: t("tab.closeOthers"),
-          disabled: state.tabs.length < 2,
+          disabled: state.doc.tabs.length < 2,
           action: async () => {
-            const others = state.tabs
+            const others = state.doc.tabs
               .filter((entry) => entry.id !== tab.id)
               .map((entry) => entry.id);
             await closeTabsSequentially(others);
@@ -228,7 +228,7 @@ export function renderTabs(list) {
 
 export function tabDragPayload(tab) {
   return {
-    sourceWindowId: state.windowId,
+    sourceWindowId: state.runtime.windowId,
     id: tab.id,
     path: tab.path,
     name: tab.name,
@@ -314,7 +314,7 @@ export function initTabDropTarget() {
     const raw = event.dataTransfer?.getData(TAB_DRAG_TYPE);
     if (!raw) return;
     const payload = parseTabDragPayload(raw);
-    if (!payload || payload.sourceWindowId === state.windowId) return;
+    if (!payload || payload.sourceWindowId === state.runtime.windowId) return;
     if (payload.dirty && !acceptsDirty(payload)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -335,7 +335,7 @@ export function initTabDropTarget() {
       return;
     }
     const payload = parseTabDragPayload(event.dataTransfer?.getData(TAB_DRAG_TYPE));
-    if (!payload || payload.sourceWindowId === state.windowId) return;
+    if (!payload || payload.sourceWindowId === state.runtime.windowId) return;
     event.preventDefault();
     if (payload.dirty) {
       if (!acceptsDirty(payload)) {
@@ -396,7 +396,7 @@ export async function selectTab(id) {
 }
 
 export function selectRelativeTab(delta) {
-  const tabs = state.tabs || [];
+  const tabs = state.doc.tabs || [];
   if (tabs.length < 2) return;
   const active = tabs.findIndex((tab) => tab.active);
   const from = active < 0 ? 0 : active;
@@ -410,8 +410,8 @@ export async function closeTab(id) {
     flashCount(t("editor.savingWait"));
     return;
   }
-  const tab = state.tabs.find((entry) => entry.id === id);
-  const isLast = (state.tabs || []).length <= 1;
+  const tab = state.doc.tabs.find((entry) => entry.id === id);
+  const isLast = (state.doc.tabs || []).length <= 1;
   if (isLast) {
     if (!(await confirmCloseLastTab(tab))) return;
     if (requestEditorClose()) return;

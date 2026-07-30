@@ -13,6 +13,9 @@ vi.mock("../src/editor.js", () => ({
   rowsVisible: vi.fn(() => 8),
   setCaret: vi.fn(),
   setFirst: vi.fn(),
+  setSelection: vi.fn((selection) => {
+    state.caret.selection = selection;
+  }),
 }));
 vi.mock("../src/save.js", () => ({
   refreshStat: vi.fn(async () => {}),
@@ -49,7 +52,7 @@ describe("line-number precision at extreme scale (#53)", () => {
   describe("goto line", () => {
     beforeEach(() => {
       vi.mocked(setCaret).mockClear();
-      state.total = TEN_BILLION;
+      state.view.total = TEN_BILLION;
     });
 
     it("jumps to an exact 1-based line near ten billion", () => {

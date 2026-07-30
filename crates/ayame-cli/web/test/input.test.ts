@@ -135,11 +135,11 @@ describe("bookmark modal keyboard ownership (#241)", () => {
 
 describe("editor Escape handling", () => {
   beforeEach(() => {
-    state.composing = false;
-    state.findOpen = true;
-    state.sel = null;
-    state.extraCursors = [];
-    state.stat = { open: true };
+    state.caret.composing = false;
+    state.search.findOpen = true;
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
+    state.doc.stat = { open: true };
     vi.clearAllMocks();
   });
 
@@ -167,12 +167,12 @@ describe("editor Escape handling", () => {
 describe("IME confirm-Enter (WebKit) handling", () => {
   beforeEach(() => {
     document.body.innerHTML = '<textarea id="hidden-input"></textarea>';
-    state.composing = false;
-    state.findOpen = false;
-    state.sel = null;
-    state.extraCursors = [];
-    state.stat = { open: true };
-    state.caret = { line: 0, col: 0 };
+    state.caret.composing = false;
+    state.search.findOpen = false;
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
+    state.doc.stat = { open: true };
+    state.caret.position = { line: 0, col: 0 };
     vi.clearAllMocks();
   });
 

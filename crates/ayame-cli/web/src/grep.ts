@@ -33,7 +33,10 @@ export function hideGrep() {
 export async function grepFolder() {
   if (anyModalOpen()) return;
   const base =
-    lastGrep.dir || localStorage.getItem(BROWSE_KEY) || pathDirName(state.stat?.path || "") || "";
+    lastGrep.dir ||
+    localStorage.getItem(BROWSE_KEY) ||
+    pathDirName(state.doc.stat?.path || "") ||
+    "";
   const form = await askForm(
     t("menu.grep"),
     [

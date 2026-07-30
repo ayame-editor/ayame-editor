@@ -59,11 +59,11 @@ describe("viewport row calculations (#129)", () => {
   });
 
   it("clamps the final first row so the last line and EOF marker are fully visible", () => {
-    state.total = 10;
+    state.view.total = 10;
     setViewportHeight(3 * LINE_HEIGHT);
     expect(maxFirst()).toBe(8);
 
-    state.total = 2;
+    state.view.total = 2;
     expect(maxFirst()).toBe(0);
   });
 
@@ -72,17 +72,17 @@ describe("viewport row calculations (#129)", () => {
     const content = document.getElementById("content")!;
     Object.defineProperty(content, "clientWidth", { configurable: true, value: 200 });
     setViewportHeight(3 * LINE_HEIGHT);
-    state.total = 20;
-    state.first = 0;
-    state.caret = { line: 10, col: 0 };
+    state.view.total = 20;
+    state.view.first = 0;
+    state.caret.position = { line: 10, col: 0 };
 
     revealCaret();
-    expect(state.first).toBe(8);
+    expect(state.view.first).toBe(8);
 
-    state.first = 10;
-    state.caret = { line: 2, col: 0 };
+    state.view.first = 10;
+    state.caret.position = { line: 2, col: 0 };
     revealCaret();
-    expect(state.first).toBe(2);
+    expect(state.view.first).toBe(2);
   });
 
   it("maps pointer rows and clamps them to document bounds", () => {
@@ -99,8 +99,8 @@ describe("viewport row calculations (#129)", () => {
       y: 100,
       toJSON: () => ({}),
     });
-    state.first = 10;
-    state.total = 20;
+    state.view.first = 10;
+    state.view.total = 20;
 
     expect(coordsFromEvent({ clientX: 40, clientY: 100 + 2 * LINE_HEIGHT + 1 })).toEqual({
       line: 12,
@@ -148,21 +148,21 @@ describe("line-number formatting (#49)", () => {
 
 describe("sparse bookmark gutter rendering (#241)", () => {
   it("replaces the marker cache together with each viewport page", () => {
-    state.bookmarks = new Set([99]);
+    state.markers.bookmarks = new Set([99]);
     cacheLineResponse(40, {
       lines: [{ number: 40, text: "visible" }],
       markers: [{ kind: "bookmark", line: 40 }],
       total: 10_000_000_000,
     });
-    expect(state.bookmarks).toEqual(new Set([40]));
-    expect(state.cache.start).toBe(40);
-    expect(state.total).toBe(10_000_000_000);
+    expect(state.markers.bookmarks).toEqual(new Set([40]));
+    expect(state.view.cache.start).toBe(40);
+    expect(state.view.total).toBe(10_000_000_000);
   });
 
   it("marks only bookmarked pooled rows and exposes the gutter as a button", () => {
     const row = document.createElement("div");
     row.append(document.createElement("span"), document.createElement("span"));
-    state.bookmarks = new Set([41]);
+    state.markers.bookmarks = new Set([41]);
 
     fillRow(row, 41, { text: "marked" });
     expect(row.classList.contains("bookmarked")).toBe(true);
@@ -177,13 +177,13 @@ describe("sparse bookmark gutter rendering (#241)", () => {
 describe("sparse change-history rendering (#243)", () => {
   beforeEach(() => {
     state.settings.showChangeHistory = true;
-    state.changeSaved = new Set();
-    state.changeUnsaved = new Set();
-    state.changeDeleted = new Set();
+    state.markers.changeSaved = new Set();
+    state.markers.changeUnsaved = new Set();
+    state.markers.changeDeleted = new Set();
   });
 
   it("replaces all change partitions with the viewport marker generation", () => {
-    state.changeSaved = new Set([99]);
+    state.markers.changeSaved = new Set([99]);
     cacheLineResponse(4, {
       lines: [{ number: 4, text: "changed" }],
       markers: [
@@ -193,16 +193,16 @@ describe("sparse change-history rendering (#243)", () => {
       ],
       total: 5,
     });
-    expect(state.changeUnsaved).toEqual(new Set([4]));
-    expect(state.changeSaved).toEqual(new Set([5]));
-    expect(state.changeDeleted).toEqual(new Set([4]));
+    expect(state.markers.changeUnsaved).toEqual(new Set([4]));
+    expect(state.markers.changeSaved).toEqual(new Set([5]));
+    expect(state.markers.changeDeleted).toEqual(new Set([4]));
   });
 
   it("uses status plus a non-color deletion shape and exposes focus text", () => {
     const row = document.createElement("div");
     row.append(document.createElement("span"), document.createElement("span"));
-    state.changeUnsaved = new Set([7]);
-    state.changeDeleted = new Set([7]);
+    state.markers.changeUnsaved = new Set([7]);
+    state.markers.changeDeleted = new Set([7]);
 
     fillRow(row, 7, { text: "next line" });
     expect(row.classList.contains("change-unsaved")).toBe(true);
@@ -214,9 +214,9 @@ describe("sparse change-history rendering (#243)", () => {
   it("renders a deletion at logical EOF and obeys the display toggle", () => {
     const row = document.createElement("div");
     row.append(document.createElement("span"), document.createElement("span"));
-    state.total = 3;
-    state.changeSaved = new Set([3]);
-    state.changeDeleted = new Set([3]);
+    state.view.total = 3;
+    state.markers.changeSaved = new Set([3]);
+    state.markers.changeDeleted = new Set([3]);
 
     fillEofRow(row);
     expect(row.classList.contains("change-saved")).toBe(true);
@@ -231,10 +231,10 @@ describe("sparse change-history rendering (#243)", () => {
 
   it("renders bounded saved/unsaved overview bins from the shared marker summary", () => {
     document.body.innerHTML = '<div id="vticks"></div>';
-    state.query = "";
-    state.searchHits = null;
-    state.analysisStatus = null;
-    state.changeHistoryOverview = {
+    state.search.query = "";
+    state.search.hits = null;
+    state.analysis.status = null;
+    state.markers.changeHistoryOverview = {
       revision: 4,
       total_lines: 10_000_000_000,
       saved: { count: 1, histogram: [0, 1, 0, 0] },
@@ -252,9 +252,9 @@ describe("sparse change-history rendering (#243)", () => {
 
 describe("editor load generation", () => {
   beforeEach(() => {
-    state.total = 1000;
-    state.cache = { start: 0, lines: [] };
-    state.loadToken = 0;
+    state.view.total = 1000;
+    state.view.cache = { start: 0, lines: [] };
+    state.view.loadToken = 0;
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -270,14 +270,14 @@ describe("editor load generation", () => {
     ensureData(0, 1);
     ensureData(700, 1);
 
-    expect(state.loadToken).toBe(2);
+    expect(state.view.loadToken).toBe(2);
     resolves[0](jsonResponse({ lines: [{ number: 0, text: "stale" }], total: 1000 }));
     await flushPromises();
-    expect(state.cache.lines).toEqual([]);
+    expect(state.view.cache.lines).toEqual([]);
 
-    state.loadToken++;
+    state.view.loadToken++;
     resolves[1](jsonResponse({ lines: [{ number: 700, text: "also stale" }], total: 1000 }));
     await flushPromises();
-    expect(state.cache.lines).toEqual([]);
+    expect(state.view.cache.lines).toEqual([]);
   });
 });

@@ -69,21 +69,24 @@ export function updateMinimap() {
   context.clearRect(0, 0, cssWidth, cssHeight);
 
   canvas.setAttribute("aria-valuemin", "1");
-  canvas.setAttribute("aria-valuemax", String(Math.max(1, state.total + 1)));
-  canvas.setAttribute("aria-valuenow", String(Math.min(state.first + 1, state.total + 1)));
-  if (state.total <= 0) return;
+  canvas.setAttribute("aria-valuemax", String(Math.max(1, state.view.total + 1)));
+  canvas.setAttribute(
+    "aria-valuenow",
+    String(Math.min(state.view.first + 1, state.view.total + 1)),
+  );
+  if (state.view.total <= 0) return;
 
   const styles = getComputedStyle(document.documentElement);
   const foreground = themeColor(styles, "--fg", "#333");
   const accent = themeColor(styles, "--accent", "#8859b1");
   const capacity = minimapCapacity(cssHeight);
-  const mapStart = minimapStart(state.first, state.total, capacity, maxFirst());
+  const mapStart = minimapStart(state.view.first, state.view.total, capacity, maxFirst());
   lastMapStart = mapStart;
   const usableWidth = cssWidth - 4;
 
   for (let index = 0; index < capacity; index++) {
     const line = mapStart + index;
-    if (line >= state.total) break;
+    if (line >= state.view.total) break;
     const y = index * MINIMAP_ROW;
     const record = cachedLine(line);
     if (record == null) {
@@ -102,9 +105,9 @@ export function updateMinimap() {
     context.fillRect(x, y, width, 2);
   }
 
-  if (state.sel) {
-    const first = Math.min(state.sel.anchor.line, state.sel.head.line);
-    const last = Math.max(state.sel.anchor.line, state.sel.head.line);
+  if (state.caret.selection) {
+    const first = Math.min(state.caret.selection.anchor.line, state.caret.selection.head.line);
+    const last = Math.max(state.caret.selection.anchor.line, state.caret.selection.head.line);
     const from = Math.max(first, mapStart);
     const to = Math.min(last, mapStart + capacity - 1);
     if (to >= from) {
@@ -114,10 +117,10 @@ export function updateMinimap() {
     }
   }
 
-  if (state.query && state.searchHits?.length) {
+  if (state.search.query && state.search.hits?.length) {
     context.globalAlpha = 0.6;
     context.fillStyle = accent;
-    for (const hit of state.searchHits) {
+    for (const hit of state.search.hits) {
       const index = hit.line - mapStart;
       if (index >= 0 && index < capacity) {
         context.fillRect(0, index * MINIMAP_ROW, cssWidth, 2);
@@ -125,15 +128,15 @@ export function updateMinimap() {
     }
   }
 
-  const caretIndex = state.caret.line - mapStart;
-  if (state.stat?.open && caretIndex >= 0 && caretIndex < capacity) {
+  const caretIndex = state.caret.position.line - mapStart;
+  if (state.doc.stat?.open && caretIndex >= 0 && caretIndex < capacity) {
     context.globalAlpha = 0.85;
     context.fillStyle = accent;
     context.fillRect(0, caretIndex * MINIMAP_ROW, cssWidth, 2);
   }
 
   const visibleRows = rowsVisible();
-  const top = Math.max(0, (state.first - mapStart) * MINIMAP_ROW);
+  const top = Math.max(0, (state.view.first - mapStart) * MINIMAP_ROW);
   const height = Math.min(cssHeight - top, Math.max(MINIMAP_ROW, visibleRows * MINIMAP_ROW));
   context.globalAlpha = 0.1;
   context.fillStyle = foreground;
@@ -175,7 +178,7 @@ export function initMinimap() {
   canvas.addEventListener("pointercancel", stop);
   canvas.addEventListener("keydown", (event: KeyboardEvent) => {
     const visible = rowsVisible();
-    let next = state.first;
+    let next = state.view.first;
     if (event.key === "ArrowUp") next -= 1;
     else if (event.key === "ArrowDown") next += 1;
     else if (event.key === "PageUp") next -= visible;

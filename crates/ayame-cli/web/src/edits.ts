@@ -13,8 +13,11 @@ import {
   revealCaret,
   revealLine,
   rowsVisible,
+  setActiveLine,
   setCaret,
   setFirst,
+  setSearchHits,
+  setSelection,
 } from "./editor.js";
 import {
   allCursors,
@@ -62,11 +65,11 @@ export function setEditSaveService(service) {
 }
 
 export function editContext() {
-  return { docGen: state.docGen };
+  return { docGen: state.doc.generation };
 }
 
 export function sameEditContext(ctx) {
-  return !!state.stat?.open && state.docGen === ctx.docGen;
+  return !!state.doc.stat?.open && state.doc.generation === ctx.docGen;
 }
 
 export async function settleEditQueue() {
@@ -88,9 +91,9 @@ export function enqueueEdit(fn) {
       // pre-edit layout is stale: F3 would resume from the wrong byte (skipping
       // a shifted match or landing mid-character) and the count/ticks would lag.
       // Drop them so the next search re-anchors from the caret (issue #74).
-      state.lastMatch = null;
-      state.searchHits = null;
-      state.searchTruncated = false;
+      state.search.lastMatch = null;
+      setSearchHits(null);
+      state.search.truncated = false;
       if (result != null) {
         void analysisService.invalidateForEdit();
       }
@@ -103,22 +106,22 @@ export function enqueueEdit(fn) {
   return editChain;
 }
 
-// Re-fetch the padded window around state.first into the cache in one shot, so
+// Re-fetch the padded window around state.view.first into the cache in one shot, so
 // the text never blinks to the "⋯" pending placeholder between keystrokes.
 export async function reloadViewport() {
-  const start = Math.max(0, state.first - PAD);
+  const start = Math.max(0, state.view.first - PAD);
   const count = rowsVisible() + OVERSCAN + 2 * PAD;
   const [res] = await Promise.all([
     api<LinesResponse>(`/api/lines?start=${start}&count=${count}`),
     refreshChangeHistoryOverview().catch((error) => {
       // Never leave position-pane ticks from an older marker revision beside
       // a successfully refreshed gutter. A later viewport refresh retries.
-      state.changeHistoryOverview = null;
+      state.markers.changeHistoryOverview = null;
       console.error("change-history overview fetch failed", error);
     }),
   ]);
   cacheLineResponse(start, res);
-  state.loadToken++; // cancel any in-flight ensureData for the old contents
+  state.view.loadToken++; // cancel any in-flight ensureData for the old contents
 }
 
 // ---- 末尾に追従 (tail -f) ----------------------------------------------------
@@ -136,29 +139,29 @@ export const TAIL_POLL_MS = 1000;
 // "At the bottom" = the last line sits within the current view; decides whether
 // a growth should follow (auto-scroll) or merely extend the scrollbar in place.
 export function tailAtBottom() {
-  return state.first >= maxFirst() - 2;
+  return state.view.first >= maxFirst() - 2;
 }
 
 export function updateTailUI() {
   const btn = $("st-tail");
-  if (btn) btn.classList.toggle("on", state.followTail);
+  if (btn) btn.classList.toggle("on", state.doc.followTail);
   const item = $("menu-toggle-tail");
   if (item) {
-    item.classList.toggle("checked", state.followTail);
-    item.setAttribute("aria-checked", String(state.followTail));
+    item.classList.toggle("checked", state.doc.followTail);
+    item.setAttribute("aria-checked", String(state.doc.followTail));
   }
 }
 
 export function setFollowTail(on) {
-  on = !!on && !!state.stat?.open;
-  const was = state.followTail;
-  state.followTail = on;
-  if (state.tailTimer) {
-    clearInterval(state.tailTimer);
-    state.tailTimer = null;
+  on = !!on && !!state.doc.stat?.open;
+  const was = state.doc.followTail;
+  state.doc.followTail = on;
+  if (state.doc.tailTimer) {
+    clearInterval(state.doc.tailTimer);
+    state.doc.tailTimer = null;
   }
   if (on) {
-    state.tailTimer = setInterval(pollTail, TAIL_POLL_MS);
+    state.doc.tailTimer = setInterval(pollTail, TAIL_POLL_MS);
     setFirst(maxFirst()); // jump to the tail so following starts from the end
     flashCount(t("status.followingTail"));
     pollTail(); // don't wait a whole interval for the first check
@@ -169,7 +172,7 @@ export function setFollowTail(on) {
 }
 
 export async function pollTail() {
-  if (!state.followTail || !state.stat?.open) return;
+  if (!state.doc.followTail || !state.doc.stat?.open) return;
   if (savingCount() > 0) return; // never poll mid-save
   let resp;
   try {
@@ -177,7 +180,7 @@ export async function pollTail() {
   } catch {
     return; // transient (e.g. a racing reload); try again next tick
   }
-  if (!state.followTail) return; // toggled off during the round-trip
+  if (!state.doc.followTail) return; // toggled off during the round-trip
   if (!resp.open) {
     setFollowTail(false);
     return;
@@ -195,17 +198,17 @@ export async function pollTail() {
   // Auto-scroll only if we were already at the bottom; otherwise adopt the new
   // total so the scrollbar grows but the user's position is left untouched.
   const stick = tailAtBottom();
-  state.total = resp.lines;
+  state.view.total = resp.lines;
   await analysisService.refreshTail();
-  if (stick) state.first = maxFirst();
+  if (stick) state.view.first = maxFirst();
   try {
     await reloadViewport();
     await refreshStat();
   } catch {
     return;
   }
-  if (!state.followTail) return;
-  if (stick) state.first = maxFirst();
+  if (!state.doc.followTail) return;
+  if (stick) state.view.first = maxFirst();
   render();
 }
 
@@ -213,7 +216,12 @@ export async function pollTail() {
 export function replaceTarget() {
   const r = selRange();
   if (r) return { l0: r.start.line, c0: r.start.col, l1: r.end.line, c1: r.end.col };
-  return { l0: state.caret.line, c0: state.caret.col, l1: state.caret.line, c1: state.caret.col };
+  return {
+    l0: state.caret.position.line,
+    c0: state.caret.position.col,
+    l1: state.caret.position.line,
+    c1: state.caret.position.col,
+  };
 }
 
 // The one primitive every edit funnels through. The backend returns the
@@ -224,27 +232,27 @@ export function replaceTarget() {
 // resolve its range against a correct caret even if the refresh below fails.
 export async function applyRange(l0, c0, l1, c1, text) {
   const ctx = editContext();
-  const gen = state.editGen;
+  const gen = state.caret.editGeneration;
   const body: ReplaceRangeRequest = { l0, c0, l1, c1, text };
   const res = await apiPost<ReplaceEditResponse, ReplaceRangeRequest>(
     "/api/edit/replace_range",
     body,
   );
   if (!sameEditContext(ctx)) return;
-  state.total = res.stats.total_lines;
-  if (state.editGen === gen) {
+  state.view.total = res.stats.total_lines;
+  if (state.caret.editGeneration === gen) {
     // No user navigation happened during the round-trip: honor the edit caret.
-    const line = Math.min(res.caret_line, Math.max(0, state.total - 1));
-    state.sel = null;
-    state.caret = { line, col: res.caret_col };
-    state.activeLine = line;
-    state.goalCol = res.caret_col;
+    const line = Math.min(res.caret_line, Math.max(0, state.view.total - 1));
+    setSelection(null);
+    state.caret.position = { line, col: res.caret_col };
+    setActiveLine(line);
+    state.caret.goalCol = res.caret_col;
   } else {
     // The user moved the caret mid-edit — keep their position, re-clamped to
     // the new line count (don't clobber it with the edit's caret).
-    const line = Math.min(state.caret.line, Math.max(0, state.total - 1));
-    state.caret = { line, col: state.caret.col };
-    state.activeLine = line;
+    const line = Math.min(state.caret.position.line, Math.max(0, state.view.total - 1));
+    state.caret.position = { line, col: state.caret.position.col };
+    setActiveLine(line);
   }
   revealCaret(); // scroll so the caret line is covered by the reload below
   try {
@@ -261,20 +269,20 @@ export async function applyRange(l0, c0, l1, c1, text) {
 
 export async function applyRect(l0, l1, c0, c1, text) {
   const ctx = editContext();
-  const gen = state.editGen;
+  const gen = state.caret.editGeneration;
   const body: ReplaceRectRequest = { l0, l1, c0, c1, text };
   const res = await apiPost<ReplaceEditResponse, ReplaceRectRequest>(
     "/api/edit/replace_rect",
     body,
   );
   if (!sameEditContext(ctx)) return;
-  state.total = res.stats.total_lines;
-  if (state.editGen === gen) {
-    const line = Math.min(res.caret_line, Math.max(0, state.total - 1));
-    state.sel = null;
-    state.caret = { line, col: res.caret_col };
-    state.activeLine = line;
-    state.goalCol = res.caret_col;
+  state.view.total = res.stats.total_lines;
+  if (state.caret.editGeneration === gen) {
+    const line = Math.min(res.caret_line, Math.max(0, state.view.total - 1));
+    setSelection(null);
+    state.caret.position = { line, col: res.caret_col };
+    setActiveLine(line);
+    state.caret.goalCol = res.caret_col;
   }
   revealCaret();
   try {
@@ -296,39 +304,39 @@ export async function applyRect(l0, l1, c0, c1, text) {
 // document origin, whose position an edit batch cannot move).
 export async function applyBatch(edits, cursors, editOf) {
   const ctx = editContext();
-  const gen = state.editGen;
+  const gen = state.caret.editGeneration;
   const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
     edits,
   });
   if (!sameEditContext(ctx)) return;
-  state.total = res.stats.total_lines;
-  if (state.editGen === gen) {
-    const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
+  state.view.total = res.stats.total_lines;
+  if (state.caret.editGeneration === gen) {
+    const clampLine = (l) => Math.min(l, Math.max(0, state.view.total - 1));
     const next = cursors.map((c, i) => {
       const k = editOf[i];
       const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
       return { line: clampLine(p.line), col: p.col, primary: c.primary };
     });
     const primary = next.find((c) => c.primary) || next[0];
-    state.sel = null;
-    state.caret = { line: primary.line, col: primary.col };
-    state.activeLine = primary.line;
-    state.goalCol = primary.col;
-    state.extraCursors = next
+    setSelection(null);
+    state.caret.position = { line: primary.line, col: primary.col };
+    setActiveLine(primary.line);
+    state.caret.goalCol = primary.col;
+    state.caret.extraCursors = next
       .filter((c) => c !== primary)
       .map((c) => ({ line: c.line, col: c.col }));
   } else {
     // The user moved the caret mid-edit: keep their position, re-clamped to
     // the new line count (don't clobber it with the edit's caret).
-    const line = Math.min(state.caret.line, Math.max(0, state.total - 1));
-    state.caret = { line, col: state.caret.col };
-    state.activeLine = line;
-    if (state.extraCursors.length) {
+    const line = Math.min(state.caret.position.line, Math.max(0, state.view.total - 1));
+    state.caret.position = { line, col: state.caret.position.col };
+    setActiveLine(line);
+    if (state.caret.extraCursors.length) {
       // Plain caret motion / cursor-adds keep the extras alive mid-flight.
       // Remap ONLY the cursors this batch owned (matched by their batch-start
       // position) onto their post-edit positions; cursors the user added or
       // removed while the batch was in flight are left exactly as they are.
-      const clampLine = (l) => Math.min(l, Math.max(0, state.total - 1));
+      const clampLine = (l) => Math.min(l, Math.max(0, state.view.total - 1));
       const moved = new Map();
       cursors.forEach((c, i) => {
         const k = editOf[i];
@@ -336,7 +344,7 @@ export async function applyBatch(edits, cursors, editOf) {
         moved.set(`${c.line}:${c.col}`, { line: clampLine(p.line), col: p.col });
       });
       const seen = new Set();
-      state.extraCursors = state.extraCursors.flatMap((c) => {
+      state.caret.extraCursors = state.caret.extraCursors.flatMap((c) => {
         const next = moved.get(`${c.line}:${c.col}`) || { line: clampLine(c.line), col: c.col };
         const key = `${next.line}:${next.col}`;
         if (seen.has(key)) return []; // two cursors landing together collapse
@@ -396,9 +404,9 @@ export function multiReplace(cursors, textFor) {
 // A 0-line document (an empty file) is editable too: replaceTarget yields the
 // (0,0)..(0,0) origin range, which the backend accepts to seed the first line.
 export function typeText(text) {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   enqueueEdit(() => {
-    if (state.extraCursors.length) {
+    if (state.caret.extraCursors.length) {
       // Multi-cursor: the same text goes in at every caret, or replaces each
       // cursor's selection, as one undo step.
       const cursors = allCursors();
@@ -429,7 +437,7 @@ export async function lineLensFor(lineNumbers) {
   const out = new Map();
   const missing = new Set();
   for (const l of lineNumbers) {
-    if (l < 0 || l >= state.total || out.has(l) || missing.has(l)) continue;
+    if (l < 0 || l >= state.view.total || out.has(l) || missing.has(l)) continue;
     const rec = cachedLine(l);
     if (rec != null) out.set(l, Array.from(rec.text ?? "").length);
     else missing.add(l);
@@ -453,7 +461,7 @@ export async function lineLensFor(lineNumbers) {
 // (callers then handle their caret-relative case). Call inside enqueueEdit.
 export function deleteSelectionEdit() {
   if (!hasSelection()) return null;
-  if (state.extraCursors.length && hasCursorSelections()) {
+  if (state.caret.extraCursors.length && hasCursorSelections()) {
     return multiReplace(allCursors(), () => "");
   }
   const rr = rectRange();
@@ -468,7 +476,7 @@ export function deleteSelectionEdit() {
 // the caret column for Backspace, after it for Delete — instead of issuing an
 // empty-range rect edit that deletes nothing and drops the selection (#74).
 async function deleteZeroWidthRect(rr, forward) {
-  const gen = state.editGen;
+  const gen = state.caret.editGeneration;
   const c = rr.c0;
   const lines = [];
   for (let l = rr.l0; l <= rr.l1; l++) lines.push(l);
@@ -495,14 +503,18 @@ async function deleteZeroWidthRect(rr, forward) {
     flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
-  if (state.editGen !== gen) return;
+  if (state.caret.editGeneration !== gen) return;
   // Keep the column caret alive at the new column so a held Backspace/Delete
   // keeps acting on every line.
   const newCol = forward ? c : Math.max(0, c - 1);
-  const l0 = Math.min(rr.l0, Math.max(0, state.total - 1));
-  const l1 = Math.min(rr.l1, Math.max(0, state.total - 1));
-  state.sel = { anchor: { line: l0, col: newCol }, head: { line: l1, col: newCol }, rect: true };
-  state.extraCursors = [];
+  const l0 = Math.min(rr.l0, Math.max(0, state.view.total - 1));
+  const l1 = Math.min(rr.l1, Math.max(0, state.view.total - 1));
+  setSelection({
+    anchor: { line: l0, col: newCol },
+    head: { line: l1, col: newCol },
+    rect: true,
+  });
+  state.caret.extraCursors = [];
   setCaret(l1, newCol);
   revealCaret();
   render();
@@ -514,7 +526,7 @@ export function backspace() {
     if (rr && rr.c0 === rr.c1) return deleteZeroWidthRect(rr, false);
     const del = deleteSelectionEdit();
     if (del) return del;
-    if (state.extraCursors.length) {
+    if (state.caret.extraCursors.length) {
       // Per cursor: delete one char before the caret (line-join at col 0).
       // allCursors() dedupes positions, so ranges may touch but never overlap;
       // a cursor at the document origin contributes no edit. Join edges need
@@ -537,7 +549,7 @@ export function backspace() {
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    const { line, col } = state.caret;
+    const { line, col } = state.caret.position;
     if (col > 0) return applyRange(line, col - 1, line, col, "");
     if (line > 0) {
       const lens = await lineLensFor([line - 1]);
@@ -554,7 +566,7 @@ export function forwardDelete() {
     if (rr && rr.c0 === rr.c1) return deleteZeroWidthRect(rr, true);
     const del = deleteSelectionEdit();
     if (del) return del;
-    if (state.extraCursors.length) {
+    if (state.caret.extraCursors.length) {
       // Per cursor: delete one char after the caret (line-join at EOL). Same
       // dedupe rule as backspace; the very end of the document yields no edit.
       // The char-vs-join decision needs each cursor line's REAL length.
@@ -565,7 +577,7 @@ export function forwardDelete() {
         if (!lens.has(c.line)) return -1; // unresolvable length: never guess 0
         if (c.col < lens.get(c.line)) {
           edits.push({ l0: c.line, c0: c.col, l1: c.line, c1: c.col + 1, text: "" });
-        } else if (c.line < state.total - 1) {
+        } else if (c.line < state.view.total - 1) {
           edits.push({ l0: c.line, c0: c.col, l1: c.line + 1, c1: 0, text: "" });
         } else {
           return -1;
@@ -575,24 +587,24 @@ export function forwardDelete() {
       if (!edits.length) return null;
       return applyBatch(edits, cursors, editOf);
     }
-    const { line, col } = state.caret;
+    const { line, col } = state.caret.position;
     const lens = await lineLensFor([line]);
     if (!lens.has(line)) return null;
     if (col < lens.get(line)) return applyRange(line, col, line, col + 1, "");
-    if (line < state.total - 1) return applyRange(line, col, line + 1, 0, "");
+    if (line < state.view.total - 1) return applyRange(line, col, line + 1, 0, "");
     return null;
   });
 }
 
 export function pasteText(raw) {
   const text = raw.replace(/\r\n?/g, "\n");
-  if (!state.extraCursors.length) {
+  if (!state.caret.extraCursors.length) {
     typeText(text);
     return;
   }
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   enqueueEdit(() => {
-    if (!state.extraCursors.length) {
+    if (!state.caret.extraCursors.length) {
       // Collapsed while the paste was queued: normal single-caret insert.
       const t = replaceTarget();
       return applyRange(t.l0, t.c0, t.l1, t.c1, text);
@@ -610,12 +622,12 @@ export function pasteText(raw) {
 export async function undoEdit() {
   enqueueEdit(async () => {
     await apiPost("/api/edit/undo", {});
-    state.sel = null;
-    state.extraCursors = []; // a multi-cursor batch undoes as one step
+    setSelection(null);
+    state.caret.extraCursors = []; // a multi-cursor batch undoes as one step
 
     await refreshStat();
     await reloadViewport();
-    setCaret(state.caret.line, state.caret.col); // re-clamp into the new bounds
+    setCaret(state.caret.position.line, state.caret.position.col); // re-clamp into the new bounds
     revealCaret();
     render();
   });
@@ -624,12 +636,12 @@ export async function undoEdit() {
 export async function redoEdit() {
   enqueueEdit(async () => {
     await apiPost("/api/edit/redo", {});
-    state.sel = null;
-    state.extraCursors = []; // a multi-cursor batch redoes as one step
+    setSelection(null);
+    state.caret.extraCursors = []; // a multi-cursor batch redoes as one step
 
     await refreshStat();
     await reloadViewport();
-    setCaret(state.caret.line, state.caret.col);
+    setCaret(state.caret.position.line, state.caret.position.col);
     revealCaret();
     render();
   });
@@ -673,7 +685,7 @@ export function applyCaseMode(text, mode) {
 // ツールメニューのケース変換: transform the selection in the editor as one
 // undoable edit — nothing is written to disk until 保存.
 export async function transformSelection(mode) {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   const fn = (s) => applyCaseMode(s, mode);
   if (!hasTextSelection()) {
     flashCount(t("editor.selectRangeFirst"), "error");
@@ -725,8 +737,8 @@ export async function applyBatchPlain(edits) {
   const ctx = editContext();
   await apiPost("/api/edit/replace_batch", { edits });
   if (!sameEditContext(ctx)) return;
-  state.sel = null;
-  state.extraCursors = [];
+  setSelection(null);
+  state.caret.extraCursors = [];
   try {
     await reloadViewport();
     await refreshStat();
@@ -735,7 +747,10 @@ export async function applyBatchPlain(edits) {
     flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
-  setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+  setCaret(
+    Math.min(state.caret.position.line, Math.max(0, state.view.total - 1)),
+    state.caret.position.col,
+  );
   revealCaret();
   render();
 }
@@ -758,7 +773,7 @@ export function lineOpSpan() {
     if (!r.rect && l1 > l0 && r.end.col === 0) l1 -= 1;
     return { l0, l1 };
   }
-  return { l0: state.caret.line, l1: state.caret.line };
+  return { l0: state.caret.position.line, l1: state.caret.position.line };
 }
 
 // Decoded text of one line — from the cache when resident, else a targeted
@@ -797,7 +812,7 @@ export async function applyLineEdit(edits, caret, sel) {
   const ctx = editContext();
   await apiPost("/api/edit/replace_batch", { edits });
   if (!sameEditContext(ctx)) return;
-  state.extraCursors = []; // line ops are single-caret
+  state.caret.extraCursors = []; // line ops are single-caret
   try {
     await reloadViewport();
     await refreshStat();
@@ -806,7 +821,7 @@ export async function applyLineEdit(edits, caret, sel) {
     flashCount(t("editor.reloadError"));
   }
   if (!sameEditContext(ctx)) return;
-  const last = Math.max(0, state.total - 1);
+  const last = Math.max(0, state.view.total - 1);
   const place = (p) => {
     const line = Math.min(Math.max(0, p.line), last);
     const cached = cachedLine(line);
@@ -814,25 +829,27 @@ export async function applyLineEdit(edits, caret, sel) {
     return { line, col };
   };
   const c = place(caret);
-  state.caret = c;
-  state.activeLine = c.line;
-  state.goalCol = c.col;
-  state.sel = sel ? { anchor: place(sel.anchor), head: place(sel.head) } : null;
+  state.caret.position = c;
+  setActiveLine(c.line);
+  state.caret.goalCol = c.col;
+  setSelection(sel ? { anchor: place(sel.anchor), head: place(sel.head) } : null);
   revealCaret();
   render();
 }
 
 // 行を複製: duplicate the covered line block just below itself.
 export function duplicateLines() {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   enqueueEdit(async () => {
     const { l0, l1 } = lineOpSpan();
     if (l1 - l0 + 1 > MAX_COPY_LINES) {
       flashCount(t("editor.duplicateCapped", { max: commas(MAX_COPY_LINES) }), "error");
       return null;
     }
-    const caret = { ...state.caret }; // the copy lands below; the caret stays put
-    const sel = cloneSelection(state.sel && !state.sel.rect ? state.sel : null);
+    const caret = { ...state.caret.position }; // the copy lands below; the caret stays put
+    const sel = cloneSelection(
+      state.caret.selection && !state.caret.selection.rect ? state.caret.selection : null,
+    );
     const texts = await lineTextsFor(l0, l1 - l0 + 1);
     const endCol = charLenOf(texts[texts.length - 1]);
     const edit = { l0: l1, c0: endCol, l1, c1: endCol, text: "\n" + texts.join("\n") };
@@ -842,17 +859,19 @@ export function duplicateLines() {
 
 // 行を上へ / 下へ移動: swap the covered block with its neighbouring line.
 export function moveLines(dir) {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   enqueueEdit(async () => {
     const { l0, l1 } = lineOpSpan();
-    if (dir < 0 ? l0 === 0 : l1 >= state.total - 1) return null; // already at the edge
+    if (dir < 0 ? l0 === 0 : l1 >= state.view.total - 1) return null; // already at the edge
     if (l1 - l0 + 1 > MAX_COPY_LINES) {
       flashCount(t("editor.moveCapped", { max: commas(MAX_COPY_LINES) }), "error");
       return null;
     }
-    const caret = { line: state.caret.line + dir, col: state.caret.col };
+    const caret = { line: state.caret.position.line + dir, col: state.caret.position.col };
     const sel = shiftLineSelection(
-      cloneSelection(state.sel && !state.sel.rect ? state.sel : null),
+      cloneSelection(
+        state.caret.selection && !state.caret.selection.rect ? state.caret.selection : null,
+      ),
       dir,
     );
     const block = await lineTextsFor(l0, l1 - l0 + 1);
@@ -883,12 +902,12 @@ export function moveLines(dir) {
 
 // 行を削除: drop the covered line block entirely.
 export function deleteLines() {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   enqueueEdit(async () => {
     const { l0, l1 } = lineOpSpan();
     let edit;
     let caret;
-    if (l1 < state.total - 1) {
+    if (l1 < state.view.total - 1) {
       // Lines survive below: drop the block; the next line slides up to l0.
       edit = { l0, c0: 0, l1: l1 + 1, c1: 0, text: "" };
       caret = { line: l0, col: 0 };
@@ -910,8 +929,8 @@ export function deleteLines() {
 export function gotoLine(n) {
   const v = parseInt(String(n).replace(/[^0-9]/g, ""), 10);
   if (!Number.isFinite(v) || v < 1) return;
-  const line = Math.min(v - 1, Math.max(0, state.total - 1));
-  state.sel = null;
+  const line = Math.min(v - 1, Math.max(0, state.view.total - 1));
+  setSelection(null);
   setCaret(line, 0);
   revealLine(line);
   focusEditor();

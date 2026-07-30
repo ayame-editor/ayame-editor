@@ -160,9 +160,9 @@ export function retryPendingNativeClose() {
 }
 
 export async function refreshStat() {
-  state.stat = await api("/api/stat");
-  state.total = state.stat.view_lines ?? state.stat.lines;
-  noteWalError(state.stat);
+  state.doc.stat = await api("/api/stat");
+  state.view.total = state.doc.stat.view_lines ?? state.doc.stat.lines;
+  noteWalError(state.doc.stat);
   updateStatusMeta();
 }
 
@@ -181,14 +181,17 @@ export async function reloadActiveDocument({
   refreshTabList = true,
 } = {}) {
   if (bumpGeneration) {
-    state.docGen++;
-    state.editGen++;
+    state.doc.generation++;
+    state.caret.editGeneration++;
   }
   clearLineCache();
   await refreshStat();
   await reloadViewport();
   if (keepCaret)
-    setCaret(Math.min(state.caret.line, Math.max(0, state.total - 1)), state.caret.col);
+    setCaret(
+      Math.min(state.caret.position.line, Math.max(0, state.view.total - 1)),
+      state.caret.position.col,
+    );
   render();
   if (refreshTabList) refreshTabs();
 }
@@ -290,7 +293,7 @@ export function isExistsError(e) {
 // standard); untitled buffers suggest the expanded 新規ファイル名 template
 // inside 前回の保存先. Async because {seq} numbering needs the folder listing.
 export async function suggestedSaveAsPath() {
-  const p = state.stat?.path || "";
+  const p = state.doc.stat?.path || "";
   if (p && !isUntitled(p)) return p;
   const tpl = state.settings.memoName || DEFAULT_SETTINGS.memoName;
   const dir = (state.settings.lastSaveDir || "").trim();
@@ -380,13 +383,13 @@ export function freeMemoName(name, taken) {
 
 export async function saveFile(options: SaveOptions = {}) {
   const { announce = true } = options;
-  if (!state.stat?.open) return false;
+  if (!state.doc.stat?.open) return false;
   if (savingCount > 0) {
     flashCount(t("editor.savingWait"));
     return false;
   }
   await settleEditQueue();
-  if (isUntitled(state.stat.path)) {
+  if (isUntitled(state.doc.stat.path)) {
     // Untitled buffers always go through the save dialog; the dialog is
     // pre-filled with the expanded name template (see suggestedSaveAsPath).
     return saveCopy({ announce });
@@ -449,7 +452,7 @@ export async function saveAllTabs() {
     flashCount(t("editor.savingWait"));
     return { saved: 0, total: 0 };
   }
-  const tabs = [...(state.tabs || [])];
+  const tabs = [...(state.doc.tabs || [])];
   const total = tabs.filter((tab) => tab.dirty).length;
   if (!total) {
     flashCount(t("status.allSaved"));
@@ -482,8 +485,8 @@ export function convertVisible() {
 }
 
 export function showConvert() {
-  if (!state.stat?.open) return;
-  if (isUntitled(state.stat.path)) {
+  if (!state.doc.stat?.open) return;
+  if (isUntitled(state.doc.stat.path)) {
     // Nothing on disk to convert yet — save it first.
     flashCount(t("dialog.convert.saveFirst"));
     saveCopy();
@@ -500,12 +503,12 @@ export function showConvert() {
     "shift-jis": "shift-jis",
     "euc-jp": "euc-jp",
   };
-  $("convert-enc").value = encOpt[state.stat.encoding] || "utf-8";
-  const l = state.stat.eol;
+  $("convert-enc").value = encOpt[state.doc.stat.encoding] || "utf-8";
+  const l = state.doc.stat.eol;
   $("convert-eol").value = ["lf", "crlf", "cr"].includes(l) ? l : "lf";
   // Prefill 「BOMを付ける」 from the file's current BOM, then gray it out unless
   // the chosen 文字コード supports a Unicode BOM.
-  $("convert-bom").checked = state.stat.bom_bytes > 0;
+  $("convert-bom").checked = state.doc.stat.bom_bytes > 0;
   syncConvertBom();
   setModalOpen($("convert-modal"), true);
   queueMicrotask(() => $("convert-enc").focus());
@@ -527,7 +530,7 @@ export function hideConvert() {
 // Rewrite the current file in the chosen 文字コード / 改行コード. Every line is
 // re-encoded server-side, so the active tab reloads the converted bytes.
 export async function convertSave(encoding, lineEnding, bom) {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   if (savingCount > 0) {
     flashCount(t("editor.savingWait"));
     return;
@@ -565,12 +568,12 @@ export async function convertSave(encoding, lineEnding, bom) {
 // guessed wrong and the text shows mojibake. Non-destructive to the file, but
 // drops any unsaved edits, so confirm first.
 export async function reopenWithEncoding(encoding) {
-  if (!state.stat?.open) return;
-  if (isUntitled(state.stat.path)) {
+  if (!state.doc.stat?.open) return;
+  if (isUntitled(state.doc.stat.path)) {
     flashCount(t("dialog.convert.noSavedFile"));
     return;
   }
-  if (state.stat.dirty) {
+  if (state.doc.stat.dirty) {
     const ok = await askConfirm(t("dialog.convert.reopen"), t("dialog.convert.discardAsk"), {
       okLabel: t("dialog.convert.discardOk"),
       danger: true,
@@ -608,8 +611,8 @@ export function parseSortKeys(text): number[] {
 // ソート: include unsaved edits, write a private temporary result, and open it
 // in a new tab. The source document is never overwritten by the GUI action.
 export async function sortSave() {
-  if (!state.stat?.open) return;
-  const detectedFormat = sortFormatForPath(state.stat.path);
+  if (!state.doc.stat?.open) return;
+  const detectedFormat = sortFormatForPath(state.doc.stat.path);
   const f = await askForm(
     t("menu.sort"),
     [
@@ -713,7 +716,7 @@ export async function sortSave() {
 // ファイル分割: writes the current document (unsaved edits included) out as
 // multiple files of at most N lines each; the original file is untouched.
 export async function splitFile() {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   const f = await askForm(
     t("menu.split"),
     [
@@ -761,7 +764,7 @@ export async function splitFile() {
 // included — into a file picked with the save dialog. The extraction streams
 // through an isolated worker, so multi-GB files complete in bounded memory.
 export async function grepToFile() {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   const f = await askForm(
     t("menu.grepSave"),
     [
@@ -769,7 +772,7 @@ export async function grepToFile() {
         id: "query",
         type: "text",
         label: t("dialog.grep.query"),
-        value: lastGrep.query || state.query || "",
+        value: lastGrep.query || state.search.query || "",
         placeholder: t("dialog.grep.queryPlaceholder"),
       },
       { id: "ci", type: "check", label: t("dialog.grep.ignoreCase"), value: lastGrep.ci },
@@ -793,7 +796,7 @@ export async function grepToFile() {
 /// The analysis UI supplies the rule; this helper deliberately reuses the same
 /// save picker, overwrite handling, progress/cancel flow, and result tab.
 export async function grepRuleToFile(rule) {
-  if (!state.stat?.open || !rule?.pattern) return;
+  if (!state.doc.stat?.open || !rule?.pattern) return;
   Object.assign(lastGrep, {
     query: rule.pattern,
     ci: !rule.case_sensitive,
@@ -816,7 +819,7 @@ export async function grepRuleToFile(rule) {
 // "app.log" → sibling "app.grep.log"; untitled buffers suggest grep.txt in
 // 前回の保存先 (the same folder save-as would suggest).
 function suggestedGrepPath() {
-  const p = state.stat?.path || "";
+  const p = state.doc.stat?.path || "";
   if (!p || isUntitled(p)) {
     return joinPath((state.settings.lastSaveDir || "").trim(), "grep.txt");
   }
@@ -868,7 +871,7 @@ async function runGrepSave(query, opts, target) {
 }
 
 function suggestedBookmarkPath() {
-  const path = state.stat?.path || "";
+  const path = state.doc.stat?.path || "";
   if (!path || isUntitled(path)) {
     return joinPath((state.settings.lastSaveDir || "").trim(), "bookmarks.txt");
   }
@@ -882,7 +885,7 @@ function suggestedBookmarkPath() {
 }
 
 export async function bookmarksToFile() {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   if (savingCount > 0) {
     flashCount(t("editor.savingWait"));
     return;

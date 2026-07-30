@@ -32,9 +32,9 @@ import { state } from "../src/state.js";
 
 describe("selection range algebra", () => {
   beforeEach(() => {
-    state.caret = { line: 3, col: 4 };
-    state.sel = null;
-    state.extraCursors = [];
+    state.caret.position = { line: 3, col: 4 };
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
   });
 
   it("normalizes reversed endpoints and gives ranges stable keys", () => {
@@ -48,7 +48,7 @@ describe("selection range algebra", () => {
   });
 
   it("dedupes cursors while preserving the primary marker", () => {
-    state.extraCursors = [
+    state.caret.extraCursors = [
       { line: 3, col: 4 },
       { line: 1, col: 9 },
       { line: 9, col: 0 },
@@ -63,11 +63,11 @@ describe("selection range algebra", () => {
   });
 
   it("dedupes equivalent selected ranges from primary and extra cursors", () => {
-    state.sel = {
+    state.caret.selection = {
       anchor: { line: 4, col: 5 },
       head: { line: 2, col: 1 },
     };
-    state.extraCursors = [
+    state.caret.extraCursors = [
       {
         line: 9,
         col: 0,

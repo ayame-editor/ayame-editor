@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/editor.js", () => ({
   cacheLineResponse: vi.fn((start: number, response: { lines: unknown[]; total: number }) => {
-    state.cache = { start, lines: response.lines };
-    state.total = response.total;
+    state.view.cache = { start, lines: response.lines };
+    state.view.total = response.total;
   }),
   cachedLine: vi.fn(() => null),
   focusEditor: vi.fn(),
@@ -13,8 +13,17 @@ vi.mock("../src/editor.js", () => ({
   revealCaret: vi.fn(),
   revealLine: vi.fn(),
   rowsVisible: vi.fn(() => 8),
+  setActiveLine: vi.fn((line: number) => {
+    state.caret.activeLine = line;
+  }),
   setCaret: vi.fn(),
   setFirst: vi.fn(),
+  setSearchHits: vi.fn((hits) => {
+    state.search.hits = hits;
+  }),
+  setSelection: vi.fn((selection) => {
+    state.caret.selection = selection;
+  }),
 }));
 vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 
@@ -49,18 +58,18 @@ function deferredResponse() {
 
 describe("edit generation guards", () => {
   beforeEach(() => {
-    state.stat = { open: true };
-    state.docGen = 1;
-    state.editGen = 0;
-    state.total = 10;
-    state.first = 0;
-    state.caret = { line: 1, col: 4 };
-    state.activeLine = 1;
-    state.goalCol = 4;
-    state.cache = { start: 0, lines: [] };
-    state.sel = null;
-    state.extraCursors = [];
-    state.loadToken = 0;
+    state.doc.stat = { open: true };
+    state.doc.generation = 1;
+    state.caret.editGeneration = 0;
+    state.view.total = 10;
+    state.view.first = 0;
+    state.caret.position = { line: 1, col: 4 };
+    state.caret.activeLine = 1;
+    state.caret.goalCol = 4;
+    state.view.cache = { start: 0, lines: [] };
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
+    state.view.loadToken = 0;
     vi.clearAllMocks();
     vi.stubGlobal("fetch", vi.fn());
   });
@@ -77,7 +86,7 @@ describe("edit generation guards", () => {
       return "ran";
     });
 
-    state.docGen++;
+    state.doc.generation++;
 
     await expect(queued).resolves.toBeNull();
     expect(ran).toBe(false);
@@ -97,38 +106,38 @@ describe("edit generation guards", () => {
 
     const pending = applyRange(1, 4, 1, 4, "x");
     await Promise.resolve();
-    state.editGen++;
-    state.caret = { line: 2, col: 1 };
+    state.caret.editGeneration++;
+    state.caret.position = { line: 2, col: 1 };
     edit.resolve(jsonResponse({ stats: { total_lines: 3 }, caret_line: 0, caret_col: 9 }));
 
     await pending;
 
-    expect(state.caret).toEqual({ line: 2, col: 1 });
-    expect(state.activeLine).toBe(2);
-    expect(state.goalCol).toBe(4);
+    expect(state.caret.position).toEqual({ line: 2, col: 1 });
+    expect(state.caret.activeLine).toBe(2);
+    expect(state.caret.goalCol).toBe(4);
   });
 
   it("reloadViewport bumps loadToken to invalidate older viewport fetches", async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({ lines: [{ number: 0, text: "alpha" }], total: 1 }),
     );
-    state.loadToken = 41;
+    state.view.loadToken = 41;
 
     await reloadViewport();
 
-    expect(state.loadToken).toBe(42);
-    expect(state.cache.lines).toEqual([{ number: 0, text: "alpha" }]);
+    expect(state.view.loadToken).toBe(42);
+    expect(state.view.cache.lines).toEqual([{ number: 0, text: "alpha" }]);
   });
 
   it("drops a stale position overview when its refresh fails", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ lines: [], total: 1 }));
     vi.mocked(refreshChangeHistoryOverview).mockRejectedValueOnce(new Error("overview offline"));
-    state.changeHistoryOverview = { revision: 1 };
+    state.markers.changeHistoryOverview = { revision: 1 };
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await reloadViewport();
 
-    expect(state.changeHistoryOverview).toBeNull();
+    expect(state.markers.changeHistoryOverview).toBeNull();
     expect(consoleError).toHaveBeenCalledOnce();
     consoleError.mockRestore();
   });
@@ -144,7 +153,7 @@ describe("edit generation guards", () => {
       }
       throw new Error(`unexpected fetch ${path}`);
     });
-    state.sel = {
+    state.caret.selection = {
       anchor: { line: 1, col: 3 },
       head: { line: 2, col: 3 },
       rect: true,
@@ -157,33 +166,33 @@ describe("edit generation guards", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
-    state.editGen++;
-    state.sel = null;
-    state.caret = { line: 0, col: 1 };
-    state.activeLine = 0;
+    state.caret.editGeneration++;
+    state.caret.selection = null;
+    state.caret.position = { line: 0, col: 1 };
+    state.caret.activeLine = 0;
     edit.resolve(jsonResponse({ stats: { total_lines: 10 } }));
 
     await settleEditQueue();
 
-    expect(state.sel).toBeNull();
-    expect(state.caret).toEqual({ line: 0, col: 1 });
+    expect(state.caret.selection).toBeNull();
+    expect(state.caret.position).toEqual({ line: 0, col: 1 });
     expect(setCaret).not.toHaveBeenCalled();
   });
 });
 
 describe("whole-line edit construction (#129)", () => {
   beforeEach(() => {
-    state.stat = { open: true };
-    state.docGen = 1;
-    state.editGen = 0;
-    state.first = 0;
-    state.caret = { line: 1, col: 0 };
-    state.activeLine = 1;
-    state.goalCol = 0;
-    state.cache = { start: 0, lines: [] };
-    state.sel = null;
-    state.extraCursors = [];
-    state.loadToken = 0;
+    state.doc.stat = { open: true };
+    state.doc.generation = 1;
+    state.caret.editGeneration = 0;
+    state.view.first = 0;
+    state.caret.position = { line: 1, col: 0 };
+    state.caret.activeLine = 1;
+    state.caret.goalCol = 0;
+    state.view.cache = { start: 0, lines: [] };
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
+    state.view.loadToken = 0;
     vi.clearAllMocks();
   });
 
@@ -194,7 +203,7 @@ describe("whole-line edit construction (#129)", () => {
 
   async function captureLineEdits(lines: string[], action: () => void) {
     const batches: unknown[][] = [];
-    state.total = lines.length;
+    state.view.total = lines.length;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input, init?: RequestInit) => {
@@ -226,7 +235,7 @@ describe("whole-line edit construction (#129)", () => {
   }
 
   it("duplicates the selected line block with one insertion edit", async () => {
-    state.caret = { line: 1, col: 3 };
+    state.caret.position = { line: 1, col: 3 };
     const batches = await captureLineEdits(["alpha", "bravo", "charlie"], duplicateLines);
 
     expect(batches).toEqual([[{ l0: 1, c0: 5, l1: 1, c1: 5, text: "\nbravo" }]]);
@@ -246,8 +255,8 @@ describe("whole-line edit construction (#129)", () => {
       { l0: 1, c0: 0, l1: 3, c1: 1, text: "d\nb\nc" },
     ],
   ])("moves a selected block %s with one replacement edit", async (_label, dir, sel, edit) => {
-    state.sel = sel;
-    state.caret = { line: 2, col: 1 };
+    state.caret.selection = sel;
+    state.caret.position = { line: 2, col: 1 };
     const batches = await captureLineEdits(["a", "b", "c", "d"], () => moveLines(dir));
 
     expect(batches).toEqual([[edit]]);

@@ -27,15 +27,15 @@ export function setAppTitle(title) {
 
 export function dirtyTabNames() {
   const names = [];
-  for (const t of state.tabs || []) {
+  for (const t of state.doc.tabs || []) {
     if (t.dirty && t.name) names.push(t.name);
   }
-  if (state.stat?.dirty && names.length === 0) names.push(displayName(state.stat.path));
+  if (state.doc.stat?.dirty && names.length === 0) names.push(displayName(state.doc.stat.path));
   return [...new Set(names)].filter(Boolean);
 }
 
 export function hasDirtyDocuments() {
-  return !!state.stat?.dirty || dirtyTabNames().length > 0;
+  return !!state.doc.stat?.dirty || dirtyTabNames().length > 0;
 }
 
 export function dirtyCloseMessage() {

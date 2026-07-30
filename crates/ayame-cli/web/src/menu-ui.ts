@@ -23,6 +23,7 @@ import {
   renderCommandPalette,
   setPaletteItems,
 } from "./palette.js";
+import { currentOpenerMode } from "./opener-state.js";
 
 export function showAppMenu(id) {
   hideFileMenu();
@@ -30,8 +31,8 @@ export function showAppMenu(id) {
     renderFileMenuRecentFiles();
     const saveAll = document.getElementById("save-all") as HTMLButtonElement | null;
     const close = document.getElementById("close-tab") as HTMLButtonElement | null;
-    if (saveAll) saveAll.disabled = !(state.tabs || []).some((tab) => tab.dirty);
-    if (close) close.disabled = !(state.tabs || []).some((tab) => tab.active);
+    if (saveAll) saveAll.disabled = !(state.doc.tabs || []).some((tab) => tab.dirty);
+    if (close) close.disabled = !(state.doc.tabs || []).some((tab) => tab.active);
   }
   if (id === "view") {
     for (const [id, on] of [
@@ -41,7 +42,7 @@ export function showAppMenu(id) {
       ["menu-toggle-minimap", state.settings.minimap !== false],
       ["menu-toggle-zsp-underline", !!state.settings.zenkakuUnderline],
       ["menu-toggle-wrap", !!state.settings.wordWrap],
-      ["menu-toggle-tail", state.followTail],
+      ["menu-toggle-tail", state.doc.followTail],
     ] as const) {
       const item = $(id);
       if (!item) continue;
@@ -101,8 +102,8 @@ export function applyLocale() {
   updateStatusPos();
   updateFindCountLabel();
   updateTailUI();
-  if (openerVisible()) configureOpener(state.openerMode);
-  if (state.tabs?.length) renderTabs(state.tabs);
+  if (openerVisible()) configureOpener(currentOpenerMode());
+  if (state.doc.tabs?.length) renderTabs(state.doc.tabs);
   if (keymapVisible()) renderKeymapRows();
   if (commandPaletteVisible()) {
     setPaletteItems(commandPaletteItems());

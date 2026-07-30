@@ -40,13 +40,13 @@ let pollEpoch = 0;
 let hitOffset = 0;
 
 function operationActive() {
-  return ["scanning", "updating"].includes(state.analysisStatus?.phase);
+  return ["scanning", "updating"].includes(state.analysis.status?.phase);
 }
 
 function activeProfile(): AnalysisProfile | null {
   return (
-    state.analysisProfiles.find((profile) => profile.id === state.activeAnalysisProfile) ||
-    state.analysisProfiles[0] ||
+    state.analysis.profiles.find((profile) => profile.id === state.analysis.activeProfile) ||
+    state.analysis.profiles[0] ||
     null
   );
 }
@@ -64,21 +64,21 @@ function cloneProfile(profile: AnalysisProfile): AnalysisProfile {
 }
 
 function setProfile(profile: AnalysisProfile) {
-  state.activeAnalysisProfile = profile.id;
-  state.analysisMatchers = compileAnalysisMatchers(profile);
-  state.analysisVisibleRuleIds = new Set(
+  state.analysis.activeProfile = profile.id;
+  state.analysis.matchers = compileAnalysisMatchers(profile);
+  state.analysis.visibleRuleIds = new Set(
     profile.rules.filter((rule) => rule.enabled).map((rule) => rule.id),
   );
   if (
-    !state.analysisSelectedRule ||
-    !profile.rules.some((rule) => rule.id === state.analysisSelectedRule)
+    !state.analysis.selectedRule ||
+    !profile.rules.some((rule) => rule.id === state.analysis.selectedRule)
   ) {
-    state.analysisSelectedRule = profile.rules.find((rule) => rule.enabled)?.id || null;
+    state.analysis.selectedRule = profile.rules.find((rule) => rule.enabled)?.id || null;
   }
 }
 
 function persistProfiles() {
-  saveAnalysisProfilesShared(state.analysisProfiles, state.activeAnalysisProfile);
+  saveAnalysisProfilesShared(state.analysis.profiles, state.analysis.activeProfile);
 }
 
 function option(value: string, text: string) {
@@ -91,11 +91,11 @@ function option(value: string, text: string) {
 function renderProfileSelect() {
   const select = $("analysis-profile-select");
   select.textContent = "";
-  for (const profile of state.analysisProfiles) {
+  for (const profile of state.analysis.profiles) {
     select.append(option(profile.id, profile.name));
   }
   select.value = activeProfile()?.id || "";
-  $("analysis-profile-new").disabled = state.analysisProfiles.length >= ANALYSIS_MAX_PROFILES;
+  $("analysis-profile-new").disabled = state.analysis.profiles.length >= ANALYSIS_MAX_PROFILES;
 }
 
 function checkbox(className: string, checked: boolean, label: string) {
@@ -234,13 +234,13 @@ function readProfileForm(): AnalysisProfile {
 
 function invalidateCurrentOperation(message = "") {
   pollEpoch++;
-  const operationId = state.analysisOperationId;
+  const operationId = state.analysis.operationId;
   if (operationId && operationActive()) {
     void apiPost("/api/analysis/cancel", { id: operationId }).catch(() => {});
   }
-  if (state.analysisStatus) {
-    state.analysisStatus = {
-      ...state.analysisStatus,
+  if (state.analysis.status) {
+    state.analysis.status = {
+      ...state.analysis.status,
       phase: "stale",
       message: message || t("analysis.stale"),
     };
@@ -251,9 +251,9 @@ function invalidateCurrentOperation(message = "") {
 function saveProfileFromForm() {
   try {
     const profile = readProfileForm();
-    const index = state.analysisProfiles.findIndex((item) => item.id === profile.id);
-    if (index >= 0) state.analysisProfiles[index] = profile;
-    else state.analysisProfiles.push(profile);
+    const index = state.analysis.profiles.findIndex((item) => item.id === profile.id);
+    if (index >= 0) state.analysis.profiles[index] = profile;
+    else state.analysis.profiles.push(profile);
     setProfile(profile);
     persistProfiles();
     invalidateCurrentOperation(t("analysis.profileChanged"));
@@ -287,7 +287,7 @@ function newRule(): AnalysisRuleConfig {
 }
 
 async function deleteActiveProfile() {
-  if (state.analysisProfiles.length <= 1) {
+  if (state.analysis.profiles.length <= 1) {
     flashCount(t("analysis.oneProfileRequired"), "error");
     return;
   }
@@ -305,15 +305,15 @@ async function deleteActiveProfile() {
   ) {
     return;
   }
-  state.analysisProfiles = state.analysisProfiles.filter((item) => item.id !== profile.id);
-  setProfile(state.analysisProfiles[0]);
+  state.analysis.profiles = state.analysis.profiles.filter((item) => item.id !== profile.id);
+  setProfile(state.analysis.profiles[0]);
   persistProfiles();
   invalidateCurrentOperation(t("analysis.profileChanged"));
   renderProfileForm();
 }
 
 function addProfile() {
-  if (state.analysisProfiles.length >= ANALYSIS_MAX_PROFILES) {
+  if (state.analysis.profiles.length >= ANALYSIS_MAX_PROFILES) {
     flashCount(t("analysis.maxProfiles", { count: ANALYSIS_MAX_PROFILES }), "error");
     return;
   }
@@ -324,7 +324,7 @@ function addProfile() {
   profile.rules.forEach((rule) => {
     rule.id = id("rule");
   });
-  state.analysisProfiles.push(profile);
+  state.analysis.profiles.push(profile);
   setProfile(profile);
   persistProfiles();
   renderProfileForm();
@@ -343,12 +343,12 @@ function phaseText(status: AnalysisStatus) {
 }
 
 function renderStrip() {
-  const status = state.analysisStatus as AnalysisStatus | null;
+  const status = state.analysis.status as AnalysisStatus | null;
   const strip = $("analysis-strip");
   strip.classList.toggle("hidden", !status);
   if (!status) return;
   const profile =
-    state.analysisProfiles.find((item) => item.id === status.profile_id) || activeProfile();
+    state.analysis.profiles.find((item) => item.id === status.profile_id) || activeProfile();
   $("analysis-manage").textContent = profile?.name || t("analysis.title");
   const chips = $("analysis-chips");
   chips.textContent = "";
@@ -356,7 +356,7 @@ function renderStrip() {
     const chip = document.createElement("div");
     chip.className = "analysis-chip";
     chip.dataset.analysisColor = rule.color;
-    const visible = state.analysisVisibleRuleIds.has(rule.id);
+    const visible = state.analysis.visibleRuleIds.has(rule.id);
     chip.classList.toggle("off", !visible);
 
     const toggle = document.createElement("button");
@@ -373,8 +373,8 @@ function renderStrip() {
     count.textContent = commas(rule.count);
     toggle.append(document.createTextNode(rule.name), count);
     toggle.addEventListener("click", () => {
-      if (state.analysisVisibleRuleIds.has(rule.id)) state.analysisVisibleRuleIds.delete(rule.id);
-      else state.analysisVisibleRuleIds.add(rule.id);
+      if (state.analysis.visibleRuleIds.has(rule.id)) state.analysis.visibleRuleIds.delete(rule.id);
+      else state.analysis.visibleRuleIds.add(rule.id);
       renderStrip();
       scheduleRender();
     });
@@ -408,7 +408,7 @@ function renderStrip() {
 }
 
 function renderModalStatus() {
-  const status = state.analysisStatus as AnalysisStatus | null;
+  const status = state.analysis.status as AnalysisStatus | null;
   const summary = $("analysis-summary");
   const results = $("analysis-results");
   if (!status) {
@@ -423,13 +423,13 @@ function renderModalStatus() {
   summary.textContent = `${phaseText(status)}${counts ? ` — ${counts}` : ""}`;
   results.classList.toggle("hidden", status.phase !== "complete");
   const select = $("analysis-result-rule") as HTMLSelectElement;
-  const previous = select.value || state.analysisSelectedRule;
+  const previous = select.value || state.analysis.selectedRule;
   select.textContent = "";
   for (const rule of status.rules.filter((item) => item.enabled)) {
     select.append(option(rule.id, `${rule.name} (${commas(rule.count)})`));
   }
   if (status.rules.some((rule) => rule.id === previous && rule.enabled)) select.value = previous;
-  state.analysisSelectedRule = select.value || null;
+  state.analysis.selectedRule = select.value || null;
 }
 
 function renderAnalysisStatus() {
@@ -439,29 +439,29 @@ function renderAnalysisStatus() {
 }
 
 function applyStatus(status: AnalysisStatus) {
-  if (status.id !== state.analysisOperationId) return;
-  state.analysisStatus = status;
+  if (status.id !== state.analysis.operationId) return;
+  state.analysis.status = status;
   renderAnalysisStatus();
 }
 
 async function pollStatus(epoch: number) {
-  while (epoch === pollEpoch && state.analysisOperationId && operationActive()) {
+  while (epoch === pollEpoch && state.analysis.operationId && operationActive()) {
     await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_MS));
-    if (epoch !== pollEpoch || !state.analysisOperationId) return;
+    if (epoch !== pollEpoch || !state.analysis.operationId) return;
     try {
-      const operationId = state.analysisOperationId;
+      const operationId = state.analysis.operationId;
       const status = await api<AnalysisStatus>(
         `/api/analysis/status?id=${encodeURIComponent(operationId)}`,
       );
-      if (epoch !== pollEpoch || operationId !== state.analysisOperationId) return;
+      if (epoch !== pollEpoch || operationId !== state.analysis.operationId) return;
       applyStatus(status);
       if (status.phase === "complete" && modalVisible("analysis-modal")) {
         await loadHits(true);
       }
     } catch (error) {
       if (epoch !== pollEpoch) return;
-      state.analysisStatus = {
-        ...state.analysisStatus,
+      state.analysis.status = {
+        ...state.analysis.status,
         phase: "error",
         message: serverMessage(error),
       };
@@ -472,7 +472,7 @@ async function pollStatus(epoch: number) {
 }
 
 export async function runAnalysis() {
-  if (!state.stat?.open) {
+  if (!state.doc.stat?.open) {
     flashCount(t("analysis.noDocument"), "error");
     return;
   }
@@ -481,8 +481,8 @@ export async function runAnalysis() {
   await settleEditQueue();
   pollEpoch++;
   const epoch = pollEpoch;
-  state.analysisLastHits = new Map();
-  state.analysisSelectedRule = profile.rules.find((rule) => rule.enabled)?.id || null;
+  state.analysis.lastHits = new Map();
+  state.analysis.selectedRule = profile.rules.find((rule) => rule.enabled)?.id || null;
   setProfile(profile);
   try {
     const status = await apiPost<AnalysisStatus, AnalysisStartRequest>("/api/analysis/start", {
@@ -493,8 +493,8 @@ export async function runAnalysis() {
       void apiPost("/api/analysis/cancel", { id: status.id }).catch(() => {});
       return;
     }
-    state.analysisOperationId = status.id;
-    state.analysisStatus = status;
+    state.analysis.operationId = status.id;
+    state.analysis.status = status;
     renderAnalysisStatus();
     void pollStatus(epoch);
   } catch (error) {
@@ -504,12 +504,12 @@ export async function runAnalysis() {
 }
 
 export async function cancelAnalysis() {
-  if (!state.analysisOperationId) return;
+  if (!state.analysis.operationId) return;
   pollEpoch++;
   try {
     applyStatus(
       await apiPost("/api/analysis/cancel", {
-        id: state.analysisOperationId,
+        id: state.analysis.operationId,
       }),
     );
   } catch {
@@ -519,21 +519,21 @@ export async function cancelAnalysis() {
 
 async function currentByteAnchor() {
   const response = await api<LineByteResponse>(
-    `/api/linebyte?line=${state.caret.line}&col=${state.caret.col}`,
+    `/api/linebyte?line=${state.caret.position.line}&col=${state.caret.position.col}`,
   );
   return response.byte || 0;
 }
 
 export async function navigateRule(
-  ruleId = state.analysisSelectedRule,
+  ruleId = state.analysis.selectedRule,
   direction: "next" | "prev" = "next",
 ) {
-  const status = state.analysisStatus as AnalysisStatus | null;
+  const status = state.analysis.status as AnalysisStatus | null;
   if (!status || status.phase !== "complete" || !ruleId) return;
   if (status.tail_pending) await refreshAnalysisTail();
-  if (state.analysisStatus?.phase !== "complete" || !state.analysisOperationId) return;
-  const operationId = state.analysisOperationId;
-  const last = state.analysisLastHits.get(ruleId) as AnalysisHit | undefined;
+  if (state.analysis.status?.phase !== "complete" || !state.analysis.operationId) return;
+  const operationId = state.analysis.operationId;
+  const last = state.analysis.lastHits.get(ruleId) as AnalysisHit | undefined;
   let from = last ? last.byte : await currentByteAnchor();
   if (last && direction === "next") from += Math.max(1, last.byte_len);
   try {
@@ -544,15 +544,15 @@ export async function navigateRule(
       from: String(from),
     });
     const response = await api<AnalysisNavigateResponse>(`/api/analysis/navigate?${query}`);
-    if (operationId !== state.analysisOperationId || state.analysisStatus?.phase !== "complete") {
+    if (operationId !== state.analysis.operationId || state.analysis.status?.phase !== "complete") {
       return;
     }
     if (!response.hit) {
       flashCount(t("analysis.noMatches"), "error");
       return;
     }
-    state.analysisSelectedRule = ruleId;
-    state.analysisLastHits.set(ruleId, response.hit);
+    state.analysis.selectedRule = ruleId;
+    state.analysis.lastHits.set(ruleId, response.hit);
     setCaret(response.hit.line, response.hit.column, response.hit.column);
     revealCaret();
     await reloadViewport();
@@ -566,11 +566,11 @@ export async function navigateRule(
 }
 
 export function nextAnalysisMatch() {
-  return navigateRule(state.analysisSelectedRule, "next");
+  return navigateRule(state.analysis.selectedRule, "next");
 }
 
 export function previousAnalysisMatch() {
-  return navigateRule(state.analysisSelectedRule, "prev");
+  return navigateRule(state.analysis.selectedRule, "prev");
 }
 
 function appendHitRow(hit: AnalysisHit) {
@@ -586,7 +586,7 @@ function appendHitRow(hit: AnalysisHit) {
   text.textContent = `${hit.text}${hit.text_truncated ? "…" : ""}`;
   row.append(line, text);
   row.addEventListener("click", async () => {
-    state.analysisLastHits.set(state.analysisSelectedRule, hit);
+    state.analysis.lastHits.set(state.analysis.selectedRule, hit);
     setCaret(hit.line, hit.column, hit.column);
     revealCaret();
     await reloadViewport();
@@ -599,9 +599,9 @@ function appendHitRow(hit: AnalysisHit) {
 }
 
 async function loadHits(reset = false) {
-  const status = state.analysisStatus as AnalysisStatus | null;
+  const status = state.analysis.status as AnalysisStatus | null;
   const rule = ($("analysis-result-rule") as HTMLSelectElement).value;
-  const operationId = state.analysisOperationId;
+  const operationId = state.analysis.operationId;
   if (!status || status.phase !== "complete" || !rule || !operationId) return;
   if (reset) {
     hitOffset = 0;
@@ -615,7 +615,7 @@ async function loadHits(reset = false) {
       limit: String(HIT_PAGE),
     });
     const response = await api<AnalysisHitsResponse>(`/api/analysis/hits?${query}`);
-    if (operationId !== state.analysisOperationId || state.analysisStatus?.phase !== "complete") {
+    if (operationId !== state.analysis.operationId || state.analysis.status?.phase !== "complete") {
       return;
     }
     for (const hit of response.hits) appendHitRow(hit);
@@ -632,7 +632,7 @@ async function loadHits(reset = false) {
 }
 
 async function bookmarkSelectedRule() {
-  const status = state.analysisStatus as AnalysisStatus | null;
+  const status = state.analysis.status as AnalysisStatus | null;
   const ruleId = ($("analysis-result-rule") as HTMLSelectElement).value;
   const rule = status?.rules.find((item) => item.id === ruleId);
   if (!status || status.phase !== "complete" || !rule) return;
@@ -651,7 +651,7 @@ async function bookmarkSelectedRule() {
   try {
     while (start < rule.stored_hits) {
       const query = new URLSearchParams({
-        id: state.analysisOperationId,
+        id: state.analysis.operationId,
         rule: ruleId,
         start: String(start),
         limit: "200",
@@ -664,7 +664,7 @@ async function bookmarkSelectedRule() {
         { kind: "bookmark", lines },
       );
       added += mutation.added || 0;
-      state.bookmarkCount = mutation.count || state.bookmarkCount;
+      state.markers.bookmarkCount = mutation.count || state.markers.bookmarkCount;
       start += page.hits.length;
       if (mutation.limit_reached) break;
     }
@@ -686,7 +686,7 @@ async function saveSelectedRuleMatches() {
 }
 
 async function exportProfiles() {
-  const json = JSON.stringify(state.analysisProfiles, null, 2);
+  const json = JSON.stringify(state.analysis.profiles, null, 2);
   try {
     await navigator.clipboard.writeText(json);
     flashCount(t("analysis.exported"));
@@ -702,13 +702,13 @@ async function importProfiles() {
     const parsed = JSON.parse(value);
     const incoming = normalizeAnalysisProfiles(Array.isArray(parsed) ? parsed : [parsed]);
     if (!incoming.length) throw new Error(t("analysis.invalidProfile"));
-    const existingIds = new Set(state.analysisProfiles.map((profile) => profile.id));
-    const combined = normalizeAnalysisProfiles([...state.analysisProfiles, ...incoming]);
+    const existingIds = new Set(state.analysis.profiles.map((profile) => profile.id));
+    const combined = normalizeAnalysisProfiles([...state.analysis.profiles, ...incoming]);
     const added = combined.filter((profile) => !existingIds.has(profile.id));
     if (!added.length) {
       throw new Error(t("analysis.maxProfiles", { count: ANALYSIS_MAX_PROFILES }));
     }
-    state.analysisProfiles = combined;
+    state.analysis.profiles = combined;
     setProfile(added[0]);
     persistProfiles();
     invalidateCurrentOperation(t("analysis.profileChanged"));
@@ -720,15 +720,15 @@ async function importProfiles() {
 }
 
 export function openAnalysis() {
-  if (!state.analysisProfiles.length) {
-    state.analysisProfiles = [defaultAnalysisProfile()];
-    setProfile(state.analysisProfiles[0]);
+  if (!state.analysis.profiles.length) {
+    state.analysis.profiles = [defaultAnalysisProfile()];
+    setProfile(state.analysis.profiles[0]);
     persistProfiles();
   }
   renderProfileForm();
   setModalOpen($("analysis-modal"), true);
   queueMicrotask(() => $("analysis-profile-select").focus());
-  if (state.analysisStatus?.phase === "complete") void loadHits(true);
+  if (state.analysis.status?.phase === "complete") void loadHits(true);
 }
 
 export function closeAnalysis() {
@@ -741,42 +741,42 @@ export function analysisVisible() {
 }
 
 export function invalidateAnalysisForEdit() {
-  if (!state.analysisStatus) return;
+  if (!state.analysis.status) return;
   invalidateCurrentOperation(t("analysis.editedStale"));
 }
 
 export function handleAnalysisDocumentOpened(path: string) {
   pollEpoch++;
-  state.analysisOperationId = null;
-  state.analysisStatus = null;
-  state.analysisLastHits = new Map();
-  const associated = analysisProfileForPath(state.analysisProfiles, path);
+  state.analysis.operationId = null;
+  state.analysis.status = null;
+  state.analysis.lastHits = new Map();
+  const associated = analysisProfileForPath(state.analysis.profiles, path);
   const profile = associated || activeProfile();
   if (profile) {
     setProfile(profile);
     if (associated) persistProfiles();
   } else {
-    state.analysisMatchers = [];
-    state.analysisVisibleRuleIds = new Set();
+    state.analysis.matchers = [];
+    state.analysis.visibleRuleIds = new Set();
   }
   renderAnalysisStatus();
 }
 
 export function handleAnalysisFileChanged() {
-  if (state.analysisStatus) invalidateCurrentOperation(t("analysis.fileChanged"));
+  if (state.analysis.status) invalidateCurrentOperation(t("analysis.fileChanged"));
 }
 
 export async function refreshAnalysisTail() {
-  if (!state.analysisOperationId || state.analysisStatus?.phase !== "complete") return;
+  if (!state.analysis.operationId || state.analysis.status?.phase !== "complete") return;
   try {
     applyStatus(
       await apiPost("/api/analysis/tail", {
-        id: state.analysisOperationId,
+        id: state.analysis.operationId,
       }),
     );
   } catch (error) {
-    state.analysisStatus = {
-      ...state.analysisStatus,
+    state.analysis.status = {
+      ...state.analysis.status,
       phase: "stale",
       message: serverMessage(error),
     };
@@ -791,14 +791,14 @@ export function initAnalysis() {
     refreshTail: refreshAnalysisTail,
   });
   const persisted = loadAnalysisProfilesShared();
-  state.analysisProfiles = normalizeAnalysisProfiles(
-    state.analysisProfiles.length ? state.analysisProfiles : persisted.profiles,
+  state.analysis.profiles = normalizeAnalysisProfiles(
+    state.analysis.profiles.length ? state.analysis.profiles : persisted.profiles,
   );
-  if (!state.analysisProfiles.length) state.analysisProfiles = [defaultAnalysisProfile()];
-  state.activeAnalysisProfile =
-    state.analysisProfiles.find((profile) => profile.id === state.activeAnalysisProfile)?.id ||
-    state.analysisProfiles.find((profile) => profile.id === persisted.active)?.id ||
-    state.analysisProfiles[0].id;
+  if (!state.analysis.profiles.length) state.analysis.profiles = [defaultAnalysisProfile()];
+  state.analysis.activeProfile =
+    state.analysis.profiles.find((profile) => profile.id === state.analysis.activeProfile)?.id ||
+    state.analysis.profiles.find((profile) => profile.id === persisted.active)?.id ||
+    state.analysis.profiles[0].id;
   setProfile(activeProfile());
   persistProfiles();
 
@@ -808,7 +808,7 @@ export function initAnalysis() {
     if (event.target === $("analysis-modal")) closeAnalysis();
   });
   $("analysis-profile-select").addEventListener("change", () => {
-    const profile = state.analysisProfiles.find(
+    const profile = state.analysis.profiles.find(
       (item) => item.id === $("analysis-profile-select").value,
     );
     if (!profile) return;
@@ -829,7 +829,7 @@ export function initAnalysis() {
   $("analysis-import").addEventListener("click", importProfiles);
   $("analysis-export").addEventListener("click", exportProfiles);
   $("analysis-result-rule").addEventListener("change", () => {
-    state.analysisSelectedRule = $("analysis-result-rule").value;
+    state.analysis.selectedRule = $("analysis-result-rule").value;
     void loadHits(true);
   });
   $("analysis-hit-more").addEventListener("click", () => loadHits(false));

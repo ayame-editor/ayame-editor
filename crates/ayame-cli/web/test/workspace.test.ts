@@ -8,7 +8,10 @@ vi.mock("../src/editor.js", () => ({
   focusEditor: vi.fn(),
   render: vi.fn(),
   scheduleRender: vi.fn(),
+  setActiveLine: vi.fn(),
   setCaret: vi.fn(),
+  setSearchHits: vi.fn(),
+  setSelection: vi.fn(),
 }));
 vi.mock("../src/save.js", () => ({
   expectWalHandoff: vi.fn(),
@@ -44,6 +47,7 @@ vi.mock("../src/app.js", () => ({
 import { isNativeApp } from "../src/app.js";
 import { showPopupMenu } from "../src/popup-menu.js";
 import { state } from "../src/state.js";
+import { currentOpenerMode, setOpenerMode } from "../src/opener-state.js";
 import {
   browseRow,
   canDragOutToNewWindow,
@@ -159,7 +163,7 @@ describe("same-window tab ordering and overflow access (#166)", () => {
   });
 
   it("keeps the active tab visible and exposes every tab through the list button", () => {
-    const originalTabs = state.tabs;
+    const originalTabs = state.doc.tabs;
     const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -182,7 +186,7 @@ describe("same-window tab ordering and overflow access (#166)", () => {
       ]);
       expect(items.map((item) => !!item.checked)).toEqual([false, true, false]);
     } finally {
-      state.tabs = originalTabs;
+      state.doc.tabs = originalTabs;
       document.body.textContent = "";
       if (originalScroll) {
         Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScroll);
@@ -214,7 +218,7 @@ describe("Close Other Tabs ordering (#123)", () => {
 
 describe("opener keyboard navigation (#185)", () => {
   it("moves from the path input through both option lists and activates with Enter", () => {
-    const originalMode = state.openerMode;
+    const originalMode = currentOpenerMode();
     document.body.innerHTML = `
       <input id="opener-input" />
       <div id="opener-recent" role="listbox" tabindex="0"></div>
@@ -230,7 +234,7 @@ describe("opener keyboard navigation (#185)", () => {
     const activate = vi.fn();
     file.addEventListener("click", activate);
     document.getElementById("opener-list")?.append(file);
-    state.openerMode = "folder"; // the row's normal file click is intentionally inert in this mode
+    setOpenerMode("folder"); // the row's normal file click is intentionally inert in this mode
 
     try {
       resetOpenerSelection();
@@ -258,20 +262,20 @@ describe("opener keyboard navigation (#185)", () => {
       expect(enter.preventDefault).toHaveBeenCalled();
       expect(activate).toHaveBeenCalledOnce();
     } finally {
-      state.openerMode = originalMode;
+      setOpenerMode(originalMode);
       document.body.textContent = "";
       resetOpenerSelection();
     }
   });
 
   it("closes an ordinary opener with Escape", () => {
-    const originalStat = state.stat;
+    const originalStat = state.doc.stat;
     document.body.innerHTML = `
       <div id="opener" class="modal" aria-hidden="false"></div>
       <div id="opener-recent" role="listbox"></div>
       <div id="opener-list" role="listbox"></div>
     `;
-    state.stat = { open: true };
+    state.doc.stat = { open: true };
     const escape = { key: "Escape", preventDefault: vi.fn() };
     try {
       onOpenerListKeydown(escape);
@@ -279,7 +283,7 @@ describe("opener keyboard navigation (#185)", () => {
       expect(document.getElementById("opener")?.classList.contains("hidden")).toBe(true);
       expect(document.getElementById("opener")?.getAttribute("aria-hidden")).toBe("true");
     } finally {
-      state.stat = originalStat;
+      state.doc.stat = originalStat;
       document.body.textContent = "";
     }
   });

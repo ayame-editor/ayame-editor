@@ -17,6 +17,8 @@ import {
   scheduleRender,
   setCaret,
   setFirst,
+  setActiveLine,
+  setSelection,
   setSelectionRenderer,
 } from "./editor.js";
 import { lineLensFor, pasteText, typeText } from "./edits.js";
@@ -78,12 +80,12 @@ export function wordRangeAt(p) {
 }
 
 export function selectPrimaryRange(r) {
-  state.sel = { anchor: clonePoint(r.start), head: clonePoint(r.end) };
-  state.caret = clonePoint(r.end);
-  state.activeLine = state.caret.line;
-  state.goalCol = state.caret.col;
-  state.editGen++;
-  revealLine(state.caret.line);
+  setSelection({ anchor: clonePoint(r.start), head: clonePoint(r.end) });
+  state.caret.position = clonePoint(r.end);
+  setActiveLine(state.caret.position.line);
+  state.caret.goalCol = state.caret.position.col;
+  state.caret.editGeneration++;
+  revealLine(state.caret.position.line);
   focusEditor();
   scheduleRender();
 }
@@ -91,21 +93,23 @@ export function selectPrimaryRange(r) {
 export function promoteSelectionRange(r) {
   const nextKey = rangeKey(r);
   const old =
-    state.sel && !state.sel.rect ? normalizedRange(state.sel.anchor, state.sel.head) : null;
+    state.caret.selection && !state.caret.selection.rect
+      ? normalizedRange(state.caret.selection.anchor, state.caret.selection.head)
+      : null;
   if (old && !rangeEmpty(old) && rangeKey(old) !== nextKey) {
-    const exists = state.extraCursors.some((c) => {
+    const exists = state.caret.extraCursors.some((c) => {
       const cr = cursorSelectionRange(c);
       return cr && rangeKey(cr) === rangeKey(old);
     });
     if (!exists) {
-      state.extraCursors.push({
-        line: state.sel.head.line,
-        col: state.sel.head.col,
-        sel: cloneSelection(state.sel),
+      state.caret.extraCursors.push({
+        line: state.caret.selection.head.line,
+        col: state.caret.selection.head.col,
+        sel: cloneSelection(state.caret.selection),
       });
     }
   }
-  state.extraCursors = state.extraCursors.filter((c) => {
+  state.caret.extraCursors = state.caret.extraCursors.filter((c) => {
     const cr = cursorSelectionRange(c);
     return !cr || rangeKey(cr) !== nextKey;
   });
@@ -145,14 +149,14 @@ export async function findNextOccurrenceRange(query, fromByte, existing) {
 }
 
 export async function selectNextOccurrence() {
-  if (!state.stat?.open) return;
+  if (!state.doc.stat?.open) return;
   if (rectRange()) {
     flashCount(t("find.rectNoCtrlD"), "error");
     return;
   }
   let ranges = selectionRanges();
   if (!ranges.length) {
-    const r = wordRangeAt(state.caret);
+    const r = wordRangeAt(state.caret.position);
     if (!r) {
       flashCount(t("find.noWordToSelect"));
       return;
@@ -188,7 +192,7 @@ export function appendSelectionRect(layer, line, startCol, endCol, trailingNewli
   const rect = document.createElement("div");
   rect.className = "selrect";
   rect.style.left = `${left}px`;
-  rect.style.top = `${(line - state.first) * LINE_HEIGHT}px`;
+  rect.style.top = `${(line - state.view.first) * LINE_HEIGHT}px`;
   rect.style.width = `${Math.max(2, width)}px`;
   layer.append(rect);
 }
@@ -196,8 +200,8 @@ export function appendSelectionRect(layer, line, startCol, endCol, trailingNewli
 export function renderRangeSelection(layer, r) {
   if (!r || rangeEmpty(r)) return;
   const vis = rowsVisible() + OVERSCAN;
-  const from = Math.max(r.start.line, state.first);
-  const to = Math.min(r.end.line, state.first + vis);
+  const from = Math.max(r.start.line, state.view.first);
+  const to = Math.min(r.end.line, state.view.first + vis);
   for (let line = from; line <= to; line++) {
     const startCol = line === r.start.line ? r.start.col : 0;
     const len = lineLen(line);
@@ -214,8 +218,8 @@ export function renderSelection() {
   const rr = rectRange();
   if (rr) {
     const vis = rowsVisible() + OVERSCAN;
-    const from = Math.max(rr.l0, state.first);
-    const to = Math.min(rr.l1, state.first + vis);
+    const from = Math.max(rr.l0, state.view.first);
+    const to = Math.min(rr.l1, state.view.first + vis);
     for (let line = from; line <= to; line++) {
       appendSelectionRect(layer, line, rr.c0, rr.c1);
     }
@@ -233,7 +237,7 @@ export function initSelection() {
     const p = coordsFromEvent(e);
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       // Ctrl+Click (Cmd+Click on mac): toggle an extra cursor at the point.
-      if (state.stat?.open) toggleExtraCursorAt(p.line, p.col);
+      if (state.doc.stat?.open) toggleExtraCursorAt(p.line, p.col);
       focusEditor();
       return;
     }
@@ -243,40 +247,44 @@ export function initSelection() {
       return;
     }
     if (e.shiftKey) {
-      const anchor = state.sel ? state.sel.anchor : { ...state.caret };
-      state.sel = { anchor, head: p, rect: e.altKey };
-      state.dragAnchor = anchor;
-      state.dragMoved = true;
+      const anchor = state.caret.selection
+        ? state.caret.selection.anchor
+        : { ...state.caret.position };
+      setSelection({ anchor, head: p, rect: e.altKey });
+      state.caret.dragAnchor = anchor;
+      state.caret.dragMoved = true;
     } else {
-      state.sel = null; // a bare click collapses any selection to a caret
-      state.dragAnchor = p;
-      state.dragMoved = false;
+      setSelection(null); // a bare click collapses any selection to a caret
+      state.caret.dragAnchor = p;
+      state.caret.dragMoved = false;
     }
-    state.dragRect = e.altKey;
+    state.caret.dragRect = e.altKey;
     setCaret(p.line, p.col);
-    state.dragging = true;
+    state.caret.dragging = true;
     focusEditor();
   });
 
   window.addEventListener("mousemove", (e) => {
-    if (!state.dragging) return;
+    if (!state.caret.dragging) return;
     const p = coordsFromEvent(e);
-    const a = state.dragAnchor;
-    if (p.line !== a.line || p.col !== a.col) state.dragMoved = true;
-    if (state.dragMoved) state.sel = { anchor: a, head: p, rect: state.dragRect };
+    const a = state.caret.dragAnchor;
+    if (p.line !== a.line || p.col !== a.col) state.caret.dragMoved = true;
+    if (state.caret.dragMoved) {
+      setSelection({ anchor: a, head: p, rect: state.caret.dragRect });
+    }
     setCaret(p.line, p.col);
     // Auto-scroll when dragging past the top/bottom edge.
     const rect = content.getBoundingClientRect();
-    if (e.clientY < rect.top + 14) setFirst(state.first - 2);
-    else if (e.clientY > rect.bottom - 14) setFirst(state.first + 2);
+    if (e.clientY < rect.top + 14) setFirst(state.view.first - 2);
+    else if (e.clientY > rect.bottom - 14) setFirst(state.view.first + 2);
     scheduleRender();
   });
 
   window.addEventListener("mouseup", () => {
-    if (!state.dragging) return;
-    state.dragging = false;
-    state.dragRect = false;
-    if (!state.dragMoved) state.sel = null; // plain click → just the caret
+    if (!state.caret.dragging) return;
+    state.caret.dragging = false;
+    state.caret.dragRect = false;
+    if (!state.caret.dragMoved) setSelection(null); // plain click → just the caret
     scheduleRender();
   });
 
@@ -301,7 +309,7 @@ export function initSelection() {
       b = pivot + 1;
     while (a > 0 && classOf(cs[a - 1]) === cls) a--;
     while (b < cs.length && classOf(cs[b]) === cls) b++;
-    state.sel = { anchor: { line: p.line, col: a }, head: { line: p.line, col: b } };
+    setSelection({ anchor: { line: p.line, col: a }, head: { line: p.line, col: b } });
     setCaret(p.line, b);
     focusEditor();
   });
@@ -310,11 +318,11 @@ export function initSelection() {
 // Select one whole line; the newline is included by anchoring the head at the
 // start of the next line (matches VS Code's triple-click).
 export function selectLineAt(line) {
-  if (state.total === 0) return;
-  const l = Math.max(0, Math.min(line, state.total - 1));
-  const hasNext = l + 1 < state.total;
+  if (state.view.total === 0) return;
+  const l = Math.max(0, Math.min(line, state.view.total - 1));
+  const hasNext = l + 1 < state.view.total;
   const head = hasNext ? { line: l + 1, col: 0 } : { line: l, col: lineLen(l) };
-  state.sel = { anchor: { line: l, col: 0 }, head };
+  setSelection({ anchor: { line: l, col: 0 }, head });
   setCaret(head.line, head.col);
   focusEditor();
   scheduleRender();
@@ -359,7 +367,7 @@ export async function saveSelectionToFile() {
     return;
   }
   const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
-  const base = state.stat?.path || "selection";
+  const base = state.doc.stat?.path || "selection";
   const f = await askForm(
     t("dialog.saveSel.title"),
     [
@@ -433,18 +441,18 @@ export async function saveSelectionToFile() {
 }
 
 export async function selectAll() {
-  if (state.total === 0) return;
-  const last = state.total - 1;
+  if (state.view.total === 0) return;
+  const last = state.view.total - 1;
   // lineLen() guesses 0 for lines outside the cache window; a guessed head of
   // (last, 0) would make "select all → delete/type" silently spare the last
   // line's text. Resolve the real end-of-document column first, and select
   // nothing rather than almost-everything if it cannot be resolved.
   const len = (await lineLensFor([last])).get(last);
   if (len == null) return;
-  state.sel = {
+  setSelection({
     anchor: { line: 0, col: 0 },
     head: { line: last, col: len },
-  };
+  });
   setCaret(last, len, len);
   focusEditor();
   scheduleRender();
@@ -453,12 +461,12 @@ export async function selectAll() {
 // Ctrl+End: the caret target is the end of the (usually uncached) last line —
 // resolve its real length like selectAll does, never lineLen()'s guessed 0.
 export async function caretToDocEnd(extend) {
-  if (state.total === 0) return;
-  const last = state.total - 1;
+  if (state.view.total === 0) return;
+  const last = state.view.total - 1;
   const len = (await lineLensFor([last])).get(last);
   if (len == null) return;
   moveCaret(last, len, extend, len);
-  state.goalCol = state.caret.col;
+  state.caret.goalCol = state.caret.position.col;
 }
 
 // Fetch the selected text (bounded) and join with newlines.
@@ -545,42 +553,42 @@ export async function cutSelection() {
 // ---- multi-cursor -----------------------------------------------------------
 
 export function clearExtraCursors() {
-  if (state.extraCursors.length) {
-    state.extraCursors = [];
+  if (state.caret.extraCursors.length) {
+    state.caret.extraCursors = [];
     scheduleRender();
   }
 }
 
 export function clearExtraSelections() {
-  for (const c of state.extraCursors) c.sel = null;
+  for (const c of state.caret.extraCursors) c.sel = null;
 }
 
 // Ctrl+Click: add a caret; clicking an existing extra caret removes it; the
 // primary caret is left alone.
 export function toggleExtraCursorAt(line, col) {
-  if (line === state.caret.line && col === state.caret.col) return;
-  const i = state.extraCursors.findIndex((c) => c.line === line && c.col === col);
-  if (i >= 0) state.extraCursors.splice(i, 1);
+  if (line === state.caret.position.line && col === state.caret.position.col) return;
+  const i = state.caret.extraCursors.findIndex((c) => c.line === line && c.col === col);
+  if (i >= 0) state.caret.extraCursors.splice(i, 1);
   else {
-    state.sel = null;
+    setSelection(null);
     clearExtraSelections();
-    state.extraCursors.push({ line, col, sel: null });
+    state.caret.extraCursors.push({ line, col, sel: null });
   }
-  state.editGen++; // user cursor action: an in-flight edit must not clobber it
+  state.caret.editGeneration++; // user cursor action: an in-flight edit must not clobber it
   scheduleRender();
 }
 
 export function addExtraCursorAt(line, col) {
-  if (line === state.caret.line && col === state.caret.col) return;
-  if (state.extraCursors.some((c) => c.line === line && c.col === col)) return;
-  state.sel = null;
+  if (line === state.caret.position.line && col === state.caret.position.col) return;
+  if (state.caret.extraCursors.some((c) => c.line === line && c.col === col)) return;
+  setSelection(null);
   clearExtraSelections();
-  state.extraCursors.push({ line, col, sel: null });
-  state.editGen++; // user cursor action: an in-flight edit must not clobber it
+  state.caret.extraCursors.push({ line, col, sel: null });
+  state.caret.editGeneration++; // user cursor action: an in-flight edit must not clobber it
   // Keep the newest cursor visible, like revealCaret does for the primary.
   const vis = rowsVisible();
-  if (line < state.first) setFirst(line);
-  else if (line >= state.first + vis) setFirst(line - vis + 1);
+  if (line < state.view.first) setFirst(line);
+  else if (line >= state.view.first + vis) setFirst(line - vis + 1);
   focusEditor();
   scheduleRender();
 }
@@ -589,7 +597,7 @@ export function addExtraCursorAt(line, col) {
 // topmost / bottommost cursor, preserving its column — clamped to the target
 // line's REAL length, which may need a fetch when it is outside the cache.
 export async function addCursorAbove() {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   const top = allCursors()[0];
   if (top.line <= 0) return;
   const line = top.line - 1;
@@ -598,10 +606,10 @@ export async function addCursorAbove() {
 }
 
 export async function addCursorBelow() {
-  if (!state.stat?.open || state.total === 0) return;
+  if (!state.doc.stat?.open || state.view.total === 0) return;
   const cs = allCursors();
   const bottom = cs[cs.length - 1];
-  if (bottom.line >= state.total - 1) return;
+  if (bottom.line >= state.view.total - 1) return;
   const line = bottom.line + 1;
   const lens = await lineLensFor([line]);
   addExtraCursorAt(line, Math.min(bottom.col, lens.get(line) ?? 0));

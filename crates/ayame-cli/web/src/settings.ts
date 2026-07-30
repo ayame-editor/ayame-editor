@@ -590,7 +590,7 @@ export async function openThemeJsonDoc() {
 // Apply the theme JSON in the active buffer (a *.ayame-theme.json tab).
 export async function applyThemeFromBuffer() {
   try {
-    const count = Math.min(state.total, MAX_COPY_LINES);
+    const count = Math.min(state.view.total, MAX_COPY_LINES);
     const r = await api<LinesResponse>(`/api/lines?start=0&count=${count}`);
     const text = r.lines.map((l) => l.text).join("\n");
     const theme = JSON.parse(text);
@@ -634,7 +634,7 @@ export async function openKeymapJsonDoc() {
 
 export async function applyKeymapFromBuffer() {
   try {
-    const count = Math.min(state.total, MAX_COPY_LINES);
+    const count = Math.min(state.view.total, MAX_COPY_LINES);
     const r = await api<LinesResponse>(`/api/lines?start=0&count=${count}`);
     const text = r.lines.map((l) => l.text).join("\n");
     const parsed = JSON.parse(text);

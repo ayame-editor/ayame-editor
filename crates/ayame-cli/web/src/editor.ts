@@ -1,11 +1,12 @@
 // Ayame Editor — editor module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas } from "./dom.js";
-import { LINE_HEIGHT, OVERSCAN, PAD, state } from "./state.js";
+import { LINE_HEIGHT, OVERSCAN, PAD, state, type Selection } from "./state.js";
 import {
   api,
   type ChangeHistoryResponse,
   type LineByteResponse,
   type LinesResponse,
+  type SearchHit,
 } from "./api.js";
 import { t } from "./i18n.js";
 import { highlightSpans } from "./syntax.js";
@@ -38,6 +39,21 @@ export function setModalOpenProvider(provider) {
 
 export function setStatusPositionRenderer(renderer) {
   statusPositionRenderer = renderer;
+}
+
+export function setSelection(selection: Selection | null) {
+  state.caret.selection = selection;
+  scheduleRender();
+}
+
+export function setSearchHits(hits: SearchHit[] | null) {
+  state.search.hits = hits;
+  scheduleRender();
+}
+
+export function setActiveLine(line: number) {
+  state.caret.activeLine = line;
+  scheduleRender();
 }
 
 // Horizontal-scroll preservation. A not-yet-loaded row renders as a narrow "⋯"
@@ -125,61 +141,61 @@ export function rowsFullyVisible() {
 }
 
 export function maxFirst() {
-  // state.total + 1: the [EOF] marker is the document's final row, so at the
+  // state.view.total + 1: the [EOF] marker is the document's final row, so at the
   // bottom of the range the last line and the marker are both shown whole.
-  return Math.max(0, state.total + 1 - rowsFullyVisible());
+  return Math.max(0, state.view.total + 1 - rowsFullyVisible());
 }
 
 // ---- data ------------------------------------------------------------------
 
 export function cachedLine(line) {
-  const c = state.cache;
+  const c = state.view.cache;
   const i = line - c.start;
   return i >= 0 && i < c.lines.length ? c.lines[i] : null;
 }
 
 export function cacheLineResponse(start: number, response: LinesResponse) {
-  state.cache = { start, lines: response.lines };
+  state.view.cache = { start, lines: response.lines };
   const markerLines = (kind) =>
     new Set(
       (response.markers || [])
         .filter((marker) => marker.kind === kind)
         .map((marker) => marker.line),
     );
-  state.bookmarks = markerLines("bookmark");
-  state.changeSaved = markerLines("change-saved");
-  state.changeUnsaved = markerLines("change-unsaved");
-  state.changeDeleted = markerLines("change-deleted");
-  state.total = response.total;
+  state.markers.bookmarks = markerLines("bookmark");
+  state.markers.changeSaved = markerLines("change-saved");
+  state.markers.changeUnsaved = markerLines("change-unsaved");
+  state.markers.changeDeleted = markerLines("change-deleted");
+  state.view.total = response.total;
 }
 
 export async function refreshChangeHistoryOverview() {
-  state.changeHistoryOverview = await api<ChangeHistoryResponse>("/api/change-history");
+  state.markers.changeHistoryOverview = await api<ChangeHistoryResponse>("/api/change-history");
 }
 
 export function ensureData(start, count) {
   const need0 = start;
-  const need1 = Math.min(state.total, start + count);
-  const c = state.cache;
+  const need1 = Math.min(state.view.total, start + count);
+  const c = state.view.cache;
   if (c.lines.length && need0 >= c.start && need1 <= c.start + c.lines.length) {
     return; // already cached
   }
   const fstart = Math.max(0, start - PAD);
   const fcount = count + 2 * PAD;
-  const token = ++state.loadToken;
+  const token = ++state.view.loadToken;
   const url = `/api/lines?start=${fstart}&count=${fcount}`;
   api<LinesResponse>(url)
     .catch(async (firstError) => {
-      if (token !== state.loadToken) throw firstError;
+      if (token !== state.view.loadToken) throw firstError;
       return api<LinesResponse>(url);
     })
     .then((res) => {
-      if (token !== state.loadToken) return; // a newer request superseded us
+      if (token !== state.view.loadToken) return; // a newer request superseded us
       cacheLineResponse(fstart, res);
       render();
     })
     .catch((e) => {
-      if (token !== state.loadToken) return;
+      if (token !== state.view.loadToken) return;
       console.error("lines fetch failed", e);
       flashCount(t("editor.reloadError"), "error");
     });
@@ -230,13 +246,13 @@ export function lineNumberChars(maxLine) {
 
 function changeStateForLine(line) {
   if (state.settings.showChangeHistory === false) return null;
-  const status = state.changeUnsaved.has(line)
+  const status = state.markers.changeUnsaved.has(line)
     ? "unsaved"
-    : state.changeSaved.has(line)
+    : state.markers.changeSaved.has(line)
       ? "saved"
       : null;
   if (!status) return null;
-  return { status, deleted: state.changeDeleted.has(line) };
+  return { status, deleted: state.markers.changeDeleted.has(line) };
 }
 
 function changeStateLabel(change) {
@@ -261,7 +277,7 @@ export function fillRow(row, line, rec) {
   row.className = "row";
   row.dataset.line = String(line);
   ln.textContent = formatLineNo(line + 1);
-  const bookmarked = state.bookmarks.has(line);
+  const bookmarked = state.markers.bookmarks.has(line);
   const change = applyRowChangeState(row, line);
   row.classList.toggle("bookmarked", bookmarked);
   ln.setAttribute("role", "button");
@@ -283,7 +299,7 @@ export function fillRow(row, line, rec) {
   if (rec == null) {
     tx.classList.add("pending");
     tx.textContent = "⋯";
-  } else if (state.matcher || state.analysisMatchers.length) {
+  } else if (state.search.matcher || state.analysis.matchers.length) {
     appendLayeredHighlighted(tx, rec.text);
   } else if (state.settings.syntaxHighlight !== false && appendSyntaxHighlighted(tx, rec.text)) {
     // rendered by appendSyntaxHighlighted
@@ -295,7 +311,7 @@ export function fillRow(row, line, rec) {
   if (rec != null && state.settings.showWhitespace) appendEol(tx);
   // Hide the current-line highlight while a selection exists — the two
   // washes stack otherwise and the selection becomes hard to read.
-  row.classList.toggle("active", line === state.activeLine && !selectionPresent());
+  row.classList.toggle("active", line === state.caret.activeLine && !selectionPresent());
 }
 
 export function fillEofRow(row) {
@@ -303,7 +319,7 @@ export function fillEofRow(row) {
   row.dataset.line = "-1";
   const ln = row.firstChild;
   ln.textContent = "";
-  const change = applyRowChangeState(row, state.total);
+  const change = applyRowChangeState(row, state.view.total);
   if (change) {
     const label = t("changeHistory.eofLabel", { state: changeStateLabel(change) });
     ln.setAttribute("role", "img");
@@ -431,7 +447,7 @@ export function gutterPixels() {
   const rootStyle = getComputedStyle(document.documentElement);
   const tokenPixels = (name) => Number.parseFloat(rootStyle.getPropertyValue(name).trim()) || 0;
   return (
-    lineNumberChars(state.total) * charWidth() +
+    lineNumberChars(state.view.total) * charWidth() +
     tokenPixels("--gutter-pad-start") +
     tokenPixels("--gutter-pad-end") +
     tokenPixels("--gutter-border-width")
@@ -443,8 +459,8 @@ export function coordsFromEvent(e) {
   const content = $("content");
   const rect = content.getBoundingClientRect();
   const rowInView = Math.floor((e.clientY - rect.top) / LINE_HEIGHT);
-  let line = state.first + Math.max(0, rowInView);
-  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  let line = state.view.first + Math.max(0, rowInView);
+  line = Math.max(0, Math.min(line, Math.max(0, state.view.total - 1)));
   const x = e.clientX - rect.left + content.scrollLeft; // #content coordinates
   return { line, col: colFromX(line, x) };
 }
@@ -505,7 +521,7 @@ export function appendEol(container) {
 }
 
 export function appendHighlighted(container, text) {
-  const re = state.matcher;
+  const re = state.search.matcher;
   re.lastIndex = 0;
   let last = 0;
   let m;
@@ -528,14 +544,14 @@ export function appendHighlighted(container, text) {
 /// is resolved by `analysisRanges`; the ordinary `<mark>` stays innermost so
 /// the active Find query remains the strongest visual signal.
 export function appendLayeredHighlighted(container, text) {
-  const analysis = analysisRanges(text, state.analysisMatchers, state.analysisVisibleRuleIds);
+  const analysis = analysisRanges(text, state.analysis.matchers, state.analysis.visibleRuleIds);
   const search = [];
-  if (state.matcher) {
-    state.matcher.lastIndex = 0;
+  if (state.search.matcher) {
+    state.search.matcher.lastIndex = 0;
     let match;
-    while ((match = state.matcher.exec(text)) !== null) {
+    while ((match = state.search.matcher.exec(text)) !== null) {
       if (match[0].length === 0) {
-        state.matcher.lastIndex++;
+        state.search.matcher.lastIndex++;
         continue;
       }
       search.push({ start: match.index, end: match.index + match[0].length });
@@ -578,7 +594,7 @@ export function appendLayeredHighlighted(container, text) {
 }
 
 export function appendSyntaxHighlighted(container, text) {
-  const spans = highlightSpans(text, state.stat?.path || "");
+  const spans = highlightSpans(text, state.doc.stat?.path || "");
   if (!spans) return false;
   for (let i = 0; i < spans.length; i++) {
     const span = spans[i];
@@ -600,24 +616,24 @@ export function render() {
   const vis = rowsVisible();
   const count = vis + OVERSCAN;
   ensurePool(count);
-  ensureData(state.first, count);
+  ensureData(state.view.first, count);
   ensureHKeeper(content);
 
   // Size the gutter to the widest visible line number (commas included). Every
   // `.ln` reads this through its tokenized width calculation, so normal rows
   // and the empty [EOF] gutter share one width and the numbers right-align.
-  const gutterCh = lineNumberChars(state.total);
+  const gutterCh = lineNumberChars(state.view.total);
   content.style.setProperty("--gutter-ch", `${gutterCh}ch`);
   let loading = false;
   for (let r = 0; r < pool.length; r++) {
     const row = pool[r];
-    const line = state.first + r;
-    if (r >= count || line > state.total) {
+    const line = state.view.first + r;
+    if (r >= count || line > state.view.total) {
       row.style.display = "none";
       continue;
     }
     row.style.display = "";
-    if (line === state.total) {
+    if (line === state.view.total) {
       fillEofRow(row); // one marker row just past the last line
     } else {
       const rec = cachedLine(line);
@@ -652,7 +668,7 @@ export function scheduleRender() {
 }
 
 export function setFirst(line) {
-  state.first = Math.min(Math.max(0, Math.round(line)), maxFirst());
+  state.view.first = Math.min(Math.max(0, Math.round(line)), maxFirst());
   scheduleRender();
 }
 
@@ -662,10 +678,10 @@ export function updateScrollbar() {
   const vh = $("viewport").clientHeight;
   const thumb = $("vthumb");
   const vis = rowsVisible();
-  const ratio = state.total > 0 ? Math.min(1, vis / state.total) : 1;
+  const ratio = state.view.total > 0 ? Math.min(1, vis / state.view.total) : 1;
   const thumbH = Math.max(24, vh * ratio);
   const mf = maxFirst();
-  const top = mf > 0 ? (vh - thumbH) * (state.first / mf) : 0;
+  const top = mf > 0 ? (vh - thumbH) * (state.view.first / mf) : 0;
   thumb.style.height = `${thumbH}px`;
   thumb.style.transform = `translateY(${top}px)`;
   renderSearchTicks(vh);
@@ -677,24 +693,25 @@ export function renderSearchTicks(vh) {
   ticks.textContent = "";
   const frag = document.createDocumentFragment();
   const maxTicks = 700;
-  if (state.query && state.searchHits?.length && state.total > 1) {
-    const step = Math.max(1, Math.ceil(state.searchHits.length / maxTicks));
-    const denom = Math.max(1, state.total - 1);
-    for (let i = 0; i < state.searchHits.length; i += step) {
-      const h = state.searchHits[i];
+  if (state.search.query && state.search.hits?.length && state.view.total > 1) {
+    const step = Math.max(1, Math.ceil(state.search.hits.length / maxTicks));
+    const denom = Math.max(1, state.view.total - 1);
+    for (let i = 0; i < state.search.hits.length; i += step) {
+      const h = state.search.hits[i];
       if (typeof h.line !== "number") continue;
       const tick = document.createElement("div");
       tick.className = "vtick";
-      if (state.lastMatch && h.byte === state.lastMatch.byte) tick.classList.add("current");
+      if (state.search.lastMatch && h.byte === state.search.lastMatch.byte)
+        tick.classList.add("current");
       const y = Math.max(0, Math.min(vh - 3, (h.line / denom) * (vh - 3)));
       tick.style.transform = `translateY(${y}px)`;
       frag.append(tick);
     }
   }
-  const analysisRules = (state.analysisStatus?.rules || []).filter(
+  const analysisRules = (state.analysis.status?.rules || []).filter(
     (rule) =>
       rule.enabled &&
-      state.analysisVisibleRuleIds.has(rule.id) &&
+      state.analysis.visibleRuleIds.has(rule.id) &&
       rule.histogram.some((count) => count > 0),
   );
   const occupied = analysisRules.reduce(
@@ -716,12 +733,13 @@ export function renderSearchTicks(vh) {
     });
   }
 
-  const change = state.settings.showChangeHistory === false ? null : state.changeHistoryOverview;
+  const change =
+    state.settings.showChangeHistory === false ? null : state.markers.changeHistoryOverview;
   if (change) {
     const groups = [
       ["saved", change.saved],
       ["unsaved", change.unsaved],
-    ];
+    ] as const;
     const occupiedChanges = groups.reduce(
       (sum, [, group]) => sum + group.histogram.reduce((n, value) => n + (value > 0 ? 1 : 0), 0),
       0,
@@ -772,7 +790,7 @@ export function initScrollbar() {
   thumb.addEventListener("mousedown", (e) => {
     dragging = true;
     startY = e.clientY;
-    startFirst = state.first;
+    startFirst = state.view.first;
     thumb.classList.add("drag");
     e.preventDefault();
     e.stopPropagation();
@@ -794,14 +812,14 @@ export function initScrollbar() {
     if (e.target === thumb) return;
     const rect = bar.getBoundingClientRect();
     const above = e.clientY < thumb.getBoundingClientRect().top;
-    setFirst(state.first + (above ? -1 : 1) * rowsVisible());
+    setFirst(state.view.first + (above ? -1 : 1) * rowsVisible());
     void rect;
   });
 }
 
 export function revealLine(line) {
   const vis = rowsVisible();
-  if (line < state.first || line >= state.first + vis) {
+  if (line < state.view.first || line >= state.view.first + vis) {
     setFirst(line - Math.floor(vis / 3));
   } else {
     scheduleRender();
@@ -810,20 +828,20 @@ export function revealLine(line) {
 }
 
 export function clearLineCache() {
-  state.cache = { start: 0, lines: [] };
-  state.bookmarks = new Set();
-  state.bookmarkCount = 0;
-  state.changeSaved = new Set();
-  state.changeUnsaved = new Set();
-  state.changeDeleted = new Set();
-  state.changeHistoryOverview = null;
-  state.loadToken++;
+  state.view.cache = { start: 0, lines: [] };
+  state.markers.bookmarks = new Set();
+  state.markers.bookmarkCount = 0;
+  state.markers.changeSaved = new Set();
+  state.markers.changeUnsaved = new Set();
+  state.markers.changeDeleted = new Set();
+  state.markers.changeHistoryOverview = null;
+  state.view.loadToken++;
 }
 
 // ===========================================================================
 //  Caret-based editing (Notepad / Sakura Editor style)
 //
-//  There is a single fluid caret (state.caret) you can place anywhere and type
+//  There is a single fluid caret (state.caret.position) you can place anywhere and type
 //  across lines. Every mutation is expressed as one range replacement and sent
 //  to the backend's /api/edit/replace_range, which records it as a single undo
 //  step and returns the resulting caret. Edits are serialized through a small
@@ -832,33 +850,35 @@ export function clearLineCache() {
 // ===========================================================================
 
 // Move the caret without touching the selection model wholesale (callers set
-// state.sel themselves). Keeps the active-line highlight on the caret line.
+// state.caret.selection themselves). Keeps the active-line highlight on the caret line.
 // `knownLen` bypasses the lineLen() clamp for a column the caller resolved
 // from the server — lineLen() guesses 0 outside the cache window.
 export function setCaret(line, col, knownLen = null) {
-  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  line = Math.max(0, Math.min(line, Math.max(0, state.view.total - 1)));
   col = Math.max(0, Math.min(col, knownLen ?? lineLen(line)));
-  state.caret = { line, col };
-  state.activeLine = line;
-  state.extraCursors = []; // any explicit caret placement collapses multi-cursor
-  state.editGen++; // user-driven caret placement (click, search, open, …)
+  state.caret.position = { line, col };
+  setActiveLine(line);
+  state.caret.extraCursors = []; // any explicit caret placement collapses multi-cursor
+  state.caret.editGeneration++; // user-driven caret placement (click, search, open, …)
 }
 
 // Caret motion for the keyboard: `extend` grows the selection from its anchor.
 // `knownLen` as in setCaret: a server-resolved length for an uncached line.
 export function moveCaret(line, col, extend, knownLen = null) {
-  line = Math.max(0, Math.min(line, Math.max(0, state.total - 1)));
+  line = Math.max(0, Math.min(line, Math.max(0, state.view.total - 1)));
   col = Math.max(0, Math.min(col, knownLen ?? lineLen(line)));
   if (extend) {
-    const anchor = state.sel ? state.sel.anchor : { ...state.caret };
-    state.sel = { anchor, head: { line, col } };
-    state.extraCursors = []; // entering a selection collapses multi-cursor
+    const anchor = state.caret.selection
+      ? state.caret.selection.anchor
+      : { ...state.caret.position };
+    setSelection({ anchor, head: { line, col } });
+    state.caret.extraCursors = []; // entering a selection collapses multi-cursor
   } else {
-    state.sel = null;
+    setSelection(null);
   }
-  state.caret = { line, col };
-  state.activeLine = line;
-  state.editGen++; // user-driven caret motion (arrows, Home/End, PageUp/Down)
+  state.caret.position = { line, col };
+  setActiveLine(line);
+  state.caret.editGeneration++; // user-driven caret motion (arrows, Home/End, PageUp/Down)
   revealCaret();
   scheduleRender();
 }
@@ -866,7 +886,7 @@ export function moveCaret(line, col, extend, knownLen = null) {
 export function focusEditor() {
   const hi = $("hidden-input");
   if (hi && document.activeElement !== hi) hi.focus({ preventScroll: true });
-  state.focused = true;
+  state.caret.focused = true;
   scheduleRender();
 }
 
@@ -876,13 +896,13 @@ export function revealCaret() {
   // Clamp against the *fully* visible row count: landing the caret on the
   // half-clipped bottom row would leave the line it is on unreadable.
   const vis = rowsFullyVisible();
-  if (state.caret.line < state.first) {
-    state.first = Math.min(state.caret.line, maxFirst());
-  } else if (state.caret.line >= state.first + vis) {
-    state.first = Math.min(Math.max(0, state.caret.line - vis + 1), maxFirst());
+  if (state.caret.position.line < state.view.first) {
+    state.view.first = Math.min(state.caret.position.line, maxFirst());
+  } else if (state.caret.position.line >= state.view.first + vis) {
+    state.view.first = Math.min(Math.max(0, state.caret.position.line - vis + 1), maxFirst());
   }
   const content = $("content");
-  const x = caretX(state.caret.line, state.caret.col);
+  const x = caretX(state.caret.position.line, state.caret.position.col);
   const view = content.clientWidth;
   const margin = 24;
   if (x - margin < content.scrollLeft) {
@@ -898,15 +918,17 @@ export function positionCaret() {
   const hi = $("hidden-input");
   if (!caretEl || !hi) return;
   const vis = rowsVisible();
-  const focusVisible = state.focused && !modalOpenProvider() && !state.composing;
+  const focusVisible = state.caret.focused && !modalOpenProvider() && !state.caret.composing;
   positionExtraCarets(vis, focusVisible);
   const onScreen =
-    !!state.stat?.open && state.caret.line >= state.first && state.caret.line < state.first + vis;
-  const show = onScreen && state.focused && !modalOpenProvider();
-  caretEl.classList.toggle("on", show && !state.composing);
+    !!state.doc.stat?.open &&
+    state.caret.position.line >= state.view.first &&
+    state.caret.position.line < state.view.first + vis;
+  const show = onScreen && state.caret.focused && !modalOpenProvider();
+  caretEl.classList.toggle("on", show && !state.caret.composing);
   if (!onScreen) return;
-  const x = caretX(state.caret.line, state.caret.col);
-  const y = (state.caret.line - state.first) * LINE_HEIGHT;
+  const x = caretX(state.caret.position.line, state.caret.position.col);
+  const y = (state.caret.position.line - state.view.first) * LINE_HEIGHT;
   caretEl.style.transform = `translate(${x}px, ${y}px)`;
   hi.style.transform = `translate(${x}px, ${y}px)`;
 }
@@ -917,7 +939,7 @@ export function positionCaret() {
 export const extraCaretPool = [];
 
 export function positionExtraCarets(vis, focusVisible) {
-  const cursors = state.extraCursors;
+  const cursors = state.caret.extraCursors;
   while (extraCaretPool.length < cursors.length) {
     const el = document.createElement("div");
     el.className = "caret extra";
@@ -929,11 +951,12 @@ export function positionExtraCarets(vis, focusVisible) {
   for (let i = 0; i < cursors.length; i++) {
     const c = cursors[i];
     const el = extraCaretPool[i];
-    const onScreen = !!state.stat?.open && c.line >= state.first && c.line < state.first + vis;
+    const onScreen =
+      !!state.doc.stat?.open && c.line >= state.view.first && c.line < state.view.first + vis;
     el.classList.toggle("on", onScreen && focusVisible);
     if (onScreen) {
       const x = caretX(c.line, c.col);
-      const y = (c.line - state.first) * LINE_HEIGHT;
+      const y = (c.line - state.view.first) * LINE_HEIGHT;
       el.style.transform = `translate(${x}px, ${y}px)`;
     }
   }

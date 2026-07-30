@@ -34,7 +34,7 @@ export function eol(lineEnding) {
 }
 
 export function updateStatusMeta() {
-  const stat = state.stat;
+  const stat = state.doc.stat;
   if (!stat) {
     setAppTitle("Ayame Editor");
     return;
@@ -88,19 +88,19 @@ export function updateStatusMeta() {
   });
   const tab = $("tabs").querySelector(".tab.active");
   if (tab) tab.classList.toggle("dirty", !!stat.dirty);
-  const activeTab = (state.tabs || []).find((item) => item.active);
+  const activeTab = (state.doc.tabs || []).find((item) => item.active);
   if (activeTab) activeTab.dirty = !!stat.dirty;
 }
 
 export function updateStatusPos() {
-  if (state.total === 0) {
+  if (state.view.total === 0) {
     $("st-pos").textContent = t("status.line0");
     return;
   }
   const pos = t("status.pos", {
-    line: commas(state.caret.line + 1),
-    col: commas(state.caret.col + 1),
+    line: commas(state.caret.position.line + 1),
+    col: commas(state.caret.position.col + 1),
   });
-  const count = state.extraCursors.length;
+  const count = state.caret.extraCursors.length;
   $("st-pos").textContent = count ? t("status.posCursors", { pos, n: count + 1 }) : pos;
 }

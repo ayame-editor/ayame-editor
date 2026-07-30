@@ -9,7 +9,10 @@ vi.mock("../src/editor.js", () => ({
   focusEditor: vi.fn(),
   render: vi.fn(),
   scheduleRender: vi.fn(),
+  setActiveLine: vi.fn(),
   setCaret: vi.fn(),
+  setSearchHits: vi.fn(),
+  setSelection: vi.fn(),
 }));
 vi.mock("../src/save.js", () => ({
   expectWalHandoff: vi.fn(),
@@ -51,6 +54,7 @@ vi.mock("../src/api.js", () => ({
 import { apiPost } from "../src/api.js";
 import { focusEditor } from "../src/editor.js";
 import { state } from "../src/state.js";
+import { setOpenerMode } from "../src/opener-state.js";
 import { configureOpener, hideOpener } from "../src/workspace.js";
 import { setModalOpen } from "../src/dom.js";
 
@@ -76,12 +80,12 @@ function openerDom() {
 describe("welcome opener escape hatch (#174)", () => {
   beforeEach(() => {
     openerDom();
-    state.openerMode = "open";
+    setOpenerMode("open");
     vi.clearAllMocks();
   });
 
   it("closes and starts a fresh buffer instead of trapping when nothing is open", async () => {
-    state.stat = { open: false } as never;
+    state.doc.stat = { open: false } as never;
     setModalOpen($("opener"), true);
     expect($("opener").classList.contains("hidden")).toBe(false);
     hideOpener();
@@ -92,7 +96,7 @@ describe("welcome opener escape hatch (#174)", () => {
   });
 
   it("closes normally and returns focus to the editor when a document is open", () => {
-    state.stat = { open: true } as never;
+    state.doc.stat = { open: true } as never;
     setModalOpen($("opener"), true);
     hideOpener();
     expect($("opener").classList.contains("hidden")).toBe(true);

@@ -1,4 +1,14 @@
 // Ayame Editor — state module. Type-stripped to JS at build time (build.rs, oxc).
+import type { ChangeHistoryResponse, LineRecord, SearchHit } from "./api.js";
+import type { AnalysisMatcher } from "./analysis-model.js";
+import type {
+  AnalysisHit,
+  AnalysisProfile,
+  AnalysisStatus,
+  BrowseEntry,
+  TabInfo,
+} from "./types/api.js";
+
 export let LINE_HEIGHT = 18;
 // tracks --lh-editor; updated by Settings (font size)
 // LINE_HEIGHT is reassigned only through this setter so other modules can
@@ -36,7 +46,35 @@ export const FONT_STACKS = {
   system: '"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif',
 };
 
-export const DEFAULT_SETTINGS = {
+export type ThemeConfig = Record<string, any>;
+
+export interface Settings {
+  theme: string;
+  font: string;
+  fontSize: number;
+  ruler: boolean;
+  lineNumberCommas: boolean;
+  confirmLastTabClose: boolean;
+  restoreSession: boolean;
+  updateCheckOnStartup: boolean;
+  showWhitespace: boolean;
+  syntaxHighlight: boolean;
+  showChangeHistory: boolean;
+  minimap: boolean;
+  zenkakuUnderline: boolean;
+  wordWrap: boolean;
+  bgMode: string;
+  bgImage: string | null;
+  bgImageName: string;
+  illus: number | null;
+  language: string;
+  keymap: Record<string, string | string[]>;
+  customThemes: Record<string, ThemeConfig>;
+  memoName: string;
+  lastSaveDir: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
   // "auto" follows the OS light/dark preference until the user picks a theme
   // explicitly (#153); any concrete id (iris-light, dark, …) then wins.
   theme: "auto",
@@ -131,71 +169,199 @@ export const DEFAULT_KEYMAP = Object.fromEntries(
   KEYMAP_ACTIONS.map(([id, _label, shortcut]) => [id, shortcut]),
 );
 
-export const state = {
-  windowId:
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : String(Date.now()) + "-" + Math.random().toString(36).slice(2),
-  total: 0,
-  first: 0, // top visible line (0-based)
-  fracAcc: 0, // sub-line wheel accumulator
-  cache: { start: 0, lines: [] },
-  loadToken: 0,
-  stat: null,
-  // search
-  query: "",
-  regex: false,
-  ci: false,
-  word: false,
-  matcher: null,
-  regexError: false,
-  matcherWordFallback: false,
-  activeLine: -1,
-  lastMatch: null, // { byte, len }
-  searchHits: null,
-  searchTruncated: false,
+export interface Point {
+  line: number;
+  col: number;
+}
+
+export interface Selection {
+  anchor: Point;
+  head: Point;
+  rect?: boolean;
+}
+
+export interface ExtraCursor extends Point {
+  sel?: Selection | null;
+}
+
+export interface DocumentStat {
+  open: boolean;
+  path?: string;
+  bytes?: number;
+  lines?: number;
+  view_lines: number;
+  encoding?: string;
+  eol?: string;
+  bom_bytes?: number;
+  stride?: number;
+  checkpoints?: number;
+  index_bytes?: number;
+  index_ms?: number;
+  from_cache?: boolean;
+  dirty: boolean;
+  revision: number;
+  inserted_lines: number;
+  replaced_lines: number;
+  deleted_lines: number;
+  can_undo: boolean;
+  can_redo: boolean;
+  recoverable?: number;
+  wal_error?: string;
+}
+
+export type OpenerMode = "open" | "save" | "file" | "folder";
+
+export interface AppState {
+  runtime: {
+    windowId: string;
+  };
+  view: {
+    total: number;
+    first: number;
+    fracAcc: number;
+    cache: { start: number; lines: LineRecord[] };
+    loadToken: number;
+  };
+  search: {
+    query: string;
+    regex: boolean;
+    caseInsensitive: boolean;
+    word: boolean;
+    matcher: RegExp | null;
+    regexError: boolean;
+    matcherWordFallback: boolean;
+    lastMatch: { byte: number; len: number } | null;
+    hits: SearchHit[] | null;
+    truncated: boolean;
+    findOpen: boolean;
+    replaceOpen: boolean;
+    history: string[];
+    historyIndex: number;
+  };
+  analysis: {
+    profiles: AnalysisProfile[];
+    activeProfile: string | null;
+    operationId: string | null;
+    status: AnalysisStatus | null;
+    matchers: AnalysisMatcher[];
+    visibleRuleIds: Set<string>;
+    selectedRule: string | null;
+    lastHits: Map<string, AnalysisHit>;
+  };
+  markers: {
+    bookmarks: Set<number>;
+    bookmarkCount: number;
+    changeSaved: Set<number>;
+    changeUnsaved: Set<number>;
+    changeDeleted: Set<number>;
+    changeHistoryOverview: ChangeHistoryResponse | null;
+  };
+  settings: Settings;
+  doc: {
+    stat: DocumentStat | null;
+    tabs: TabInfo[];
+    followTail: boolean;
+    tailTimer: ReturnType<typeof setInterval> | null;
+    generation: number;
+  };
+  opener: {
+    dir: string | null;
+    entries: BrowseEntry[];
+  };
+  caret: {
+    position: Point;
+    activeLine: number;
+    goalCol: number;
+    editGeneration: number;
+    composing: boolean;
+    focused: boolean;
+    selection: Selection | null;
+    extraCursors: ExtraCursor[];
+    dragging: boolean;
+    dragMoved: boolean;
+    dragAnchor: Point | null;
+    dragRect: boolean;
+  };
+}
+
+export const state: AppState = {
+  runtime: {
+    windowId:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random().toString(36).slice(2),
+  },
+  view: {
+    total: 0,
+    first: 0, // top visible line (0-based)
+    fracAcc: 0, // sub-line wheel accumulator
+    cache: { start: 0, lines: [] },
+    loadToken: 0,
+  },
+  search: {
+    query: "",
+    regex: false,
+    caseInsensitive: false,
+    word: false,
+    matcher: null,
+    regexError: false,
+    matcherWordFallback: false,
+    lastMatch: null, // { byte, len }
+    hits: null,
+    truncated: false,
+    findOpen: false,
+    replaceOpen: false,
+    history: [],
+    historyIndex: -1,
+  },
   // Bounded log-analysis state. Profiles persist separately from find history;
   // status contains only fixed histograms and capped sparse positions.
-  analysisProfiles: [],
-  activeAnalysisProfile: null,
-  analysisOperationId: null,
-  analysisStatus: null,
-  analysisMatchers: [],
-  analysisVisibleRuleIds: new Set<string>(),
-  analysisSelectedRule: null,
-  analysisLastHits: new Map(),
-  // Sparse marker cache for the same range as `cache.lines`. It is replaced,
-  // not accumulated, on each viewport fetch so edits can never leave stale
-  // line-number markers behind.
-  bookmarks: new Set<number>(),
-  bookmarkCount: 0,
-  changeSaved: new Set<number>(),
-  changeUnsaved: new Set<number>(),
-  changeDeleted: new Set<number>(),
-  changeHistoryOverview: null,
-  findOpen: false,
-  replaceOpen: false,
-  history: [],
-  historyIndex: -1,
+  analysis: {
+    profiles: [],
+    activeProfile: null,
+    operationId: null,
+    status: null,
+    matchers: [],
+    visibleRuleIds: new Set<string>(),
+    selectedRule: null,
+    lastHits: new Map<string, AnalysisHit>(),
+  },
+  // Sparse marker cache for the same range as `view.cache.lines`. It is
+  // replaced, not accumulated, on each viewport fetch so edits can never leave
+  // stale line-number markers behind.
+  markers: {
+    bookmarks: new Set<number>(),
+    bookmarkCount: 0,
+    changeSaved: new Set<number>(),
+    changeUnsaved: new Set<number>(),
+    changeDeleted: new Set<number>(),
+    changeHistoryOverview: null,
+  },
   settings: { ...DEFAULT_SETTINGS },
-  tabs: [], // open tabs from /api/tabs
-  followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
-  tailTimer: null, // setInterval handle while following; cleared when off
-  openerDir: null, // directory currently shown in the open dialog
-  openerMode: "open", // "open" | "save" | "file" | "folder"
-  openerEntries: [],
-  openerResolve: null,
+  doc: {
+    stat: null,
+    tabs: [], // open tabs from /api/tabs
+    followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
+    tailTimer: null, // setInterval handle while following; cleared when off
+    generation: 0, // bumps whenever the active document/tab changes; cancels stale queued edits
+  },
+  opener: {
+    dir: null, // directory currently shown in the open dialog
+    entries: [],
+  },
   // ---- caret-based (Notepad-style) editing ----
-  caret: { line: 0, col: 0 }, // (line, col) in Unicode scalars, like the backend
-  goalCol: 0, // remembered column for vertical caret motion
-  editGen: 0, // bumps on every user caret move; lets an in-flight edit detect it
-  docGen: 0, // bumps whenever the active document/tab changes; cancels stale queued edits
-  composing: false, // an IME composition is in progress
-  focused: false, // the hidden text input holds focus (draw the caret)
-  sel: null, // selection: { anchor: {line,col}, head: {line,col}, rect?: bool } or null
-  extraCursors: [], // multi-cursor: additional carets [{line,col}]; primary is state.caret
-  dragging: false,
-  dragMoved: false,
-  dragAnchor: null, // caret at mouse-down, promoted to a selection once it moves
-  dragRect: false,
+  caret: {
+    position: { line: 0, col: 0 }, // Unicode scalar coordinates, like the backend
+    activeLine: -1,
+    goalCol: 0, // remembered column for vertical caret motion
+    editGeneration: 0, // bumps on every user caret move; protects in-flight edits
+    composing: false, // an IME composition is in progress
+    focused: false, // the hidden text input holds focus (draw the caret)
+    selection: null,
+    extraCursors: [], // additional carets; primary is `caret.position`
+    dragging: false,
+    dragMoved: false,
+    dragAnchor: null, // mouse-down caret, promoted to a selection once it moves
+    dragRect: false,
+  },
 };
