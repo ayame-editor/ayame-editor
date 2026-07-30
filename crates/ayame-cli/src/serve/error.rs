@@ -3,11 +3,8 @@
 //! Handlers return [`ApiError`] instead of a bare `(StatusCode, String)` tuple.
 //! It serializes to `{"code": <slug>, "message": <text>}`, so the web client
 //! branches on a stable machine-readable `code` rather than pattern-matching
-//! localized message text. Two `From` impls keep the migration cheap:
+//! localized message text. Core errors also convert directly:
 //!
-//! - `From<(StatusCode, String)>` — the `bad_request` / `internal` helpers and
-//!   every ad-hoc tuple still work through `?`; the code is inferred from the
-//!   status.
 //! - `From<ayame_core::Error>` — a core `Result` propagated with `?` maps its
 //!   variant to the right status *and* code, so `Error::Conflict` finally
 //!   becomes a real `409` instead of an opaque `500`.
@@ -70,32 +67,6 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
-    }
-}
-
-/// A best-effort machine code for the many call sites that still hand back a
-/// bare `(StatusCode, String)` (via `bad_request` / `internal` / worker
-/// helpers). Kept in sync with the codes the web client recognizes.
-fn code_for_status(status: StatusCode) -> &'static str {
-    match status {
-        StatusCode::BAD_REQUEST => "bad_request",
-        StatusCode::NOT_FOUND => "not_found",
-        StatusCode::CONFLICT => "conflict",
-        StatusCode::PAYLOAD_TOO_LARGE => "too_large",
-        StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => "timeout",
-        StatusCode::BAD_GATEWAY => "worker_failed",
-        s if s.is_server_error() => "internal",
-        _ => "error",
-    }
-}
-
-impl From<(StatusCode, String)> for ApiError {
-    fn from((status, message): (StatusCode, String)) -> ApiError {
-        ApiError {
-            status,
-            code: code_for_status(status),
-            message,
-        }
     }
 }
 
