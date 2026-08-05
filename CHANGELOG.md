@@ -4,6 +4,61 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+## v0.8.7 - 2026-08-05
+
+- Replaced the frontend's flat mutable state bag with a typed `AppState`
+  grouped into view, search, analysis, markers, doc, opener, and caret
+  responsibilities, moved the opener's transient mode and promise resolver out
+  of application state, and routed selection, search-hit, and active-line
+  updates through render-scheduling setters (#260).
+- Bounded editor render work: caret hit-testing now measures each row once and
+  moves a Range boundary instead of alternating writes and layout reads,
+  search/analysis ticks reuse their DOM, and settings persistence is debounced
+  with wallpaper data URLs kept in a separate storage key with legacy
+  migration. On the measured workload layout events fell from 1,303 to 4 and
+  serialized settings bytes from 10,490,410 to 430 (#261).
+- Shortened cold release builds from 199.98s to 156.78s (-21.6%) by compiling
+  `ayame-cli` with 16 codegen units while keeping `ayame-core` at one, and
+  dropped the unused `oxc_codegen` sourcemap feature with its five exclusive
+  lockfile packages (#263).
+- Split `/api/edit/save` into converted, copy, and in-place modes with
+  documented lock ordering, shared the save-encoding parser with the
+  reopen-with-encoding path, and completed the `ApiError` migration. Wire
+  responses are unchanged (#264).
+- Replaced the ad-hoc `ayame:*` string-prefix native IPC with a serde-tagged
+  JSON envelope shared by the TypeScript send sites and the Rust decoder.
+  Malformed or unknown messages are now rejected and logged instead of
+  becoming empty dialog requests, structured values such as Windows paths
+  containing colons survive the bridge, and window reveal/close have single
+  implementations (#265).
+- Centralized ordinary staged-file publication in
+  `ayame_core::replace_with_staged` with one collision-resistant sibling
+  temp-path generator shared by edit, transform, split, and server
+  export/sort/marker saves, while keeping the WAL `.old` recovery protocol and
+  the live-mmap in-place save transition intentionally distinct (#266).
+
+## v0.8.6 - 2026-07-25
+
+- Reduced `search.ts`, `menus.ts`, and `workspace.ts` to compatibility facades
+  and split their responsibilities into dedicated modules: search bar,
+  replace, and grep; menu actions, UI, keymap, palette, context menu, and menu
+  bar; file opening, browsing, recents, and tabs. Save-service wiring moved
+  from import time to `initWorkspace()` (#258, #259).
+- Made app, save, and menu initialization explicit and repeat-safe, validated
+  regular expressions before wrapping them in word boundaries so invalid
+  search patterns fall back to a literal search, and added regression coverage
+  for the virtualization, caret, search/replace, and line-edit risk paths
+  (#257).
+
+## v0.8.5 - 2026-07-25
+
+- Eliminated the frontend's circular import graph — one strongly connected
+  component spanning 13 feature modules — by splitting status, text, modal,
+  menu-surface, grep, and selection concerns into acyclic modules and
+  inverting cross-feature integration through explicit registration
+  boundaries. A TypeScript-AST circular import checker now runs in the
+  existing GitHub Actions frontend job (#256).
+
 ## v0.8.4 - 2026-07-25
 
 - Added an 88px document minimap with cached line shapes, inserted-line,
