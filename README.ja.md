@@ -80,7 +80,7 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 
 ユーザー向けガイド、全 CLI リファレンス、アーキテクチャ、既定ショートカット、
 インストール、ビルド手順、Linux の実行時パッケージは
-[ドキュメントサイト](https://hjosugi.github.io/ayame-editor/ja/) にまとめています。
+[ドキュメントサイト](https://ayame-editor.github.io/ayame-editor/ja/) にまとめています。
 Project への参加には[行動規範](CODE_OF_CONDUCT.ja.md)が適用されます。
 
 1 バイトの誤りも許されない用途向けに、[データ完全性の保証](docs/DATA_INTEGRITY.ja.md)
