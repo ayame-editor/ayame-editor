@@ -216,6 +216,12 @@ fn is_known_command(cmd: &str) -> bool {
 /// turns into exit code 2). Most subcommands are pass/fail and map their `()`
 /// success to code 0; only `search` distinguishes "ran fine, no match".
 pub(crate) fn run(args: Vec<String>) -> Result<u8> {
+    // Worker half of the spawn handshake (#137), before anything reads a file:
+    // an editor that was updated while running would otherwise drive a worker
+    // from a different build across the JSON/progress protocol.
+    if let Some(code) = crate::worker::version_mismatch_exit() {
+        return Ok(code);
+    }
     let cmd = match args.first() {
         Some(c) => c.clone(),
         None => {

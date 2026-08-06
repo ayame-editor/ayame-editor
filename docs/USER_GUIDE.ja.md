@@ -43,6 +43,12 @@ binary が `/nix/store` から動いている場合、Ayame は Nix 管理とみ
 `起動時に更新を確認` をオフにしてください。Nix、Homebrew、Scoop など package
 manager 管理の install は自己変更せず、package manager 側で更新します。
 
+更新は実行中のエディタの起動元 binary を置き換えるため、検索・ソート・置換・分割
+などのファイル操作は新しい版でないと実行できません。install 完了時にアプリが再
+起動を提案します。再起動するまで（別の terminal から `ayame update` を実行した
+場合も同様）これらの操作は「Ayame の再起動が必要」と返します。開いているファイル
+と未保存の編集はそのままです。
+
 ## ファイルを開く
 
 ```sh

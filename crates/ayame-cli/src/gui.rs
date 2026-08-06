@@ -174,6 +174,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     let mut update_check_enabled: Option<bool> = None;
     let mut update_check_started = false;
     let mut update_installing = false;
+    // Set when the user answered "restart now" to an installed update: the
+    // successor process is spawned once this one has finished exiting.
+    let mut restart_after_exit = false;
     // Latest NON-maximized geometry seen this session, so quitting while
     // maximized still remembers where the normal window lived (the loaded
     // state would otherwise be written back, losing this session's moves).
@@ -251,6 +254,9 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             Event::UserEvent(GuiEvent::CloseCanceled) => {
                 close_pending = false;
                 close_deadline = None;
+                // The page kept the window open (unsaved work). A later,
+                // unrelated close must not surprise the user with a restart.
+                restart_after_exit = false;
             }
             Event::UserEvent(GuiEvent::SetTitle(title)) => {
                 window.set_title(&title);
@@ -286,7 +292,21 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             }
             Event::UserEvent(GuiEvent::UpdateInstalled(report)) => {
                 update_installing = false;
-                show_update_installed_dialog(&window, &report);
+                if show_update_installed_dialog(&window, &report) {
+                    // Take the ordinary close path so unsaved work still gets
+                    // its confirmation; the replacement process is spawned
+                    // from LoopDestroyed, once this one really is leaving.
+                    restart_after_exit = true;
+                    request_close(
+                        &webview,
+                        &window,
+                        last_normal.as_ref(),
+                        &mut close_pending,
+                        &mut close_deadline,
+                        close_timeout,
+                        control_flow,
+                    );
+                }
             }
             Event::UserEvent(GuiEvent::UpdateInstallFailed(message)) => {
                 update_installing = false;
@@ -367,6 +387,12 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
             // instead of leaking every session (#138).
             Event::LoopDestroyed => {
                 crate::serve::cleanup_session(&cleanup_state);
+                // After cleanup, so the successor never races this session's
+                // scratch/WAL teardown. It starts the freshly installed build
+                // and restores the session like any manual restart would.
+                if restart_after_exit {
+                    spawn_new_window();
+                }
             }
             _ => {}
         }
@@ -621,31 +647,41 @@ fn spawn_update_install(proxy: EventLoopProxy<GuiEvent>) {
     });
 }
 
-fn show_update_installed_dialog(window: &Window, report: &crate::UpdateInstallReport) {
-    let (title, description) = if report.deferred {
-        (
-            "Update will finish after quit",
-            format!(
+/// Report the finished install and offer to act on it. Returns `true` when the
+/// user asked to restart now — until this window actually exits, the running
+/// process is older than the binary it was loaded from, so every op worker it
+/// would spawn is refused (#137). Restarting is the fix, so the dialog offers
+/// it instead of only describing it.
+fn show_update_installed_dialog(window: &Window, report: &crate::UpdateInstallReport) -> bool {
+    // A deferred install is finished by a helper that waits for *this* process
+    // to exit before copying the new binary in. A successor started from here
+    // would therefore launch the old build and then have it replaced
+    // underneath itself — exactly the hazard the restart exists to end — so
+    // this case stays a plain notice.
+    if report.deferred {
+        let _ = rfd::MessageDialog::new()
+            .set_parent(window)
+            .set_level(rfd::MessageLevel::Info)
+            .set_title("Update will finish after quit")
+            .set_description(format!(
                 "Ayame {} was downloaded.\n\nClose Ayame, then open it again to finish installing the update.",
                 report.release_version
-            ),
-        )
-    } else {
-        (
-            "Update installed",
-            format!(
-                "Ayame {} was installed to:\n{}\n\nRestart Ayame to use the new version.",
-                report.release_version, report.destination
-            ),
-        )
-    };
-    let _ = rfd::MessageDialog::new()
+            ))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        return false;
+    }
+    rfd::MessageDialog::new()
         .set_parent(window)
         .set_level(rfd::MessageLevel::Info)
-        .set_title(title)
-        .set_description(description)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
+        .set_title("Update installed")
+        .set_description(format!(
+            "Ayame {} was installed to:\n{}\n\nSearch, sort, replace and the other file operations need the new version. Restart Ayame now?",
+            report.release_version, report.destination
+        ))
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show()
+        == rfd::MessageDialogResult::Yes
 }
 
 fn show_update_failed_dialog(window: &Window, message: &str) {
@@ -669,12 +705,16 @@ fn file_dialog(dir: &str) -> rfd::FileDialog {
     dlg
 }
 
-/// Open a new editor window: spawn a fresh, detached `<current-exe> gui`
+/// Open a new editor window: spawn a fresh, detached `<installed-exe> gui`
 /// process. Each window is its own process + server by design — no state is
 /// shared, so a crash in one window can never take another down. Failures are
 /// logged and swallowed: the running window must never break over this.
+///
+/// The program comes from [`crate::worker::installed_program`] so a window
+/// opened after a self-update starts the newly installed build instead of
+/// failing on Linux's `… (deleted)` path (#137).
 fn spawn_new_window() {
-    match std::env::current_exe() {
+    match crate::worker::installed_program() {
         Ok(exe) => {
             if let Err(e) = std::process::Command::new(exe).arg("gui").spawn() {
                 eprintln!("ayame: opening a new window failed: {e}");
@@ -694,7 +734,7 @@ fn spawn_new_window_with_path(path: &str, recover: bool) {
         spawn_new_window();
         return;
     }
-    match std::env::current_exe() {
+    match crate::worker::installed_program() {
         Ok(exe) => {
             let mut cmd = std::process::Command::new(exe);
             cmd.arg("gui").arg(clean);

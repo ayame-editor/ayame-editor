@@ -1,3 +1,8 @@
+// One harness, several test binaries: each `mod common;` gets its own copy and
+// no single binary exercises every helper, so unused-in-this-binary is the
+// normal state here rather than a finding.
+#![allow(dead_code)]
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
@@ -27,9 +32,15 @@ fn free_port() -> u16 {
 /// Start `ayame serve FILE --port P` and wait until it answers `/api/stat`.
 /// Retries with a fresh port if the probed one was taken in the meantime.
 pub fn spawn_server(file: &Path) -> ServerGuard {
+    spawn_server_from(Path::new(env!("CARGO_BIN_EXE_ayame")), file)
+}
+
+/// [`spawn_server`] against a specific `ayame` binary — for tests that need an
+/// install they own and can replace underneath the running server.
+pub fn spawn_server_from(exe: &Path, file: &Path) -> ServerGuard {
     for _ in 0..5 {
         let port = free_port();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ayame"))
+        let mut child = Command::new(exe)
             .arg("serve")
             .arg(file)
             .arg("--port")

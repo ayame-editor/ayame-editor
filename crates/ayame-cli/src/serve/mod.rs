@@ -105,6 +105,10 @@ pub(crate) fn build_state(
     flags: &std::collections::HashSet<String>,
 ) -> Result<AppState> {
     configure_scratch(opts);
+    // Fingerprint our own executable while it is still the current version:
+    // op workers are spawned from it, and an update landing mid-session must
+    // be caught rather than silently spawning a different build (#137).
+    crate::worker::snapshot_executable();
     // Reap scratch that crashed/killed prior sessions left behind before we
     // start piling on our own (#138). Safe: only dead PIDs' dirs are removed.
     crate::temp_paths::sweep_stale_scratch();

@@ -44,6 +44,13 @@ and turn off `Check for updates on startup`. Package-manager installs such as
 Nix, Homebrew, and Scoop are not self-modified; update them through the package
 manager.
 
+An update replaces the binary the running editor was started from, so search,
+sort, replace, split, and the other file operations need the new version before
+they can run again. The app offers to restart once the install finishes; until
+it does — including when `ayame update` is run from another terminal — those
+operations report that Ayame must be restarted. The open file and any unsaved
+edits are unaffected.
+
 ## Open Files
 
 ```sh

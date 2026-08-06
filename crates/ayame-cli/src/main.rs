@@ -17,6 +17,7 @@ mod gui;
 mod icon;
 mod serve;
 mod temp_paths;
+mod worker;
 
 #[cfg(feature = "gui")]
 pub(crate) use cli::default_cache_dir;
