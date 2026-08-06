@@ -51,3 +51,4 @@ export type SessionState = JsonWire<Wire.SessionState>;
 export type UiState = JsonWire<Wire.UiState>;
 export type TabInfo = JsonWire<Wire.TabInfo>;
 export type TabsResponse = JsonWire<Wire.TabsResponse>;
+export type DiskCheckResponse = JsonWire<Wire.DiskCheckResponse>;

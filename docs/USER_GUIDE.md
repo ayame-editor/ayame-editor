@@ -109,6 +109,28 @@ option list. File comparison is provided by the sister project
 - Includes tabs, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.
+- Notices when another program rewrites the open file and asks before that
+  change is overwritten — see [External Changes](#external-changes).
+
+## External Changes
+
+Files get rewritten while they are open: a build regenerates them, a log
+rotates, another editor saves. Ayame remembers what the file looked like when it
+last read or wrote it, and re-checks whenever the window comes back to the
+front — with tail-follow on or off.
+
+When the file has changed underneath you, Ayame asks instead of guessing:
+
+- Coming back to the window: reload from disk, or keep what you have.
+- Saving over the changed file: overwrite it, or reload first. The save is
+  refused until you answer, so no external change is buried silently.
+
+Reloading discards this tab's unsaved edits; overwriting discards what is on
+disk. Saving to a different path is never blocked — only writing over the open
+file asks.
+
+Files rewritten within the same filesystem timestamp tick, at exactly the same
+length, cannot be told apart from an untouched file by any check of this kind.
 
 ## Default Shortcuts
 

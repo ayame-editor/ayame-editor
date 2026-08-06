@@ -37,7 +37,7 @@ use super::ops::{
     ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest,
     OperationCancelRequest, ReplaceSaveRequest, SortSaveRequest, SplitSaveRequest,
 };
-use super::state::{SessionState, TabInfo, TabsResponse, UiState};
+use super::state::{DiskCheckResponse, SessionState, TabInfo, TabsResponse, UiState};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest, TabReorderRequest};
 
 fn output_path() -> PathBuf {
@@ -99,6 +99,7 @@ fn bridge() -> Bridge {
         .decl(&decl::<UiState>())
         .decl(&decl::<TabInfo>())
         .decl(&decl::<TabsResponse>())
+        .decl(&decl::<DiskCheckResponse>())
 }
 
 fn strip_trailing_ws(mut s: String) -> String {

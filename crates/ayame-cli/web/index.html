@@ -746,6 +746,10 @@
           <div id="confirm-message" class="confirm-message"></div>
           <div class="confirm-actions">
             <button id="confirm-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
+            <!-- Optional third choice (askConfirm's `altLabel`), for questions
+                 with two real answers plus cancel — e.g. reload vs overwrite
+                 when the file changed outside the editor. Hidden by default. -->
+            <button id="confirm-alt" class="cmd hidden"></button>
             <button id="confirm-ok" class="cmd primary" data-i18n="common.ok">OK</button>
           </div>
         </div>

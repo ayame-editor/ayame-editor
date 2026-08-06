@@ -250,6 +250,12 @@ pub(super) struct EditSaveRequest {
     /// omitted the file's current BOM state is preserved.
     #[serde(default)]
     bom: Option<bool>,
+    /// Overwrite the open file even though it changed outside the editor since
+    /// it was opened. Without this a save onto a file somebody else has
+    /// written is refused with `disk_changed`, and the client asks the user
+    /// whether to reload or overwrite (#163).
+    #[serde(default)]
+    force: bool,
 }
 
 /// [`SaveResult`] plus whether the active tab now shows the saved file.
@@ -294,10 +300,17 @@ pub(super) async fn api_edit_save(
                 default_save_copy_path(&active_path)
             }
         });
+    // Writing over the file this tab is showing is the one save that can bury
+    // an external edit, so it is refused up front unless the user has already
+    // been asked and chose to overwrite anyway (#163). Save-as onto some other
+    // path has its own "the target exists" confirmation.
+    if same_path(&target, &active_path) && !req.force {
+        state.confirm_disk_unchanged()?;
+    }
     let response = if req.encoding.is_some() || req.eol.is_some() {
         save_converted_mode(&state, snap, &active_path, target, &req).await?
     } else if req.overwrite && same_path(&target, &active_path) {
-        save_in_place_mode(&state, snap, target).await?
+        save_in_place_mode(&state, snap, target, req.force).await?
     } else {
         save_copy_mode(&state, snap, &active_path, target, &req).await?
     };
@@ -396,6 +409,7 @@ async fn save_in_place_mode(
     state: &SharedState,
     mut snap: super::state::EditSnapshot,
     target: PathBuf,
+    force: bool,
 ) -> Result<EditSaveResponse, ApiError> {
     // Phase 1 — stream the snapshot to a stage file without holding any lock,
     // so typing stays live during a long save.
@@ -425,7 +439,17 @@ async fn save_in_place_mode(
     // undo history all stay untouched: the view is unchanged and undo keeps
     // working ACROSS the save; only the saved-content marker moves.
     let _transitions = state.lock_transitions().await;
-    if let Err(e) = state.confirm_overwrite(&snap) {
+    // Re-asked with the lock held: phase 1 streamed without one, so an
+    // external writer had the whole streaming window to land in after the
+    // check in `api_edit_save` said the file was ours (#163).
+    let committable = state.confirm_overwrite(&snap).and_then(|()| {
+        if force {
+            Ok(())
+        } else {
+            state.confirm_disk_unchanged()
+        }
+    });
+    if let Err(e) = committable {
         let _ = tokio::fs::remove_file(&stage).await;
         return Err(e);
     }

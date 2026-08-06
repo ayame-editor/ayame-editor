@@ -38,7 +38,14 @@ eol: string | null,
  * meaningful when the target 文字コード is UTF-8 (ignored otherwise). When
  * omitted the file's current BOM state is preserved.
  */
-bom: boolean | null, };
+bom: boolean | null,
+/**
+ * Overwrite the open file even though it changed outside the editor since
+ * it was opened. Without this a save onto a file somebody else has
+ * written is refused with `disk_changed`, and the client asks the user
+ * whether to reload or overwrite (#163).
+ */
+force: boolean, };
 
 export type EditSaveResponse = {
 /**
@@ -161,3 +168,13 @@ export type UiState = { recent_files: Array<string>, search_history: Array<strin
 export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
 
 export type TabsResponse = { tabs: Array<TabInfo>, };
+
+export type DiskCheckResponse = {
+/**
+ * Whether a file is open at all; `changed` is meaningless when false.
+ */
+open: boolean,
+/**
+ * The file on disk is no longer the one this session last read or wrote.
+ */
+changed: boolean, };

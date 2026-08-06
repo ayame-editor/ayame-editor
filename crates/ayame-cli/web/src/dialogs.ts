@@ -50,10 +50,17 @@ function backdropCancel(modal, finish: (value: any) => void) {
 
 // Titles, messages and button labels arrive already localized (t() results);
 // server-side error details go through serverMessage() at the call site.
+//
+// Resolves `true` for OK, `false` for cancel, and — only when `opts.altLabel`
+// asked for the optional third button — the string `"alt"`. Callers that never
+// pass `altLabel` therefore keep their plain boolean contract.
+export const CONFIRM_ALT = "alt";
+
 export function askConfirm(title, message, opts: any = {}): Promise<any> {
   const modal = $("confirm");
   const okBtn = $("confirm-ok");
   const cancelBtn = $("confirm-cancel");
+  const altBtn = $("confirm-alt");
   $("confirm-title").textContent = title || t("common.confirm");
   $("confirm-message").textContent = message || "";
   okBtn.textContent = opts.okLabel || t("common.ok");
@@ -61,27 +68,36 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
   okBtn.classList.toggle("primary", !opts.danger);
   cancelBtn.textContent = opts.cancelLabel || t("common.cancel");
   cancelBtn.classList.toggle("hidden", !!opts.alert);
+  altBtn.textContent = opts.altLabel || "";
+  altBtn.classList.toggle("hidden", !opts.altLabel);
+  // Focus order matches the visual order, so the arrow keys can walk it.
+  const choices = [cancelBtn, altBtn, okBtn].filter((btn) => !btn.classList.contains("hidden"));
   return runModal(
     modal,
     () => queueMicrotask(() => okBtn.focus()),
     (finish, on) => {
       const onOk = () => finish(true);
       const onCancel = () => finish(false);
+      const onAlt = () => finish(CONFIRM_ALT);
+      const answerOf = (btn) => (btn === cancelBtn ? false : btn === altBtn ? CONFIRM_ALT : true);
       const onKey = (ev) => {
         ev.stopPropagation();
         if (ev.key === "Enter") {
           ev.preventDefault();
           // Respect the button selected with ArrowLeft/ArrowRight. Preventing
           // the native button event means we must mirror its focused action.
-          finish(document.activeElement !== cancelBtn);
+          finish(answerOf(document.activeElement));
         } else if (ev.key === "Escape") {
           ev.preventDefault();
           finish(false);
         } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-          // Move focus between the Cancel / OK buttons, like a native dialog.
-          if (opts.alert) return; // OK-only: nothing to move between
+          // Walk the visible buttons, like a native dialog.
+          if (choices.length < 2) return; // OK-only: nothing to move between
           ev.preventDefault();
-          (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+          const at = choices.findIndex((btn) => btn === document.activeElement);
+          const step = ev.key === "ArrowLeft" ? -1 : 1;
+          const next = at < 0 ? 0 : (at + step + choices.length) % choices.length;
+          choices[next].focus();
         }
       };
       const onBackdrop = (ev) => {
@@ -89,6 +105,7 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
       };
       on(okBtn, "click", onOk);
       on(cancelBtn, "click", onCancel);
+      on(altBtn, "click", onAlt);
       on($("confirm-close"), "click", onCancel);
       on(modal, "mousedown", onBackdrop);
       on(modal, "keydown", onKey);
