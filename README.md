@@ -78,7 +78,7 @@ GUI. Use Ayame Editor to open and edit huge files, and ayame-diff to compare the
 
 The docs site includes the user guide, full CLI reference, architecture notes,
 default shortcuts, install notes, build steps, and Linux runtime packages:
-[docs site](https://hjosugi.github.io/ayame-editor/).
+[docs site](https://ayame-editor.github.io/ayame-editor/).
 Project participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 For files where a single wrong byte is unacceptable, see the
