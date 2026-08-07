@@ -484,6 +484,15 @@ pub(crate) struct AppState {
     ///    rejected with 409 instead of silently discarding edits made while
     ///    the save was streaming.
     ws: RwLock<Workspace>,
+    /// In-flight artifact operations (sort/replace/case/grep/split), keyed by
+    /// the client-supplied op id, for progress polling and cancellation.
+    ///
+    /// Owned by the session rather than the process (#106): a `static` map was
+    /// shared by every `AppState` a test built, and — being reachable from a
+    /// `Drop` that can run while a request unwinds — its poisoning had to be
+    /// recovered from anyway. Here it is per-session, and `lock_recover` is the
+    /// same helper the workspace lock uses.
+    artifact_ops: Mutex<HashMap<String, Arc<super::ops::ArtifactOperation>>>,
     /// Serializes multi-step doc-slot transitions (open / new / upload / tab
     /// switch / tab close / in-place save commit). Held across `.await`s,
     /// hence a tokio mutex. Ordering rule: acquire `transitions` BEFORE `ws`;
@@ -575,6 +584,7 @@ impl AppState {
                 recoverable,
                 tabs,
             }),
+            artifact_ops: Mutex::new(HashMap::new()),
             transitions: tokio::sync::Mutex::new(()),
             open_opts,
             find_snapshot: Mutex::new(None),
@@ -1127,6 +1137,14 @@ impl AppState {
                 status
             }
         }
+    }
+
+    /// The session's in-flight artifact operations. See the field docs for why
+    /// this is per-session rather than a process global.
+    pub(super) fn artifact_ops(
+        &self,
+    ) -> MutexGuard<'_, HashMap<String, Arc<super::ops::ArtifactOperation>>> {
+        lock_recover(&self.artifact_ops)
     }
 
     /// Serialize a multi-step doc-slot transition against all others. See the

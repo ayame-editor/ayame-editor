@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use axum::extract::{Query, State};
@@ -24,9 +23,8 @@ use super::{bad_request, default_suffix_path, edit, internal, workspace, ApiErro
 const WORKER_TIMEOUT: Duration = Duration::from_secs(300);
 const ARTIFACT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 static REQ_SEQ: AtomicU64 = AtomicU64::new(0);
-static ARTIFACT_OPS: OnceLock<Mutex<HashMap<String, Arc<ArtifactOperation>>>> = OnceLock::new();
 
-struct ArtifactOperation {
+pub(super) struct ArtifactOperation {
     id: String,
     kind: String,
     processed_lines: AtomicU64,
@@ -294,16 +292,18 @@ pub(super) struct ArtifactResponse {
 }
 
 pub(super) async fn api_operation_status(
+    State(state): State<SharedState>,
     Query(q): Query<OperationQuery>,
 ) -> Result<Json<ArtifactOpStatus>, ApiError> {
-    let op = lookup_operation(&q.id)?;
+    let op = lookup_operation(&state, &q.id)?;
     Ok(Json(op.status()))
 }
 
 pub(super) async fn api_operation_cancel(
+    State(state): State<SharedState>,
     Json(req): Json<OperationCancelRequest>,
 ) -> Result<Json<ArtifactOpStatus>, ApiError> {
-    let op = lookup_operation(&req.id)?;
+    let op = lookup_operation(&state, &req.id)?;
     op.canceled.store(true, AtomicOrdering::Relaxed);
     op.set_message("canceled");
     op.notify_cancel.notify_waiters();
@@ -336,6 +336,88 @@ pub(super) struct SortSaveRequest {
     csv: bool,
 }
 
+/// The shape every artifact endpoint has: materialize the dirty-aware input,
+/// decide a target path and a worker command from it, run the worker, and
+/// answer with the artifact.
+///
+/// Sort, replace, case and grep each wrote that flow out (#106). What actually
+/// differs is `plan` — the target and the command — so that is the parameter
+/// and the rest is here once, including the `drop(wd)` that must outlive the
+/// worker child and is easy to forget.
+async fn artifact_endpoint<F>(
+    state: &SharedState,
+    kind: &'static str,
+    label: &'static str,
+    op_id: Option<&str>,
+    plan: F,
+) -> Result<Json<ArtifactResponse>, ApiError>
+where
+    F: FnOnce(&WorkerDoc) -> Result<WorkerPlan, ApiError>,
+{
+    let wd = dirty_aware_input(state, label).await?;
+    // `wd` is dropped on every path below, failed plan included: it owns the
+    // materialized snapshot and must not leak.
+    let mut planned = plan(&wd)?;
+    let res = run_artifact_worker(
+        state,
+        kind,
+        &mut planned.cmd,
+        &planned.target,
+        wd.total_lines,
+        op_id,
+    )
+    .await;
+    if let Some(scratch) = planned.scratch {
+        let _ = tokio::fs::remove_dir_all(&scratch).await;
+    }
+    drop(wd); // the snapshot guard must outlive the worker child
+    res.map(Json)
+}
+
+/// What an endpoint decided to run, given its materialized input.
+struct WorkerPlan {
+    /// Where the artifact is written.
+    target: PathBuf,
+    /// The worker invocation that writes it.
+    cmd: Command,
+    /// A scratch directory to remove once the worker has finished — sort's
+    /// external-merge spill. `None` for the transforms, which stream.
+    scratch: Option<PathBuf>,
+}
+
+impl WorkerPlan {
+    fn new(target: PathBuf, cmd: Command) -> WorkerPlan {
+        WorkerPlan {
+            target,
+            cmd,
+            scratch: None,
+        }
+    }
+
+    fn spilling(target: PathBuf, cmd: Command, scratch: PathBuf) -> WorkerPlan {
+        WorkerPlan {
+            target,
+            cmd,
+            scratch: Some(scratch),
+        }
+    }
+}
+
+/// `--jobs` / `--chunk-lines` for the line-local transforms (replace, case,
+/// grep-lines), which the three endpoints spelled out identically. Zero jobs
+/// means "the Rayon default" in the worker, so an unset request still says so
+/// explicitly rather than depending on the worker's own default.
+fn append_parallel_args(cmd: &mut Command, jobs: Option<usize>, chunk_lines: Option<u64>) {
+    cmd.arg("--jobs")
+        .arg(jobs.unwrap_or(0).to_string())
+        .arg("--chunk-lines")
+        .arg(
+            chunk_lines
+                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
+                .to_string(),
+        );
+}
+
 pub(super) async fn api_sort_save(
     State(state): State<SharedState>,
     Json(req): Json<SortSaveRequest>,
@@ -343,26 +425,19 @@ pub(super) async fn api_sort_save(
     if req.in_place {
         return sort_save_in_place(state, req).await;
     }
-    let wd = dirty_aware_input(&state, "sort-save").await?;
-    // No explicit destination: sort into a scratch file (the GUI opens the
-    // result as a new tab instead of asking for a path first).
-    let target = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-        Some(p) => PathBuf::from(p),
-        None => default_sorted_temp_path(wd.doc.path()).map_err(internal)?,
-    };
-    let dir = spawn_dir("sort-save-spill").map_err(internal)?;
-    let mut cmd = sort_command(&wd.doc, wd.input.path(), &target, &req, &dir)?;
-    let res = run_artifact_worker(
-        "sort",
-        &mut cmd,
-        &target,
-        wd.total_lines,
-        req.op_id.as_deref(),
-    )
-    .await;
-    let _ = tokio::fs::remove_dir_all(&dir).await;
-    drop(wd); // remove the materialized input, if any
-    res.map(Json)
+    let op_id = req.op_id.clone();
+    artifact_endpoint(&state, "sort", "sort-save", op_id.as_deref(), |wd| {
+        // No explicit destination: sort into a scratch file (the GUI opens the
+        // result as a new tab instead of asking for a path first).
+        let target = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => PathBuf::from(p),
+            None => default_sorted_temp_path(wd.doc.path()).map_err(internal)?,
+        };
+        let dir = spawn_dir("sort-save-spill").map_err(internal)?;
+        let cmd = sort_command(&wd.doc, wd.input.path(), &target, &req, &dir)?;
+        Ok(WorkerPlan::spilling(target, cmd, dir))
+    })
+    .await
 }
 
 /// Sort the active document onto itself. Phase 1 runs the ordinary
@@ -395,8 +470,15 @@ async fn sort_save_in_place(
     let stage = edit::overwrite_stage_path(&target);
     let dir = spawn_dir("sort-save-spill").map_err(internal)?;
     let mut cmd = sort_command(&snap.doc, input.path(), &stage, &req, &dir)?;
-    let res =
-        run_artifact_worker("sort", &mut cmd, &stage, total_lines, req.op_id.as_deref()).await;
+    let res = run_artifact_worker(
+        &state,
+        "sort",
+        &mut cmd,
+        &stage,
+        total_lines,
+        req.op_id.as_deref(),
+    )
+    .await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     drop(input); // remove the materialized input, if any
     if let Err(e) = res {
@@ -526,39 +608,25 @@ pub(super) async fn api_replace_save(
     Json(req): Json<ReplaceSaveRequest>,
 ) -> Result<Json<ArtifactResponse>, ApiError> {
     let op_id = req.op_id.clone();
-    let wd = dirty_aware_input(&state, "replace-save").await?;
-    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
-    let mut cmd = worker_command()?;
-    cmd.arg("replace").arg(wd.input.path());
-    append_worker_encoding(&mut cmd, &wd.doc);
-    cmd.arg(req.find)
-        .arg(req.replacement)
-        .arg("--out")
-        .arg(&target);
-    if req.regex {
-        cmd.arg("--regex");
-    }
-    if req.ci {
-        cmd.arg("--ignore-case");
-    }
-    cmd.arg("--jobs")
-        .arg(req.jobs.unwrap_or(0).to_string())
-        .arg("--chunk-lines")
-        .arg(
-            req.chunk_lines
-                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
-                .to_string(),
-        );
-    let res = run_artifact_worker(
-        "replace",
-        &mut cmd,
-        &target,
-        wd.total_lines,
-        op_id.as_deref(),
-    )
-    .await;
-    drop(wd);
-    res.map(Json)
+    artifact_endpoint(&state, "replace", "replace-save", op_id.as_deref(), |wd| {
+        let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "replaced");
+        let mut cmd = worker_command()?;
+        cmd.arg("replace").arg(wd.input.path());
+        append_worker_encoding(&mut cmd, &wd.doc);
+        cmd.arg(req.find)
+            .arg(req.replacement)
+            .arg("--out")
+            .arg(&target);
+        if req.regex {
+            cmd.arg("--regex");
+        }
+        if req.ci {
+            cmd.arg("--ignore-case");
+        }
+        append_parallel_args(&mut cmd, req.jobs, req.chunk_lines);
+        Ok(WorkerPlan::new(target, cmd))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -585,32 +653,19 @@ pub(super) async fn api_case_save(
             "mode must be one of upper|lower|camel|pascal|snake|kebab|constant",
         ));
     }
-    let wd = dirty_aware_input(&state, "case-save").await?;
-    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
-    let mut cmd = worker_command()?;
-    cmd.arg("case").arg(wd.input.path());
-    append_worker_encoding(&mut cmd, &wd.doc);
-    cmd.arg(mode).arg("--out").arg(&target);
-    // Same chunked-parallel plumbing as replace: case conversion is
-    // line-local, so huge files scale with cores in the worker.
-    cmd.arg("--jobs")
-        .arg(req.jobs.unwrap_or(0).to_string())
-        .arg("--chunk-lines")
-        .arg(
-            req.chunk_lines
-                .unwrap_or(DEFAULT_PARALLEL_REPLACE_CHUNK_LINES)
-                .to_string(),
-        );
-    let res = run_artifact_worker(
-        "case",
-        &mut cmd,
-        &target,
-        wd.total_lines,
-        req.op_id.as_deref(),
-    )
-    .await;
-    drop(wd);
-    res.map(Json)
+    let op_id = req.op_id.clone();
+    artifact_endpoint(&state, "case", "case-save", op_id.as_deref(), |wd| {
+        let target = requested_or_default(wd.doc.path(), req.path.as_deref(), &mode);
+        let mut cmd = worker_command()?;
+        cmd.arg("case").arg(wd.input.path());
+        append_worker_encoding(&mut cmd, &wd.doc);
+        cmd.arg(mode).arg("--out").arg(&target);
+        // Same chunked-parallel plumbing as replace: case conversion is
+        // line-local, so huge files scale with cores in the worker.
+        append_parallel_args(&mut cmd, req.jobs, req.chunk_lines);
+        Ok(WorkerPlan::new(target, cmd))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -648,29 +703,23 @@ pub(super) async fn api_grep_save(
     if req.query.is_empty() {
         return Err(bad_request("query is empty"));
     }
-    let wd = dirty_aware_input(&state, "grep-save").await?;
-    let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "grep");
-    // Checked here (same message as save-as) because the worker's stderr is
-    // discarded: its own Conflict would surface as an opaque 502, and the web
-    // overwrite-confirm flow keys off this text.
-    if !req.overwrite && target.exists() {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "exists",
-            format!("{} は既に存在します", workspace::display_path(&target)),
-        ));
-    }
-    let mut cmd = grep_save_command(&wd.doc, wd.input.path(), &target, &req)?;
-    let res = run_artifact_worker(
-        "grep",
-        &mut cmd,
-        &target,
-        wd.total_lines,
-        req.op_id.as_deref(),
-    )
-    .await;
-    drop(wd);
-    res.map(Json)
+    let op_id = req.op_id.clone();
+    artifact_endpoint(&state, "grep", "grep-save", op_id.as_deref(), |wd| {
+        let target = requested_or_default(wd.doc.path(), req.path.as_deref(), "grep");
+        // Checked here (same message as save-as) because the worker's stderr is
+        // discarded: its own Conflict would surface as an opaque 502, and the web
+        // overwrite-confirm flow keys off this text.
+        if !req.overwrite && target.exists() {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "exists",
+                format!("{} は既に存在します", workspace::display_path(&target)),
+            ));
+        }
+        let cmd = grep_save_command(&wd.doc, wd.input.path(), &target, &req)?;
+        Ok(WorkerPlan::new(target, cmd))
+    })
+    .await
 }
 
 /// Build the `ayame grep-lines` worker invocation for [`api_grep_save`].
@@ -768,6 +817,7 @@ pub(super) async fn api_split_save(
     }
 
     let out = wait_worker_output_tracked(
+        &state,
         "split",
         &mut cmd,
         ARTIFACT_TIMEOUT,
@@ -842,7 +892,7 @@ pub(super) async fn api_search(
     }
     cmd.arg("--").arg(q.q);
 
-    let out = wait_worker_output("search", &mut cmd, WORKER_TIMEOUT).await;
+    let out = wait_worker_output(&state, "search", &mut cmd, WORKER_TIMEOUT).await;
     drop(view); // the snapshot guard must outlive the worker child
     let res: ayame_core::SearchResult = parse_worker_json("search", &out?)?;
     Ok(Json(res))
@@ -1019,10 +1069,6 @@ fn spawn_dir(kind: &str) -> std::io::Result<PathBuf> {
     temp_paths::create_private_temp_dir(&format!("srv-{kind}-{n}"))
 }
 
-fn operations() -> &'static Mutex<HashMap<String, Arc<ArtifactOperation>>> {
-    ARTIFACT_OPS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 fn valid_operation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -1032,6 +1078,7 @@ fn valid_operation_id(id: &str) -> bool {
 }
 
 fn register_operation(
+    state: &SharedState,
     id: Option<&str>,
     kind: &str,
     total_lines: u64,
@@ -1043,25 +1090,27 @@ fn register_operation(
         return Err(bad_request("invalid operation id"));
     }
     let op = Arc::new(ArtifactOperation::new(id.to_string(), kind, total_lines));
-    lock_recover(operations()).insert(id.to_string(), op.clone());
+    state.artifact_ops().insert(id.to_string(), op.clone());
     Ok(Some(op))
 }
 
-/// Drops an operation out of the global map when the worker call returns, so
-/// finished ops don't accumulate for the life of the `serve` process — every
-/// operation carries a fresh random id, so without this the map would grow
-/// unbounded across a long session. A status poll that arrives after removal
-/// just 404s, which the client's best-effort poller ignores.
-struct OperationGuard(String);
+/// Drops an operation out of the session's map when the worker call returns,
+/// so finished ops don't accumulate for the life of the `serve` process —
+/// every operation carries a fresh random id, so without this the map would
+/// grow unbounded across a long session. A status poll that arrives after
+/// removal just 404s, which the client's best-effort poller ignores.
+struct OperationGuard {
+    state: SharedState,
+    id: String,
+}
 
 impl Drop for OperationGuard {
     fn drop(&mut self) {
-        if let Some(map) = ARTIFACT_OPS.get() {
-            // Recover from poisoning rather than unwrapping: this Drop can fire
-            // while unwinding a panicking request, where a second panic would
-            // abort the whole process instead of failing one request (#106).
-            lock_recover(map).remove(&self.0);
-        }
+        // `artifact_ops()` recovers from poisoning rather than unwrapping:
+        // this Drop can fire while unwinding a panicking request, where a
+        // second panic would abort the whole process instead of failing one
+        // request (#106).
+        self.state.artifact_ops().remove(&self.id);
     }
 }
 
@@ -1069,17 +1118,22 @@ impl Drop for OperationGuard {
 /// evicts it from the map when dropped. Callers bind the guard for the whole
 /// worker call: `let (op, _guard) = tracked_operation(...)?;`.
 fn tracked_operation(
+    state: &SharedState,
     op_id: Option<&str>,
     kind: &str,
     total_lines: u64,
 ) -> Result<(Option<Arc<ArtifactOperation>>, Option<OperationGuard>), ApiError> {
-    let op = register_operation(op_id, kind, total_lines)?;
-    let guard = op.as_ref().map(|o| OperationGuard(o.id.clone()));
+    let op = register_operation(state, op_id, kind, total_lines)?;
+    let guard = op.as_ref().map(|o| OperationGuard {
+        state: state.clone(),
+        id: o.id.clone(),
+    });
     Ok((op, guard))
 }
 
-fn lookup_operation(id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
-    lock_recover(operations())
+fn lookup_operation(state: &SharedState, id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
+    state
+        .artifact_ops()
         .get(id)
         .cloned()
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "operation not found"))
@@ -1155,24 +1209,16 @@ fn parse_worker_json<T: serde::de::DeserializeOwned>(
 }
 
 async fn run_artifact_worker(
+    state: &SharedState,
     kind: &str,
     cmd: &mut Command,
     target: &Path,
     lines: u64,
     op_id: Option<&str>,
 ) -> Result<ArtifactResponse, ApiError> {
-    let (op, _op_guard) = tracked_operation(op_id, kind, lines)?;
-    if op.is_some() {
-        cmd.arg("--progress");
-    }
-    cmd.stdout(Stdio::null())
-        .stderr(if op.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .kill_on_drop(true);
-    let status = wait_worker_for_tracked(kind, cmd, ARTIFACT_TIMEOUT, op.clone()).await?;
+    let (op, _op_guard) = tracked_operation(state, op_id, kind, lines)?;
+    let (status, _) =
+        supervise_worker(kind, cmd, Capture::None, ARTIFACT_TIMEOUT, op.clone()).await?;
     if !status.success() {
         if let Some(op) = &op {
             op.done.store(true, AtomicOrdering::Relaxed);
@@ -1208,92 +1254,56 @@ fn describe_status(s: std::process::ExitStatus) -> String {
     }
 }
 
-async fn wait_worker_for_tracked(
+/// What the caller wants back from the worker besides its exit status.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Capture {
+    /// stdout is discarded: artifact writers report through the filesystem.
+    None,
+    /// stdout is read to end: the JSON-printing workers (search, split).
+    Stdout,
+}
+
+/// Spawn `cmd`, wait for it, and honour the operation's timeout and cancel.
+///
+/// The supervision — child, progress reader on stderr, and the
+/// wait/timeout/cancel `select!` — was written out once per return shape
+/// (#106). The shapes differ; the supervision does not. `Capture` names the
+/// difference, and the stdout reader is always awaited before an error
+/// propagates so a killed child never leaves a task reading a dead pipe.
+async fn supervise_worker(
     kind: &str,
     cmd: &mut Command,
+    capture: Capture,
     timeout_after: Duration,
     op: Option<Arc<ArtifactOperation>>,
-) -> Result<std::process::ExitStatus, ApiError> {
-    let mut child = cmd.spawn().map_err(internal)?;
-    let progress_task = child.stderr.take().map(|stderr| {
-        let op = op.clone();
-        tokio::spawn(async move { read_progress_lines(stderr, op).await })
-    });
-    let sleep = tokio::time::sleep(timeout_after);
-    tokio::pin!(sleep);
-    let cancel = wait_for_cancel(op.clone());
-    tokio::pin!(cancel);
-
-    let res = tokio::select! {
-        waited = child.wait() => waited.map_err(internal),
-        _ = &mut sleep => {
-            let _ = child.kill().await;
-            Err(ApiError::new(
-                StatusCode::GATEWAY_TIMEOUT,
-                "timeout",
-                format!(
-                    "{kind} worker timed out after {}s - the engine is unaffected",
-                    timeout_after.as_secs()
-                ),
-            ))
-        }
-        _ = &mut cancel => {
-            if let Some(op) = &op {
-                op.canceled.store(true, AtomicOrdering::Relaxed);
-                op.done.store(true, AtomicOrdering::Relaxed);
-                op.set_message("canceled");
-            }
-            let _ = child.kill().await;
-            Err(ApiError::new(
-                StatusCode::CONFLICT,
-                "canceled",
-                format!("{kind} operation canceled"),
-            ))
-        }
-    };
-    if let Some(task) = progress_task {
-        let _ = task.await;
-    }
-    res
-}
-
-/// Spawn a JSON-printing worker (stdout piped, stderr discarded) and wait for
-/// its output, killing it on timeout.
-async fn wait_worker_output(
-    kind: &str,
-    cmd: &mut Command,
-    timeout_after: Duration,
-) -> Result<std::process::Output, ApiError> {
-    wait_worker_output_tracked(kind, cmd, timeout_after, None, 0).await
-}
-
-async fn wait_worker_output_tracked(
-    kind: &str,
-    cmd: &mut Command,
-    timeout_after: Duration,
-    op_id: Option<&str>,
-    total_lines: u64,
-) -> Result<std::process::Output, ApiError> {
-    let (op, _op_guard) = tracked_operation(op_id, kind, total_lines)?;
+) -> Result<(std::process::ExitStatus, Vec<u8>), ApiError> {
     if op.is_some() {
         cmd.arg("--progress");
     }
-    cmd.stdout(Stdio::piped())
-        .stderr(if op.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .kill_on_drop(true);
+    cmd.stdout(match capture {
+        Capture::Stdout => Stdio::piped(),
+        Capture::None => Stdio::null(),
+    })
+    .stderr(if op.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .kill_on_drop(true);
     let mut child = cmd.spawn().map_err(internal)?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| internal("worker stdout was not piped"))?;
-    let stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        stdout.read_to_end(&mut buf).await.map(|_| buf)
-    });
+    let stdout_task = match capture {
+        Capture::Stdout => {
+            let mut stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| internal("worker stdout was not piped"))?;
+            Some(tokio::spawn(async move {
+                let mut buf = Vec::new();
+                stdout.read_to_end(&mut buf).await.map(|_| buf)
+            }))
+        }
+        Capture::None => None,
+    };
     let progress_task = child.stderr.take().map(|stderr| {
         let op = op.clone();
         tokio::spawn(async move { read_progress_lines(stderr, op).await })
@@ -1330,11 +1340,38 @@ async fn wait_worker_output_tracked(
             ))
         }
     };
-    let stdout = stdout_task.await.map_err(internal)?.map_err(internal)?;
+    let stdout = match stdout_task {
+        Some(task) => task.await.map_err(internal)?.map_err(internal)?,
+        None => Vec::new(),
+    };
     if let Some(task) = progress_task {
         let _ = task.await;
     }
-    let status = status_res?;
+    Ok((status_res?, stdout))
+}
+
+/// Spawn a JSON-printing worker (stdout piped, stderr discarded) and wait for
+/// its output, killing it on timeout.
+async fn wait_worker_output(
+    state: &SharedState,
+    kind: &str,
+    cmd: &mut Command,
+    timeout_after: Duration,
+) -> Result<std::process::Output, ApiError> {
+    wait_worker_output_tracked(state, kind, cmd, timeout_after, None, 0).await
+}
+
+async fn wait_worker_output_tracked(
+    state: &SharedState,
+    kind: &str,
+    cmd: &mut Command,
+    timeout_after: Duration,
+    op_id: Option<&str>,
+    total_lines: u64,
+) -> Result<std::process::Output, ApiError> {
+    let (op, _op_guard) = tracked_operation(state, op_id, kind, total_lines)?;
+    let (status, stdout) =
+        supervise_worker(kind, cmd, Capture::Stdout, timeout_after, op.clone()).await?;
     if let Some(op) = &op {
         let total = op.total_lines.load(AtomicOrdering::Relaxed);
         op.processed_lines.store(total, AtomicOrdering::Relaxed);
@@ -1580,20 +1617,47 @@ mod tests {
 
     #[test]
     fn tracked_operation_is_evicted_when_its_guard_drops() {
-        let id = format!("op-evict-test-{}", std::process::id());
+        let state: SharedState = Arc::new(super::super::state::AppState::new(
+            None,
+            OpenOptions::default(),
+        ));
+        let id = "op-evict-test".to_string();
         {
-            let (op, _guard) = tracked_operation(Some(&id), "sort", 100).unwrap();
+            let (op, _guard) = tracked_operation(&state, Some(&id), "sort", 100).unwrap();
             assert!(op.is_some(), "an op id must register a handle");
             assert!(
-                lock_recover(operations()).contains_key(&id),
+                state.artifact_ops().contains_key(&id),
                 "the op is tracked while the guard lives"
             );
         }
         // Guard dropped at end of scope: the op must no longer leak in the map.
         assert!(
-            !lock_recover(operations()).contains_key(&id),
+            !state.artifact_ops().contains_key(&id),
             "the op must be evicted once the worker call returns"
         );
+    }
+
+    /// The map used to be a process global, so two sessions in one process —
+    /// every test in this binary, and a future multi-window host — shared it.
+    #[test]
+    fn each_session_tracks_its_own_operations() {
+        let a: SharedState = Arc::new(super::super::state::AppState::new(
+            None,
+            OpenOptions::default(),
+        ));
+        let b: SharedState = Arc::new(super::super::state::AppState::new(
+            None,
+            OpenOptions::default(),
+        ));
+        let id = "shared-id".to_string();
+        let (_op_a, _guard_a) = tracked_operation(&a, Some(&id), "sort", 1).unwrap();
+
+        assert!(a.artifact_ops().contains_key(&id));
+        assert!(
+            !b.artifact_ops().contains_key(&id),
+            "one session's operation must not be visible in another"
+        );
+        assert!(lookup_operation(&b, &id).is_err());
     }
 
     #[test]
