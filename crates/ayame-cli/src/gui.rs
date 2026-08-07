@@ -19,18 +19,14 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{http::Request, DragDropEvent, WebContext, WebView, WebViewBuilder};
 
-use crate::{has_flag, parse_checked};
+use crate::{has_flag, parse_for};
 
 pub fn cmd_gui(args: &[String]) -> Result<()> {
     // Same file-opening options as `serve`; the window opens empty if no FILE.
     // `--recover` is internal: a window spawned by a dirty-tab handoff (issue
     // #35) passes it so the page replays the detached tab's crash log without
     // the crash-recovery prompt.
-    let (pos, opts, flags) = parse_checked(
-        args,
-        &["--encoding", "--stride", "--cache-dir", "--scratch-dir"],
-        &["--no-cache", "--recover"],
-    )?;
+    let (pos, opts, flags) = parse_for("gui", args)?;
     let recover_pending = has_flag(&flags, &["--recover"]);
     let title = initial_window_title(&pos);
 

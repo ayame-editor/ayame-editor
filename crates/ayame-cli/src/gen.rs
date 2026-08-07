@@ -12,7 +12,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use ayame_core::Encoding;
 
-use crate::{commas, first_opt, has_flag, human_bytes, parse_checked};
+use crate::{commas, first_opt, has_flag, human_bytes, parse_for};
 
 const WORDS: [&str; 16] = [
     "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
@@ -41,11 +41,7 @@ fn lcg(state: &mut u64) -> u64 {
 }
 
 pub fn cmd_gen(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse_checked(
-        args,
-        &["--lines", "-n", "--cols", "--encoding"],
-        &["--quiet", "-q"],
-    )?;
+    let (pos, opts, flags) = parse_for("gen", args)?;
     let path = pos.first().context("expected an output FILE")?;
     let lines: u64 = first_opt(&opts, &["--lines", "-n"])
         .context("--lines N is required")?

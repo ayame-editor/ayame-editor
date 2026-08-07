@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 #[cfg(any(windows, target_os = "macos"))]
 use std::process::{Command, Stdio};
 
-use super::{first_opt, has_flag, parse_checked};
+use super::{first_opt, has_flag, parse_for};
 
 const REPO: &str = "hjosugi/ayame-editor";
 const API_BASE: &str = "https://api.github.com/repos/hjosugi/ayame-editor";
@@ -115,11 +115,7 @@ impl Drop for StageDir {
 
 /// `ayame update [--version VERSION] [--install-dir DIR] [--force] [--dry-run]`
 pub(crate) fn cmd_update(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse_checked(
-        args,
-        &["--version", "--install-dir"],
-        &["--force", "--dry-run"],
-    )?;
+    let (pos, opts, flags) = parse_for("update", args)?;
     if !pos.is_empty() {
         bail!("update does not take positional arguments");
     }
@@ -228,7 +224,7 @@ pub(crate) fn install_latest_update() -> Result<UpdateInstallReport> {
 
 /// `ayame remove [--install-dir DIR] [--yes] [--dry-run]`
 pub(crate) fn cmd_remove(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse_checked(args, &["--install-dir"], &["--yes", "--dry-run"])?;
+    let (pos, opts, flags) = parse_for("remove", args)?;
     if !pos.is_empty() {
         bail!("remove does not take positional arguments");
     }

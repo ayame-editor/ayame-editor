@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use ayame_core::{Document, LineOffsetReader, OrderingReader, SortOptions};
 
-use super::args::{first_opt, has_flag, open_doc};
+use super::args::{first_opt, has_flag, open_for};
 use super::common::{maybe_crash, rename_or_copy, temp_sibling_with_label};
 use super::fields::{field_spec, parse_budget, parse_keys};
 use super::formatting::{commas, human_bytes};
@@ -12,21 +12,7 @@ use super::progress::ProgressReporter;
 
 pub(crate) fn cmd_sort(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &[
-            "--key",
-            "-k",
-            "--delim",
-            "-t",
-            "--quote",
-            "--budget",
-            "--out-order",
-            "--out",
-            "--spill-dir",
-        ],
-        &["--numeric", "-n", "--reverse", "-r", "--csv", "--progress"],
-    )?;
+    let (doc, _pos, opts, flags) = open_for("sort", args)?;
     let key_columns = parse_keys(&opts)?;
     let numeric = has_flag(&flags, &["--numeric", "-n"]);
     let reverse = has_flag(&flags, &["--reverse", "-r"]);
