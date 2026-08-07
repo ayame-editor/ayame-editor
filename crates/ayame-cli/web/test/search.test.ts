@@ -9,6 +9,7 @@ vi.mock("../src/edits.js", () => ({
 vi.mock("../src/dialogs.js", () => ({
   askForm: vi.fn(),
   hideLoading: vi.fn(),
+  setLoadingDetail: vi.fn(),
   showLoading: vi.fn(),
   showMessage: vi.fn(),
 }));

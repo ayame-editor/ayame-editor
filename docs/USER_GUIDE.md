@@ -110,6 +110,22 @@ option list. File comparison is provided by the sister project
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
 - Keeps a crash-recovery log for unsaved edits.
 
+## Replace
+
+`Ctrl+H` opens the replace row under the find bar.
+
+- **Replace in selection only** (the `▤` toggle) confines `Replace All` to the
+  selected text. It turns on by itself when you open the replace row over a
+  selection spanning more than one line, and is unavailable when nothing is
+  selected. A match that only partly overlaps the selection is left alone.
+- `Replace All` can be canceled while it runs. Replacements already made stay
+  and can be undone as usual; the message says how many landed.
+- The replacement field keeps a history: `↑` / `↓` walk it, like the find field.
+
+Whole-word matching cannot be combined with every regular expression. When it
+cannot, the replace is refused rather than run against a wider set of matches
+than whole-word means — turn `Whole Word` off to run it.
+
 ## Default Shortcuts
 
 `Ctrl` can be entered as `Cmd` on macOS. Shortcuts can be changed from `Edit`

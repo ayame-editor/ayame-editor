@@ -23,6 +23,8 @@ export const PAD = 400;
 // extra lines fetched around the viewport and cached
 export const SEARCH_HISTORY_KEY = "ayame.searchHistory.v1";
 
+export const REPLACE_HISTORY_KEY = "ayame.replaceHistory.v1";
+
 export const SETTINGS_KEY = "ayame.settings.v1";
 
 export const SETTINGS_BG_IMAGE_KEY = "ayame.settings.bgImage.v1";
@@ -237,8 +239,12 @@ export interface AppState {
     truncated: boolean;
     findOpen: boolean;
     replaceOpen: boolean;
+    /// Replace-all writes only inside the current selection (#173).
+    inSelection: boolean;
     history: string[];
     historyIndex: number;
+    replaceHistory: string[];
+    replaceHistoryIndex: number;
   };
   analysis: {
     profiles: AnalysisProfile[];
@@ -313,8 +319,11 @@ export const state: AppState = {
     truncated: false,
     findOpen: false,
     replaceOpen: false,
+    inSelection: false,
     history: [],
     historyIndex: -1,
+    replaceHistory: [],
+    replaceHistoryIndex: -1,
   },
   // Bounded log-analysis state. Profiles persist separately from find history;
   // status contains only fixed histograms and capped sparse positions.

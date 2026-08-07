@@ -156,7 +156,14 @@ export type AnalysisHitsResponse = { rule: string, total_count: bigint, stored_h
 
 export type SessionState = { paths: Array<string>, active_path: string | null, };
 
-export type UiState = { recent_files: Array<string>, search_history: Array<string>, session: SessionState, analysis_profiles: Array<AnalysisProfile>, active_analysis_profile: string | null, };
+export type UiState = { recent_files: Array<string>, search_history: Array<string>,
+/**
+ * Replacement strings the user has committed, newest first — the find
+ * field's history had no counterpart for the replace field (#173).
+ * `#[serde(default)]` so a stored state written before this field is
+ * still readable.
+ */
+replace_history: Array<string>, session: SessionState, analysis_profiles: Array<AnalysisProfile>, active_analysis_profile: string | null, };
 
 export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
 

@@ -467,6 +467,12 @@ pub(super) struct SessionState {
 pub(super) struct UiState {
     pub(super) recent_files: Vec<String>,
     pub(super) search_history: Vec<String>,
+    /// Replacement strings the user has committed, newest first — the find
+    /// field's history had no counterpart for the replace field (#173).
+    /// `#[serde(default)]` so a stored state written before this field is
+    /// still readable.
+    #[serde(default)]
+    pub(super) replace_history: Vec<String>,
     pub(super) session: SessionState,
     #[serde(default)]
     pub(super) analysis_profiles: Vec<AnalysisProfile>,
@@ -555,6 +561,7 @@ impl AppState {
     pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, ApiError> {
         ui.recent_files = clean_path_list(ui.recent_files, 24);
         ui.search_history = clean_string_list(ui.search_history, 50);
+        ui.replace_history = clean_string_list(ui.replace_history, 50);
         ui.session.paths = clean_path_list(ui.session.paths, SESSION_MAX_PATHS);
         if let Some(active) = ui.session.active_path.take() {
             ui.session.active_path = clean_one_string(active);

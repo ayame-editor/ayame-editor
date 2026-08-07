@@ -393,18 +393,40 @@ async function pollLoadingOperation(opId: string) {
   }
 }
 
-export function showLoading(text, opts: { opId?: string | null; cancel?: boolean } = {}) {
+/// Show the blocking operation overlay.
+///
+/// Two kinds of cancelable work land here. Server-side operations (sort,
+/// replace-save, grep …) pass `opId`: progress is polled from `/api/ops/status`
+/// and Cancel posts to `/api/ops/cancel`. Work the CLIENT drives — replace-all
+/// walks the document itself over many small requests — has no server-side
+/// operation to cancel, so it passes `onCancel` and reports its own progress
+/// through [`setLoadingDetail`]. Both end up with the same overlay, the same
+/// Cancel button, and the same Esc handling (#173).
+export function showLoading(
+  text,
+  opts: { opId?: string | null; cancel?: boolean; onCancel?: (() => void) | null } = {},
+) {
   stopLoadingPoll();
   const o = $("overlay");
   const parts = loadingParts();
+  const tracked = !!opts.opId || !!opts.onCancel;
   parts.text.textContent = text || t("dialog.open.loading");
-  parts.progress.classList.toggle("hidden", !opts.opId);
-  parts.detail.classList.toggle("hidden", !opts.opId);
-  parts.detail.textContent = opts.opId ? t("dialog.operation.starting") : "";
+  parts.progress.classList.toggle("hidden", !tracked);
+  parts.detail.classList.toggle("hidden", !tracked);
+  parts.detail.textContent = tracked ? t("dialog.operation.starting") : "";
+  parts.progress.value = 0;
   parts.cancel.textContent = t("common.cancel");
-  parts.cancel.classList.toggle("hidden", !opts.opId || !opts.cancel);
+  parts.cancel.classList.toggle("hidden", !tracked || !opts.cancel);
   parts.cancel.disabled = false;
+  const onCancel = opts.onCancel ?? null;
   parts.cancel.onclick = () => {
+    if (onCancel) {
+      loadingCanceling = true;
+      parts.cancel.disabled = true;
+      parts.detail.textContent = t("dialog.operation.canceling");
+      onCancel();
+      return;
+    }
     const id = loadingOpId;
     if (!id) return;
     loadingCanceling = true;
@@ -412,6 +434,7 @@ export function showLoading(text, opts: { opId?: string | null; cancel?: boolean
     parts.detail.textContent = t("dialog.operation.canceling");
     apiPost<ArtifactOpStatus, OperationCancelRequest>("/api/ops/cancel", { id }).catch(() => {});
   };
+  if (onCancel) loadingCanceling = false;
   if (opts.opId) {
     loadingOpId = opts.opId;
     loadingSeenOp = false;
@@ -432,10 +455,21 @@ export function showLoading(text, opts: { opId?: string | null; cancel?: boolean
   });
 }
 
-// True while a running operation can be canceled from the overlay (a cancelable
-// op is in flight and the Cancel button is showing and still enabled).
+/// Report progress for client-driven work (no server operation to poll).
+/// Ignored once the overlay is gone, so a late tick from a finished loop cannot
+/// scribble on the next operation's card.
+export function setLoadingDetail(detail: string, percent: number | null = null) {
+  if (!loadingVisible()) return;
+  const parts = loadingParts();
+  if (loadingCanceling) return; // "canceling" outranks any progress still arriving
+  parts.detail.textContent = detail;
+  if (percent != null) parts.progress.value = Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+// True while a running operation can be canceled from the overlay (the Cancel
+// button is showing and still enabled).
 export function loadingCancelable() {
-  if (!loadingVisible() || !loadingOpId) return false;
+  if (!loadingVisible()) return false;
   const cancel = document.getElementById("overlay-cancel") as HTMLButtonElement | null;
   return !!cancel && !cancel.classList.contains("hidden") && !cancel.disabled;
 }
@@ -449,6 +483,7 @@ export function cancelLoading() {
 
 export function hideLoading() {
   stopLoadingPoll();
+  loadingCanceling = false;
   $("overlay").classList.add("hidden");
 }
 

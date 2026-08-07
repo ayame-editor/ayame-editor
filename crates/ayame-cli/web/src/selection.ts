@@ -42,6 +42,7 @@ import {
   selectionRanges,
 } from "./selection-model.js";
 import { selectedTextForRange } from "./selection-text.js";
+import { updateInSelectionUI } from "./findbar.js";
 import { isWordChar } from "./text.js";
 import type { SelectionSaveRequest, SelectionSaveResponse } from "./types/api.js";
 
@@ -213,6 +214,10 @@ export function renderRangeSelection(layer, r) {
 }
 
 export function renderSelection() {
+  // The replace row's "in selection only" toggle is enabled by whether a
+  // selection exists, so it is refreshed from the one place that already runs
+  // whenever the selection is redrawn (#173). A no-op while the row is closed.
+  updateInSelectionUI();
   const layer = $("sel-layer");
   layer.textContent = "";
   const rr = rectRange();

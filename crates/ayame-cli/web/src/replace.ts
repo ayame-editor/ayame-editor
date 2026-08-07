@@ -4,26 +4,25 @@ import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { api, type FindResponse, type LinesResponse, type SearchResponse } from "./api.js";
 import { applyBatchPlain, applyRange, enqueueEdit } from "./edits.js";
-import { hideLoading, showLoading } from "./dialogs.js";
+import { hideLoading, setLoadingDetail, showLoading } from "./dialogs.js";
 import { flashCount } from "./notifications.js";
+import { lineByte } from "./editor.js";
+import { selRange } from "./selection-model.js";
+import {
+  expandTemplate,
+  replaceWithinWindow,
+  scopeFromSelection,
+  scopeWindow,
+  type ReplaceScope,
+} from "./replace-scope.js";
 import { charLenOf, utf16IndexOfCol, utf8ByteLength } from "./text.js";
-import { buildMatcher, findStep, qs, updateCount } from "./findbar.js";
+import { buildMatcher, findStep, qs, saveReplaceHistory, updateCount } from "./findbar.js";
 
 export const REPLACE_ALL_MAX = 20000;
 
 // The replacement string sent to the document for one concrete match.
-export function replacementFor(matchText, replacement) {
-  if (!state.search.regex) return replacement;
-  const single = new RegExp(
-    state.search.matcher.source,
-    state.search.matcher.flags.replace("g", ""),
-  );
-  return matchText.replace(single, replacement);
-}
-
-// In literal mode "$" has no special meaning; escape it for String.replace.
-export function literalReplacement(replacement) {
-  return replacement.replace(/\$/g, "$$$$");
+export function replacementFor(match: RegExpMatchArray, replacement: string) {
+  return expandTemplate(match, replacement, state.search.regex);
 }
 
 export function replaceReady() {
@@ -38,7 +37,13 @@ export function replaceReady() {
     return false;
   }
   if (state.search.matcherWordFallback) {
-    flashCount(t("find.regexError"), "error");
+    // The pattern itself is fine — it is the whole-word wrapper around it that
+    // this engine will not accept, so the highlight is a superset of the real
+    // matches. Replacing against that superset would rewrite text the user's
+    // whole-word setting says to leave alone, hence the refusal; saying
+    // "invalid regex" instead just sends people hunting a typo that is not
+    // there (#173).
+    flashCount(t("find.wordRegexUnsupported"), "error");
     return false;
   }
   return true;
@@ -48,6 +53,7 @@ export function replaceReady() {
 export async function replaceCurrent() {
   if (!replaceReady()) return;
   const replacement = $("replace-input").value;
+  saveReplaceHistory(replacement);
   if (!state.search.lastMatch) {
     await findStep("next");
     return;
@@ -71,7 +77,7 @@ export async function replaceCurrent() {
       flashCount(t("find.cannotIdentifyMatch"), "error");
       return;
     }
-    const rep = replacementFor(m[0], replacement);
+    const rep = replacementFor(m, replacement);
     const c0 = h.column;
     const c1 = h.column + charLenOf(m[0]);
     await enqueueEdit(() => applyRange(h.line, c0, h.line, c1, rep));
@@ -85,47 +91,41 @@ export async function replaceCurrent() {
   }
 }
 
+/// The scope replace-all will honour: the current selection when the user asked
+/// for "in selection only" and there is one, otherwise the whole document.
+export function activeReplaceScope(): ReplaceScope | null {
+  if (!state.search.inSelection) return null;
+  return scopeFromSelection(selRange());
+}
+
 // One whole-line edit per matching line, flushed in bounded batches.
+//
+// Cancelable: the whole walk happens here in the client — a search sweep, then
+// line fetches, then batched edits — so there is no server-side operation to
+// cancel and the overlay drives a plain flag instead. It is honoured at every
+// boundary that costs a round trip, so Cancel lands within one request rather
+// than at the end (#173). Edits already committed stay committed; they are
+// ordinary undoable batches, and the count says how many landed.
 export async function replaceAll() {
   if (!replaceReady()) return;
   const replacement = $("replace-input").value;
-  const literal = literalReplacement(replacement);
-  showLoading(t("find.replacing"));
+  saveReplaceHistory(replacement);
+  const scope = activeReplaceScope();
+  let canceled = false;
+  showLoading(t(scope ? "find.replacingInSelection" : "find.replacing"), {
+    cancel: true,
+    onCancel: () => {
+      canceled = true;
+    },
+  });
+  let replaced = 0;
   try {
-    const lineSet = new Set<number>();
-    let totalHits = 0;
-    let start = 0;
-    for (let pass = 0; pass < 10000; pass++) {
-      const res = await api<SearchResponse>(
-        `/api/search?${qs()}&start=${start}&max=${REPLACE_ALL_MAX}`,
-      );
-      const hits = res.hits || [];
-      for (const h of hits) lineSet.add(h.line);
-      totalHits += hits.length;
-      if (!hits.length || !res.truncated) break;
-      const last = hits[hits.length - 1];
-      const next = last.byte + Math.max(1, last.byte_len || 0);
-      if (next <= start) break;
-      start = next;
-      flashCount(t("find.matchCount", { total: `${commas(totalHits)}+` }));
-    }
-    if (!lineSet.size) {
-      flashCount(t("find.noMatch"));
+    const lines = await collectMatchingLines(scope, () => canceled);
+    if (canceled) return;
+    if (!lines.length) {
+      flashCount(t(scope ? "find.noMatchInSelection" : "find.noMatch"));
       return;
     }
-    const lines: number[] = [...lineSet].sort((a, b) => a - b);
-    // Fetch affected lines in contiguous chunks (≤2000 lines per request).
-    const texts = new Map();
-    for (let i = 0; i < lines.length; ) {
-      let j = i;
-      while (j + 1 < lines.length && lines[j + 1] - lines[i] < 2000) j++;
-      const start = lines[i];
-      const count = lines[j] - lines[i] + 1;
-      const r = await api<LinesResponse>(`/api/lines?start=${start}&count=${count}`);
-      r.lines.forEach((rec, k) => texts.set(start + k, rec.text ?? ""));
-      i = j + 1;
-    }
-    let replaced = 0;
     let edits = [];
     let pendingBytes = 0;
     const flush = async () => {
@@ -135,22 +135,48 @@ export async function replaceAll() {
       pendingBytes = 0;
       await enqueueEdit(() => applyBatchPlain(batch));
     };
-    for (const line of lines) {
-      const text = texts.get(line);
-      if (text == null) continue;
-      const re = new RegExp(state.search.matcher.source, state.search.matcher.flags);
-      const count = [...text.matchAll(re)].length;
-      if (!count) continue;
-      const next = text.replace(re, state.search.regex ? replacement : literal);
-      if (next === text) continue;
-      replaced += count;
-      edits.push({ l0: line, c0: 0, l1: line, c1: charLenOf(text), text: next });
-      pendingBytes += next.length;
-      if (edits.length >= 2000 || pendingBytes > 512 * 1024) await flush();
+    // Fetch affected lines in contiguous chunks (≤2000 lines per request) and
+    // rewrite each as it arrives, so a cancel does not first pay for fetching
+    // every remaining line.
+    for (let i = 0; i < lines.length && !canceled; ) {
+      let j = i;
+      while (j + 1 < lines.length && lines[j + 1] - lines[i] < 2000) j++;
+      const from = lines[i];
+      const count = lines[j] - lines[i] + 1;
+      const r = await api<LinesResponse>(`/api/lines?start=${from}&count=${count}`);
+      const texts = new Map<number, string>();
+      r.lines.forEach((rec, k) => texts.set(from + k, rec.text ?? ""));
+      for (const line of lines.slice(i, j + 1)) {
+        const text = texts.get(line);
+        if (text == null) continue;
+        const window = scopeWindow(scope, line);
+        if (!window) continue;
+        const next = replaceWithinWindow(
+          text,
+          state.search.matcher,
+          replacement,
+          state.search.regex,
+          window,
+        );
+        if (!next.count || next.text === text) continue;
+        replaced += next.count;
+        edits.push({ l0: line, c0: 0, l1: line, c1: charLenOf(text), text: next.text });
+        pendingBytes += next.text.length;
+        if (edits.length >= 2000 || pendingBytes > 512 * 1024) await flush();
+      }
+      i = j + 1;
+      setLoadingDetail(
+        t("find.replaceProgress", { done: commas(replaced) }),
+        (i / lines.length) * 100,
+      );
     }
     await flush();
     state.search.lastMatch = null;
     await updateCount();
+    if (canceled) {
+      flashCount(t("find.replaceCanceled", { n: commas(replaced) }), "error");
+      return;
+    }
     flashCount(replaced ? t("find.replacedCount", { n: commas(replaced) }) : t("find.noMatch"));
   } catch (e) {
     flashCount(t("find.replaceError"), "error");
@@ -158,4 +184,38 @@ export async function replaceAll() {
   } finally {
     hideLoading();
   }
+}
+
+// Walk /api/search for the lines holding at least one match, bounded to the
+// scope's line range. Returns them sorted and deduped; a line that turns out to
+// hold no match inside the scope's column window is simply skipped later.
+async function collectMatchingLines(scope: ReplaceScope | null, canceled: () => boolean) {
+  const lineSet = new Set<number>();
+  let totalHits = 0;
+  // Starting the sweep at the scope's first line skips everything above it
+  // outright instead of paging through the whole document to throw it away.
+  let start = scope ? await lineByte(scope.start.line) : 0;
+  for (let pass = 0; pass < 10000 && !canceled(); pass++) {
+    const res = await api<SearchResponse>(
+      `/api/search?${qs()}&start=${start}&max=${REPLACE_ALL_MAX}`,
+    );
+    const hits = res.hits || [];
+    let past = false;
+    for (const h of hits) {
+      if (scope && h.line > scope.end.line) {
+        past = true;
+        break;
+      }
+      if (scope && h.line < scope.start.line) continue;
+      lineSet.add(h.line);
+      totalHits++;
+    }
+    if (past || !hits.length || !res.truncated) break;
+    const last = hits[hits.length - 1];
+    const next = last.byte + Math.max(1, last.byte_len || 0);
+    if (next <= start) break;
+    start = next;
+    setLoadingDetail(t("find.matchCount", { total: `${commas(totalHits)}+` }));
+  }
+  return [...lineSet].sort((a, b) => a - b);
 }
