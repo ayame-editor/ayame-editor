@@ -67,9 +67,13 @@ describe("application chrome", () => {
     expect(
       doc.querySelector('#edit-menu [data-menu-action="paste"] [data-i18n="menu.paste"]'),
     ).not.toBeNull();
-    expect(read("src/menu-actions.ts")).toContain(
-      "paste: { run: pasteFromClipboard, editorOnly: true }",
-    );
+    const actionsSource = read("src/menu-actions.ts");
+    expect(actionsSource).toMatch(/paste:\s*\{[^}]*run:\s*pasteFromClipboard/);
+    // Paste is a rebindable action now (#175), but on its own chord the
+    // browser's clipboard event still does the work — see `nativeChords`.
+    expect(actionsSource).toMatch(/paste:\s*\{[^}]*nativeChords:\s*\["Ctrl\+V"/);
+    expect(doc.querySelector('#edit-menu [data-menu-action="paste"] [data-key-action="paste"]'))
+      .not.toBeNull();
   });
 
   it("exposes tab close, Save All, and recent files from the File menu (#167)", () => {

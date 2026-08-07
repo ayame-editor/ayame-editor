@@ -4,6 +4,16 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Filled in the tab context menu and freed the last hard-coded shortcuts. Tabs
+  can now be closed to the right, all at once, or only the saved ones, and a
+  closed tab can be reopened from the menu or `Ctrl+Shift+T` — each entry
+  disabled when it would close nothing. Font size (in/out/reset) and paste
+  became real keymap actions instead of raw key handling, so they appear in the
+  key-bindings editor and the command palette and can be rebound; paste still
+  leaves its default `Ctrl+V` to the browser's own clipboard event. Shortcut
+  parsing gained a bindable `+`, and a punctuation key now matches its chord
+  with or without the `Shift` a keyboard layout needs to type it (#175).
+
 ## v0.8.7 - 2026-08-05
 
 - Replaced the frontend's flat mutable state bag with a typed `AppState`

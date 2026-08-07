@@ -126,6 +126,8 @@ Shortcuts`.
 | Save | `Ctrl+S` |
 | Save as | `Ctrl+Shift+S` |
 | Close tab | `Ctrl+W` |
+| Reopen closed tab | `Ctrl+Shift+T` |
+| Close tabs to the right / all / saved | Unassigned |
 | Next / previous tab | `Ctrl+PageDown`, `Ctrl+PageUp` |
 | Command palette | `Ctrl+Shift+P` |
 | Find | `Ctrl+F` |
@@ -141,6 +143,7 @@ Shortcuts`.
 | Delete line | `Ctrl+Shift+K` |
 | Copy / cut / paste | `Ctrl+C`, `Ctrl+X`, `Ctrl+V` |
 | Search options: case / word / regex | `Alt+C`, `Alt+W`, `Alt+R` |
+| Increase / decrease / reset font size | `Ctrl++`, `Ctrl+-`, `Ctrl+0` |
 | Sort into a new temporary tab | Unassigned |
 | Split current file | Unassigned |
 | Grep a folder | Unassigned |
@@ -152,6 +155,13 @@ Shortcuts`.
 
 Unassigned actions appear under `Edit` -> `Settings` -> `Key Bindings`; assign
 a shortcut if you use them often.
+
+Every action in this table is rebindable, font size and paste included. Paste
+keeps using the system clipboard on its default `Ctrl+V`; bound to anything
+else it reads the clipboard directly, which some browsers ask permission for.
+
+Which physical key produces `+` or `-` depends on the keyboard layout, so the
+font-size bindings match with or without the `Shift` a layout needs for them.
 
 ### Menu and Status Operations
 
@@ -168,5 +178,7 @@ the menu, status bar, or command palette (`Ctrl+Shift+P`) where listed.
 | Reopen with a different encoding | Open `Encoding / Line Endings...`, choose an encoding, then use `Reopen` |
 | Save selection to file | Selection context menu |
 | Cut / copy / paste / select all | `Edit` menu |
+| Close other / right-hand / saved / all tabs | Tab context menu (right-click a tab) |
+| Reopen closed tab | Tab context menu or `Ctrl+Shift+T` |
 | Settings | `Edit` -> `Settings` |
 | Key bindings | `Edit` -> `Settings` -> `Key Bindings`, or `Help` -> `Keyboard Shortcuts` |
