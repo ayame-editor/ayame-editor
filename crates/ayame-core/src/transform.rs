@@ -105,85 +105,93 @@ pub struct GrepLinesOptions {
     pub overwrite: bool,
 }
 
+/// How a transform runs, as opposed to what it does.
+///
+/// Every transform here is one streaming pass over the document; parallelism
+/// and progress reporting are the axes orthogonal to that pass. Spelling them
+/// as fields rather than as function names is what keeps this module from
+/// being a 3x4 grid of near-identical entry points — which is what it was, and
+/// what a third axis would have doubled again (#110).
+///
+/// That third axis is the point of the struct: cancelling a long GUI operation
+/// belongs here as another field, not as another eight functions.
+#[derive(Default, Clone, Copy)]
+pub struct TransformRun<'a> {
+    /// Run the pass as independent line-range chunks on worker threads.
+    /// `None` streams through a single writer. Every transform in this module
+    /// is line-local, so the two produce byte-identical output — which
+    /// `transform_equivalence` asserts.
+    pub parallel: Option<&'a ParallelReplaceOptions>,
+    /// Called with `(lines_done, lines_total)` as the pass proceeds.
+    pub progress: Option<&'a (dyn Fn(u64, u64) + Sync)>,
+}
+
+impl<'a> TransformRun<'a> {
+    /// One writer, no progress — the plain case.
+    pub fn serial() -> TransformRun<'a> {
+        TransformRun::default()
+    }
+
+    /// Chunked across worker threads.
+    pub fn parallel(parallel: &'a ParallelReplaceOptions) -> TransformRun<'a> {
+        TransformRun {
+            parallel: Some(parallel),
+            progress: None,
+        }
+    }
+
+    /// Report `(done, total)` lines as the pass proceeds.
+    pub fn reporting(mut self, progress: &'a (dyn Fn(u64, u64) + Sync)) -> TransformRun<'a> {
+        self.progress = Some(progress);
+        self
+    }
+}
+
+/// Run one line-local pass with whichever streaming strategy `run` selects.
+///
+/// `line_fn` takes the document because the parallel path hands each worker
+/// its own handle; the serial path closes over the caller's.
+fn run_transform<F>(
+    doc: &Document,
+    target: &Path,
+    run: TransformRun<'_>,
+    line_fn: F,
+) -> Result<TransformResult>
+where
+    F: Fn(&Document, &[u8], &[u8], &mut BufWriter<std::fs::File>) -> Result<(bool, u64)> + Sync,
+{
+    match run.parallel {
+        Some(parallel) => stream_chunks_parallel(doc, target, parallel, &line_fn, run.progress),
+        None => stream_to_new_file(
+            doc,
+            target,
+            |raw, term, w| line_fn(doc, raw, term, w),
+            run.progress,
+        ),
+    }
+}
+
 /// Extract every line matching `opts` into a new file ("grep して保存"): one
 /// streaming pass over the mmap, so multi-GB files complete in bounded
 /// memory. Matched lines are copied verbatim, original terminator included;
 /// `changed_lines` reports how many lines matched.
+///
+/// Matching is line-local, so [`TransformRun::parallel`] filters independent
+/// line-range chunks on worker threads and concatenates them in order.
 pub fn grep_lines_to_path(
     doc: &Document,
     target: impl AsRef<Path>,
     opts: &GrepLinesOptions,
+    run: TransformRun<'_>,
 ) -> Result<TransformResult> {
-    grep_lines_to_path_inner(doc, target.as_ref(), opts, None)
-}
-
-pub fn grep_lines_to_path_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &GrepLinesOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    grep_lines_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
-}
-
-fn grep_lines_to_path_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &GrepLinesOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
+    let target = target.as_ref();
     if !opts.overwrite {
         ensure_new_target(target)?;
     }
     let (plan, whole_word) = grep_plan(doc, opts)?;
-    stream_to_new_file(
-        doc,
-        target,
-        |raw, term, w| write_grep_line(doc, &plan, whole_word, raw, term, w),
-        progress,
-    )
-}
-
-/// Parallel variant of [`grep_lines_to_path`]: matching is line-local, so
-/// independent line-range chunks filter on worker threads and concatenate in
-/// order, exactly like replace/case.
-pub fn grep_lines_to_path_parallel(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &GrepLinesOptions,
-    parallel: &ParallelReplaceOptions,
-) -> Result<TransformResult> {
-    grep_lines_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
-}
-
-pub fn grep_lines_to_path_parallel_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &GrepLinesOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    grep_lines_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
-}
-
-fn grep_lines_to_path_parallel_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &GrepLinesOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
-    if !opts.overwrite {
-        ensure_new_target(target)?;
-    }
-    let (plan, whole_word) = grep_plan(doc, opts)?;
-    stream_chunks_parallel(
-        doc,
-        target,
-        parallel,
-        &move |doc, raw, term, w| write_grep_line(doc, &plan, whole_word, raw, term, w),
-        progress,
-    )
+    run_transform(doc, target, run, move |doc, raw, term, w| {
+        write_grep_line(doc, &plan, whole_word, raw, term, w)
+    })
 }
 
 fn grep_plan(doc: &Document, opts: &GrepLinesOptions) -> Result<(MatchPlan, bool)> {
@@ -212,85 +220,25 @@ fn write_grep_line(
     }
 }
 
+/// Rewrite every line with `opts.mode` into a new file.
+///
+/// Case conversion is line-local, so [`TransformRun::parallel`] converts
+/// independent line-range chunks on worker threads and concatenates them in
+/// order — huge files scale with cores instead of a single writer.
 pub fn case_to_path(
     doc: &Document,
     target: impl AsRef<Path>,
     opts: &CaseOptions,
+    run: TransformRun<'_>,
 ) -> Result<TransformResult> {
-    case_to_path_inner(doc, target.as_ref(), opts, None)
-}
-
-pub fn case_to_path_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &CaseOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    case_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
-}
-
-fn case_to_path_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &CaseOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
+    let target = target.as_ref();
     ensure_new_target(target)?;
     let mode = opts.mode;
-    stream_to_new_file(
-        doc,
-        target,
-        |raw, term, w| {
-            let (changed, count) = write_cased_line(doc, mode, raw, w)?;
-            w.write_all(term)?;
-            Ok((changed, count))
-        },
-        progress,
-    )
-}
-
-/// Parallel variant of [`case_to_path`]: line-local like the streaming path,
-/// so independent line-range chunks convert on worker threads and concatenate
-/// in order — huge files scale with cores instead of a single writer.
-pub fn case_to_path_parallel(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &CaseOptions,
-    parallel: &ParallelReplaceOptions,
-) -> Result<TransformResult> {
-    case_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
-}
-
-pub fn case_to_path_parallel_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &CaseOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    case_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
-}
-
-fn case_to_path_parallel_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &CaseOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
-    ensure_new_target(target)?;
-    let mode = opts.mode;
-    stream_chunks_parallel(
-        doc,
-        target,
-        parallel,
-        &move |doc, raw, term, w| {
-            let res = write_cased_line(doc, mode, raw, w)?;
-            w.write_all(term)?;
-            Ok(res)
-        },
-        progress,
-    )
+    run_transform(doc, target, run, move |doc, raw, term, w| {
+        let res = write_cased_line(doc, mode, raw, w)?;
+        w.write_all(term)?;
+        Ok(res)
+    })
 }
 
 fn write_cased_line(
@@ -309,76 +257,19 @@ fn write_cased_line(
     Ok((changed, 0))
 }
 
+/// Rewrite every line with `opts` into a new file.
+///
+/// Replacement is line-local, so [`TransformRun::parallel`] rewrites
+/// independent line-range chunks on worker threads and concatenates them in
+/// order. Both paths build the same raw-literal / regex / decoded-literal
+/// plan; only the number of writers differs.
 pub fn replace_to_path(
     doc: &Document,
     target: impl AsRef<Path>,
     opts: &ReplaceOptions,
+    run: TransformRun<'_>,
 ) -> Result<TransformResult> {
-    replace_to_path_inner(doc, target.as_ref(), opts, None)
-}
-
-pub fn replace_to_path_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &ReplaceOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    replace_to_path_inner(doc, target.as_ref(), opts, Some(&progress))
-}
-
-fn replace_to_path_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &ReplaceOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
-    ensure_new_target(target)?;
-    if opts.find.is_empty() {
-        return Err(Error::InvalidInput(
-            "replace pattern must not be empty".into(),
-        ));
-    }
-    // The same raw-literal / regex / decoded-literal plan the parallel path
-    // uses, streamed through a single writer.
-    let plan = ReplacePlan::new(doc, opts)?;
-    stream_to_new_file(
-        doc,
-        target,
-        |raw, term, w| {
-            let (changed, count) = write_replaced_line(doc, &plan, raw, w)?;
-            w.write_all(term)?;
-            Ok((changed, count))
-        },
-        progress,
-    )
-}
-
-pub fn replace_to_path_parallel(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &ReplaceOptions,
-    parallel: &ParallelReplaceOptions,
-) -> Result<TransformResult> {
-    replace_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, None)
-}
-
-pub fn replace_to_path_parallel_with_progress(
-    doc: &Document,
-    target: impl AsRef<Path>,
-    opts: &ReplaceOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: impl Fn(u64, u64) + Sync,
-) -> Result<TransformResult> {
-    replace_to_path_parallel_inner(doc, target.as_ref(), opts, parallel, Some(&progress))
-}
-
-fn replace_to_path_parallel_inner(
-    doc: &Document,
-    target: &Path,
-    opts: &ReplaceOptions,
-    parallel: &ParallelReplaceOptions,
-    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
-) -> Result<TransformResult> {
+    let target = target.as_ref();
     ensure_new_target(target)?;
     if opts.find.is_empty() {
         return Err(Error::InvalidInput(
@@ -386,25 +277,13 @@ fn replace_to_path_parallel_inner(
         ));
     }
     let plan = ReplacePlan::new(doc, opts)?;
-    stream_chunks_parallel(
-        doc,
-        target,
-        parallel,
-        &move |doc, raw, term, w| {
-            let res = write_replaced_line(doc, &plan, raw, w)?;
-            w.write_all(term)?;
-            Ok(res)
-        },
-        progress,
-    )
+    run_transform(doc, target, run, move |doc, raw, term, w| {
+        let res = write_replaced_line(doc, &plan, raw, w)?;
+        w.write_all(term)?;
+        Ok(res)
+    })
 }
 
-/// The shared chunked-parallel driver: split the document into line-range
-/// chunks, run `line_fn` over each chunk into its own temp part file (Rayon
-/// workers), then concatenate the parts in order. Only valid for line-local
-/// transforms — `line_fn` must not carry state across lines. `line_fn` owns
-/// the line terminator (its third argument), so filters like grep-to-file can
-/// drop a line entirely instead of leaving a blank one behind.
 fn stream_chunks_parallel<F>(
     doc: &Document,
     target: &Path,
@@ -1046,6 +925,7 @@ mod tests {
                 regex: false,
                 case_sensitive: true,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 2);
@@ -1067,6 +947,7 @@ mod tests {
                 regex: true,
                 case_sensitive: true,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 2);
@@ -1088,6 +969,7 @@ mod tests {
                 regex: false,
                 case_sensitive: false,
             },
+            TransformRun::serial(),
         )
         .unwrap();
 
@@ -1108,6 +990,7 @@ mod tests {
                 regex: true,
                 case_sensitive: true,
             },
+            TransformRun::serial(),
         )
         .unwrap();
 
@@ -1119,7 +1002,7 @@ mod tests {
     fn parallel_literal_replace_preserves_order_and_eol() {
         let (f, doc) = doc_from(b"foo\r\nkeep\r\nfoo foo\r\n");
         let out = f.path().with_extension("parallel-replace");
-        let res = replace_to_path_parallel(
+        let res = replace_to_path(
             &doc,
             &out,
             &ReplaceOptions {
@@ -1128,9 +1011,12 @@ mod tests {
                 regex: false,
                 case_sensitive: true,
             },
-            &ParallelReplaceOptions {
-                jobs: 2,
-                chunk_lines: 1,
+            TransformRun {
+                parallel: Some(&ParallelReplaceOptions {
+                    jobs: 2,
+                    chunk_lines: 1,
+                }),
+                progress: None,
             },
         )
         .unwrap();
@@ -1144,7 +1030,7 @@ mod tests {
     fn parallel_regex_replace_matches_streaming_replace() {
         let (f, doc) = doc_from(b"a1\nb22\nccc\n");
         let out = f.path().with_extension("parallel-regex");
-        let res = replace_to_path_parallel(
+        let res = replace_to_path(
             &doc,
             &out,
             &ReplaceOptions {
@@ -1153,9 +1039,12 @@ mod tests {
                 regex: true,
                 case_sensitive: true,
             },
-            &ParallelReplaceOptions {
-                jobs: 2,
-                chunk_lines: 1,
+            TransformRun {
+                parallel: Some(&ParallelReplaceOptions {
+                    jobs: 2,
+                    chunk_lines: 1,
+                }),
+                progress: None,
             },
         )
         .unwrap();
@@ -1203,6 +1092,7 @@ mod tests {
             &CaseOptions {
                 mode: CaseMode::Camel,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 2);
@@ -1217,15 +1107,18 @@ mod tests {
     fn parallel_case_matches_streaming_case() {
         let (f, doc) = doc_from(b"foo_bar\nsecond_line\nthird one\n");
         let out = f.path().with_extension("parallel-case");
-        let res = case_to_path_parallel(
+        let res = case_to_path(
             &doc,
             &out,
             &CaseOptions {
                 mode: CaseMode::Pascal,
             },
-            &ParallelReplaceOptions {
-                jobs: 2,
-                chunk_lines: 1,
+            TransformRun {
+                parallel: Some(&ParallelReplaceOptions {
+                    jobs: 2,
+                    chunk_lines: 1,
+                }),
+                progress: None,
             },
         )
         .unwrap();
@@ -1256,6 +1149,7 @@ mod tests {
             &CaseOptions {
                 mode: CaseMode::Upper,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 1);
@@ -1280,7 +1174,8 @@ mod tests {
     fn grep_lines_extracts_matching_lines_verbatim() {
         let (f, doc) = doc_from(b"alpha needle\r\nbeta\nneedle end");
         let out = f.path().with_extension("grep");
-        let res = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap();
+        let res =
+            grep_lines_to_path(&doc, &out, &grep_opts("needle"), TransformRun::serial()).unwrap();
         assert_eq!(res.changed_lines, 2);
         assert_eq!(res.lines, 3);
         // Terminators (and their absence on the last line) survive verbatim,
@@ -1303,6 +1198,7 @@ mod tests {
                 whole_word: true,
                 overwrite: false,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 2);
@@ -1320,6 +1216,7 @@ mod tests {
                 whole_word: false,
                 overwrite: false,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 1);
@@ -1332,14 +1229,17 @@ mod tests {
         let (f, doc) = doc_from(b"needle a\nskip\nneedle b\nskip\nneedle c");
         let seq = f.path().with_extension("grep-seq");
         let par = f.path().with_extension("grep-par");
-        grep_lines_to_path(&doc, &seq, &grep_opts("needle")).unwrap();
-        let res = grep_lines_to_path_parallel(
+        grep_lines_to_path(&doc, &seq, &grep_opts("needle"), TransformRun::serial()).unwrap();
+        let res = grep_lines_to_path(
             &doc,
             &par,
             &grep_opts("needle"),
-            &ParallelReplaceOptions {
-                jobs: 2,
-                chunk_lines: 1,
+            TransformRun {
+                parallel: Some(&ParallelReplaceOptions {
+                    jobs: 2,
+                    chunk_lines: 1,
+                }),
+                progress: None,
             },
         )
         .unwrap();
@@ -1378,7 +1278,8 @@ mod tests {
         // reports ending exactly at total (single writer, in order).
         let seq = f.path().with_extension("prog-seq");
         let seen = Mutex::new(Vec::new());
-        replace_to_path_with_progress(
+        let report = |done, total| seen.lock().unwrap().push((done, total));
+        replace_to_path(
             &doc,
             &seq,
             &ReplaceOptions {
@@ -1387,7 +1288,7 @@ mod tests {
                 regex: false,
                 case_sensitive: true,
             },
-            |done, total| seen.lock().unwrap().push((done, total)),
+            TransformRun::serial().reporting(&report),
         )
         .unwrap();
         let samples = seen.into_inner().unwrap();
@@ -1408,15 +1309,16 @@ mod tests {
         // and the shared counter reaches total.
         let par = f.path().with_extension("prog-par");
         let seen = Mutex::new(Vec::new());
-        grep_lines_to_path_parallel_with_progress(
+        let parallel = ParallelReplaceOptions {
+            jobs: 2,
+            chunk_lines: 4,
+        };
+        let report = |done, total| seen.lock().unwrap().push((done, total));
+        grep_lines_to_path(
             &doc,
             &par,
             &grep_opts("a"),
-            &ParallelReplaceOptions {
-                jobs: 2,
-                chunk_lines: 4,
-            },
-            |done, total| seen.lock().unwrap().push((done, total)),
+            TransformRun::parallel(&parallel).reporting(&report),
         )
         .unwrap();
         bounded_and_complete(&seen.into_inner().unwrap());
@@ -1435,7 +1337,7 @@ mod tests {
         f.write_all(b"\x83\x5c line\nreal \\ here\n").unwrap();
         let doc = Document::open(f.path(), &opts).unwrap();
         let out = f.path().with_extension("grep-sjis");
-        let res = grep_lines_to_path(&doc, &out, &grep_opts("\\")).unwrap();
+        let res = grep_lines_to_path(&doc, &out, &grep_opts("\\"), TransformRun::serial()).unwrap();
         assert_eq!(res.changed_lines, 1);
         assert_eq!(std::fs::read(&out).unwrap(), b"real \\ here\n");
         let _ = std::fs::remove_file(out);
@@ -1465,6 +1367,7 @@ mod tests {
                 whole_word: true,
                 overwrite: false,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 1);
@@ -1478,13 +1381,14 @@ mod tests {
         let out = f.path().with_extension("grep-ow");
         std::fs::write(&out, b"old contents").unwrap();
         // Without overwrite: conflict, the old file is untouched.
-        let err = grep_lines_to_path(&doc, &out, &grep_opts("needle")).unwrap_err();
+        let err = grep_lines_to_path(&doc, &out, &grep_opts("needle"), TransformRun::serial())
+            .unwrap_err();
         assert!(matches!(err, Error::TargetExists { .. }), "got {err:?}");
         assert_eq!(std::fs::read(&out).unwrap(), b"old contents");
         // With overwrite: the picked file is replaced.
         let mut ow = grep_opts("needle");
         ow.overwrite = true;
-        let res = grep_lines_to_path(&doc, &out, &ow).unwrap();
+        let res = grep_lines_to_path(&doc, &out, &ow, TransformRun::serial()).unwrap();
         assert_eq!(res.changed_lines, 1);
         assert_eq!(std::fs::read(&out).unwrap(), b"needle\n");
         let _ = std::fs::remove_file(out);
@@ -1530,6 +1434,7 @@ mod tests {
             &CaseOptions {
                 mode: CaseMode::Upper,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 1);
@@ -1558,6 +1463,7 @@ mod tests {
                 regex: false,
                 case_sensitive: true,
             },
+            TransformRun::serial(),
         )
         .unwrap();
         assert_eq!(res.changed_lines, 1);

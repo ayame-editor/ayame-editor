@@ -10,10 +10,9 @@ mod common;
 
 use ayame_core::ops::sort;
 use ayame_core::{
-    case_to_path, case_to_path_parallel, grep_lines_to_path, grep_lines_to_path_parallel,
-    replace_to_path, replace_to_path_parallel, split_by_lines, CaseMode, CaseOptions,
+    case_to_path, grep_lines_to_path, replace_to_path, split_by_lines, CaseMode, CaseOptions,
     GrepLinesOptions, OrderingReader, ParallelReplaceOptions, ReplaceOptions, SortOptions,
-    SplitOptions,
+    SplitOptions, TransformRun,
 };
 use common::{assert_bytes_eq, open_doc, read, scratch};
 
@@ -41,10 +40,10 @@ fn replace_bytes(
     let out = dir.path().join("replace.out");
     match par {
         None => {
-            replace_to_path(&doc, &out, opts).unwrap();
+            replace_to_path(&doc, &out, opts, TransformRun::serial()).unwrap();
         }
         Some(p) => {
-            replace_to_path_parallel(&doc, &out, opts, &p).unwrap();
+            replace_to_path(&doc, &out, opts, TransformRun::parallel(&p)).unwrap();
         }
     }
     read(&out)
@@ -56,10 +55,10 @@ fn case_bytes(input: &[u8], opts: &CaseOptions, par: Option<ParallelReplaceOptio
     let out = dir.path().join("case.out");
     match par {
         None => {
-            case_to_path(&doc, &out, opts).unwrap();
+            case_to_path(&doc, &out, opts, TransformRun::serial()).unwrap();
         }
         Some(p) => {
-            case_to_path_parallel(&doc, &out, opts, &p).unwrap();
+            case_to_path(&doc, &out, opts, TransformRun::parallel(&p)).unwrap();
         }
     }
     read(&out)
@@ -140,10 +139,10 @@ fn grep_bytes(
     let out = dir.path().join("grep.out");
     match par {
         None => {
-            grep_lines_to_path(&doc, &out, opts).unwrap();
+            grep_lines_to_path(&doc, &out, opts, TransformRun::serial()).unwrap();
         }
         Some(p) => {
-            grep_lines_to_path_parallel(&doc, &out, opts, &p).unwrap();
+            grep_lines_to_path(&doc, &out, opts, TransformRun::parallel(&p)).unwrap();
         }
     }
     read(&out)

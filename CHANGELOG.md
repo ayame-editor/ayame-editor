@@ -73,6 +73,16 @@ All notable changes to Ayame Editor are tracked here.
   decision and one failure message, the two sort merge passes share one
   `merge_pump`, and `comparable_key` became a wrapper over
   `comparable_key_into` (#112).
+- Collapsed the transform API from twelve entry points to three. `replace`,
+  `case` and `grep-lines` each had a `{_, _with_progress, _parallel,
+  _parallel_with_progress}` quartet; parallelism and progress are now fields of
+  a `TransformRun` config, so a third axis — cancelling a long GUI operation —
+  can be another field instead of another eight functions. The three CLI
+  commands each parsed `--jobs`/`--chunk-lines` for themselves and branched
+  serial-vs-parallel around near-identical calls; both the parse and the branch
+  are gone. Documented why `group`/`top`/`distinct` have no crash-isolation
+  hook — only the subcommands `serve` spawns as workers need one — and removed
+  the stray one from `group`, which is never spawned (#110).
 
 ## v0.8.7 - 2026-08-05
 

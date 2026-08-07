@@ -71,12 +71,9 @@ pub use split::{
     split_by_lines, split_by_lines_with_progress, SplitOptions, SplitResult, SPLIT_RESULT_MAX_FILES,
 };
 pub use transform::{
-    case_to_path, case_to_path_parallel, case_to_path_parallel_with_progress,
-    case_to_path_with_progress, grep_lines_to_path, grep_lines_to_path_parallel,
-    grep_lines_to_path_parallel_with_progress, grep_lines_to_path_with_progress, replace_to_path,
-    replace_to_path_parallel, replace_to_path_parallel_with_progress,
-    replace_to_path_with_progress, CaseMode, CaseOptions, GrepLinesOptions, ParallelReplaceOptions,
-    ReplaceOptions, TransformResult, DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
+    case_to_path, grep_lines_to_path, replace_to_path, CaseMode, CaseOptions, GrepLinesOptions,
+    ParallelReplaceOptions, ReplaceOptions, TransformResult, TransformRun,
+    DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 pub use wal::{LoggedOp, RecoveryInfo, WalWriter};
 

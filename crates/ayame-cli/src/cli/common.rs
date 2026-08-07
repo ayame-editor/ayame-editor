@@ -4,7 +4,14 @@ use crate::temp_paths;
 
 /// Test/operational hook: when running as a spawned op worker, optionally crash
 /// in a specific way so the supervisor's isolation can be exercised
-/// deterministically. `AYAME_WORKER_CRASH = panic | abort | hang | exit<N>`.
+/// deterministically. `AYAME_WORKER_CRASH = panic | abort | hang | exit<N>`;
+/// see `scripts/crash-isolation-test.sh`.
+///
+/// Called by exactly the subcommands `serve` spawns as op workers — search,
+/// sort, replace, case, grep-lines, split — because those are the ones whose
+/// crash the supervisor has to survive. `group`, `top` and `distinct` run only
+/// from the command line, where a crash is the user's own process and there is
+/// no isolation to test, so they deliberately have no hook (#110).
 pub(crate) fn maybe_crash() {
     let Ok(mode) = std::env::var("AYAME_WORKER_CRASH") else {
         return;
