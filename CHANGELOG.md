@@ -4,6 +4,15 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Moved the in-flight artifact operations out of a process global and into the
+  session, so two `AppState`s in one process no longer share a map, and the
+  guard that evicts a finished operation — a `Drop` that can run while a
+  request unwinds — no longer reaches for process-wide state. The four
+  artifact endpoints (sort, replace, case, grep) became thin plans over one
+  driver that owns the materialize/run/cleanup flow, the two worker waiters
+  became one supervisor differing only in whether stdout is captured, and the
+  `--jobs`/`--chunk-lines` block is written once (#106).
+
 ## v0.8.7 - 2026-08-05
 
 - Replaced the frontend's flat mutable state bag with a typed `AppState`
