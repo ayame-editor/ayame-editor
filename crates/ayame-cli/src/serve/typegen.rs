@@ -11,7 +11,7 @@
 //! (typeship `Transport::Fetch`) wait for a JS+JSDoc render mode upstream, since
 //! this frontend runs without a transpile step.
 //!
-//! [`typeship`]: https://github.com/hjosugi/typeship
+//! [`typeship`]: https://github.com/irodori-table/typeship
 
 use std::path::PathBuf;
 
