@@ -24,6 +24,11 @@ repository = "https://github.com/ayame-editor/ayame-editor"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+# Every `unsafe` must state its contract. The engine's mmap sites are the ones
+# that matter: a mapping can be invalidated by another process truncating the
+# file, and each site has to say how that is absorbed rather than leaving the
+# reasoning in nearby prose (#112).
+undocumented_unsafe_blocks = "deny"
 
 [workspace.dependencies]
 memmap2 = "0.9"

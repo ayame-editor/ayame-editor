@@ -58,6 +58,9 @@ impl Default for FieldSpec {
 /// NFC-normalized UTF-8 (byte order == code-point order). Shared by sort and
 /// top-n. Numeric fields that cannot be parsed, or parse to NaN, are treated as
 /// negative infinity so they sort before every finite number.
+///
+/// Allocating wrapper over [`comparable_key_into`], which is the one place the
+/// numeric-vs-text decision and its NaN rule live (#112).
 pub(crate) fn comparable_key(
     raw: &[u8],
     enc: Encoding,
@@ -66,19 +69,9 @@ pub(crate) fn comparable_key(
     numeric: bool,
     scratch: &mut Vec<u8>,
 ) -> Vec<u8> {
-    let field = capped(field_bytes(raw, col, spec, scratch));
-    if numeric {
-        let v = enc
-            .decode_line(field)
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .filter(|v| !v.is_nan())
-            .unwrap_or(f64::NEG_INFINITY);
-        f64_order_key(v).to_vec()
-    } else {
-        normalized_text_key(field, enc)
-    }
+    let mut out = Vec::new();
+    comparable_key_into(raw, enc, col, spec, numeric, scratch, &mut out);
+    out
 }
 
 pub(crate) fn comparable_key_into(
@@ -134,12 +127,6 @@ pub(crate) fn normalized_key_into(field: &[u8], enc: Encoding, out: &mut Vec<u8>
     } else {
         out.extend_from_slice(decoded.nfc().collect::<String>().as_bytes());
     }
-}
-
-fn normalized_text_key(field: &[u8], enc: Encoding) -> Vec<u8> {
-    let mut out = Vec::new();
-    normalized_key_into(field, enc, &mut out);
-    out
 }
 
 /// Extract the key/value field from a line. Returns a borrow of `raw` for the

@@ -172,8 +172,10 @@ fn grep_file(path: &Path, opts: &GrepOptions, max_hits: usize) -> Result<Vec<Gre
     if len == 0 || len > opts.max_file_bytes {
         return Ok(Vec::new());
     }
-    // SAFETY(mmap): a grepped file may be truncated by its writer mid-scan,
-    // which would SIGBUS; `watch` absorbs that and the file is skipped below.
+    // SAFETY: a folder grep walks files nobody promised to hold still — a log
+    // being rotated by its writer is the normal case. A truncation mid-scan
+    // would SIGBUS; `watch` on the next line absorbs it and this one file is
+    // skipped, which is the right outcome for a search over many files.
     let mmap = unsafe { Mmap::map(&file)? };
     let watch = crate::mapfault::MapWatch::watch(&mmap);
     let buf: &[u8] = &mmap;

@@ -258,12 +258,14 @@ pub struct LineOffsetReader {
 impl LineOffsetReader {
     pub fn open(path: &Path) -> Result<LineOffsetReader> {
         let file = File::open(path)?;
-        // SAFETY(mmap): the offsets file lives in a temp/spill directory that
-        // an external cleaner may truncate; `watch` absorbs the SIGBUS and
-        // `raw_range` degrades to `None` (a "missing offset" error upstream).
         let mmap = if file.metadata()?.len() == 0 {
             None
         } else {
+            // SAFETY: this offsets file is ours, but it lives in a temp/spill
+            // directory a system cleaner can empty while a long sort runs. The
+            // fault that would cause is absorbed by `watch` below, after which
+            // `raw_range` returns `None` and the caller reports a missing
+            // offset rather than reading a zero-filled hole as a real record.
             Some(unsafe { Mmap::map(&file)? })
         };
         let watch = crate::mapfault::MapWatch::watch(mmap.as_deref().unwrap_or(&[]));
@@ -402,26 +404,18 @@ fn merge_run_records(
         .iter()
         .map(|p| RunReader::open(p))
         .collect::<Result<_>>()?;
-    let mut heap = spill::seed_heap(&mut readers, |key, line, run| {
-        heap_item(key, line, run, reverse)
-    })?;
-
     let mut out = BufWriter::new(File::create(output_path)?);
-    let mut count = 0u64;
-    let mut bytes = 0u64;
-    while let Some(item) = heap.pop() {
-        out.write_all(&(item.key.len() as u32).to_le_bytes())?;
-        out.write_all(&item.key)?;
-        item.payload.write_to(&mut out)?;
-        count += 1;
-        bytes += 4 + item.key.len() as u64 + 8;
-        if count.is_multiple_of(8192) {
-            progress(count);
-        }
-        if let Some((key, line)) = readers[item.run].next_record()? {
-            heap.push(heap_item(key, line, item.run, reverse));
-        }
-    }
+    let (count, bytes) = spill::merge_pump(
+        &mut readers,
+        |key, line, run| heap_item(key, line, run, reverse),
+        |item| {
+            out.write_all(&(item.key.len() as u32).to_le_bytes())?;
+            out.write_all(&item.key)?;
+            item.payload.write_to(&mut out)?;
+            Ok(4 + item.key.len() as u64 + 8)
+        },
+        &mut progress,
+    )?;
     out.flush()?;
     progress(count);
     Ok((count, bytes))
@@ -439,22 +433,18 @@ fn merge_runs_to_ordering(
         .iter()
         .map(|p| RunReader::open(p))
         .collect::<Result<_>>()?;
-    let mut heap = spill::seed_heap(&mut readers, |key, line, run| {
-        heap_item(key, line, run, reverse)
-    })?;
-
     let mut out = BufWriter::new(File::create(ordering_path)?);
-    let mut count = 0u64;
-    while let Some(item) = heap.pop() {
-        item.payload.write_to(&mut out)?;
-        count += 1;
-        if count.is_multiple_of(8192) {
-            progress(count);
-        }
-        if let Some((key, line)) = readers[item.run].next_record()? {
-            heap.push(heap_item(key, line, item.run, reverse));
-        }
-    }
+    // No key framing here: the ordering file is line numbers only, so the
+    // byte count the pump returns is not the file's size and is discarded.
+    let (count, _bytes) = spill::merge_pump(
+        &mut readers,
+        |key, line, run| heap_item(key, line, run, reverse),
+        |item| {
+            item.payload.write_to(&mut out)?;
+            Ok(8)
+        },
+        &mut progress,
+    )?;
     out.flush()?;
     progress(count);
     Ok(count)
