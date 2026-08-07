@@ -557,6 +557,8 @@ export const MESSAGES = {
     "error.server.tooLarge": "リクエストが大きすぎます。",
     "error.server.timeout": "操作がタイムアウトしました。",
     "error.server.workerFailed": "ワーカープロセスでエラーが発生しました。",
+    "error.server.restartRequired":
+      "実行中に Ayame が更新されました。この操作には再起動が必要です（開いているファイルと未保存の編集はそのままです）。",
     "error.server.unsupported": "この操作には対応していません。",
     "error.server.search": "検索条件が正しくありません。",
     "error.server.io": "ファイルの入出力エラーが発生しました。",
@@ -1086,6 +1088,8 @@ export const MESSAGES = {
     "error.server.tooLarge": "The request is too large.",
     "error.server.timeout": "The operation timed out.",
     "error.server.workerFailed": "The worker process failed.",
+    "error.server.restartRequired":
+      "Ayame was updated while running. Restart it to run this operation — the open file and any unsaved edits are unaffected.",
     "error.server.unsupported": "This operation is not supported.",
     "error.server.search": "The search request is invalid.",
     "error.server.io": "A file I/O error occurred.",
@@ -1116,6 +1120,7 @@ export const SERVER_CODE_KEYS = {
   too_large: "error.server.tooLarge",
   timeout: "error.server.timeout",
   worker_failed: "error.server.workerFailed",
+  restart_required: "error.server.restartRequired",
   unsupported: "error.server.unsupported",
   search: "error.server.search",
   io: "error.server.io",

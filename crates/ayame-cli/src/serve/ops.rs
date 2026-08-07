@@ -1087,9 +1087,38 @@ fn lookup_operation(id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
 
 /// A [`Command`] re-invoking this same binary — every op worker is an isolated
 /// `ayame <subcommand>` child process.
+///
+/// The program comes from the startup fingerprint rather than a fresh
+/// `current_exe()`: a self-update that landed mid-session has already replaced
+/// that file, and spawning it would either fail outright (Linux, where the
+/// path now reads `… (deleted)`) or quietly run a different build against this
+/// server's protocol (#137). Both become [`restart_required`] here, and the
+/// version stamp lets the worker refuse the same skew if the update lands
+/// between this check and the exec.
 fn worker_command() -> Result<Command, ApiError> {
-    let exe = std::env::current_exe().map_err(internal)?;
-    Ok(Command::new(exe))
+    let exe = crate::worker::worker_program().map_err(|blocked| match blocked {
+        crate::worker::SpawnBlocked::Replaced => restart_required(),
+        crate::worker::SpawnBlocked::Unknown => {
+            internal("this process's executable could not be located")
+        }
+    })?;
+    let mut cmd = Command::new(exe);
+    cmd.env(crate::worker::VERSION_ENV, crate::worker::VERSION);
+    Ok(cmd)
+}
+
+/// The error every worker-backed endpoint returns once the editor has been
+/// updated underneath itself. Deliberately not a 502 `worker_failed`: nothing
+/// went wrong with the operation, the process just needs to be restarted, and
+/// the open document and its unsaved edits are untouched either way.
+fn restart_required() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "restart_required",
+        "Ayame was updated on disk while this editor was running - restart \
+         Ayame to run this operation. The open file and any unsaved edits are \
+         unaffected.",
+    )
 }
 
 fn append_worker_encoding(cmd: &mut Command, doc: &Document) {
@@ -1098,6 +1127,12 @@ fn append_worker_encoding(cmd: &mut Command, doc: &Document) {
 
 /// The 502 every endpoint returns when its worker child exits unsuccessfully.
 fn worker_failed(kind: &str, status: std::process::ExitStatus) -> ApiError {
+    // The worker refused the job because it is a different build than this
+    // server — an update landed between `worker_command`'s check and the exec
+    // (#137). Same story for the user, so the same answer.
+    if status.code() == Some(i32::from(crate::worker::VERSION_MISMATCH_EXIT)) {
+        return restart_required();
+    }
     ApiError::new(
         StatusCode::BAD_GATEWAY,
         "worker_failed",

@@ -4,6 +4,15 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Stopped a self-update landing under a running editor from breaking its op
+  workers. The server now spawns workers from an executable it fingerprints at
+  startup and refuses — with a dedicated `restart_required` error instead of a
+  Linux `… (deleted)` spawn failure or a macOS worker from the wrong build —
+  once that fingerprint changes; workers re-check the supervisor's version and
+  exit rather than run a job from another build. The native app's "update
+  installed" dialog now offers to restart, and windows opened after an update
+  start the newly installed binary (#137).
+
 ## v0.8.7 - 2026-08-05
 
 - Replaced the frontend's flat mutable state bag with a typed `AppState`
