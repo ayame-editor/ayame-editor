@@ -22,3 +22,9 @@ __pycache__/
 
 # Claude Code local orchestration worktrees (transient, per-machine)
 .claude/worktrees/
+.claude/skills/graphify/
+.claude/settings.local.json
+.copilot/skills/graphify/
+.codex/skills/graphify/
+.codex/hooks.json
+graphify-out/
