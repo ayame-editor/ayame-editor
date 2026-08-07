@@ -1615,6 +1615,24 @@ mod tests {
         assert_eq!(parse_progress_line("ayame-progress\tbad\t100"), None);
     }
 
+    /// The serve→worker progress protocol, end to end: whatever the worker
+    /// writes, this parser must read back. Both halves had tests; nothing
+    /// asserted they agreed, which is the only thing that matters (#113).
+    #[test]
+    fn worker_progress_lines_round_trip_through_the_parser() {
+        for (done, total) in [(0u64, 0u64), (1, 100), (12, 100), (100, 100)] {
+            let line = crate::machine_progress_line(done, total);
+            assert_eq!(
+                parse_progress_line(&line),
+                Some((done.min(total), total)),
+                "worker line {line:?} did not parse back"
+            );
+        }
+        // The worker clamps an overcount; the supervisor never sees >100%.
+        let line = crate::machine_progress_line(120, 100);
+        assert_eq!(parse_progress_line(&line), Some((100, 100)));
+    }
+
     #[test]
     fn tracked_operation_is_evicted_when_its_guard_drops() {
         let state: SharedState = Arc::new(super::super::state::AppState::new(

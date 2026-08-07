@@ -91,6 +91,17 @@ All notable changes to Ayame Editor are tracked here.
   driver that owns the materialize/run/cleanup flow, the two worker waiters
   became one supervisor differing only in whether stdout is captured, and the
   `--jobs`/`--chunk-lines` block is written once (#106).
+- Covered the self-update's file-writing code, which had none. The zip-slip
+  defence is now pinned by an archive built with traversal and absolute entry
+  names — verified to fail, on its own assertion, when the guard is removed —
+  and the macOS bundle install, its rollback, and the artifact/plan matrix have
+  tests. `parse_size` and the serve→worker progress protocol are covered too,
+  the latter as a round trip between the worker's formatter and the
+  supervisor's parser so the two halves cannot drift. Collapsed three
+  duplications in `update.rs`: one detached-PowerShell launcher, one
+  component-sequence walk with the comparator as a parameter, and one
+  `UpdateVerdict` instead of the same version comparison evaluated separately
+  for dry-run and for real (#113).
 
 ## v0.8.7 - 2026-08-05
 

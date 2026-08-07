@@ -4,13 +4,20 @@ use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
 
+/// One line of the serve→worker progress protocol, which
+/// `serve::ops::parse_progress_line` reads back off the worker's stderr.
+/// `done` is clamped so a worker that overcounts cannot report above 100%.
+pub(crate) fn machine_progress_line(done: u64, total: u64) -> String {
+    format!("ayame-progress\t{}\t{}", done.min(total), total)
+}
+
 pub(crate) struct ProgressReporter {
     label: &'static str,
     mode: ProgressMode,
     state: Mutex<ProgressState>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProgressMode {
     Off,
     Human,
@@ -55,7 +62,7 @@ impl ProgressReporter {
         state.last = now;
         match self.mode {
             ProgressMode::Machine => {
-                eprintln!("ayame-progress\t{}\t{}", done.min(total), total);
+                eprintln!("{}", machine_progress_line(done, total));
             }
             ProgressMode::Human => {
                 let pct = if total == 0 {
@@ -91,5 +98,46 @@ impl ProgressReporter {
             eprintln!();
             state.wrote_human = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags(list: &[&str]) -> HashSet<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `--progress` is the serve→worker contract: the supervisor parses these
+    /// exact lines off the worker's stderr to drive the progress card, so the
+    /// mode selection and the line format are an API, not formatting (#113).
+    #[test]
+    fn the_progress_flag_selects_the_machine_protocol() {
+        assert_eq!(
+            ProgressReporter::new("sort", &flags(&["--progress"])).mode,
+            ProgressMode::Machine
+        );
+    }
+
+    /// Without the flag, a worker whose stderr is a pipe — which is how the
+    /// server spawns it — must stay silent rather than write human progress
+    /// into a stream nobody renders.
+    #[test]
+    fn a_piped_worker_without_the_flag_is_silent() {
+        // Tests run with stderr captured (not a terminal), which is the same
+        // shape as the server's pipe.
+        assert_eq!(
+            ProgressReporter::new("sort", &flags(&[])).mode,
+            ProgressMode::Off
+        );
+    }
+
+    #[test]
+    fn machine_progress_lines_match_what_the_supervisor_parses() {
+        assert_eq!(machine_progress_line(12, 100), "ayame-progress\t12\t100");
+        // A worker that counts past the total still reports a value the
+        // supervisor can turn into a percentage.
+        assert_eq!(machine_progress_line(120, 100), "ayame-progress\t100\t100");
     }
 }

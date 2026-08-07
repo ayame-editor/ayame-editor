@@ -24,6 +24,10 @@ pub(crate) use cli::default_cache_dir;
 #[cfg(feature = "gui")]
 pub(crate) use cli::{check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport};
 pub(crate) use cli::{commas, first_opt, has_flag, human_bytes, open_opts, parse_for};
+// Test-only: the serve-side parser round-trips against the worker's own
+// formatter, so the two halves of the progress protocol cannot drift (#113).
+#[cfg(test)]
+pub(crate) use cli::machine_progress_line;
 
 use std::process::ExitCode;
 
