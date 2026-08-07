@@ -236,3 +236,188 @@ fn write_ordered_lines_raw<W: Write>(
     progress(emitted);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> TempDir {
+            let dir = std::env::temp_dir().join(format!(
+                "ayame-sortio-{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn file(&self, name: &str, bytes: &[u8]) -> PathBuf {
+            let path = self.0.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        }
+
+        fn join(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `cmd_sort` args with a per-test spill directory.
+    ///
+    /// The default spill path is one directory per *process*, which is unique
+    /// in production — the CLI runs one subcommand per process, and the server
+    /// spawns each sort as its own child — but shared by tests running in
+    /// parallel threads, where the first to finish would delete it out from
+    /// under the others.
+    fn sort_args(dir: &TempDir, args: &[&str]) -> Vec<String> {
+        let mut all = argv(args);
+        all.push("--spill-dir".to_string());
+        all.push(dir.join("spill").to_string_lossy().into_owned());
+        all
+    }
+
+    /// The whole point of the raw writer: sorting reorders lines, it does not
+    /// transcode them. Decode-and-rewrite would turn CRLF into LF and mangle
+    /// non-UTF-8 bytes, so the bytes are asserted, not the decoded text
+    /// (#187).
+    #[test]
+    fn sorting_preserves_original_bytes_and_terminators() {
+        let dir = TempDir::new("crlf");
+        // Shift_JIS "い" (0x82 0xA2) and "あ" (0x82 0xA0): invalid UTF-8, so a
+        // decode round trip would corrupt them.
+        let input = dir.file("in.txt", b"\x82\xA2\r\n\x82\xA0\r\n");
+        let out = dir.join("out.txt");
+
+        cmd_sort(&sort_args(
+            &dir,
+            &[
+                input.to_str().unwrap(),
+                "--encoding",
+                "shift_jis",
+                "--out",
+                out.to_str().unwrap(),
+            ],
+        ))
+        .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), b"\x82\xA0\r\n\x82\xA2\r\n");
+    }
+
+    /// A file whose last line has no terminator: moving it off the end must
+    /// give it one, or it would fuse with its new neighbour.
+    #[test]
+    fn a_moved_final_line_gains_a_terminator() {
+        let dir = TempDir::new("noterm");
+        let input = dir.file("in.txt", b"b\na");
+        let out = dir.join("out.txt");
+
+        cmd_sort(&sort_args(
+            &dir,
+            &[input.to_str().unwrap(), "--out", out.to_str().unwrap()],
+        ))
+        .unwrap();
+
+        // "a" was last and unterminated; moved to the front it gains the
+        // document's terminator so it cannot fuse with "b". "b" keeps the one
+        // it already had, so the output ends terminated even though the input
+        // did not.
+        assert_eq!(std::fs::read(&out).unwrap(), b"a\nb\n");
+    }
+
+    #[test]
+    fn a_utf8_bom_survives_the_sort() {
+        let dir = TempDir::new("bom");
+        let input = dir.file("in.txt", b"\xEF\xBB\xBFb\na\n");
+        let out = dir.join("out.txt");
+
+        cmd_sort(&sort_args(
+            &dir,
+            &[input.to_str().unwrap(), "--out", out.to_str().unwrap()],
+        ))
+        .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), b"\xEF\xBB\xBFa\nb\n");
+    }
+
+    /// The output writer refuses an existing target rather than overwriting
+    /// it, and leaves the original untouched.
+    #[test]
+    fn sorting_refuses_to_overwrite_an_existing_output() {
+        let dir = TempDir::new("exists");
+        let input = dir.file("in.txt", b"b\na\n");
+        let out = dir.file("out.txt", b"precious");
+
+        let err = cmd_sort(&sort_args(
+            &dir,
+            &[input.to_str().unwrap(), "--out", out.to_str().unwrap()],
+        ))
+        .unwrap_err();
+        // `{:#}` walks the context chain, which is the form `main` prints.
+        let err = format!("{err:#}");
+
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"precious");
+    }
+
+    /// A missing parent directory is created rather than being an error: the
+    /// GUI's save dialog can name a folder that does not exist yet.
+    #[test]
+    fn sorting_creates_a_missing_output_directory() {
+        let dir = TempDir::new("mkdir");
+        let input = dir.file("in.txt", b"b\na\n");
+        let out = dir.join("nested/deeper/out.txt");
+
+        cmd_sort(&sort_args(
+            &dir,
+            &[input.to_str().unwrap(), "--out", out.to_str().unwrap()],
+        ))
+        .unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), b"a\nb\n");
+    }
+
+    /// The sort leaves no temp siblings behind next to its output — the tmp
+    /// file it writes through must be renamed away, not left.
+    #[test]
+    fn sorting_leaves_no_scratch_beside_the_output() {
+        let dir = TempDir::new("scratch");
+        // The output lives in its own directory so the explicit spill dir
+        // (which the caller owns, and `cmd_sort` deliberately does not remove)
+        // is not what this assertion sees.
+        let work = dir.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let input = work.join("in.txt");
+        std::fs::write(&input, b"c\na\nb\n").unwrap();
+        let out = work.join("out.txt");
+
+        cmd_sort(&sort_args(
+            &dir,
+            &[input.to_str().unwrap(), "--out", out.to_str().unwrap()],
+        ))
+        .unwrap();
+
+        let mut names: Vec<_> = std::fs::read_dir(&work)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["in.txt", "out.txt"]);
+    }
+}

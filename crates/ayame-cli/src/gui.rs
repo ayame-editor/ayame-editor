@@ -498,6 +498,156 @@ fn request_close(
 }
 
 #[cfg(test)]
+mod pure_tests {
+    use super::*;
+
+    #[test]
+    fn the_window_title_names_the_file_being_opened() {
+        assert_eq!(
+            initial_window_title(&["/logs/app.log".to_string()]),
+            "app.log - Ayame Editor"
+        );
+        assert_eq!(initial_window_title(&[]), "Ayame Editor");
+    }
+
+    #[test]
+    fn a_path_shows_its_file_name_or_falls_back_to_itself() {
+        assert_eq!(path_display_name("/a/b/notes.txt"), "notes.txt");
+        assert_eq!(path_display_name("notes.txt"), "notes.txt");
+        // No file-name component: the path itself is the best label there is.
+        assert_eq!(path_display_name("/"), "/");
+        assert_eq!(path_display_name(""), "");
+    }
+
+    /// The page sets the title, so it is untrusted input: control characters
+    /// could rewrite the titlebar and an unbounded string could stall it.
+    #[test]
+    fn a_title_from_the_page_is_stripped_and_bounded() {
+        assert_eq!(clean_window_title("notes.txt"), "notes.txt");
+        assert_eq!(clean_window_title("a\u{0}b\nc"), "abc");
+        assert_eq!(clean_window_title("").len(), "Ayame Editor".len());
+        assert_eq!(clean_window_title("   "), "Ayame Editor");
+        assert_eq!(clean_window_title(&"x".repeat(1000)).chars().count(), 256);
+    }
+
+    #[test]
+    fn env_flags_accept_the_spellings_people_actually_use() {
+        for on in ["1", "true", "yes", "on", "TRUE", " On "] {
+            assert_eq!(parse_env_bool(on), Some(true), "{on:?}");
+        }
+        for off in ["0", "false", "no", "off", "OFF"] {
+            assert_eq!(parse_env_bool(off), Some(false), "{off:?}");
+        }
+        // Anything else is not an answer, so the caller's default stands.
+        for junk in ["", "maybe", "2"] {
+            assert_eq!(parse_env_bool(junk), None, "{junk:?}");
+        }
+    }
+
+    /// Restored geometry is clamped so a stale or hand-edited file cannot
+    /// produce a window nobody can use or find.
+    #[test]
+    fn restored_geometry_is_clamped_to_something_usable() {
+        let tiny = WindowState {
+            x: Some(10),
+            y: Some(10),
+            width: 1,
+            height: 1,
+            maximized: false,
+        }
+        .sanitized();
+        assert_eq!((tiny.width, tiny.height), (900, 560));
+
+        let huge = WindowState {
+            x: Some(10),
+            y: Some(10),
+            width: 99_999,
+            height: 99_999,
+            maximized: false,
+        }
+        .sanitized();
+        assert_eq!((huge.width, huge.height), (8192, 8192));
+    }
+
+    #[test]
+    fn an_offscreen_position_is_dropped_so_the_window_is_placed_by_the_os() {
+        let lost = WindowState {
+            x: Some(999_999),
+            y: Some(999_999),
+            ..WindowState::default()
+        }
+        .sanitized();
+        assert_eq!((lost.x, lost.y), (None, None));
+
+        // A monitor left of the primary has a genuinely negative origin, so
+        // that must survive.
+        let left_monitor = WindowState {
+            x: Some(-2560),
+            y: Some(0),
+            ..WindowState::default()
+        }
+        .sanitized();
+        assert_eq!((left_monitor.x, left_monitor.y), (Some(-2560), Some(0)));
+    }
+
+    /// The persistence round trip: what a close writes is what the next start
+    /// restores.
+    #[test]
+    fn window_state_survives_a_save_and_load() {
+        let saved = next_window_state(false, Some((120, 80)), (1600, 900), None);
+        let json = serde_json::to_vec(&saved).unwrap();
+
+        let restored = parse_window_state(&json);
+
+        assert_eq!(restored.x, Some(120));
+        assert_eq!(restored.y, Some(80));
+        assert_eq!((restored.width, restored.height), (1600, 900));
+        assert!(!restored.maximized);
+    }
+
+    /// Quitting maximized keeps the last un-maximized geometry: the maximized
+    /// bounds would otherwise become the restore size forever after.
+    #[test]
+    fn quitting_maximized_remembers_the_geometry_underneath() {
+        let previous = WindowState {
+            x: Some(50),
+            y: Some(60),
+            width: 1000,
+            height: 700,
+            maximized: false,
+        };
+
+        let saved = next_window_state(true, Some((0, 0)), (3840, 2160), Some(&previous));
+
+        assert!(saved.maximized);
+        assert_eq!((saved.x, saved.y), (Some(50), Some(60)));
+        assert_eq!((saved.width, saved.height), (1000, 700));
+    }
+
+    #[test]
+    fn quitting_maximized_with_nothing_remembered_falls_back_to_defaults() {
+        let saved = next_window_state(true, None, (3840, 2160), None);
+        assert!(saved.maximized);
+        assert_eq!(
+            (saved.width, saved.height),
+            (WindowState::default().width, WindowState::default().height)
+        );
+    }
+
+    /// A corrupt or hand-edited file costs the geometry, not the window.
+    #[test]
+    fn unparseable_state_falls_back_to_the_defaults() {
+        let restored = parse_window_state(b"{not json");
+        let default = WindowState::default().sanitized();
+        assert_eq!(
+            (restored.width, restored.height),
+            (default.width, default.height)
+        );
+        assert_eq!((restored.x, restored.y), (default.x, default.y));
+    }
+}
+
+#[cfg(test)]
 mod ipc_tests {
     use super::*;
 
@@ -587,7 +737,12 @@ fn startup_update_check_allowed() -> bool {
 }
 
 fn env_bool(name: &str) -> Option<bool> {
-    let value = std::env::var(name).ok()?;
+    parse_env_bool(&std::env::var(name).ok()?)
+}
+
+/// The spellings an environment flag accepts. Split from [`env_bool`] so it is
+/// testable without mutating process-global state from parallel tests (#187).
+fn parse_env_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
@@ -1102,8 +1257,43 @@ fn window_state_path() -> Option<PathBuf> {
 /// unparseable JSON falls back to the defaults rather than being an error.
 fn load_window_state() -> Option<WindowState> {
     let bytes = std::fs::read(window_state_path()?).ok()?;
-    let state: WindowState = serde_json::from_slice(&bytes).unwrap_or_default();
-    Some(state.sanitized())
+    Some(parse_window_state(&bytes))
+}
+
+/// A stored state, clamped. Unparseable JSON falls back to the defaults rather
+/// than being an error: a corrupt or hand-edited file must cost the geometry,
+/// not the window.
+fn parse_window_state(bytes: &[u8]) -> WindowState {
+    serde_json::from_slice::<WindowState>(bytes)
+        .unwrap_or_default()
+        .sanitized()
+}
+
+/// What a close should persist, given the window's live geometry.
+///
+/// Split out from [`save_window_state`] because it is the whole decision and
+/// the rest is file I/O: a maximized window's bounds are useless for restore,
+/// so the last known un-maximized geometry is kept and only the flag moves
+/// (#187). Without that, maximizing once and quitting would restore to a
+/// full-screen-sized *un-maximized* window forever after.
+fn next_window_state(
+    maximized: bool,
+    position: Option<(i32, i32)>,
+    size: (u32, u32),
+    previous: Option<&WindowState>,
+) -> WindowState {
+    if maximized {
+        let mut state = previous.cloned().unwrap_or_default();
+        state.maximized = true;
+        return state;
+    }
+    WindowState {
+        x: position.map(|(x, _)| x),
+        y: position.map(|(_, y)| y),
+        width: size.0,
+        height: size.1,
+        maximized: false,
+    }
 }
 
 /// Best-effort save on close. Failures are silently ignored: the close path
@@ -1112,23 +1302,14 @@ fn save_window_state(window: &Window, previous: Option<&WindowState>) {
     let Some(path) = window_state_path() else {
         return;
     };
-    let state = if window.is_maximized() {
-        // Maximized bounds are useless for restore; keep the last known
-        // un-maximized geometry and only remember the maximized flag.
-        let mut state = previous.cloned().unwrap_or_default();
-        state.maximized = true;
-        state
-    } else {
-        let pos = window.outer_position().ok();
-        let size = window.inner_size();
-        WindowState {
-            x: pos.map(|p| p.x),
-            y: pos.map(|p| p.y),
-            width: size.width,
-            height: size.height,
-            maximized: false,
-        }
-    };
+    let pos = window.outer_position().ok().map(|p| (p.x, p.y));
+    let size = window.inner_size();
+    let state = next_window_state(
+        window.is_maximized(),
+        pos,
+        (size.width, size.height),
+        previous,
+    );
     let Ok(json) = serde_json::to_vec(&state) else {
         return;
     };

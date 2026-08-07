@@ -4,6 +4,17 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Covered the CLI's I/O layer and the desktop window's pure logic, neither of
+  which had any tests. The index-cache GC — the one command that deletes files
+  — now has its age and size boundaries, its dry-run/real agreement, and its
+  refusal to touch anything but `.idx` files pinned. The sort and group output
+  writers are checked for byte preservation across Shift_JIS, CRLF and a BOM,
+  for giving a moved unterminated final line a terminator, for refusing an
+  existing target, and for leaving no scratch behind. `gui.rs` gained tests for
+  its title handling, its environment flags, and a window-state round trip
+  including the rule that quitting maximized keeps the geometry underneath
+  (#187).
+
 ## v0.8.7 - 2026-08-05
 
 - Replaced the frontend's flat mutable state bag with a typed `AppState`
