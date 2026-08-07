@@ -118,6 +118,10 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   // Alt+W is the whole-word search toggle (see `searchWord`); keep it off the
   // tab-close default so the find-bar shortcut is reachable (issue #70).
   ["closeTab", "tab.close", "Ctrl+W"],
+  ["closeTabsToRight", "tab.closeToRight", ""],
+  ["closeAllTabs", "tab.closeAll", ""],
+  ["closeSavedTabs", "tab.closeSaved", ""],
+  ["reopenClosedTab", "tab.reopenClosed", "Ctrl+Shift+T"],
   // Ctrl+Tab is unreliable across WebViews, so page-based defaults (issue #79).
   ["nextTab", "keymap.nextTab", "Ctrl+PageDown"],
   ["prevTab", "keymap.prevTab", "Ctrl+PageUp"],
@@ -147,6 +151,13 @@ export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
   ["deleteLine", "menu.deleteLine", "Ctrl+Shift+K"],
   ["copy", "menu.copy", "Ctrl+C"],
   ["cut", "menu.cut", "Ctrl+X"],
+  ["paste", "menu.paste", "Ctrl+V"],
+  // Which physical key types "+" or "-" depends on the layout, so each zoom
+  // step lists the spellings a keyboard can produce; matching also ignores the
+  // Shift a layout needs for them (see `eventShortcuts`).
+  ["zoomIn", "keymap.zoomIn", ["Ctrl++", "Ctrl+="]],
+  ["zoomOut", "keymap.zoomOut", ["Ctrl+-", "Ctrl+_"]],
+  ["zoomReset", "keymap.zoomReset", "Ctrl+0"],
   ["searchCase", "keymap.searchCase", "Alt+C"],
   ["searchWord", "keymap.searchWord", "Alt+W"],
   ["searchRegex", "keymap.searchRegex", "Alt+R"],

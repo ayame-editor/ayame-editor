@@ -1,6 +1,6 @@
 // Ayame Editor — action registry and global shortcut dispatch.
 import { $ } from "./dom.js";
-import { state } from "./state.js";
+import { DEFAULT_SETTINGS, state } from "./state.js";
 import { t } from "./i18n.js";
 import { openNewWindow } from "./app.js";
 import {
@@ -37,9 +37,25 @@ import { buildMatcher, findStep, showFind, updateCount } from "./findbar.js";
 import { grepFolder } from "./grep.js";
 import { askPrompt, showMessage } from "./dialogs.js";
 import { anyModalOpen } from "./modal-state.js";
-import { eventShortcut } from "./keys.js";
-import { closeTab, newUntitled, openFileDialog, selectRelativeTab } from "./workspace.js";
-import { setSettingsMenuService, showSettings, updateSetting } from "./settings.js";
+import { eventShortcuts } from "./keys.js";
+import {
+  closeSavedTabs,
+  closeTab,
+  closeTabsToRight,
+  closeAllTabs,
+  newUntitled,
+  openFileDialog,
+  reopenClosedTab,
+  selectRelativeTab,
+} from "./workspace.js";
+import {
+  adjustFontSize,
+  FONT_SIZE_STEP,
+  setFontSize,
+  setSettingsMenuService,
+  showSettings,
+  updateSetting,
+} from "./settings.js";
 import {
   bookmarkSearchMatches,
   clearBookmarks,
@@ -62,9 +78,11 @@ import {
 import { setPaletteActionRunner, showCommandPalette } from "./palette.js";
 import { applyLocale } from "./menu-ui.js";
 
+const activeTabId = () => state.doc.tabs.find((tab) => tab.active)?.id ?? null;
+
 const closeActiveTab = () => {
-  const active = state.doc.tabs.find((tab) => tab.active);
-  if (active) closeTab(active.id);
+  const id = activeTabId();
+  if (id != null) closeTab(id);
 };
 
 const promptGotoLine = () => {
@@ -117,7 +135,14 @@ export function toggleOpt(key: SearchOptionKey, id: string) {
 
 export const ACTIONS: Record<
   string,
-  { run: () => any; globalShortcut?: boolean; editorOnly?: boolean }
+  {
+    run: () => any;
+    globalShortcut?: boolean;
+    editorOnly?: boolean;
+    /// Chords the browser already handles better than this action can; the
+    /// global dispatch leaves those alone (see `shortcutActionFromEvent`).
+    nativeChords?: string[];
+  }
 > = {
   commandPalette: { run: showCommandPalette, globalShortcut: true },
   undo: { run: undoEdit, globalShortcut: true, editorOnly: true },
@@ -143,7 +168,18 @@ export const ACTIONS: Record<
   deleteLine: { run: deleteLines },
   copy: { run: copySelection, globalShortcut: true, editorOnly: true },
   cut: { run: cutSelection, globalShortcut: true, editorOnly: true },
-  paste: { run: pasteFromClipboard, editorOnly: true },
+  // Ctrl+V stays with the browser's own clipboard `paste` event (see
+  // `nativeChords`); rebinding this action is what routes it through the
+  // permission-gated clipboard read instead (#175).
+  paste: {
+    run: pasteFromClipboard,
+    globalShortcut: true,
+    editorOnly: true,
+    nativeChords: ["Ctrl+V", "Shift+Insert"],
+  },
+  zoomIn: { run: () => adjustFontSize(FONT_SIZE_STEP), globalShortcut: true },
+  zoomOut: { run: () => adjustFontSize(-FONT_SIZE_STEP), globalShortcut: true },
+  zoomReset: { run: () => setFontSize(DEFAULT_SETTINGS.fontSize), globalShortcut: true },
   toggleWhitespace: {
     run: () => updateSetting("showWhitespace", !state.settings.showWhitespace),
   },
@@ -208,6 +244,10 @@ export const ACTIONS: Record<
   saveAll: { run: saveAllTabs, globalShortcut: true },
   encoding: { run: showConvert },
   closeTab: { run: closeActiveTab, globalShortcut: true },
+  closeTabsToRight: { run: () => closeTabsToRight(activeTabId()), globalShortcut: true },
+  closeAllTabs: { run: () => closeAllTabs(), globalShortcut: true },
+  closeSavedTabs: { run: () => closeSavedTabs(), globalShortcut: true },
+  reopenClosedTab: { run: reopenClosedTab, globalShortcut: true },
   findPrev: { run: () => findStep("prev"), globalShortcut: true },
   findNext: { run: () => findStep("next"), globalShortcut: true },
   searchCase: { run: () => toggleOpt("ci", "opt-case"), globalShortcut: true },
@@ -234,6 +274,14 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "selectBookmarks",
   "clearBookmarks",
   "closeTab",
+  "closeTabsToRight",
+  "closeAllTabs",
+  "closeSavedTabs",
+  "reopenClosedTab",
+  "paste",
+  "zoomIn",
+  "zoomOut",
+  "zoomReset",
   "nextTab",
   "prevTab",
   "find",
@@ -284,13 +332,20 @@ export function rebuildGlobalShortcutActions() {
 }
 
 export function shortcutActionFromEvent(e, inField = false) {
-  const shortcut = eventShortcut(e);
-  if (!shortcut) return null;
+  const shortcuts = eventShortcuts(e);
+  if (!shortcuts.length) return null;
   if (!globalShortcutActionsByKey.size) rebuildGlobalShortcutActions();
-  for (const action of globalShortcutActionsByKey.get(shortcut) || []) {
-    const entry = ACTIONS[action];
-    if (!entry?.globalShortcut || (inField && entry.editorOnly)) continue;
-    return action;
+  for (const shortcut of shortcuts) {
+    for (const action of globalShortcutActionsByKey.get(shortcut) || []) {
+      const entry = ACTIONS[action];
+      if (!entry?.globalShortcut || (inField && entry.editorOnly)) continue;
+      // Some actions duplicate what the browser already does for a chord.
+      // Paste on its native chord is the clipboard `paste` event's job — the
+      // event carries the text, and needs no clipboard-read permission — so
+      // the action stands aside there and only takes over once rebound (#175).
+      if (entry.nativeChords?.includes(shortcut)) continue;
+      return action;
+    }
   }
   return null;
 }

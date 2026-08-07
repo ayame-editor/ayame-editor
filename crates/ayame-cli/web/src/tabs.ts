@@ -138,6 +138,126 @@ export async function closeTabsSequentially(ids, close = closeTab) {
   for (const id of ids) await close(id);
 }
 
+// ---- which tabs a bulk close covers (#175) ---------------------------------
+//
+// Pure over the tab list so the selection rules can be checked without a live
+// workspace. Each returns ids in the order they should be closed.
+
+/// Every tab to the right of `id`, right-to-left. Closing from the far end
+/// keeps the ids stable as the list shrinks, and leaves the anchor tab active.
+export function tabsToRightOf(list, id) {
+  const at = (list || []).findIndex((tab) => tab.id === id);
+  if (at < 0) return [];
+  return list
+    .slice(at + 1)
+    .map((tab) => tab.id)
+    .reverse();
+}
+
+/// Every tab except `keep` (all of them when `keep` is null). The kept tab is
+/// excluded rather than closed last so the workspace never has to invent a
+/// replacement mid-way.
+export function tabsOtherThan(list, keep = null) {
+  return (list || []).filter((tab) => tab.id !== keep).map((tab) => tab.id);
+}
+
+/// Tabs with nothing unsaved. "Close saved" is the tidy-up that must never
+/// raise a discard prompt, so a dirty tab is simply not in the set.
+export function savedTabs(list) {
+  return (list || []).filter((tab) => !tab.dirty).map((tab) => tab.id);
+}
+
+export function closeTabsToRight(id) {
+  return closeTabsSequentially(tabsToRightOf(state.doc.tabs || [], id));
+}
+
+export function closeOtherTabs(id) {
+  return closeTabsSequentially(tabsOtherThan(state.doc.tabs || [], id));
+}
+
+export function closeAllTabs() {
+  return closeTabsSequentially(tabsOtherThan(state.doc.tabs || []));
+}
+
+export function closeSavedTabs() {
+  return closeTabsSequentially(savedTabs(state.doc.tabs || []));
+}
+
+// ---- reopen closed tab (#175) ----------------------------------------------
+//
+// Closing the wrong tab had no undo. Paths of closed tabs are kept newest-first
+// so Ctrl+Shift+T walks back through them, the way every browser and editor
+// does. Untitled buffers are not recorded: their backing file is this session's
+// own scratch and reopening the path would resurrect a file, not a buffer.
+
+export const CLOSED_TAB_HISTORY_MAX = 20;
+
+let closedTabPaths: string[] = [];
+
+export function rememberClosedTab(tab) {
+  const path = String(tab?.path || "").trim();
+  if (!path || isUntitled(path)) return;
+  closedTabPaths = [path, ...closedTabPaths.filter((entry) => entry !== path)].slice(
+    0,
+    CLOSED_TAB_HISTORY_MAX,
+  );
+}
+
+export function closedTabHistory() {
+  return [...closedTabPaths];
+}
+
+export function hasClosedTabs() {
+  return closedTabPaths.length > 0;
+}
+
+export async function reopenClosedTab() {
+  const path = closedTabPaths.shift();
+  if (!path) {
+    flashCount(t("tab.noClosedTabs"));
+    return false;
+  }
+  // Opening an already-open path focuses that tab instead of duplicating it,
+  // so a stale entry costs a focus change rather than a wrong file.
+  const opened = await openDocumentPath(path);
+  if (!opened) flashCount(t("tab.reopenClosedError"), "error");
+  return opened;
+}
+
+/// The bulk-close half of a tab's context menu, in the order editors put them.
+/// Each entry is disabled when it would close nothing, so the menu says what is
+/// possible rather than offering a no-op (#175).
+export function tabCloseMenuItems(tab, list) {
+  return [
+    {
+      label: t("tab.closeOthers"),
+      disabled: tabsOtherThan(list, tab.id).length === 0,
+      action: () => closeOtherTabs(tab.id),
+    },
+    {
+      label: t("tab.closeToRight"),
+      disabled: tabsToRightOf(list, tab.id).length === 0,
+      action: () => closeTabsToRight(tab.id),
+    },
+    {
+      label: t("tab.closeSaved"),
+      disabled: savedTabs(list).length === 0,
+      action: () => closeSavedTabs(),
+    },
+    {
+      label: t("tab.closeAll"),
+      disabled: list.length === 0,
+      action: () => closeAllTabs(),
+    },
+    { separator: true },
+    {
+      label: t("tab.reopenClosed"),
+      disabled: !hasClosedTabs(),
+      action: () => reopenClosedTab(),
+    },
+  ];
+}
+
 export function renderTabs(list) {
   state.doc.tabs = list;
   const container = $("tabs");
@@ -203,16 +323,7 @@ export function renderTabs(list) {
           },
         },
         { separator: true },
-        {
-          label: t("tab.closeOthers"),
-          disabled: state.doc.tabs.length < 2,
-          action: async () => {
-            const others = state.doc.tabs
-              .filter((entry) => entry.id !== tab.id)
-              .map((entry) => entry.id);
-            await closeTabsSequentially(others);
-          },
-        },
+        ...tabCloseMenuItems(tab, state.doc.tabs || []),
       ]);
     });
     element.addEventListener("dragstart", (event) => startTabDrag(event, tab));
@@ -424,6 +535,9 @@ export async function closeTab(id) {
   }
   try {
     const stat = await apiPost<{ open: boolean }, TabIdRequest>("/api/tabs/close", { id });
+    // Recorded only once the close actually landed, so a refused or failed
+    // close never leaves a phantom entry for Ctrl+Shift+T (#175).
+    rememberClosedTab(tab);
     if (!stat.open) await createUntitled();
     else activateDocument(stat);
   } catch (error) {

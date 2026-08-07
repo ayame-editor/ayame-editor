@@ -373,25 +373,10 @@ export function onEditKey(e) {
     e.preventDefault();
     e.stopPropagation();
   };
-  // Font size: Ctrl/Cmd with +/-/0. Checked before the switch so nothing else
-  // claims them (and browser/webview page zoom remains suppressed).
-  if (mod && !e.altKey) {
-    if (e.key === "+" || e.key === "=") {
-      take();
-      adjustFontSize(FONT_SIZE_STEP);
-      return;
-    }
-    if (e.key === "-" || e.key === "_") {
-      take();
-      adjustFontSize(-FONT_SIZE_STEP);
-      return;
-    }
-    if (e.key === "0") {
-      take();
-      setFontSize(DEFAULT_SETTINGS.fontSize);
-      return;
-    }
-  }
+  // Font size used to be hard-coded here as Ctrl with +/-/0, which kept it out
+  // of the keymap editor and out of reach of rebinding (#175). It is now
+  // `zoomIn`/`zoomOut`/`zoomReset` in KEYMAP_ACTIONS, dispatched with every
+  // other global shortcut before this handler runs.
   // Multi-cursor: add a caret above/below (default Ctrl+Alt+ArrowUp/Down).
   // Checked before the switch so the plain-arrow cases never swallow them.
   if (matchesShortcut(e, "addCursorAbove")) {
