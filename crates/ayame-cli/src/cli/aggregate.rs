@@ -5,12 +5,11 @@ use anyhow::{Context, Result};
 use ayame_core::{DistinctOptions, Document, GroupOptions, GroupRow, TopOptions};
 
 use super::args::{first_opt, has_flag, open_doc};
-use super::common::{maybe_crash, rename_or_copy, temp_sibling_with_label};
+use super::common::{rename_or_copy, temp_sibling_with_label};
 use super::fields::{field_spec, parse_budget, parse_key};
 use super::formatting::{commas, human_bytes};
 
 pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
-    maybe_crash();
     let (doc, _pos, opts, flags) = open_doc(
         args,
         &[
