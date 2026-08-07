@@ -659,6 +659,13 @@ button.toggle.on:hover {
   background: color-mix(in srgb, var(--accent) 86%, var(--fg));
   border-color: color-mix(in srgb, var(--accent-bright) 78%, var(--fg));
 }
+/* "Replace in selection only" is disabled while nothing is selected; the
+   generic button:disabled color is not enough on a toggle, whose whole job is
+   to look pressable. */
+button.toggle:disabled {
+  opacity: 0.45;
+  border-color: var(--border);
+}
 
 /* Floating in-editor search & replace: overlays the viewport's top-right
    (VS Code style) so opening it never reflows the toolbar or the text. */

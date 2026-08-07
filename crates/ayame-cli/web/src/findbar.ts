@@ -12,7 +12,13 @@ import {
   setSearchHits,
   setSelection,
 } from "./editor.js";
-import { loadSearchHistoryShared, saveSearchHistoryShared } from "./persistence.js";
+import {
+  loadReplaceHistoryShared,
+  loadSearchHistoryShared,
+  saveReplaceHistoryShared,
+  saveSearchHistoryShared,
+} from "./persistence.js";
+import { selRange } from "./selection-model.js";
 import { flashCount } from "./notifications.js";
 
 export function showFind(withReplace = false) {
@@ -39,6 +45,46 @@ export function setReplaceRow(open) {
   const row = $("replace-row");
   row.setAttribute("aria-hidden", open ? "false" : "true");
   row.inert = !open;
+  // Opening the replace row over a multi-line selection means "replace inside
+  // this", every time; opening it with a caret means the document. Deciding
+  // once here — rather than on every selection change — leaves the toggle under
+  // the user's control for the rest of the session (#173).
+  if (open) state.search.inSelection = defaultInSelection();
+  updateInSelectionUI();
+}
+
+/// Whether "in selection only" should start on. A selection spanning more than
+/// one line is a scope; a few characters on one line is a word the user is
+/// about to search for, and scoping replace to it would make replace-all a
+/// near-no-op.
+export function defaultInSelection() {
+  const range = selRange();
+  return !!range && range.end.line > range.start.line;
+}
+
+export function inSelectionAvailable() {
+  const range = selRange();
+  if (!range) return false;
+  return range.end.line !== range.start.line || range.end.col !== range.start.col;
+}
+
+export function setInSelection(on) {
+  state.search.inSelection = !!on && inSelectionAvailable();
+  updateInSelectionUI();
+}
+
+export function updateInSelectionUI() {
+  if (!state.search.replaceOpen) return;
+  const btn = document.getElementById("opt-in-selection") as HTMLButtonElement | null;
+  if (!btn) return;
+  const available = inSelectionAvailable();
+  // A selection can disappear (a click in the editor) while the row is open;
+  // the toggle must not keep claiming a scope that no longer exists.
+  if (!available) state.search.inSelection = false;
+  const on = state.search.inSelection;
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.disabled = !available;
 }
 
 export function buildMatcher() {
@@ -234,16 +280,51 @@ export function saveSearchHistory(q) {
 }
 
 export function showSearchHistory(delta) {
-  if (!state.search.history.length) return false;
-  if (state.search.historyIndex < 0) {
-    state.search.historyIndex = delta < 0 ? 0 : state.search.history.length - 1;
-  } else {
-    state.search.historyIndex = Math.min(
-      state.search.history.length - 1,
-      Math.max(0, state.search.historyIndex + delta),
-    );
-  }
-  $("find").value = state.search.history[state.search.historyIndex];
+  const next = stepHistory(state.search.history, state.search.historyIndex, delta);
+  if (next < 0) return false;
+  state.search.historyIndex = next;
+  $("find").value = state.search.history[next];
   setQueryFromInput();
   return true;
+}
+
+// ---- replacement history (#173) ---------------------------------------------
+//
+// The find field has kept a history since the beginning; the replace field had
+// none, so re-applying "the same replacement as last time" meant retyping it.
+// Same list semantics, same Up/Down keys, its own stored list.
+
+export function loadReplaceHistory() {
+  return loadReplaceHistoryShared();
+}
+
+export function saveReplaceHistory(replacement) {
+  // An empty replacement is a real operation (delete every match) but not a
+  // useful history entry — it would push out entries the user can still type.
+  const value = String(replacement ?? "");
+  if (!value) return;
+  state.search.replaceHistory = [
+    value,
+    ...state.search.replaceHistory.filter((x) => x !== value),
+  ].slice(0, 50);
+  state.search.replaceHistoryIndex = -1;
+  saveReplaceHistoryShared(state.search.replaceHistory);
+}
+
+export function showReplaceHistory(delta) {
+  const next = stepHistory(state.search.replaceHistory, state.search.replaceHistoryIndex, delta);
+  if (next < 0) return false;
+  state.search.replaceHistoryIndex = next;
+  $("replace-input").value = state.search.replaceHistory[next];
+  return true;
+}
+
+/// Index a history list moves to for one Up (`delta < 0`) or Down. Entering the
+/// list from "not browsing" (`index < 0`) starts at the newest for Up and the
+/// oldest for Down; from inside, it steps and stops at the ends rather than
+/// wrapping. `-1` when there is no history to browse.
+export function stepHistory(list: string[], index: number, delta: number) {
+  if (!list.length) return -1;
+  if (index < 0) return delta < 0 ? 0 : list.length - 1;
+  return Math.min(list.length - 1, Math.max(0, index + delta));
 }

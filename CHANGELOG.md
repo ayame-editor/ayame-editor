@@ -21,6 +21,17 @@ All notable changes to Ayame Editor are tracked here.
   says the user chose to overwrite. The client asks on window focus and at save
   time, offering reload or overwrite; the confirm dialog grew an optional third
   button for it (#163).
+- Gave replace a scope and a way out. "Replace in selection only" confines
+  Replace All to the selected lines and columns — rectangular selections
+  included, and matches that only partly overlap the selection are left alone —
+  and turns itself on when the replace row opens over a multi-line selection.
+  Replace All is now cancelable while it runs, reporting progress and how many
+  replacements landed, and the search sweep starts at the selection instead of
+  the top of the file. The replacement field gained the find field's Up/Down
+  history, a valid pattern the whole-word wrapper cannot accept now says so
+  instead of claiming an invalid regular expression, and replacements are
+  expanded from the match object so `$1`-style templates survive the
+  lookaround the whole-word matcher adds (#173).
 
 ## v0.8.7 - 2026-08-05
 

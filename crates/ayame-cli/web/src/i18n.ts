@@ -256,6 +256,14 @@ export const MESSAGES = {
     "find.replaceError": "置換エラー",
     "find.replacing": "置換中…",
     "find.replacedCount": "{n} 件置換しました",
+    // -- scoped / cancelable replace-all (#173) --
+    "find.inSelection": "選択範囲内のみ置換",
+    "find.replacingInSelection": "選択範囲内を置換中…",
+    "find.noMatchInSelection": "選択範囲内に一致なし",
+    "find.replaceProgress": "{done} 件置換",
+    "find.replaceCanceled": "置換をキャンセルしました（{n} 件は置換済み・元に戻せます）",
+    "find.wordRegexUnsupported":
+      "この正規表現は単語単位と組み合わせられません — 単語単位をオフにしてください",
     "find.replacedCountPartial":
       "{n} 件置換しました — 一致が多いため一部です。もう一度実行してください",
     // -- status bar --
@@ -823,6 +831,14 @@ export const MESSAGES = {
     "find.replaceError": "Replace error",
     "find.replacing": "Replacing...",
     "find.replacedCount": "Replaced {n} matches.",
+    // -- scoped / cancelable replace-all (#173) --
+    "find.inSelection": "Replace in selection only",
+    "find.replacingInSelection": "Replacing in the selection...",
+    "find.noMatchInSelection": "No matches in the selection",
+    "find.replaceProgress": "{done} replaced",
+    "find.replaceCanceled": "Replace canceled. {n} matches were already replaced (undoable).",
+    "find.wordRegexUnsupported":
+      "This pattern cannot be combined with whole-word matching - turn whole word off.",
     "find.replacedCountPartial": "Replaced {n} matches. There are more matches; run it again.",
     "status.saving": "Saving...",
     "status.follow": "Follow",

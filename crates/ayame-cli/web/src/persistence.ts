@@ -8,6 +8,7 @@ import {
   ANALYSIS_PROFILES_KEY,
   RECENT_KEY,
   RECENT_MAX,
+  REPLACE_HISTORY_KEY,
   SEARCH_HISTORY_KEY,
   state,
 } from "./state.js";
@@ -51,6 +52,7 @@ function normalizeUiState(ui: Partial<UiState> = {}): UiState {
   return {
     recent_files: cleanList(ui.recent_files, RECENT_MAX),
     search_history: cleanList(ui.search_history, 50),
+    replace_history: cleanList(ui.replace_history, 50),
     session: {
       paths: cleanList(ui.session?.paths, 64),
       active_path: String(ui.session?.active_path || "").trim() || null,
@@ -67,6 +69,7 @@ export async function hydrateSharedUiState() {
     const remote = normalizeUiState(await api<UiState>("/api/ui_state"));
     const localRecent = localList(RECENT_KEY, RECENT_MAX);
     const localHistory = localList(SEARCH_HISTORY_KEY, 50);
+    const localReplaceHistory = localList(REPLACE_HISTORY_KEY, 50);
     let localProfiles = [];
     try {
       localProfiles = normalizeAnalysisProfiles(
@@ -79,15 +82,18 @@ export async function hydrateSharedUiState() {
       ...remote,
       recent_files: remote.recent_files.length ? remote.recent_files : localRecent,
       search_history: remote.search_history.length ? remote.search_history : localHistory,
+      replace_history: remote.replace_history.length ? remote.replace_history : localReplaceHistory,
       analysis_profiles: remote.analysis_profiles.length ? remote.analysis_profiles : localProfiles,
     });
     sharedUiState = merged;
     state.search.history = merged.search_history;
+    state.search.replaceHistory = merged.replace_history;
     state.analysis.profiles = merged.analysis_profiles;
     state.analysis.activeProfile = merged.active_analysis_profile;
     if (
       merged.recent_files.length !== remote.recent_files.length ||
       merged.search_history.length !== remote.search_history.length ||
+      merged.replace_history.length !== remote.replace_history.length ||
       merged.analysis_profiles.length !== remote.analysis_profiles.length
     ) {
       await saveSharedUiState(merged);
@@ -146,6 +152,19 @@ export function saveSearchHistoryShared(list) {
   void currentUiStateBase().then((base) => {
     if (!base) return; // can't read current state — don't clobber the server
     void saveSharedUiState(normalizeUiState({ ...base, search_history: history }));
+  });
+}
+
+export function loadReplaceHistoryShared() {
+  return sharedUiState?.replace_history || localList(REPLACE_HISTORY_KEY, 50);
+}
+
+export function saveReplaceHistoryShared(list) {
+  const history = cleanList(list, 50);
+  saveLocalList(REPLACE_HISTORY_KEY, history, 50);
+  void currentUiStateBase().then((base) => {
+    if (!base) return; // can't read current state — don't clobber the server
+    void saveSharedUiState(normalizeUiState({ ...base, replace_history: history }));
   });
 }
 

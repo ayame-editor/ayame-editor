@@ -66,8 +66,10 @@ import {
   replaceAll,
   replaceCurrent,
   selectNextOccurrence,
+  setInSelection,
   setQueryFromInput,
   setReplaceRow,
+  showReplaceHistory,
   showSearchHistory,
   updateCount,
 } from "./search.js";
@@ -178,10 +180,18 @@ export function initEvents() {
   $("find-expand").addEventListener("click", () => setReplaceRow(!state.search.replaceOpen));
   $("replace-one").addEventListener("click", () => replaceCurrent());
   $("replace-all").addEventListener("click", () => replaceAll());
+  $("opt-in-selection").addEventListener("click", () => {
+    setInSelection(!state.search.inSelection);
+  });
   $("replace-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       replaceCurrent();
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      // Same history keys as the find field above.
+      if (showReplaceHistory(e.key === "ArrowUp" ? -1 : 1)) {
+        e.preventDefault();
+      }
     } else if (e.key === "Escape") {
       hideFind();
       focusEditor();
