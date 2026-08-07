@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use ayame_core::{Document, Encoding, OpenOptions};
 
+use super::commands::Subcommand;
+
 pub(crate) type ParsedArgs = (Vec<String>, HashMap<String, String>, HashSet<String>);
 pub(crate) type OpenedDoc = (
     Document,
@@ -12,8 +14,11 @@ pub(crate) type OpenedDoc = (
     HashSet<String>,
 );
 
-const OPEN_VALUE_OPTS: &[&str] = &["--encoding", "--stride", "--cache-dir"];
-const OPEN_FLAG_OPTS: &[&str] = &["--no-cache"];
+/// Options every FILE-opening subcommand accepts on top of its own, so they
+/// are declared once here rather than repeated in each row of the command
+/// table (see [`super::commands`]).
+pub(crate) const OPEN_VALUE_OPTS: &[&str] = &["--encoding", "--stride", "--cache-dir"];
+pub(crate) const OPEN_FLAG_OPTS: &[&str] = &["--no-cache"];
 
 /// Split argv into positionals, valued options, and boolean flags.
 /// `valued` lists the option names (incl. aliases) that consume the next token.
@@ -121,20 +126,50 @@ fn os_cache_root() -> Option<PathBuf> {
     non_empty_var_os("HOME").map(|h| PathBuf::from(h).join(".cache"))
 }
 
-pub(crate) fn open_doc(
-    args: &[String],
-    valued_extra: &[&str],
-    flag_extra: &[&str],
-) -> Result<OpenedDoc> {
-    let mut valued = Vec::from(OPEN_VALUE_OPTS);
-    valued.extend_from_slice(valued_extra);
-    let mut allowed_flags = Vec::from(OPEN_FLAG_OPTS);
-    allowed_flags.extend_from_slice(flag_extra);
-    let (pos, opts, flags) = parse_checked(args, &valued, &allowed_flags)?;
+/// The table row for `command`, which every handler reads its own allow-lists
+/// from. A name with no row is a programming error, not a user error, and the
+/// `every_parse_site_names_a_real_command` test rules it out ahead of runtime.
+fn spec(command: &str) -> &'static Subcommand {
+    super::commands::find(command)
+        .unwrap_or_else(|| panic!("'{command}' parses arguments but has no command-table row"))
+}
+
+/// The option lists a command actually parses with: the ones it declares, plus
+/// the shared open options when it takes a FILE. One definition, so the
+/// parser, the help-coverage test and the accepted-option test cannot disagree
+/// about what a command takes.
+pub(crate) fn allow_lists(spec: &Subcommand) -> (Vec<&'static str>, Vec<&'static str>) {
+    let mut valued = Vec::from(spec.valued);
+    let mut flags = Vec::from(spec.flags);
+    if spec.document {
+        valued.extend_from_slice(OPEN_VALUE_OPTS);
+        flags.extend_from_slice(OPEN_FLAG_OPTS);
+    }
+    (valued, flags)
+}
+
+/// Parse `args` with the allow-lists `command` declares, and open its FILE.
+///
+/// Handlers name themselves instead of repeating their option lists inline:
+/// the lists lived next to the parse call and had to be kept in step with the
+/// help text and the dispatcher by hand (#105).
+pub(crate) fn open_for(command: &str, args: &[String]) -> Result<OpenedDoc> {
+    let spec = spec(command);
+    debug_assert!(
+        spec.document,
+        "'{command}' opens a FILE but is not `document`"
+    );
+    let (pos, opts, flags) = parse_for(command, args)?;
     let path = pos.first().context("expected a FILE argument")?.clone();
     let doc = Document::open(&path, &open_opts(&opts, &flags)?)
         .with_context(|| format!("opening '{path}'"))?;
     Ok((doc, pos, opts, flags))
+}
+
+/// [`open_for`] for a command that takes no FILE.
+pub(crate) fn parse_for(command: &str, args: &[String]) -> Result<ParsedArgs> {
+    let (valued, flags) = allow_lists(spec(command));
+    parse_checked(args, &valued, &flags)
 }
 
 #[cfg(test)]

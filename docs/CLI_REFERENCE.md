@@ -101,6 +101,15 @@ Output commands refuse to overwrite existing files (for `grep-lines`,
 `--overwrite` opts in). Choose a new output path or remove the target
 intentionally before rerunning.
 
+## Gen Options
+
+| Option | Meaning |
+| --- | --- |
+| `--lines <N>` | Lines to generate. Required. |
+| `--cols <N>` | Columns per generated line. Default: 5. |
+| `--encoding <ENC>` | Encoding to write. Default: UTF-8. |
+| `-q`, `--quiet` | Do not print progress or the final summary. |
+
 ## Split Options
 
 | Option | Notes |

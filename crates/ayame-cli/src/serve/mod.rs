@@ -28,7 +28,7 @@ use ayame_core::{Document, FileStat};
 use serde::Serialize;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::{first_opt, has_flag, open_opts, parse_checked};
+use crate::{first_opt, has_flag, open_opts, parse_for};
 
 mod analysis;
 mod assets;
@@ -51,18 +51,7 @@ use state::{AppState, DiskCheckResponse, SharedState, TabsResponse, TailStatus, 
 const MAX_VIEW: u64 = 20_000;
 
 pub fn cmd_serve(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse_checked(
-        args,
-        &[
-            "--encoding",
-            "--stride",
-            "--host",
-            "--port",
-            "--cache-dir",
-            "--scratch-dir",
-        ],
-        &["--no-cache", "--allow-remote"],
-    )?;
+    let (pos, opts, flags) = parse_for("serve", args)?;
     let host = first_opt(&opts, &["--host"])
         .unwrap_or("127.0.0.1")
         .to_string();

@@ -4,28 +4,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use ayame_core::{DistinctOptions, Document, GroupOptions, GroupRow, TopOptions};
 
-use super::args::{first_opt, has_flag, open_doc};
+use super::args::{first_opt, has_flag, open_for};
 use super::common::{maybe_crash, rename_or_copy, temp_sibling_with_label};
 use super::fields::{field_spec, parse_budget, parse_key};
 use super::formatting::{commas, human_bytes};
 
 pub(crate) fn cmd_group(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &[
-            "--key",
-            "-k",
-            "--value",
-            "--delim",
-            "-t",
-            "--quote",
-            "--budget",
-            "--spill-dir",
-            "--out-groups",
-        ],
-        &["--csv", "--json"],
-    )?;
+    let (doc, _pos, opts, flags) = open_for("group", args)?;
     let key_column = parse_key(&opts)?;
     let value_column = match first_opt(&opts, &["--value"]) {
         Some(s) => Some(s.parse().context("--value must be a number")?),
@@ -159,27 +145,7 @@ fn write_group_row<W: Write>(w: &mut W, row: &GroupRow, has_value: bool) -> std:
 }
 
 pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &[
-            "--key",
-            "-k",
-            "-n",
-            "--top",
-            "--delim",
-            "-t",
-            "--quote",
-            "--out-order",
-        ],
-        &[
-            "--numeric",
-            "--min",
-            "--smallest",
-            "--asc",
-            "--csv",
-            "--json",
-        ],
-    )?;
+    let (doc, _pos, opts, flags) = open_for("top", args)?;
     let n: usize = first_opt(&opts, &["-n", "--top"])
         .unwrap_or("10")
         .parse()
@@ -235,19 +201,7 @@ pub(crate) fn cmd_top(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &[
-            "--key",
-            "-k",
-            "--delim",
-            "-t",
-            "--quote",
-            "--precision",
-            "-p",
-        ],
-        &["--csv", "--json"],
-    )?;
+    let (doc, _pos, opts, flags) = open_for("distinct", args)?;
     let precision: u32 = first_opt(&opts, &["--precision", "-p"])
         .map(|s| s.parse::<u32>())
         .transpose()

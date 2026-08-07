@@ -1,12 +1,12 @@
 use anyhow::{bail, Context, Result};
 use ayame_core::SearchOptions;
 
-use super::args::{first_opt, has_flag, open_doc};
+use super::args::{first_opt, has_flag, open_for};
 use super::common::maybe_crash;
 use super::formatting::{commas, human_bytes};
 
 pub(crate) fn cmd_stat(args: &[String]) -> Result<()> {
-    let (doc, _pos, opts, flags) = open_doc(args, &[], &["--json"])?;
+    let (doc, _pos, opts, flags) = open_for("stat", args)?;
     let s = doc.stat();
     if has_flag(&flags, &["--json"]) {
         println!("{}", serde_json::to_string_pretty(&s)?);
@@ -42,7 +42,7 @@ pub(crate) fn cmd_stat(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn cmd_head_tail(args: &[String], tail: bool) -> Result<()> {
-    let (doc, _pos, opts, _flags) = open_doc(args, &["-n", "--lines"], &[])?;
+    let (doc, _pos, opts, _flags) = open_for(if tail { "tail" } else { "head" }, args)?;
     let n: u64 = first_opt(&opts, &["-n", "--lines"])
         .unwrap_or("10")
         .parse()
@@ -70,7 +70,7 @@ fn note_truncated_lines(count: u64) {
 }
 
 pub(crate) fn cmd_line(args: &[String]) -> Result<()> {
-    let (doc, pos, _opts, _flags) = open_doc(args, &[], &[])?;
+    let (doc, pos, _opts, _flags) = open_for("line", args)?;
     let n: u64 = pos
         .get(1)
         .context("expected line number")?
@@ -92,7 +92,7 @@ pub(crate) fn cmd_line(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn cmd_lines(args: &[String]) -> Result<()> {
-    let (doc, pos, _opts, _flags) = open_doc(args, &[], &[])?;
+    let (doc, pos, _opts, _flags) = open_for("lines", args)?;
     let start: u64 = pos
         .get(1)
         .context("expected START")?
@@ -115,20 +115,7 @@ pub(crate) fn cmd_lines(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_search(args: &[String]) -> Result<u8> {
     maybe_crash();
-    let (doc, pos, opts, flags) = open_doc(
-        args,
-        &["--max", "--start-byte"],
-        &[
-            "--json",
-            "-e",
-            "--regex",
-            "-i",
-            "--ignore-case",
-            "-w",
-            "--word",
-            "--whole-word",
-        ],
-    )?;
+    let (doc, pos, opts, flags) = open_for("search", args)?;
     let pattern = pos.get(1).context("expected a PATTERN")?.clone();
     let regex = has_flag(&flags, &["-e", "--regex"]);
     let ignore_case = has_flag(&flags, &["-i", "--ignore-case"]);

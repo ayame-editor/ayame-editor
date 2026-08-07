@@ -23,7 +23,7 @@ mod worker;
 pub(crate) use cli::default_cache_dir;
 #[cfg(feature = "gui")]
 pub(crate) use cli::{check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport};
-pub(crate) use cli::{commas, first_opt, has_flag, human_bytes, open_opts, parse_checked};
+pub(crate) use cli::{commas, first_opt, has_flag, human_bytes, open_opts, parse_for};
 
 use std::process::ExitCode;
 

@@ -51,6 +51,18 @@ All notable changes to Ayame Editor are tracked here.
   200 caret-move frames on a 500-line TypeScript document (46 visible rows),
   row rebuilds fell from 9,200 to 398 and the measured pass from 10,082ms to
   521ms (#142, follow-up to #128).
+- Reduced the CLI's four descriptions of each subcommand to one. A single
+  `SUBCOMMANDS` table carries a command's name, aliases, option allow-lists,
+  handler and help text; the dispatcher, the parser each handler uses, the
+  `COMMANDS:` block of `--help`, and the drift tests all derive from it, so
+  adding a subcommand is one row and one handler. New tests close the gaps a
+  table cannot: every option a command accepts must appear in `--help`, every
+  option must be accepted by its own parser, and every command must appear in
+  both CLI references. The first of those found `ayame gen`'s `-q` / `--quiet`
+  undocumented anywhere, now written up as a `GEN OPTIONS` section in the help
+  and both references. `ayame version` became an ordinary row. Help output is
+  otherwise unchanged apart from two lines whose hand-written alignment was one
+  space off (#105, following #80).
 
 ## v0.8.7 - 2026-08-05
 

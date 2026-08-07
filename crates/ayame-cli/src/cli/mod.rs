@@ -5,13 +5,10 @@
 
 use anyhow::{bail, Result};
 
-#[cfg(feature = "gui")]
-use crate::gui;
-use crate::{gen, serve};
-
 mod aggregate;
 mod args;
 mod cache;
+mod commands;
 mod common;
 mod fields;
 mod formatting;
@@ -47,45 +44,27 @@ mod update {
 // Used by both the gui startup path and temp_paths' disk-backed scratch
 // default (#140), so it is not gui-gated.
 pub(crate) use args::default_cache_dir;
-pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
+pub(crate) use args::{first_opt, has_flag, open_opts, parse_for};
 pub(crate) use formatting::{commas, human_bytes};
 #[cfg(feature = "gui")]
 pub(crate) use update::{
     check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport,
 };
 
-const HELP: &str = "\
+/// Everything above the generated `COMMANDS:` block.
+const HELP_HEADER: &str = "\
 ayame — edit, transform, search and navigate text files of any size
 
 USAGE:
     ayame <COMMAND> [OPTIONS]
 
-COMMANDS:
-    stat   <FILE>                 Show size, line count, encoding, EOL, index stats
-    head   <FILE> [-n N]          Print the first N lines (default 10)
-    tail   <FILE> [-n N]          Print the last N lines (default 10)
-    line   <FILE> <N>             Print line N (1-based)
-    lines  <FILE> <START> <COUNT> Print COUNT lines from START (1-based)
-    search <FILE> <PATTERN>       Search; -e regex, -i ignore-case, -w whole-word, --max N
-    sort   <FILE>                 External merge sort (memory-bounded, spills to disk)
-    replace <FILE> <FIND> <REPL>  Streaming replace to a new file (--out FILE)
-    case   <FILE> <MODE>          Streaming case conversion to --out FILE (MODE =
-                                  upper|lower|camel|pascal|snake|kebab|constant)
-    grep-lines <FILE> <PATTERN>   Extract matching lines to a new file (--out FILE;
-                                  -e regex, -i ignore-case, -w whole-word)
-    split  <FILE> --lines N       Split into N-line parts (<stem>.partNNNN<.ext>)
-    group  <FILE> -k COL          Group-by/aggregate (count; sum/min/max/avg with --value)
-    top    <FILE> -k COL -n N      Top-N rows by key (bounded memory; --min for smallest)
-    distinct <FILE> -k COL         Approximate distinct count (HyperLogLog)
-    gen    <FILE> --lines N       Generate synthetic test data (--cols, --encoding)
-    serve  <FILE>                 Launch the local web editor (--host, --port,
-                                  --allow-remote for non-loopback hosts)
-    gui    [FILE]                 Open the editor in a native desktop window
-    cache  [path|info|gc|clear]   Inspect or clean the on-disk index cache
-    update                        Update Ayame from the GitHub release artifacts
-    remove                        Remove the installed Ayame binary/app
-    version                       Show version
+";
 
+/// Everything below it. The option sections are grouped by SUBJECT, not by
+/// command — `FIELD OPTIONS` covers sort/group/top/distinct — so they stay
+/// prose rather than a projection of the command table. The
+/// `help_documents_every_option_the_table_declares` test keeps them honest.
+const HELP_DETAILS: &str = "\
 COMMON OPTIONS:
     --encoding <ENC>   Force encoding: utf8 | utf-16le | utf-16be | shift_jis | euc-jp | iso-2022-jp | ascii
     --stride <N>       Lines per index checkpoint (default 4096)
@@ -120,6 +99,11 @@ TRANSFORM OPTIONS:
     --overwrite        Allow grep-lines --out to replace an existing file
     --jobs <N>         Parallel replace workers (replace/case/grep-lines; 0 = Rayon default)
     --chunk-lines <N>  Lines per parallel replace chunk (default 4000000)
+
+GEN OPTIONS:
+    --lines <N>        Lines to generate (required)
+    --cols <N>         Columns per line (default 5)
+    -q, --quiet        Do not print progress or the final summary
 
 SPLIT OPTIONS:
     --lines <N>        Lines per output part (required, at least 1)
@@ -179,42 +163,20 @@ EXAMPLES:
     ayame serve huge.csv --port 8777
 ";
 
-#[cfg(any(feature = "gui", test))]
-const COMMANDS: &[&str] = &[
-    "stat",
-    "head",
-    "tail",
-    "line",
-    "lines",
-    "search",
-    "diff",
-    "sort",
-    "sortdiff",
-    "sort-diff",
-    "replace",
-    "case",
-    "grep-lines",
-    "split",
-    "group",
-    "top",
-    "distinct",
-    "gen",
-    "serve",
-    "typegen",
-    "cache",
-    "update",
-    "remove",
-];
-
-#[cfg(any(feature = "gui", test))]
-fn is_known_command(cmd: &str) -> bool {
-    COMMANDS.contains(&cmd) || (cfg!(feature = "gui") && cmd == "gui")
+/// The full `--help` text: header, the `COMMANDS:` block rendered from the
+/// command table, then the shared option/exit-code/example sections.
+fn help() -> String {
+    format!("{HELP_HEADER}{}{HELP_DETAILS}", commands::commands_help())
 }
 
 /// Run a CLI invocation and return its process exit code (0 = success, 1 =
 /// `search` found no matches; every error path returns `Err`, which `main`
 /// turns into exit code 2). Most subcommands are pass/fail and map their `()`
 /// success to code 0; only `search` distinguishes "ran fine, no match".
+///
+/// Dispatch is a lookup in [`commands::SUBCOMMANDS`] rather than a `match`, so
+/// a command cannot exist in one of the CLI's four descriptions of itself and
+/// not the others (#105).
 pub(crate) fn run(args: Vec<String>) -> Result<u8> {
     // Worker half of the spawn handshake (#137), before anything reads a file:
     // an editor that was updated while running would otherwise drive a worker
@@ -230,70 +192,43 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
             // so they never land here. Plain CLI builds print help as before.
             #[cfg(feature = "gui")]
             {
-                return gui::cmd_gui(&[]).map(|_| 0);
+                return crate::gui::cmd_gui(&[]).map(|_| 0);
             }
             #[cfg(not(feature = "gui"))]
             {
-                print!("{HELP}");
+                print!("{}", help());
                 return Ok(0);
             }
         }
     };
     if cmd == "-h" || cmd == "--help" || cmd == "help" {
-        print!("{HELP}");
+        print!("{}", help());
         return Ok(0);
     }
-    if cmd == "-V" || cmd == "--version" || cmd == "version" {
+    // Flag spellings only: `ayame version` is an ordinary table row.
+    if cmd == "-V" || cmd == "--version" {
         println!("ayame {}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
 
     #[cfg(feature = "gui")]
     if should_open_path_in_gui(&cmd) {
-        return gui::cmd_gui(&args).map(|_| 0);
+        return crate::gui::cmd_gui(&args).map(|_| 0);
     }
 
     let rest = &args[1..];
-    match cmd.as_str() {
-        "stat" => inspect::cmd_stat(rest).map(|_| 0),
-        "head" => inspect::cmd_head_tail(rest, false).map(|_| 0),
-        "tail" => inspect::cmd_head_tail(rest, true).map(|_| 0),
-        "line" => inspect::cmd_line(rest).map(|_| 0),
-        "lines" => inspect::cmd_lines(rest).map(|_| 0),
-        // `search` owns its exit code (0 = matched, 1 = no match in human mode).
-        "search" => inspect::cmd_search(rest),
-        "diff" => removed_comparison_command("diff", "text"),
-        "sort" => sort::cmd_sort(rest).map(|_| 0),
-        "sortdiff" | "sort-diff" => removed_comparison_command("sortdiff", "sorted"),
-        "replace" => transform::cmd_replace(rest).map(|_| 0),
-        "case" => transform::cmd_case(rest).map(|_| 0),
-        "grep-lines" => transform::cmd_grep_lines(rest).map(|_| 0),
-        "split" => transform::cmd_split(rest).map(|_| 0),
-        "group" => aggregate::cmd_group(rest).map(|_| 0),
-        "top" => aggregate::cmd_top(rest).map(|_| 0),
-        "distinct" => aggregate::cmd_distinct(rest).map(|_| 0),
-        "gen" => gen::cmd_gen(rest).map(|_| 0),
-        "serve" => serve::cmd_serve(rest).map(|_| 0),
-        #[cfg(feature = "typegen")]
-        "typegen" => crate::serve::typegen::cmd_typegen(rest).map(|_| 0),
-        #[cfg(not(feature = "typegen"))]
-        "typegen" => anyhow::bail!(
-            "typegen requires a dev build: cargo run -p ayame-cli --features typegen -- typegen"
-        ),
-        #[cfg(feature = "gui")]
-        "gui" => gui::cmd_gui(rest).map(|_| 0),
-        "cache" => cache::cmd_cache(rest).map(|_| 0),
-        "update" => update::cmd_update(rest).map(|_| 0),
-        "remove" => update::cmd_remove(rest).map(|_| 0),
-        other => {
-            print!("{HELP}");
-            bail!("unknown command '{other}'");
+    match commands::find(&cmd) {
+        Some(subcommand) => (subcommand.run)(rest),
+        None => {
+            print!("{}", help());
+            bail!("unknown command '{cmd}'");
         }
     }
 }
 
 /// Keep an actionable error for one release after removing the implementation.
-/// The names stay in `COMMANDS` so GUI builds do not mistake them for file paths.
+/// The names stay in the command table so GUI builds do not mistake them for
+/// file paths, and so their arguments are still checked.
 fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
     bail!(
         "`ayame {old_cmd}` was removed in Ayame Editor v0.7.0; use \
@@ -305,51 +240,171 @@ fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
 
 #[cfg(feature = "gui")]
 fn should_open_path_in_gui(cmd: &str) -> bool {
-    !is_known_command(cmd) && std::path::Path::new(cmd).exists()
+    !commands::is_known(cmd) && std::path::Path::new(cmd).exists()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every place that parses argv names a command that exists. This is the
+    /// one stringly link left after the table landed: handlers say
+    /// `open_for("sort", …)` rather than repeating their option lists, and a
+    /// typo there would only surface when that command was run.
     #[test]
-    fn every_dispatched_command_is_a_known_command() {
-        // Derive the command names straight from run()'s dispatch instead of a
-        // hand-copied list. The previous hand-maintained copy had silently
-        // dropped `grep-lines` (#105), so it could not have caught that command
-        // going missing from `COMMANDS`. Reading the match arms out of this
-        // file's own source keeps the guard from ever drifting from the code it
-        // guards — add a subcommand and it is covered automatically.
-        let src = include_str!("mod.rs");
-        let start = src
-            .find("match cmd.as_str()")
-            .expect("run() dispatch match is present");
-        // Bound the scan to run()'s match block (its `    }\n}` close) so neither
-        // the helper fns below it nor this test's own source feed back in.
-        let end = src[start..]
-            .find("\n    }\n}")
-            .map_or(src.len(), |off| start + off);
+    fn every_parse_site_names_a_real_command() {
+        let sources = [
+            include_str!("aggregate.rs"),
+            include_str!("cache.rs"),
+            include_str!("inspect.rs"),
+            include_str!("sort.rs"),
+            include_str!("transform.rs"),
+            include_str!("update.rs"),
+            include_str!("../gen.rs"),
+            include_str!("../gui.rs"),
+            include_str!("../serve/mod.rs"),
+        ];
+        let mut seen = 0;
+        for src in sources {
+            for opener in ["open_for(\"", "parse_for(\""] {
+                let mut rest = src;
+                while let Some(at) = rest.find(opener) {
+                    rest = &rest[at + opener.len()..];
+                    let name = &rest[..rest.find('"').expect("unterminated command name")];
+                    assert!(
+                        commands::find(name).is_some(),
+                        "{name:?} parses arguments but has no command-table row"
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        // A scan that matched nothing would pass vacuously.
+        assert!(seen >= 15, "expected to find the parse sites, found {seen}");
+    }
 
-        let mut names = Vec::new();
-        for line in src[start..end].lines() {
-            if !line.trim_start().starts_with('"') || !line.contains("=>") {
+    /// Every option a row declares is one its parser really accepts. This is
+    /// the guard for the move itself: the lists came out of a dozen inline
+    /// arrays, and a dropped entry would silently start rejecting an option
+    /// that used to work.
+    #[test]
+    fn every_declared_option_is_accepted_by_its_command() {
+        for command in commands::SUBCOMMANDS {
+            for option in command.all_options() {
+                let message = parse_for(command.name, &[option.to_string()])
+                    .err()
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                // A valued option with nothing after it says so; what must
+                // never happen is the parser not recognizing it at all.
+                assert!(
+                    !message.contains("unknown option"),
+                    "`ayame {} {option}` was rejected: {message}",
+                    command.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn command_names_are_unambiguous() {
+        let mut seen = std::collections::HashSet::new();
+        for command in commands::SUBCOMMANDS {
+            for name in command.names() {
+                assert!(seen.insert(name), "{name:?} names two commands");
+            }
+        }
+    }
+
+    /// The gap the table cannot close by itself: the option sections of the
+    /// help text are grouped by subject rather than by command, so they are
+    /// written by hand. An option a command accepts but nobody documented is
+    /// exactly the drift #80 and #105 are about.
+    #[test]
+    fn help_documents_every_option_the_table_declares() {
+        // Alias spellings and internal options that deliberately have no help
+        // line: the help names one canonical form of each pair, and
+        // `--progress`/`--recover`/`--check` are protocol details between the
+        // server and its workers, a dirty-tab handoff, and a dev-only command.
+        const UNDOCUMENTED: &[&str] = &[
+            "--word",     // help names `-w, --whole-word`
+            "--top",      // help names `-n`
+            "--smallest", // help names `--min`
+            "--asc",      // help names `--min`
+            "--quiet",    // help names `-q`
+            "--progress",
+            "--recover",
+            "--check",
+        ];
+        // Whole tokens, not substrings: `-q` would otherwise "appear" inside
+        // `--quote` and the guard would pass without documenting anything.
+        let text = help();
+        let documented: std::collections::HashSet<&str> = text
+            .split([' ', '\n', '\t', ','])
+            .map(|token| token.trim_matches(|c: char| "();.:|".contains(c)))
+            .filter(|token| token.starts_with('-'))
+            .collect();
+        for command in commands::SUBCOMMANDS {
+            for option in command.all_options() {
+                if UNDOCUMENTED.contains(&option) {
+                    continue;
+                }
+                assert!(
+                    documented.contains(option),
+                    "`ayame {}` accepts {option} but --help never mentions it",
+                    command.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn help_lists_every_documented_command() {
+        let text = help();
+        for command in commands::SUBCOMMANDS {
+            if command.summary.is_empty() {
                 continue;
             }
-            let patterns = line.split("=>").next().unwrap_or("");
-            names.extend(patterns.split('"').skip(1).step_by(2));
-        }
-
-        assert!(
-            names.contains(&"grep-lines"),
-            "dispatch parsing missed grep-lines: {names:?}"
-        );
-        for name in names {
-            // `gui` is deliberately absent from COMMANDS: is_known_command()
-            // recognizes it through its own feature-gated case, not the table.
             assert!(
-                is_known_command(name) || name == "gui",
-                "dispatched command {name:?} is not a known command"
+                text.contains(&format!("    {}", command.name)),
+                "{} is missing from the COMMANDS block",
+                command.name
             );
+        }
+        // The removed comparison commands stay dispatchable but unadvertised.
+        assert!(
+            !text.contains("\n    diff "),
+            "removed commands are advertised"
+        );
+    }
+
+    /// The user-facing reference is a separate document, so it drifts from the
+    /// help text unless something checks (#105, #80).
+    #[test]
+    fn the_cli_reference_covers_every_documented_command() {
+        // Both languages: the guides are kept in step by hand, which is the
+        // same class of drift the command table exists to end.
+        for (file, reference) in [
+            (
+                "CLI_REFERENCE.md",
+                include_str!("../../../../docs/CLI_REFERENCE.md"),
+            ),
+            (
+                "CLI_REFERENCE.ja.md",
+                include_str!("../../../../docs/CLI_REFERENCE.ja.md"),
+            ),
+        ] {
+            for command in commands::SUBCOMMANDS {
+                if command.summary.is_empty() {
+                    continue;
+                }
+                // The reference lists commands as table rows: "| `name …".
+                assert!(
+                    reference.contains(&format!("| `{}", command.name)),
+                    "`ayame {}` is missing from docs/{file}",
+                    command.name
+                );
+            }
         }
     }
 

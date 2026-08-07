@@ -3,16 +3,12 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
-use super::args::{default_cache_dir, first_opt, has_flag, parse_checked};
+use super::args::{default_cache_dir, first_opt, has_flag, parse_for};
 use super::fields::parse_size;
 use super::formatting::{commas, human_bytes};
 
 pub(crate) fn cmd_cache(args: &[String]) -> Result<()> {
-    let (pos, opts, flags) = parse_checked(
-        args,
-        &["--max-size", "--max-age-days"],
-        &["--dry-run", "--json"],
-    )?;
+    let (pos, opts, flags) = parse_for("cache", args)?;
     let sub = pos.first().map(|s| s.as_str()).unwrap_or("info");
     let json = has_flag(&flags, &["--json"]);
     let dir = default_cache_dir()

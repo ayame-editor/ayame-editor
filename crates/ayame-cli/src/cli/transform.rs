@@ -6,18 +6,14 @@ use ayame_core::{
     DEFAULT_PARALLEL_REPLACE_CHUNK_LINES,
 };
 
-use super::args::{first_opt, has_flag, open_doc};
+use super::args::{first_opt, has_flag, open_for};
 use super::common::maybe_crash;
 use super::formatting::{commas, human_bytes};
 use super::progress::ProgressReporter;
 
 pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, flags) = open_doc(
-        args,
-        &["--out", "--jobs", "--chunk-lines"],
-        &["-e", "--regex", "-i", "--ignore-case", "--progress"],
-    )?;
+    let (doc, pos, opts, flags) = open_for("replace", args)?;
     let find = pos.get(1).context("expected FIND pattern")?.clone();
     let replacement = pos.get(2).context("expected REPLACEMENT text")?.clone();
     let out = first_opt(&opts, &["--out"]).context("replace requires --out <FILE>")?;
@@ -64,8 +60,7 @@ pub(crate) fn cmd_replace(args: &[String]) -> Result<()> {
 
 pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, flags) =
-        open_doc(args, &["--out", "--jobs", "--chunk-lines"], &["--progress"])?;
+    let (doc, pos, opts, flags) = open_for("case", args)?;
     const MODES: &str = "upper|lower|camel|pascal|snake|kebab|constant";
     let mode = match pos.get(1) {
         Some(raw) => CaseMode::parse(raw)
@@ -114,21 +109,7 @@ pub(crate) fn cmd_case(args: &[String]) -> Result<()> {
 /// passed when an OS save dialog already confirmed replacing the target.
 pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, pos, opts, flags) = open_doc(
-        args,
-        &["--out", "--jobs", "--chunk-lines"],
-        &[
-            "-e",
-            "--regex",
-            "-i",
-            "--ignore-case",
-            "-w",
-            "--word",
-            "--whole-word",
-            "--overwrite",
-            "--progress",
-        ],
-    )?;
+    let (doc, pos, opts, flags) = open_for("grep-lines", args)?;
     let query = pos.get(1).context("expected PATTERN")?.clone();
     let out = first_opt(&opts, &["--out"]).context("grep-lines requires --out <FILE>")?;
     let grep_opts = GrepLinesOptions {
@@ -179,11 +160,7 @@ pub(crate) fn cmd_grep_lines(args: &[String]) -> Result<()> {
 /// the original file; `--json` prints the result for that worker to parse.
 pub(crate) fn cmd_split(args: &[String]) -> Result<()> {
     maybe_crash();
-    let (doc, _pos, opts, flags) = open_doc(
-        args,
-        &["--lines", "--out-dir", "--name"],
-        &["--json", "--progress"],
-    )?;
+    let (doc, _pos, opts, flags) = open_for("split", args)?;
     let lines: u64 = first_opt(&opts, &["--lines"])
         .context("split requires --lines <N>")?
         .parse()
