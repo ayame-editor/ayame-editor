@@ -18,6 +18,66 @@ const MAX_CHANGE_TICKS = 512;
 
 export let renderQueued = false;
 
+// ---- per-row render memo (#142) ---------------------------------------------
+//
+// `render()` runs on every caret move, selection change, scroll tick and edit,
+// and used to rebuild every visible row unconditionally: `textContent = ""`
+// then a fresh span tree per line, re-tokenized. Arrow-key repeat and drag
+// selection meant ~60 rows torn down and rebuilt per frame for a document that
+// had not changed.
+//
+// A row's rendered output is a function of (line, active flag) plus a handful
+// of shared inputs. Almost all of those are REPLACED rather than mutated — the
+// line cache, the marker sets, the settings object, the search matcher, the
+// analysis matchers — so identity comparison is exact and one epoch counter
+// stands in for the lot. Keys parallel to `pool` then say whether a row
+// already shows exactly what it should.
+let rowEpoch = 0;
+let rowEpochInputs: unknown[] = [];
+// Keyed by the row element rather than its pool index: a pool that was emptied
+// and refilled (tab teardown, tests) then starts with no keys at all instead of
+// inheriting the previous rows'.
+const renderedRows = new WeakMap<Element, string>();
+
+/// Bump the epoch when anything shared by all rows has changed.
+function refreshRowEpoch() {
+  const inputs = [
+    state.view.cache,
+    state.view.total,
+    state.settings,
+    state.markers.bookmarks,
+    state.markers.changeSaved,
+    state.markers.changeUnsaved,
+    state.markers.changeDeleted,
+    state.search.matcher,
+    state.analysis.matchers,
+    // Rule visibility is toggled in place on the same Set, so this one input
+    // is compared by value rather than by identity.
+    visibleAnalysisRulesKey(),
+    // The document's path selects the syntax language, and its identity
+    // changes whenever the tab or the file behind it does.
+    state.doc.stat,
+  ];
+  if (inputs.some((input, i) => input !== rowEpochInputs[i])) {
+    rowEpochInputs = inputs;
+    rowEpoch++;
+  }
+  return rowEpoch;
+}
+
+/// Forget what every pooled row is showing. Every key embeds the epoch, so
+/// forcing the next epoch bump invalidates all of them at once. For callers
+/// that write into rows behind `render()`'s back.
+export function invalidateRenderedRows() {
+  rowEpochInputs = [];
+}
+
+/// What a row is currently believed to show; `undefined` means "needs filling".
+/// Exported for the render-reuse tests.
+export function renderedRowKey(row: Element) {
+  return renderedRows.get(row);
+}
+
 let minimapRenderer = () => {};
 let selectionRenderer = () => {};
 let selectionPresent = () => false;
@@ -706,22 +766,39 @@ export function render() {
   // and the empty [EOF] gutter share one width and the numbers right-align.
   const gutterCh = lineNumberChars(state.view.total);
   content.style.setProperty("--gutter-ch", `${gutterCh}ch`);
+  // One epoch for the whole pass, so rows that already show the right thing
+  // are left untouched instead of torn down and rebuilt (#142).
+  const epoch = refreshRowEpoch();
+  const selecting = selectionPresent();
   let loading = false;
   for (let r = 0; r < pool.length; r++) {
     const row = pool[r];
     const line = state.view.first + r;
     if (r >= count || line > state.view.total) {
-      row.style.display = "none";
+      if (renderedRows.get(row) !== "off") {
+        row.style.display = "none";
+        renderedRows.set(row, "off");
+      }
       continue;
     }
-    row.style.display = "";
     if (line === state.view.total) {
+      const key = `eof:${epoch}`;
+      if (renderedRows.get(row) === key) continue;
+      renderedRows.set(row, key);
+      row.style.display = "";
       fillEofRow(row); // one marker row just past the last line
-    } else {
-      const rec = cachedLine(line);
-      if (rec == null) loading = true;
-      fillRow(row, line, rec);
+      continue;
     }
+    const rec = cachedLine(line);
+    if (rec == null) loading = true;
+    // Within one epoch the line cache is fixed, so `line` determines `rec` —
+    // the caret's line is the only other thing a row's output turns on.
+    const active = line === state.caret.activeLine && !selecting;
+    const key = `${epoch}:${line}:${active ? 1 : 0}`;
+    if (renderedRows.get(row) === key) continue;
+    renderedRows.set(row, key);
+    row.style.display = "";
+    fillRow(row, line, rec);
   }
   // Keep the horizontal scroll position stable while rows are still loading: the
   // "⋯" placeholders would otherwise collapse the scroll width and snap
