@@ -41,6 +41,16 @@ All notable changes to Ayame Editor are tracked here.
   leaves its default `Ctrl+V` to the browser's own clipboard event. Shortcut
   parsing gained a bindable `+`, and a punctuation key now matches its chord
   with or without the `Shift` a keyboard layout needs to type it (#175).
+- Stopped `render()` rebuilding every visible row on every frame. Rows carry a
+  key over the inputs that decide what they show — the line, the caret's line,
+  and an epoch over the shared state that is replaced rather than mutated — so
+  a caret move now refills the two rows it touches instead of the whole
+  viewport, and a frame that changed nothing refills none. Syntax tokenization
+  is memoized per (language, line text) behind a bounded LRU that skips very
+  long lines, and the path-to-language lookup is no longer redone per row. Over
+  200 caret-move frames on a 500-line TypeScript document (46 visible rows),
+  row rebuilds fell from 9,200 to 398 and the measured pass from 10,082ms to
+  521ms (#142, follow-up to #128).
 
 ## v0.8.7 - 2026-08-05
 
