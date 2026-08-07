@@ -113,6 +113,32 @@ impl Drop for StageDir {
     }
 }
 
+/// What `ayame update` decided to do with the release it resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateVerdict {
+    /// The release matches the running version.
+    UpToDate,
+    /// The release is older than the running version.
+    Older,
+    /// Newer, unrecognizable, or forced.
+    Install,
+}
+
+impl UpdateVerdict {
+    /// `version_order` is this build compared against the release: `Equal` for
+    /// the same version, `Greater` when the release is behind, `None` when a
+    /// tag could not be parsed — which installs, because refusing an
+    /// unparseable tag would strand anyone on a non-semver release.
+    fn of(version_order: Option<Ordering>, force: bool) -> UpdateVerdict {
+        match version_order {
+            _ if force => UpdateVerdict::Install,
+            Some(Ordering::Equal) => UpdateVerdict::UpToDate,
+            Some(Ordering::Greater) => UpdateVerdict::Older,
+            _ => UpdateVerdict::Install,
+        }
+    }
+}
+
 /// `ayame update [--version VERSION] [--install-dir DIR] [--force] [--dry-run]`
 pub(crate) fn cmd_update(args: &[String]) -> Result<()> {
     let (pos, opts, flags) = parse_checked(
@@ -137,45 +163,42 @@ pub(crate) fn cmd_update(args: &[String]) -> Result<()> {
     let dry_run = has_flag(&flags, &["--dry-run"]);
 
     let prepared = prepare_update(&version_req, install_dir.as_deref())?;
-    if !dry_run {
-        match prepared.version_order {
-            Some(Ordering::Equal) if !force => {
-                println!("ayame {CURRENT_VERSION} is already up to date");
-                return Ok(());
-            }
-            Some(Ordering::Greater) if !force => {
-                bail!(
-                    "release {} is older than this ayame {}. Pass --force to install it anyway.",
-                    prepared.release_tag,
-                    CURRENT_VERSION
-                );
-            }
-            _ => {}
-        }
-    }
+    // One decision, described once. `--dry-run` reports it and `--force`
+    // overrides it; the two used to evaluate the same `version_order` match
+    // separately, which is how their wordings drifted apart (#113).
+    let verdict = UpdateVerdict::of(prepared.version_order, force);
 
     if dry_run {
-        match prepared.version_order {
-            Some(Ordering::Equal) if !force => {
-                println!("ayame {CURRENT_VERSION} is already up to date");
-            }
-            Some(Ordering::Greater) if !force => {
-                println!(
-                    "would not install older release {} over ayame {CURRENT_VERSION} without --force",
-                    prepared.release_tag
-                );
-            }
-            _ => {
-                println!(
-                    "would update ayame {CURRENT_VERSION} -> {} using {asset_name}",
-                    prepared.release_tag,
-                    asset_name = prepared.asset_name
-                );
-            }
+        match verdict {
+            UpdateVerdict::UpToDate => println!("ayame {CURRENT_VERSION} is already up to date"),
+            UpdateVerdict::Older => println!(
+                "would not install older release {} over ayame {CURRENT_VERSION} without --force",
+                prepared.release_tag
+            ),
+            UpdateVerdict::Install => println!(
+                "would update ayame {CURRENT_VERSION} -> {} using {asset_name}",
+                prepared.release_tag,
+                asset_name = prepared.asset_name
+            ),
         }
         println!("asset: {}", prepared.asset_name);
         println!("install target: {}", prepared.plan.destination_display());
         return Ok(());
+    }
+
+    match verdict {
+        UpdateVerdict::UpToDate => {
+            println!("ayame {CURRENT_VERSION} is already up to date");
+            return Ok(());
+        }
+        UpdateVerdict::Older => {
+            bail!(
+                "release {} is older than this ayame {}. Pass --force to install it anyway.",
+                prepared.release_tag,
+                CURRENT_VERSION
+            );
+        }
+        UpdateVerdict::Install => {}
     }
 
     let outcome = download_and_install(&prepared, true)?;
@@ -977,6 +1000,36 @@ fn clear_macos_quarantine(path: &Path) {
 #[cfg(not(target_os = "macos"))]
 fn clear_macos_quarantine(_path: &Path) {}
 
+/// Run `script` detached through whichever PowerShell this Windows has.
+///
+/// `pwsh` first (PowerShell 7 if installed), then the two spellings of Windows
+/// PowerShell; every stdio handle is null so the helper survives this process
+/// exiting. Both deferred helpers — replace and remove — walked this list
+/// themselves and differed only in their arguments and the noun in the error
+/// (#113).
+#[cfg(windows)]
+fn spawn_powershell_detached(script: &Path, args: &[&OsStr], what: &str) -> Result<()> {
+    let mut last_err = None;
+    for shell in ["pwsh", "powershell.exe", "powershell"] {
+        match Command::new(shell)
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(script)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    match last_err {
+        Some(e) => Err(e).with_context(|| format!("spawning PowerShell {what} helper")),
+        None => bail!("no PowerShell executable found for deferred {what}"),
+    }
+}
+
 #[cfg(windows)]
 fn spawn_windows_deferred_replace(source: &Path, dest: &Path, stage: &StageDir) -> Result<()> {
     let script = stage.path.join("finish-update.ps1");
@@ -1002,28 +1055,16 @@ Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
     .with_context(|| format!("writing {}", script.display()))?;
 
     let pid = std::process::id().to_string();
-    let mut last_err = None;
-    for shell in ["pwsh", "powershell.exe", "powershell"] {
-        match Command::new(shell)
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&script)
-            .arg(&pid)
-            .arg(source)
-            .arg(dest)
-            .arg(&stage.path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(_) => return Ok(()),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    match last_err {
-        Some(e) => Err(e).context("spawning PowerShell update helper"),
-        None => bail!("no PowerShell executable found for deferred update"),
-    }
+    spawn_powershell_detached(
+        &script,
+        &[
+            pid.as_ref(),
+            source.as_os_str(),
+            dest.as_os_str(),
+            stage.path.as_os_str(),
+        ],
+        "update",
+    )
 }
 
 #[cfg(windows)]
@@ -1069,27 +1110,11 @@ Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
     .with_context(|| format!("writing {}", script.display()))?;
 
     let pid = std::process::id().to_string();
-    let mut last_err = None;
-    for shell in ["pwsh", "powershell.exe", "powershell"] {
-        match Command::new(shell)
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&script)
-            .arg(&pid)
-            .arg(dest)
-            .arg(&stage.path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(_) => return Ok(()),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    match last_err {
-        Some(e) => Err(e).context("spawning PowerShell remove helper"),
-        None => bail!("no PowerShell executable found for deferred remove"),
-    }
+    spawn_powershell_detached(
+        &script,
+        &[pid.as_ref(), dest.as_os_str(), stage.path.as_os_str()],
+        "remove",
+    )
 }
 
 #[cfg(windows)]
@@ -1165,7 +1190,19 @@ fn managed_install(path: &Path) -> Option<ManagedInstall> {
     None
 }
 
-fn has_component_sequence(path: &Path, needle: &[&str]) -> bool {
+/// Whether `path` contains `needle` as a run of consecutive directory names,
+/// compared with `eq`.
+///
+/// The two callers differ only in case sensitivity: a Nix store path is exact
+/// (`/nix/store` is a real, lowercase path), while Homebrew's `Cellar` and
+/// Scoop's `apps` are matched loosely because those live under user-chosen
+/// prefixes on case-insensitive filesystems. Passing the comparator says that
+/// out loud instead of duplicating the walk (#113).
+fn has_component_sequence_by(
+    path: &Path,
+    needle: &[&str],
+    eq: impl Fn(&str, &str) -> bool,
+) -> bool {
     let parts: Vec<_> = path
         .components()
         .filter_map(|c| match c {
@@ -1173,28 +1210,331 @@ fn has_component_sequence(path: &Path, needle: &[&str]) -> bool {
             _ => None,
         })
         .collect();
-    parts.windows(needle.len()).any(|window| window == needle)
+    parts
+        .windows(needle.len())
+        .any(|window| window.iter().zip(needle).all(|(part, want)| eq(part, want)))
+}
+
+fn has_component_sequence(path: &Path, needle: &[&str]) -> bool {
+    has_component_sequence_by(path, needle, |part, want| part == want)
 }
 
 fn has_component_sequence_case_insensitive(path: &Path, needle: &[&str]) -> bool {
-    let parts: Vec<_> = path
-        .components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(s) => s.to_str(),
-            _ => None,
-        })
-        .collect();
-    parts.windows(needle.len()).any(|window| {
-        window
-            .iter()
-            .zip(needle)
-            .all(|(part, want)| part.eq_ignore_ascii_case(want))
-    })
+    has_component_sequence_by(path, needle, str::eq_ignore_ascii_case)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A private directory for one test's files, removed on drop.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> TempDir {
+            let dir = std::env::temp_dir().join(format!(
+                "ayame-update-{label}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&dir).expect("creating the fixture directory");
+            TempDir(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Write a zip whose entries are `(name, contents)` verbatim — including
+    /// names no well-behaved archiver would produce.
+    fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, contents) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(contents).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    /// Sorted file/directory names directly inside `dir`.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Zip-slip: an archive entry whose name climbs out of the extraction
+    /// directory must not be written there.
+    ///
+    /// This is the highest-consequence path in the repository — it runs during
+    /// a self-update, as whatever user is updating — and the defence is one
+    /// `enclosed_name()` call that a refactor could quietly drop (#113). The
+    /// archive here is built by hand because no archiver would emit these
+    /// names.
+    #[test]
+    fn unzip_refuses_entries_that_escape_the_destination() {
+        let dir = TempDir::new("zip-slip");
+        let archive = dir.path().join("evil.zip");
+        let dest = dir.path().join("extract");
+        fs::create_dir_all(&dest).unwrap();
+
+        write_zip(
+            &archive,
+            &[
+                ("../outside.txt", b"escaped"),
+                ("../../outside.txt", b"escaped"),
+                ("nested/../../outside.txt", b"escaped"),
+                ("safe.txt", b"kept"),
+            ],
+        );
+
+        unzip_safe(&archive, &dest).unwrap();
+
+        // Exactly the one harmless entry landed, and it landed in `dest`. The
+        // guard rejects entries rather than archives, so one bad name must not
+        // cost the whole update.
+        assert_eq!(names_in(&dest), vec!["safe.txt"]);
+        assert_eq!(fs::read(dest.join("safe.txt")).unwrap(), b"kept");
+        // And nothing appeared beside the extraction directory, which is where
+        // every `../` entry above was aimed.
+        assert_eq!(names_in(dir.path()), vec!["evil.zip", "extract"]);
+    }
+
+    /// Absolute entry names are rejected the same way. Kept apart from the
+    /// `../` cases on purpose: an absolute name aims at the filesystem root,
+    /// so whether writing it *fails* depends on who runs the tests. This
+    /// asserts the entry is ignored; the traversal test above is the one whose
+    /// failure message names the escape.
+    #[test]
+    fn unzip_ignores_absolute_entry_names() {
+        let dir = TempDir::new("zip-absolute");
+        let archive = dir.path().join("absolute.zip");
+        let dest = dir.path().join("extract");
+        write_zip(
+            &archive,
+            &[("/etc/ayame-evil.txt", b"escaped"), ("ok.txt", b"kept")],
+        );
+
+        unzip_safe(&archive, &dest).unwrap();
+
+        assert_eq!(names_in(&dest), vec!["ok.txt"]);
+    }
+
+    #[test]
+    fn unzip_keeps_nested_entries_inside_the_destination() {
+        let dir = TempDir::new("zip-nested");
+        let archive = dir.path().join("app.zip");
+        let dest = dir.path().join("extract");
+        write_zip(
+            &archive,
+            &[
+                ("Ayame.app/Contents/MacOS/ayame", b"binary"),
+                ("Ayame.app/Contents/Info.plist", b"plist"),
+            ],
+        );
+
+        unzip_safe(&archive, &dest).unwrap();
+
+        assert_eq!(
+            fs::read(dest.join("Ayame.app/Contents/MacOS/ayame")).unwrap(),
+            b"binary"
+        );
+        assert_eq!(
+            fs::read(dest.join("Ayame.app/Contents/Info.plist")).unwrap(),
+            b"plist"
+        );
+    }
+
+    fn write_app_bundle(root: &Path, marker: &[u8]) -> PathBuf {
+        let app = root.join("Ayame.app");
+        let macos = app.join("Contents").join("MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(macos.join("ayame"), marker).unwrap();
+        fs::write(app.join("Contents").join("Info.plist"), b"plist").unwrap();
+        app
+    }
+
+    /// Installing over an existing bundle must leave exactly the new one, with
+    /// no staging or backup siblings behind.
+    #[test]
+    fn installing_an_app_bundle_replaces_the_old_one() {
+        let dir = TempDir::new("app-install");
+        let source = write_app_bundle(&dir.path().join("src"), b"new");
+        let dest_root = dir.path().join("Applications");
+        let dest = write_app_bundle(&dest_root, b"old");
+
+        install_macos_app(&source, &dest).unwrap();
+
+        assert_eq!(
+            fs::read(dest.join("Contents").join("MacOS").join("ayame")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            names_in(&dest_root),
+            vec!["Ayame.app"],
+            "staging/backup siblings left behind"
+        );
+    }
+
+    #[test]
+    fn installing_an_app_bundle_creates_a_missing_destination() {
+        let dir = TempDir::new("app-fresh");
+        let source = write_app_bundle(&dir.path().join("src"), b"fresh");
+        let dest = dir.path().join("Applications").join("Ayame.app");
+
+        install_macos_app(&source, &dest).unwrap();
+
+        assert_eq!(
+            fs::read(dest.join("Contents").join("MacOS").join("ayame")).unwrap(),
+            b"fresh"
+        );
+    }
+
+    /// The rollback path: if the staged bundle cannot take the destination's
+    /// name, the original must come back rather than the install leaving no
+    /// application at all. Provoked by making the staged path un-renameable —
+    /// a file where a directory is expected on the way in.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_app_install_restores_the_previous_bundle() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("app-rollback");
+        let source = write_app_bundle(&dir.path().join("src"), b"new");
+        let dest_root = dir.path().join("Applications");
+        let dest = write_app_bundle(&dest_root, b"old");
+        // A read-only parent makes the rename into place fail while leaving
+        // the already-created staging copy intact.
+        let mut perms = fs::metadata(&dest_root).unwrap().permissions();
+        perms.set_mode(0o500);
+        fs::set_permissions(&dest_root, perms).unwrap();
+
+        let result = install_macos_app(&source, &dest);
+
+        let mut perms = fs::metadata(&dest_root).unwrap().permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&dest_root, perms).unwrap();
+
+        // Either the staging copy or the rename failed; either way the old
+        // bundle must still be the one installed.
+        assert!(result.is_err(), "the install should not have succeeded");
+        assert_eq!(
+            fs::read(dest.join("Contents").join("MacOS").join("ayame")).unwrap(),
+            b"old",
+            "the previous bundle must survive a failed install"
+        );
+    }
+
+    /// The artifact/plan matrix: a macOS zip can install as either an app
+    /// bundle or the bare binary inside it, a plain binary only as itself, and
+    /// every other pairing is refused rather than half-installed.
+    #[test]
+    fn artifact_and_plan_must_agree() {
+        let dir = TempDir::new("artifact-matrix");
+        let stage = StageDir {
+            path: dir.path().join("stage"),
+            keep: true,
+        };
+        fs::create_dir_all(&stage.path).unwrap();
+        let asset = dir.path().join("ayame");
+        fs::write(&asset, b"binary").unwrap();
+
+        let binary_target = ReleaseTarget {
+            suffix: "x86_64-unknown-linux-gnu",
+            exe_name: "ayame",
+            kind: ArtifactKind::Binary,
+        };
+        let zip_target = ReleaseTarget {
+            suffix: "aarch64-apple-darwin",
+            exe_name: "ayame",
+            kind: ArtifactKind::MacAppZip,
+        };
+        let binary_plan = InstallPlan::Binary {
+            dest: dir.path().join("bin").join("ayame"),
+        };
+        let app_plan = InstallPlan::MacApp {
+            dest: dir.path().join("Ayame.app"),
+        };
+
+        // Binary artifact, binary plan: installed as-is.
+        assert_eq!(
+            prepare_artifact(&binary_target, &binary_plan, &asset, &stage).unwrap(),
+            asset
+        );
+        // Binary artifact into an app plan is refused, not guessed at.
+        assert!(prepare_artifact(&binary_target, &app_plan, &asset, &stage).is_err());
+
+        // A zip artifact needs a real archive; a truncated one must error
+        // rather than install nothing and report success.
+        assert!(prepare_artifact(&zip_target, &app_plan, &asset, &stage).is_err());
+    }
+
+    /// A macOS zip installed to a binary destination pulls the executable out
+    /// of the bundle rather than dropping a directory where a binary goes.
+    #[test]
+    fn a_mac_zip_can_install_as_a_bare_binary() {
+        let dir = TempDir::new("zip-to-binary");
+        let stage = StageDir {
+            path: dir.path().join("stage"),
+            keep: true,
+        };
+        fs::create_dir_all(&stage.path).unwrap();
+        let archive = dir.path().join("Ayame.zip");
+        write_zip(
+            &archive,
+            &[
+                ("Ayame.app/Contents/MacOS/ayame", b"the binary"),
+                ("Ayame.app/Contents/Info.plist", b"plist"),
+            ],
+        );
+        let target = ReleaseTarget {
+            suffix: "aarch64-apple-darwin",
+            exe_name: "ayame",
+            kind: ArtifactKind::MacAppZip,
+        };
+        let plan = InstallPlan::Binary {
+            dest: dir.path().join("bin").join("ayame"),
+        };
+
+        let prepared = prepare_artifact(&target, &plan, &archive, &stage).unwrap();
+
+        assert!(
+            prepared.is_file(),
+            "expected a file at {}",
+            prepared.display()
+        );
+        assert_eq!(fs::read(&prepared).unwrap(), b"the binary");
+    }
+
+    #[test]
+    fn the_update_verdict_is_decided_once() {
+        use UpdateVerdict::*;
+        assert_eq!(UpdateVerdict::of(Some(Ordering::Equal), false), UpToDate);
+        assert_eq!(UpdateVerdict::of(Some(Ordering::Greater), false), Older);
+        assert_eq!(UpdateVerdict::of(Some(Ordering::Less), false), Install);
+        // An unparseable tag installs rather than stranding a non-semver
+        // release, and --force overrides every refusal.
+        assert_eq!(UpdateVerdict::of(None, false), Install);
+        assert_eq!(UpdateVerdict::of(Some(Ordering::Equal), true), Install);
+        assert_eq!(UpdateVerdict::of(Some(Ordering::Greater), true), Install);
+    }
 
     #[test]
     fn normalizes_tags() {

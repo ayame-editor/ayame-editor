@@ -96,6 +96,34 @@ pub(crate) fn parse_size(s: &str) -> Result<usize> {
 mod tests {
     use super::*;
 
+    /// `--budget` is how a user bounds a sort's memory before it spills, so a
+    /// misparse is a silent out-of-memory or a needless spill. Untested until
+    /// now (#113).
+    #[test]
+    fn parses_sizes_with_and_without_units() {
+        assert_eq!(parse_size("512").unwrap(), 512);
+        assert_eq!(parse_size("512b").unwrap(), 512);
+        assert_eq!(parse_size("2k").unwrap(), 2 << 10);
+        assert_eq!(parse_size("2KiB").unwrap(), 2 << 10);
+        assert_eq!(parse_size("256m").unwrap(), 256 << 20);
+        assert_eq!(parse_size("256MiB").unwrap(), 256 << 20);
+        assert_eq!(parse_size("2g").unwrap(), 2 << 30);
+        assert_eq!(parse_size("2GiB").unwrap(), 2usize << 30);
+        // Units are case-insensitive and surrounding space is ignored, because
+        // both come from a shell where quoting is easy to get slightly wrong.
+        assert_eq!(parse_size(" 1gib ").unwrap(), 1 << 30);
+        // Fractions are accepted: "1.5GiB" is a natural thing to type.
+        assert_eq!(parse_size("1.5MiB").unwrap(), 1_572_864);
+    }
+
+    #[test]
+    fn rejects_sizes_that_are_not_numbers() {
+        for bad in ["", "abc", "12x", "m", "1.2.3"] {
+            let err = parse_size(bad).unwrap_err().to_string();
+            assert!(err.contains("invalid size"), "{bad:?} -> {err}");
+        }
+    }
+
     #[test]
     fn parses_ordered_key_columns_and_tsv_delimiter_aliases() {
         let opts = HashMap::from([
@@ -123,5 +151,8 @@ mod tests {
     #[test]
     fn budget_default_tracks_the_core_constant() {
         assert_eq!(parse_budget(&HashMap::new()).unwrap(), DEFAULT_BUDGET_BYTES);
+        // And an explicit --budget goes through parse_size.
+        let opts = HashMap::from([("--budget".to_string(), "8MiB".to_string())]);
+        assert_eq!(parse_budget(&opts).unwrap(), 8 << 20);
     }
 }

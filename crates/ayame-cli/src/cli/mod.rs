@@ -49,6 +49,8 @@ mod update {
 pub(crate) use args::default_cache_dir;
 pub(crate) use args::{first_opt, has_flag, open_opts, parse_checked};
 pub(crate) use formatting::{commas, human_bytes};
+#[cfg(test)]
+pub(crate) use progress::machine_progress_line;
 #[cfg(feature = "gui")]
 pub(crate) use update::{
     check_latest_update, install_latest_update, UpdateInfo, UpdateInstallReport,
