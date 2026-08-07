@@ -199,6 +199,34 @@ pub enum RecoveryInfo {
 /// Attach it to the LIVE [`EditSession`] via [`EditSession::set_wal`];
 /// session clones (save snapshots, parked tabs) deliberately do not carry the
 /// attachment, so exactly one logger exists per file.
+/// The message a caller sees when the log had to be reset without a way to
+/// re-anchor the live overlay onto the new base: the log is valid but no
+/// longer covers the edits made since, and only a save re-arms it.
+const NO_CAPTURE: &str = "the crash log was reset without a session capture; edits since the last \
+                          save are not crash-protected — save the file to re-arm crash recovery";
+
+/// The overlay a fresh log should be written with, or `None` when there is no
+/// honest one to write.
+///
+/// While `base_gen` is 0 the header still describes the base the session's
+/// overlay anchors point at, so that overlay can be serialized verbatim. After
+/// a reset it cannot — the session keeps editing against the OLD mmap base —
+/// and only a captured [`RebaseSource`] can re-anchor it. Both the live
+/// snapshot and the compaction stage make exactly this choice, and used to
+/// make it separately, along with a duplicated copy of the failure message
+/// (#112).
+fn overlay_for(
+    base_gen: u64,
+    rebase: Option<&RebaseSource>,
+    session: &EditSession,
+) -> Option<OverlaySnapshot> {
+    if base_gen == 0 {
+        Some(session.overlay_snapshot())
+    } else {
+        rebase.map(|r| r.rebase(session))
+    }
+}
+
 #[derive(Debug)]
 pub struct WalWriter {
     file: File,
@@ -396,12 +424,11 @@ impl WalWriter {
     /// writer and surface the error (check [`WalWriter::can_snapshot`] first
     /// to skip instead, as compaction does).
     pub fn snapshot(&mut self, session: &EditSession) -> Result<()> {
-        let overlay = if self.base_gen == 0 {
-            Some(session.overlay_snapshot())
-        } else {
-            self.rebase.as_ref().map(|r| r.rebase(session))
-        };
+        let overlay = overlay_for(self.base_gen, self.rebase.as_ref(), session);
         let honest = overlay.is_some();
+        // Written either way: a log with no overlay still records the header
+        // and everything after it, so the next edits ARE protected. Only the
+        // ones already made are not, which is what the error says.
         let (file, len) = write_fresh(&self.path, &self.header, overlay)?;
         self.file = file;
         self.len = len;
@@ -410,11 +437,7 @@ impl WalWriter {
         if honest {
             Ok(())
         } else {
-            Err(Error::UnsupportedFeature(
-                "the crash log was reset without a session capture; edits since the last save \
-                 are not crash-protected — save the file to re-arm crash recovery"
-                    .into(),
-            ))
+            Err(Error::UnsupportedFeature(NO_CAPTURE.into()))
         }
     }
 
@@ -467,17 +490,11 @@ impl WalCompactionPlan {
     /// appending to the current log while this runs; callers install the stage
     /// only after proving the editing session revision did not change.
     pub fn stage(&self, session: &EditSession) -> Result<StagedWalCompaction> {
-        let overlay = if self.base_gen == 0 {
-            Some(session.overlay_snapshot())
-        } else {
-            self.rebase.as_ref().map(|r| r.rebase(session))
-        };
-        let Some(overlay) = overlay else {
-            return Err(Error::UnsupportedFeature(
-                "the crash log was reset without a session capture; edits since the last save \
-                 are not crash-protected — save the file to re-arm crash recovery"
-                    .into(),
-            ));
+        // Unlike the live snapshot, compaction REPLACES a log that is already
+        // protecting these edits, so it refuses rather than writing a log that
+        // covers less than the one it would install over.
+        let Some(overlay) = overlay_for(self.base_gen, self.rebase.as_ref(), session) else {
+            return Err(Error::UnsupportedFeature(NO_CAPTURE.into()));
         };
         let (tmp, len) = write_staged(&self.path, &self.header, Some(overlay))?;
         Ok(StagedWalCompaction {

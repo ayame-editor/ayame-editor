@@ -170,11 +170,19 @@ impl Document {
         let len = meta.len();
         let mtime = mtime_of(&meta);
         // Zero-length files cannot be mmap'd on some platforms; treat as empty.
-        // SAFETY(mmap): the file may shrink underneath this read-only map,
-        // which would SIGBUS; `watch` below absorbs that into a sticky flag.
         let mmap = if len == 0 {
             None
         } else {
+            // SAFETY: a read-only mapping of a file another process may
+            // truncate or rotate under us. Rust cannot make that safe — the
+            // guarantee memmap2 asks for (nobody modifies the file) is not one
+            // an editor for other people's files can have — so the hazard is
+            // absorbed rather than avoided: `watch`, installed immediately
+            // below over this exact address range, turns the resulting SIGBUS
+            // into a sticky flag that `base_ok`/`Document::open` check, and
+            // every read then fails with `BaseFileChanged` instead of aborting
+            // the process (#200). Accepted because the alternative — copying
+            // the file into memory — is the design this editor exists to avoid.
             Some(unsafe { Mmap::map(&file)? })
         };
         let watch = MapWatch::watch(mmap.as_deref().unwrap_or(&[]));
@@ -348,7 +356,9 @@ impl Document {
         }
         // Grew: an existing mapping has a fixed length, so re-map the fd to make
         // the appended bytes visible, then extend the index over the new range.
-        // SAFETY(mmap): shrink-during-scan is absorbed by `new_watch` below.
+        // SAFETY: same contract as `Document::open` — a writer can truncate
+        // this file mid-scan. `new_watch` below covers the new range and the
+        // caller reindexes rather than trusting a faulted mapping.
         let new_mmap = unsafe { Mmap::map(&self._file)? };
         if (new_mmap.len() as u64) < new_len {
             // A racing shrink between the stat and the map: treat as a reindex
@@ -391,7 +401,10 @@ impl Document {
         }
 
         let file = self._file.try_clone()?;
-        // SAFETY(mmap): shrink-during-scan is absorbed by `watch` below.
+        // SAFETY: same contract as `Document::open`. A shrink between the stat
+        // above and this map is caught two ways: the length comparison below
+        // refuses to publish a document whose mapping and index disagree, and
+        // `watch` absorbs a fault raised while the appended range is scanned.
         let mmap = unsafe { Mmap::map(&file)? };
         let mapped_len = mmap.len() as u64;
         if mapped_len <= self.len || mapped_len < observed_len {

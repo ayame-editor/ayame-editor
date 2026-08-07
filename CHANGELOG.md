@@ -4,6 +4,17 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Made every `unsafe` in the engine state its contract and turned on
+  `undocumented_unsafe_blocks` workspace-wide so a future one cannot skip it.
+  The five `Mmap::map` sites now say what invalidates the mapping — another
+  process truncating or rotating the file, which no Rust guarantee covers for
+  an editor of other people's files — and how the resulting SIGBUS is absorbed
+  into a recoverable error instead of aborting. Collapsed three duplications
+  behind it: the WAL's snapshot and compaction paths share one `overlay_for`
+  decision and one failure message, the two sort merge passes share one
+  `merge_pump`, and `comparable_key` became a wrapper over
+  `comparable_key_into` (#112).
+
 ## v0.8.7 - 2026-08-05
 
 - Replaced the frontend's flat mutable state bag with a typed `AppState`

@@ -138,6 +138,44 @@ impl<P> Ord for HeapEntry<P> {
     }
 }
 
+/// Seed a merge heap and drain it in order, refilling from whichever run each
+/// popped record came from.
+///
+/// The heap/pop/refill pump is the same for every straight k-way merge — only
+/// what gets written per record differs — so the two sort passes shared a
+/// hand-copied copy of it (#81.1, finished in #112). `emit` writes one record
+/// and returns how many bytes it wrote; the running count is reported to
+/// `progress` every [`PROGRESS_EVERY`] records, and the caller ticks it once
+/// more after flushing. Returns `(records, bytes)`.
+///
+/// Not used by the group merge, which pops every entry sharing a key and folds
+/// them into one row — a different loop, not a parameter of this one.
+pub(super) fn merge_pump<P: Payload>(
+    readers: &mut [RunReader<P>],
+    mut make: impl FnMut(Vec<u8>, P, usize) -> HeapEntry<P>,
+    mut emit: impl FnMut(&HeapEntry<P>) -> Result<u64>,
+    mut progress: impl FnMut(u64),
+) -> Result<(u64, u64)> {
+    let mut heap = seed_heap(readers, &mut make)?;
+    let mut records = 0u64;
+    let mut bytes = 0u64;
+    while let Some(item) = heap.pop() {
+        bytes += emit(&item)?;
+        records += 1;
+        if records.is_multiple_of(PROGRESS_EVERY) {
+            progress(records);
+        }
+        if let Some((key, payload)) = readers[item.run].next_record()? {
+            heap.push(make(key, payload, item.run));
+        }
+    }
+    Ok((records, bytes))
+}
+
+/// How often a merge reports progress. Frequent enough to feel live on a long
+/// sort, rare enough that the callback is not the bottleneck.
+const PROGRESS_EVERY: u64 = 8192;
+
 /// Prime a merge heap with the first record of every run. `make` builds the
 /// entry from `(key, payload, run_index)`, letting the caller set the payload,
 /// tiebreak, and direction for its op.
