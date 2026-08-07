@@ -41,14 +41,21 @@ vi.mock("../src/findbar.js", () => ({
 vi.mock("../src/grep.js", () => ({ grepFolder: vi.fn() }));
 vi.mock("../src/dialogs.js", () => ({ askPrompt: vi.fn(), showMessage: vi.fn() }));
 vi.mock("../src/modal-state.js", () => ({ anyModalOpen: vi.fn(() => false) }));
-vi.mock("../src/keys.js", () => ({ eventShortcut: vi.fn() }));
+vi.mock("../src/keys.js", () => ({ eventShortcuts: vi.fn() }));
 vi.mock("../src/workspace.js", () => ({
+  closeAllTabs: vi.fn(),
+  closeSavedTabs: vi.fn(),
   closeTab: vi.fn(),
+  closeTabsToRight: vi.fn(),
   newUntitled: vi.fn(),
   openFileDialog: vi.fn(),
+  reopenClosedTab: vi.fn(),
   selectRelativeTab: vi.fn(),
 }));
 vi.mock("../src/settings.js", () => ({
+  adjustFontSize: vi.fn(),
+  FONT_SIZE_STEP: 1,
+  setFontSize: vi.fn(),
   setSettingsMenuService: vi.fn(),
   showSettings: vi.fn(),
   updateSetting: vi.fn(),
@@ -78,7 +85,7 @@ vi.mock("../src/palette.js", () => ({
 vi.mock("../src/menu-ui.js", () => ({ applyLocale: vi.fn(), showAppMenu: vi.fn() }));
 
 import { moveLines, transformSelection } from "../src/edits.js";
-import { eventShortcut } from "../src/keys.js";
+import { eventShortcuts } from "../src/keys.js";
 import { shortcutList } from "../src/keymap-menu.js";
 import {
   rebuildGlobalShortcutActions,
@@ -174,11 +181,11 @@ describe("menu action dispatch (#188)", () => {
     });
     rebuildGlobalShortcutActions();
 
-    vi.mocked(eventShortcut).mockReturnValue("Ctrl+C");
+    vi.mocked(eventShortcuts).mockReturnValue(["Ctrl+C"]);
     expect(shortcutActionFromEvent(new KeyboardEvent("keydown"))).toBe("copy");
     expect(shortcutActionFromEvent(new KeyboardEvent("keydown"), true)).toBeNull();
 
-    vi.mocked(eventShortcut).mockReturnValue("Ctrl+S");
+    vi.mocked(eventShortcuts).mockReturnValue(["Ctrl+S"]);
     expect(shortcutActionFromEvent(new KeyboardEvent("keydown"), true)).toBe("saveFile");
   });
 });
