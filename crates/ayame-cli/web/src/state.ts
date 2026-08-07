@@ -286,84 +286,92 @@ export interface AppState {
   };
 }
 
-export const state: AppState = {
-  runtime: {
-    windowId:
-      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : String(Date.now()) + "-" + Math.random().toString(36).slice(2),
-  },
-  view: {
-    total: 0,
-    first: 0, // top visible line (0-based)
-    fracAcc: 0, // sub-line wheel accumulator
-    cache: { start: 0, lines: [] },
-    loadToken: 0,
-  },
-  search: {
-    query: "",
-    regex: false,
-    caseInsensitive: false,
-    word: false,
-    matcher: null,
-    regexError: false,
-    matcherWordFallback: false,
-    lastMatch: null, // { byte, len }
-    hits: null,
-    truncated: false,
-    findOpen: false,
-    replaceOpen: false,
-    history: [],
-    historyIndex: -1,
-  },
-  // Bounded log-analysis state. Profiles persist separately from find history;
-  // status contains only fixed histograms and capped sparse positions.
-  analysis: {
-    profiles: [],
-    activeProfile: null,
-    operationId: null,
-    status: null,
-    matchers: [],
-    visibleRuleIds: new Set<string>(),
-    selectedRule: null,
-    lastHits: new Map<string, AnalysisHit>(),
-  },
-  // Sparse marker cache for the same range as `view.cache.lines`. It is
-  // replaced, not accumulated, on each viewport fetch so edits can never leave
-  // stale line-number markers behind.
-  markers: {
-    bookmarks: new Set<number>(),
-    bookmarkCount: 0,
-    changeSaved: new Set<number>(),
-    changeUnsaved: new Set<number>(),
-    changeDeleted: new Set<number>(),
-    changeHistoryOverview: null,
-  },
-  settings: { ...DEFAULT_SETTINGS },
-  doc: {
-    stat: null,
-    tabs: [], // open tabs from /api/tabs
-    followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
-    tailTimer: null, // setInterval handle while following; cleared when off
-    generation: 0, // bumps whenever the active document/tab changes; cancels stale queued edits
-  },
-  opener: {
-    dir: null, // directory currently shown in the open dialog
-    entries: [],
-  },
-  // ---- caret-based (Notepad-style) editing ----
-  caret: {
-    position: { line: 0, col: 0 }, // Unicode scalar coordinates, like the backend
-    activeLine: -1,
-    goalCol: 0, // remembered column for vertical caret motion
-    editGeneration: 0, // bumps on every user caret move; protects in-flight edits
-    composing: false, // an IME composition is in progress
-    focused: false, // the hidden text input holds focus (draw the caret)
-    selection: null,
-    extraCursors: [], // additional carets; primary is `caret.position`
-    dragging: false,
-    dragMoved: false,
-    dragAnchor: null, // mouse-down caret, promoted to a selection once it moves
-    dragRect: false,
-  },
-};
+export function createInitialState(): AppState {
+  return {
+    runtime: {
+      windowId:
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : String(Date.now()) + "-" + Math.random().toString(36).slice(2),
+    },
+    view: {
+      total: 0,
+      first: 0, // top visible line (0-based)
+      fracAcc: 0, // sub-line wheel accumulator
+      cache: { start: 0, lines: [] },
+      loadToken: 0,
+    },
+    search: {
+      query: "",
+      regex: false,
+      caseInsensitive: false,
+      word: false,
+      matcher: null,
+      regexError: false,
+      matcherWordFallback: false,
+      lastMatch: null, // { byte, len }
+      hits: null,
+      truncated: false,
+      findOpen: false,
+      replaceOpen: false,
+      history: [],
+      historyIndex: -1,
+    },
+    // Bounded log-analysis state. Profiles persist separately from find history;
+    // status contains only fixed histograms and capped sparse positions.
+    analysis: {
+      profiles: [],
+      activeProfile: null,
+      operationId: null,
+      status: null,
+      matchers: [],
+      visibleRuleIds: new Set<string>(),
+      selectedRule: null,
+      lastHits: new Map<string, AnalysisHit>(),
+    },
+    // Sparse marker cache for the same range as `view.cache.lines`. It is
+    // replaced, not accumulated, on each viewport fetch so edits can never leave
+    // stale line-number markers behind.
+    markers: {
+      bookmarks: new Set<number>(),
+      bookmarkCount: 0,
+      changeSaved: new Set<number>(),
+      changeUnsaved: new Set<number>(),
+      changeDeleted: new Set<number>(),
+      changeHistoryOverview: null,
+    },
+    settings: {
+      ...DEFAULT_SETTINGS,
+      keymap: { ...DEFAULT_SETTINGS.keymap },
+      customThemes: { ...DEFAULT_SETTINGS.customThemes },
+    },
+    doc: {
+      stat: null,
+      tabs: [], // open tabs from /api/tabs
+      followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
+      tailTimer: null, // setInterval handle while following; cleared when off
+      generation: 0, // bumps whenever the active document/tab changes; cancels stale queued edits
+    },
+    opener: {
+      dir: null, // directory currently shown in the open dialog
+      entries: [],
+    },
+    // ---- caret-based (Notepad-style) editing ----
+    caret: {
+      position: { line: 0, col: 0 }, // Unicode scalar coordinates, like the backend
+      activeLine: -1,
+      goalCol: 0, // remembered column for vertical caret motion
+      editGeneration: 0, // bumps on every user caret move; protects in-flight edits
+      composing: false, // an IME composition is in progress
+      focused: false, // the hidden text input holds focus (draw the caret)
+      selection: null,
+      extraCursors: [], // additional carets; primary is `caret.position`
+      dragging: false,
+      dragMoved: false,
+      dragAnchor: null, // mouse-down caret, promoted to a selection once it moves
+      dragRect: false,
+    },
+  };
+}
+
+export const state: AppState = createInitialState();
