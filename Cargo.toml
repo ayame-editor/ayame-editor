@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ayame-core", "crates/ayame-cli", "xtask"]
 
 [workspace.package]
-version = "0.8.7"
+version = "0.9.0"
 edition = "2021"
 # Minimum supported Rust version. The build.rs TS->JS transform depends on
 # oxc 0.138, whose `oxc_transformer` uses `if let` match guards — stable only
