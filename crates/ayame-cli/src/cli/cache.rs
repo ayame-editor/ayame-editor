@@ -218,3 +218,156 @@ fn cache_entries(vdir: &Path) -> Result<Vec<CacheEntry>> {
     }
     Ok(entries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> TempDir {
+            let dir = std::env::temp_dir().join(format!(
+                "ayame-cache-{label}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// An index-cache entry of `bytes` bytes, last modified `age_secs` ago.
+    fn entry(dir: &Path, name: &str, bytes: usize, age_secs: u64) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, vec![b'x'; bytes]).unwrap();
+        let when = SystemTime::now() - Duration::from_secs(age_secs);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        path
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut out: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        out.sort();
+        out
+    }
+
+    const HOUR: u64 = 3600;
+
+    /// Age is the first cut, and it is inclusive of nothing: an entry exactly
+    /// at the limit is kept. GC deletes files, so the boundary is worth
+    /// pinning rather than inferring (#187).
+    #[test]
+    fn gc_removes_entries_older_than_the_age_limit() {
+        let dir = TempDir::new("age");
+        entry(dir.path(), "old.idx", 10, 48 * HOUR);
+        entry(dir.path(), "fresh.idx", 10, HOUR);
+
+        let report = cache_gc(dir.path(), u64::MAX, Duration::from_secs(24 * HOUR), false).unwrap();
+
+        assert_eq!(report.removed_count, 1);
+        assert_eq!(report.removed_bytes, 10);
+        assert_eq!(names(dir.path()), vec!["fresh.idx"]);
+    }
+
+    /// Over the size budget, the OLDEST entries go first — a cache is only
+    /// worth what its recent entries save.
+    #[test]
+    fn gc_trims_to_the_size_budget_oldest_first() {
+        let dir = TempDir::new("size");
+        entry(dir.path(), "oldest.idx", 100, 3 * HOUR);
+        entry(dir.path(), "middle.idx", 100, 2 * HOUR);
+        entry(dir.path(), "newest.idx", 100, HOUR);
+
+        let report = cache_gc(dir.path(), 150, Duration::from_secs(24 * HOUR), false).unwrap();
+
+        assert_eq!(
+            report.removed_count, 2,
+            "must fall to at or below the budget"
+        );
+        assert_eq!(names(dir.path()), vec!["newest.idx"]);
+        assert_eq!(report.after_bytes, 100);
+    }
+
+    #[test]
+    fn gc_keeps_everything_that_fits_and_is_fresh() {
+        let dir = TempDir::new("keep");
+        entry(dir.path(), "a.idx", 10, HOUR);
+        entry(dir.path(), "b.idx", 10, 2 * HOUR);
+
+        let report = cache_gc(dir.path(), 1024, Duration::from_secs(24 * HOUR), false).unwrap();
+
+        assert_eq!(report.removed_count, 0);
+        assert_eq!(names(dir.path()), vec!["a.idx", "b.idx"]);
+    }
+
+    /// `--dry-run` must report exactly what a real run would remove, and
+    /// remove nothing. It is the only way to inspect a destructive operation
+    /// before committing to it.
+    #[test]
+    fn a_dry_run_reports_without_deleting() {
+        let dir = TempDir::new("dry");
+        entry(dir.path(), "old.idx", 10, 48 * HOUR);
+        entry(dir.path(), "fresh.idx", 10, HOUR);
+
+        let dry = cache_gc(dir.path(), u64::MAX, Duration::from_secs(24 * HOUR), true).unwrap();
+        assert_eq!(names(dir.path()).len(), 2, "a dry run must delete nothing");
+
+        let real = cache_gc(dir.path(), u64::MAX, Duration::from_secs(24 * HOUR), false).unwrap();
+        assert_eq!(
+            (dry.removed_count, dry.removed_bytes),
+            (real.removed_count, real.removed_bytes),
+            "the dry run must predict the real one exactly"
+        );
+    }
+
+    /// Only `.idx` files are the cache's to delete. Anything else in the
+    /// directory — a stray file, a subdirectory — is somebody else's.
+    #[test]
+    fn gc_only_touches_index_files() {
+        let dir = TempDir::new("foreign");
+        entry(dir.path(), "stale.idx", 10, 48 * HOUR);
+        entry(dir.path(), "notes.txt", 10, 48 * HOUR);
+        std::fs::create_dir(dir.path().join("subdir.idx")).unwrap();
+
+        let report = cache_gc(dir.path(), u64::MAX, Duration::from_secs(24 * HOUR), false).unwrap();
+
+        assert_eq!(report.removed_count, 1);
+        assert_eq!(names(dir.path()), vec!["notes.txt", "subdir.idx"]);
+    }
+
+    #[test]
+    fn gc_on_a_missing_directory_is_not_an_error() {
+        let dir = TempDir::new("missing");
+        let report = cache_gc(
+            &dir.path().join("nope"),
+            1024,
+            Duration::from_secs(HOUR),
+            false,
+        )
+        .unwrap();
+        assert_eq!((report.before_count, report.removed_count), (0, 0));
+    }
+}

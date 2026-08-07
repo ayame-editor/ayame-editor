@@ -237,3 +237,132 @@ pub(crate) fn cmd_distinct(args: &[String]) -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> TempDir {
+            let dir = std::env::temp_dir().join(format!(
+                "ayame-groupio-{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn join(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn doc_from(dir: &TempDir, name: &str, bytes: &[u8]) -> (PathBuf, Document) {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let doc = Document::open(&path, &ayame_core::OpenOptions::default()).unwrap();
+        (path, doc)
+    }
+
+    fn group_opts(has_value: bool) -> GroupOptions {
+        GroupOptions {
+            key_column: Some(1),
+            value_column: has_value.then_some(2),
+            fields: ayame_core::FieldSpec {
+                delimiter: b',',
+                ..ayame_core::FieldSpec::default()
+            },
+            ..GroupOptions::default()
+        }
+    }
+
+    /// The artifact writer is what `--out-groups` and the GUI's group-save
+    /// produce; its TSV shape is a contract with whatever reads it back
+    /// (#187).
+    #[test]
+    fn counting_groups_writes_key_and_count_as_tsv() {
+        let dir = TempDir::new("count");
+        let (_src, doc) = doc_from(&dir, "in.csv", b"a,1\nb,2\na,3\n");
+        let out = dir.join("groups.tsv");
+
+        write_group_artifact(&doc, &group_opts(false), false, &out).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "a\t2\nb\t1\n");
+    }
+
+    #[test]
+    fn aggregating_groups_writes_every_statistic() {
+        let dir = TempDir::new("stats");
+        let (_src, doc) = doc_from(&dir, "in.csv", b"a,10\na,20\nb,5\n");
+        let out = dir.join("groups.tsv");
+
+        write_group_artifact(&doc, &group_opts(true), true, &out).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            "a\t2\t30\t10\t20\t15\nb\t1\t5\t5\t5\t5\n"
+        );
+    }
+
+    /// A key whose rows carry no parseable number still gets a row, with the
+    /// numeric columns empty rather than zero — zero would be a claim the data
+    /// does not make.
+    #[test]
+    fn a_group_with_no_numbers_leaves_the_statistics_blank() {
+        let dir = TempDir::new("nonnumeric");
+        let (_src, doc) = doc_from(&dir, "in.csv", b"a,x\na,y\n");
+        let out = dir.join("groups.tsv");
+
+        write_group_artifact(&doc, &group_opts(true), true, &out).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "a\t2\t\t\t\t\n");
+    }
+
+    #[test]
+    fn the_artifact_writer_creates_a_missing_directory_and_leaves_no_scratch() {
+        let dir = TempDir::new("mkdir");
+        let (_src, doc) = doc_from(&dir, "in.csv", b"a,1\n");
+        let out_dir = dir.join("nested/deeper");
+        let out = out_dir.join("groups.tsv");
+
+        write_group_artifact(&doc, &group_opts(false), false, &out).unwrap();
+
+        let mut names: Vec<_> = std::fs::read_dir(&out_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["groups.tsv"],
+            "the tmp sibling must be renamed away"
+        );
+    }
+
+    /// A key containing the delimiter would make the TSV ambiguous; this pins
+    /// what actually happens today so a change to it is a decision, not a
+    /// surprise.
+    #[test]
+    fn keys_are_written_as_their_bytes_decode() {
+        let dir = TempDir::new("bytes");
+        let (_src, doc) = doc_from(&dir, "in.csv", "日本語,1\n".as_bytes());
+        let out = dir.join("groups.tsv");
+
+        write_group_artifact(&doc, &group_opts(false), false, &out).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "日本語\t1\n");
+    }
+}
