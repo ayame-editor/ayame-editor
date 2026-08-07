@@ -8,12 +8,12 @@ should point at those release assets and their checksums.
 This repository can be used directly as a Scoop bucket:
 
 ```powershell
-scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop bucket add ayame-editor https://github.com/ayame-editor/ayame-editor
 scoop install ayame
 scoop update ayame
 ```
 
-The manifest is [bucket/ayame.json](https://github.com/hjosugi/ayame-editor/blob/main/bucket/ayame.json).
+The manifest is [bucket/ayame.json](https://github.com/ayame-editor/ayame-editor/blob/main/bucket/ayame.json).
 For a dedicated bucket later, copy it into `hjosugi/scoop-bucket`.
 
 ## Homebrew
@@ -91,9 +91,9 @@ SmartScreen reputation can still take time to accumulate even with a valid
 certificate.
 
 The public
-[code signing policy](https://github.com/hjosugi/ayame-editor#code-signing-policy)
+[code signing policy](https://github.com/ayame-editor/ayame-editor#code-signing-policy)
 documents the signed files, build provenance, team roles, approval rule, and
-[privacy policy](https://github.com/hjosugi/ayame-editor/blob/main/PRIVACY.md)
+[privacy policy](https://github.com/ayame-editor/ayame-editor/blob/main/PRIVACY.md)
 required for the Foundation application.
 
 ## Self-Update Policy

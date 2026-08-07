@@ -37,13 +37,13 @@
 
 ## First steps
 
-1. Download the build for your OS from the [latest release](https://github.com/hjosugi/ayame-editor/releases/latest).
+1. Download the build for your OS from the [latest release](https://github.com/ayame-editor/ayame-editor/releases/latest).
 2. Follow the [User Guide](USER_GUIDE.md) to open a file and choose its encoding.
 3. Use the [CLI Reference](CLI_REFERENCE.md) when a repeatable terminal workflow is faster.
 
 <div class="doc-link-row">
-  <a href="https://github.com/hjosugi/ayame-editor">GitHub</a>
-  <a href="https://github.com/hjosugi/ayame-editor/releases/latest">Latest release</a>
-  <a href="https://github.com/hjosugi/ayame-editor/blob/main/CHANGELOG.md">Changelog</a>
-  <a href="https://github.com/hjosugi/ayame-editor/blob/main/CONTRIBUTING.md">Contributing</a>
+  <a href="https://github.com/ayame-editor/ayame-editor">GitHub</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/releases/latest">Latest release</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/blob/main/CHANGELOG.md">Changelog</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/blob/main/CONTRIBUTING.md">Contributing</a>
 </div>

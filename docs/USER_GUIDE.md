@@ -4,7 +4,7 @@ Ayame Editor is a desktop text editor for huge files. Use the native app for nor
 
 ## Install
 
-Download the build for your OS from the [latest release](https://github.com/hjosugi/ayame-editor/releases/latest).
+Download the build for your OS from the [latest release](https://github.com/ayame-editor/ayame-editor/releases/latest).
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
@@ -94,7 +94,7 @@ overwrite existing files, so choose a new path when the target already exists.
 
 Use [CLI Reference](CLI_REFERENCE.md) or `ayame --help` for the full command and
 option list. File comparison is provided by the sister project
-[ayame-diff](https://github.com/hjosugi/ayame-diff).
+[ayame-diff](https://github.com/ayame-editor/ayame-diff).
 
 ## Main Features
 

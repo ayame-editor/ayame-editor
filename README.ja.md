@@ -10,7 +10,7 @@
 macOS、Windows、Linux で動作します。
 
 > **ファイル比較は？** 比較機能は姉妹プロジェクト
-> **[ayame-diff](https://github.com/hjosugi/ayame-diff)** へ移管しました。
+> **[ayame-diff](https://github.com/ayame-editor/ayame-diff)** へ移管しました。
 > Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
 > 削除します。
 
@@ -28,7 +28,7 @@ macOS、Windows、Linux で動作します。
 
 ## インストール
 
-[最新リリース](https://github.com/hjosugi/ayame-editor/releases/latest) から、お使いの OS 向けのビルドをダウンロードしてください。
+[最新リリース](https://github.com/ayame-editor/ayame-editor/releases/latest) から、お使いの OS 向けのビルドをダウンロードしてください。
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
@@ -39,7 +39,7 @@ macOS、Windows、Linux で動作します。
 Scoop はこのリポジトリを bucket として使えます。
 
 ```powershell
-scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop bucket add ayame-editor https://github.com/ayame-editor/ayame-editor
 scoop install ayame
 ```
 
@@ -71,7 +71,7 @@ Homebrew tap 用 template は `packaging/homebrew/` にあります。
 
 ## 姉妹プロジェクト
 
-[ayame-diff](https://github.com/hjosugi/ayame-diff) はテキスト、ソート済み
+[ayame-diff](https://github.com/ayame-editor/ayame-diff) はテキスト、ソート済み
 テキスト、CSV/TSV、フォルダ、アーカイブ、バイナリ、3-way 比較を CLI と GUI で
 提供します。巨大ファイルの閲覧・編集には Ayame Editor、比較には ayame-diff を
 使い分けてください。
@@ -98,14 +98,14 @@ release は未署名です。
 ### 署名対象
 
 - この project が
-  [GitHub Releases](https://github.com/hjosugi/ayame-editor/releases) で配布する
+  [GitHub Releases](https://github.com/ayame-editor/ayame-editor/releases) で配布する
   Windows native executable。
 - macOS・Linux artifact は現在このコード署名ポリシーの対象外です。
 
 ### Build・署名手順
 
 - Release artifact は、この公開 repository から
-  [GitHub Actions](https://github.com/hjosugi/ayame-editor/actions) で build します。
+  [GitHub Actions](https://github.com/ayame-editor/ayame-editor/actions) で build します。
 - Repository の release workflow が生成した artifact だけを SignPath に送信します。
   秘密署名鍵は SignPath が保持し、この repository には保存しません。
 

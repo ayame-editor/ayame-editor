@@ -4,7 +4,7 @@ Ayame Editor は巨大ファイル向けのデスクトップ・テキストエ�
 
 ## インストール
 
-[最新リリース](https://github.com/hjosugi/ayame-editor/releases/latest) から、お使いの OS 向けのビルドをダウンロードしてください。
+[最新リリース](https://github.com/ayame-editor/ayame-editor/releases/latest) から、お使いの OS 向けのビルドをダウンロードしてください。
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
@@ -93,7 +93,7 @@ ayame serve huge.csv --port 8777
 
 全コマンドとオプションは [CLI リファレンス](CLI_REFERENCE.md) または
 `ayame --help` を参照してください。ファイル比較は姉妹プロジェクト ayame-diff が
-提供します。[ayame-diff](https://github.com/hjosugi/ayame-diff)を参照してください。
+提供します。[ayame-diff](https://github.com/ayame-editor/ayame-diff)を参照してください。
 
 ## 主な機能
 

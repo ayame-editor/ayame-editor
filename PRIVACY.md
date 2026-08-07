@@ -32,5 +32,5 @@ application's normal cleanup and uninstall behavior.
 ## Questions
 
 For privacy questions, open an issue in the
-[Ayame Editor repository](https://github.com/hjosugi/ayame-editor/issues)
+[Ayame Editor repository](https://github.com/ayame-editor/ayame-editor/issues)
 without including private document contents or other sensitive information.

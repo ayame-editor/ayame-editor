@@ -31,7 +31,7 @@ project を代表して参加するその他の場に適用されます。
 ## 報告と対応
 
 問題は repository owner に
-[issue](https://github.com/hjosugi/ayame-editor/issues)で報告してください。Public
+[issue](https://github.com/ayame-editor/ayame-editor/issues)で報告してください。Public
 issue に private・sensitive な詳細を書かず、private follow-up が必要であることだけを
 記載してください。Maintainer は公平に確認し、必要に応じて content の削除、警告、
 一時的な参加制限、恒久的な参加禁止を行います。

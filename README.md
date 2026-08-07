@@ -10,7 +10,7 @@ A fast desktop text editor for huge files.
 Runs on macOS, Windows, and Linux.
 
 > **Comparing files?** Comparison moved to the sister project
-> **[ayame-diff](https://github.com/hjosugi/ayame-diff)**. Ayame Editor v0.7.0
+> **[ayame-diff](https://github.com/ayame-editor/ayame-diff)**. Ayame Editor v0.7.0
 > removes its `diff` / `sortdiff` implementations and two-file comparison UI.
 
 ## Features
@@ -28,7 +28,7 @@ Runs on macOS, Windows, and Linux.
 ## Install
 
 Download the build for your OS from the
-[latest release](https://github.com/hjosugi/ayame-editor/releases/latest).
+[latest release](https://github.com/ayame-editor/ayame-editor/releases/latest).
 
 - macOS: `Ayame.app`
 - Windows: `ayame-*.exe`
@@ -39,7 +39,7 @@ You can also install from the terminal.
 Scoop users can install from this repository bucket:
 
 ```powershell
-scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop bucket add ayame-editor https://github.com/ayame-editor/ayame-editor
 scoop install ayame
 ```
 
@@ -70,7 +70,7 @@ Homebrew tap templates are in `packaging/homebrew/` for publishing
 
 ## Sister Project
 
-[ayame-diff](https://github.com/hjosugi/ayame-diff) handles text, sorted-text,
+[ayame-diff](https://github.com/ayame-editor/ayame-diff) handles text, sorted-text,
 CSV/TSV, directory, archive, binary, and three-way comparisons from its CLI or
 GUI. Use Ayame Editor to open and edit huge files, and ayame-diff to compare them.
 
@@ -97,13 +97,13 @@ Until then, Windows releases remain unsigned.
 ### What will be signed
 
 - Native Windows executables published by this project on
-  [GitHub Releases](https://github.com/hjosugi/ayame-editor/releases).
+  [GitHub Releases](https://github.com/ayame-editor/ayame-editor/releases).
 - macOS and Linux artifacts are currently outside this code-signing policy.
 
 ### Build and signing process
 
 - Release artifacts are built from this public repository by
-  [GitHub Actions](https://github.com/hjosugi/ayame-editor/actions).
+  [GitHub Actions](https://github.com/ayame-editor/ayame-editor/actions).
 - Only artifacts produced by the repository's release workflow are submitted
   to SignPath. SignPath holds the private signing key; this repository does not
   store or handle it.

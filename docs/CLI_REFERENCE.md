@@ -51,7 +51,7 @@ print help.
 The former `diff`, `sortdiff`, and `sort-diff` commands were removed in v0.7.0.
 For one release they return an error naming the corresponding ayame-diff
 command. File comparison is available in
-[ayame-diff](https://github.com/hjosugi/ayame-diff).
+[ayame-diff](https://github.com/ayame-editor/ayame-diff).
 
 ## Common Options
 

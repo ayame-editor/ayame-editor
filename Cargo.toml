@@ -16,7 +16,7 @@ edition = "2021"
 # `stable` toolchain unnoticed.
 rust-version = "1.95"
 license = "0BSD"
-repository = "https://github.com/hjosugi/ayame-editor"
+repository = "https://github.com/ayame-editor/ayame-editor"
 
 # One lint policy for every crate (each opts in with `[lints] workspace = true`).
 # CI enforces `-D warnings` on top; these make debug leftovers unbuildable.

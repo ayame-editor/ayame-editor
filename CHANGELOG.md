@@ -339,7 +339,7 @@ All notable changes to Ayame Editor are tracked here.
 
 - **Breaking:** removed the `diff` / `sortdiff` implementations, `/api/diff`,
   the Web two-file diff view, native/menu commands, diff-only CSS and tests.
-  Comparison now lives in [ayame-diff](https://github.com/hjosugi/ayame-diff):
+  Comparison now lives in [ayame-diff](https://github.com/ayame-editor/ayame-diff):
   replace `ayame diff OLD NEW` with `ayame-diff text OLD NEW`, and replace
   `ayame sortdiff OLD NEW` with `ayame-diff sorted OLD NEW`. The old CLI names
   return an actionable migration error for this release. (#94–#104)
@@ -373,7 +373,7 @@ All notable changes to Ayame Editor are tracked here.
   #134, #135)
 - Deprecated the `diff` and `sortdiff` subcommands (#94). They now print a
   notice pointing to the sister project
-  [ayame-diff](https://github.com/hjosugi/ayame-diff), whose `text` / `sorted`
+  [ayame-diff](https://github.com/ayame-editor/ayame-diff), whose `text` / `sorted`
   subcommands supersede them; the editor's copy is frozen and slated for removal
   in a later release (see #93, #104). The notice goes to stderr (stdout output
   is unchanged) and can be silenced with `AYAME_NO_DEPRECATION`.
@@ -549,4 +549,4 @@ All notable changes to Ayame Editor are tracked here.
   dead cache blobs on disk; growth is now followed without the index cache. (#76)
 
 Release artifacts are published from GitHub Actions and listed on the
-[releases page](https://github.com/hjosugi/ayame-editor/releases).
+[releases page](https://github.com/ayame-editor/ayame-editor/releases).

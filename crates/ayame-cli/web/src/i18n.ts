@@ -118,7 +118,7 @@ export const MESSAGES = {
     "help.body":
       "巨大ファイルをメモリへ全読み込みせずに扱うテキストエディタです。\n\nよく使う操作\nCtrl+O  ファイルを開く\nCtrl+F  検索\nCtrl+H  置換\nCtrl+G  行へ移動\nCtrl+Shift+P  コマンドパレット\n\n変更履歴マーカー\n長い線  未保存の変更\n短い線  保存済みの変更\n菱形  削除位置\n表示メニューから表示を切り替えられます。\n\nすべてのショートカットは、ヘルプ → キーボードショートカットから確認・変更できます。",
     "help.aboutBody":
-      "Ayame Editor\n巨大なテキスト・ログ・CSV/TSVファイル向けのデスクトップエディタです。\n\nhttps://github.com/hjosugi/ayame-editor",
+      "Ayame Editor\n巨大なテキスト・ログ・CSV/TSVファイル向けのデスクトップエディタです。\n\nhttps://github.com/ayame-editor/ayame-editor",
     "menu.sort": "ソート",
     "menu.sortTitle": "行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます",
     "menu.split": "ファイルを分割",
@@ -672,7 +672,7 @@ export const MESSAGES = {
     "help.body":
       "A text editor that works with huge files without loading the whole file into memory.\n\nCommon actions\nCtrl+O  Open File\nCtrl+F  Find\nCtrl+H  Replace\nCtrl+G  Go to Line\nCtrl+Shift+P  Command Palette\n\nChange history markers\nLong rail  Unsaved change\nShort rail  Saved change\nDiamond  Deletion position\nToggle them from the View menu.\n\nView and change every shortcut from Help → Keyboard Shortcuts.",
     "help.aboutBody":
-      "Ayame Editor\nA desktop editor for huge text, log, CSV, and TSV files.\n\nhttps://github.com/hjosugi/ayame-editor",
+      "Ayame Editor\nA desktop editor for huge text, log, CSV, and TSV files.\n\nhttps://github.com/ayame-editor/ayame-editor",
     "menu.sort": "Sort",
     "menu.sortTitle": "Sort into a temporary result and open it in a new tab.",
     "menu.split": "Split File",

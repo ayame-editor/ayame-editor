@@ -292,8 +292,8 @@ fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
     bail!(
         "`ayame {old_cmd}` was removed in Ayame Editor v0.7.0; use \
          `ayame-diff {new_cmd} OLD NEW` instead. Install ayame-diff from \
-         https://github.com/hjosugi/ayame-diff/releases/latest or run \
-         `go install github.com/hjosugi/ayame-diff/cmd/ayame-diff@latest`"
+         https://github.com/ayame-editor/ayame-diff/releases/latest or run \
+         `go install github.com/ayame-editor/ayame-diff/cmd/ayame-diff@latest`"
     )
 }
 

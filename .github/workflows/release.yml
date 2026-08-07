@@ -263,7 +263,7 @@ jobs:
             gh release create "$tag" dist/* \
               --title "$tag" \
               --target "$GITHUB_SHA" \
-              --notes "Ayame ${tag}: native desktop app (Windows .exe, macOS .app, Linux binary). Linux needs WebKitGTK at runtime; Windows/macOS use the built-in system webview. Code signing policy: https://github.com/hjosugi/ayame-editor/blob/main/docs/PACKAGING.md#windows-code-signing"
+              --notes "Ayame ${tag}: native desktop app (Windows .exe, macOS .app, Linux binary). Linux needs WebKitGTK at runtime; Windows/macOS use the built-in system webview. Code signing policy: https://github.com/ayame-editor/ayame-editor/blob/main/docs/PACKAGING.md#windows-code-signing"
           else
             gh release upload "$tag" dist/* --clobber
           fi

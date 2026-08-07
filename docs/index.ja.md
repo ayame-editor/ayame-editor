@@ -37,13 +37,13 @@
 
 ## 最初の3ステップ
 
-1. [最新リリース](https://github.com/hjosugi/ayame-editor/releases/latest)から OS に合うビルドを取得します。
+1. [最新リリース](https://github.com/ayame-editor/ayame-editor/releases/latest)から OS に合うビルドを取得します。
 2. [ユーザーガイド](USER_GUIDE.md)に沿ってファイルを開き、文字コードを確認します。
 3. 繰り返し処理は [CLI リファレンス](CLI_REFERENCE.md)から目的のコマンドを探します。
 
 <div class="doc-link-row">
-  <a href="https://github.com/hjosugi/ayame-editor">GitHub</a>
-  <a href="https://github.com/hjosugi/ayame-editor/releases/latest">最新リリース</a>
-  <a href="https://github.com/hjosugi/ayame-editor/blob/main/CHANGELOG.md">変更履歴</a>
-  <a href="https://github.com/hjosugi/ayame-editor/blob/main/CONTRIBUTING.md">コントリビューション</a>
+  <a href="https://github.com/ayame-editor/ayame-editor">GitHub</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/releases/latest">最新リリース</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/blob/main/CHANGELOG.md">変更履歴</a>
+  <a href="https://github.com/ayame-editor/ayame-editor/blob/main/CONTRIBUTING.md">コントリビューション</a>
 </div>

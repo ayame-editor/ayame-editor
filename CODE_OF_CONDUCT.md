@@ -33,7 +33,7 @@ discussions, and other spaces where someone represents the project.
 ## Reporting and enforcement
 
 Report a concern to the repository owner by opening an
-[issue](https://github.com/hjosugi/ayame-editor/issues). Do not include private
+[issue](https://github.com/ayame-editor/ayame-editor/issues). Do not include private
 or sensitive details in a public issue; state only that private follow-up is
 needed. The maintainer will review reports fairly and may remove content, issue
 a warning, temporarily restrict participation, or permanently exclude a

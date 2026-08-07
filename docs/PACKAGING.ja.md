@@ -8,12 +8,12 @@ Ayame の GitHub Releases を配布元の source of truth にします。各 pac
 このリポジトリはそのまま Scoop bucket として使えます。
 
 ```powershell
-scoop bucket add ayame-editor https://github.com/hjosugi/ayame-editor
+scoop bucket add ayame-editor https://github.com/ayame-editor/ayame-editor
 scoop install ayame
 scoop update ayame
 ```
 
-manifest は [bucket/ayame.json](https://github.com/hjosugi/ayame-editor/blob/main/bucket/ayame.json)
+manifest は [bucket/ayame.json](https://github.com/ayame-editor/ayame-editor/blob/main/bucket/ayame.json)
 です。後で専用 bucket を作る場合は、`hjosugi/scoop-bucket` へコピーします。
 
 ## Homebrew
@@ -90,10 +90,10 @@ Get-FileHash -Algorithm SHA256 .\ayame-v0.0.0-windows-x86_64.exe
 SmartScreen reputation の蓄積には時間がかかる場合があります。
 
 公開
-[コード署名ポリシー](https://github.com/hjosugi/ayame-editor/blob/main/README.ja.md#code-signing-policyコード署名ポリシー)
+[コード署名ポリシー](https://github.com/ayame-editor/ayame-editor/blob/main/README.ja.md#code-signing-policyコード署名ポリシー)
 には、Foundation 申請に必要な署名対象、build provenance、team role、承認ルール、
 および
-[プライバシーポリシー](https://github.com/hjosugi/ayame-editor/blob/main/PRIVACY.ja.md)
+[プライバシーポリシー](https://github.com/ayame-editor/ayame-editor/blob/main/PRIVACY.ja.md)
 を記載しています。
 
 ## self-update の扱い

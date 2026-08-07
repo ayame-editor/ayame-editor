@@ -1,11 +1,11 @@
 {
   "version": "0.7.5",
   "description": "Desktop text editor and CLI tools for huge files.",
-  "homepage": "https://github.com/hjosugi/ayame-editor",
+  "homepage": "https://github.com/ayame-editor/ayame-editor",
   "license": "0BSD",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/hjosugi/ayame-editor/releases/download/v0.7.5/ayame-v0.7.5-windows-x86_64.exe#/ayame.exe",
+      "url": "https://github.com/ayame-editor/ayame-editor/releases/download/v0.7.5/ayame-v0.7.5-windows-x86_64.exe#/ayame.exe",
       "hash": "d3e14bb2ca7f099bda4e9ca112b5cfb9b8d75fbf125084c5ad09b05ba90347e8"
     }
   },
@@ -17,14 +17,14 @@
     ]
   ],
   "checkver": {
-    "github": "https://github.com/hjosugi/ayame-editor"
+    "github": "https://github.com/ayame-editor/ayame-editor"
   },
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/hjosugi/ayame-editor/releases/download/v$version/ayame-v$version-windows-x86_64.exe#/ayame.exe",
+        "url": "https://github.com/ayame-editor/ayame-editor/releases/download/v$version/ayame-v$version-windows-x86_64.exe#/ayame.exe",
         "hash": {
-          "url": "https://github.com/hjosugi/ayame-editor/releases/download/v$version/ayame-v$version-windows-x86_64.exe.sha256"
+          "url": "https://github.com/ayame-editor/ayame-editor/releases/download/v$version/ayame-v$version-windows-x86_64.exe.sha256"
         }
       }
     }

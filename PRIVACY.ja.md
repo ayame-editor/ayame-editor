@@ -31,5 +31,5 @@ Settings、session state、recovery data、temporary file は local に保存さ
 ## 問い合わせ
 
 Privacy に関する質問は、private document の内容など機密情報を含めずに
-[Ayame Editor repository](https://github.com/hjosugi/ayame-editor/issues)で
+[Ayame Editor repository](https://github.com/ayame-editor/ayame-editor/issues)で
 issue を作成してください。

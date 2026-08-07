@@ -1,7 +1,7 @@
 site_name: Ayame Editor Docs
 site_description: Documentation for Ayame Editor, a desktop text editor for huge files.
 site_url: https://ayame-editor.github.io/ayame-editor/
-repo_url: https://github.com/hjosugi/ayame-editor
+repo_url: https://github.com/ayame-editor/ayame-editor
 repo_name: hjosugi/ayame-editor
 edit_uri: edit/main/docs/
 
@@ -87,7 +87,7 @@ extra:
   generator: false
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/hjosugi/ayame-editor
+      link: https://github.com/ayame-editor/ayame-editor
 
 nav:
   - Home: index.md
