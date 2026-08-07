@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo="hjosugi/ayame-editor"
+repo="ayame-editor/ayame-editor"
 base_url="https://github.com/$repo"
 version="${AYAME_VERSION:-${VERSION:-latest}}"
 install_dir="${AYAME_INSTALL_DIR:-${INSTALL_DIR:-}}"

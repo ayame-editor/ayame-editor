@@ -7,7 +7,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$Repo = "hjosugi/ayame-editor"
+$Repo = "ayame-editor/ayame-editor"
 $BaseUrl = "https://github.com/$Repo"
 
 function Say([string]$Message) {

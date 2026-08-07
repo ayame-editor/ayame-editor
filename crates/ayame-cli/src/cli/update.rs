@@ -14,8 +14,8 @@ use std::process::{Command, Stdio};
 
 use super::{first_opt, has_flag, parse_checked};
 
-const REPO: &str = "hjosugi/ayame-editor";
-const API_BASE: &str = "https://api.github.com/repos/hjosugi/ayame-editor";
+const REPO: &str = "ayame-editor/ayame-editor";
+const API_BASE: &str = "https://api.github.com/repos/ayame-editor/ayame-editor";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
