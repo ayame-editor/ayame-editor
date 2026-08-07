@@ -18,6 +18,7 @@ import { lastGrep } from "./grep-state.js";
 import {
   askConfirm,
   askForm,
+  CONFIRM_ALT,
   hideLoading,
   newOperationId,
   showLoading,
@@ -27,6 +28,7 @@ import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
 import type {
   ArtifactResponse,
   BrowseResponse,
+  DiskCheckResponse,
   EditSaveRequest,
   EditSaveResponse,
   GrepSaveRequest,
@@ -72,6 +74,7 @@ function editSaveRequest(req: Partial<EditSaveRequest>): EditSaveRequest {
     encoding: null,
     eol: null,
     bom: null,
+    force: false,
     ...req,
   };
 }
@@ -150,6 +153,14 @@ export function initSave() {
   window.__ayameNativeCloseRequested = onNativeCloseRequested;
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("beforeunload", onBeforeUnload);
+  // Coming back to the editor is when an external rewrite is worth reporting:
+  // the user has just been somewhere else, which is where the rewrite came
+  // from. `visibilitychange` covers the browser build, where a background tab
+  // never sees a window focus event (#163).
+  window.addEventListener("focus", () => void checkExternalChange());
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void checkExternalChange();
+  });
 }
 
 export function retryPendingNativeClose() {
@@ -397,9 +408,23 @@ export async function saveFile(options: SaveOptions = {}) {
   savingCount++;
   setSavingUI();
   try {
+    return await saveOverActiveFile(announce, false);
+  } finally {
+    savingCount--;
+    setSavingUI();
+    retryPendingNativeClose();
+  }
+}
+
+// One overwrite attempt of the open file. The server refuses with
+// `disk_changed` when somebody else wrote the file after we read it (#163);
+// that is a question for the user, not an error, so it is asked and — if they
+// choose to overwrite anyway — retried once with `force`.
+async function saveOverActiveFile(announce: boolean, force: boolean) {
+  try {
     const res = await apiPost<EditSaveResponse, EditSaveRequest>(
       "/api/edit/save",
-      editSaveRequest({ overwrite: true }),
+      editSaveRequest({ overwrite: true, force }),
     );
     clearLineCache();
     await refreshStat();
@@ -408,13 +433,103 @@ export async function saveFile(options: SaveOptions = {}) {
     if (announce) flashCount(t("file.saved", { path: displayPath(res.path) }));
     return true;
   } catch (e) {
+    if (!force && isApiErrorCode(e, "disk_changed")) {
+      const choice = await askExternalChange("save");
+      if (choice === "reload") return await reloadFromDisk();
+      if (choice === "overwrite") return await saveOverActiveFile(announce, true);
+      return false;
+    }
     flashCount(t("error.saveError"), "error");
     showMessage(t("error.saveError"), serverMessage(e));
     return false;
+  }
+}
+
+// ---- external changes (#163) ------------------------------------------------
+//
+// Another process rewriting the open file — a build, a log rotation, another
+// editor — used to be invisible unless tail-follow happened to be on, so the
+// next save silently buried it. The server tracks what the file looked like
+// when this session last read or wrote it; the client asks on window focus and
+// the server re-checks under its own lock before any overwrite lands.
+
+/// True when the open file has been written by something other than this
+/// session. Never throws: a failed probe is reported as "no change" so a
+/// transient error cannot pop a dialog.
+export async function diskChanged(): Promise<boolean> {
+  if (!state.doc.stat?.open) return false;
+  try {
+    const res = await apiPost<DiskCheckResponse>("/api/disk/check");
+    return !!res.open && !!res.changed;
+  } catch {
+    return false;
+  }
+}
+
+type ExternalChangeChoice = "reload" | "overwrite" | "dismiss";
+
+// `reason` picks the default action: coming back to the window, reloading is
+// what the user almost always wants; interrupted mid-save, they asked to write
+// and overwriting stays the primary answer.
+async function askExternalChange(reason: "focus" | "save"): Promise<ExternalChangeChoice> {
+  const dirty = !!state.doc.stat?.dirty;
+  const message = dirty ? t("externalChange.messageDirty") : t("externalChange.message");
+  if (reason === "save") {
+    const answer = await askConfirm(t("externalChange.title"), message, {
+      okLabel: t("externalChange.overwrite"),
+      altLabel: t("externalChange.reload"),
+      danger: true,
+    });
+    if (answer === CONFIRM_ALT) return "reload";
+    return answer ? "overwrite" : "dismiss";
+  }
+  const answer = await askConfirm(t("externalChange.title"), message, {
+    okLabel: t("externalChange.reload"),
+    cancelLabel: t("externalChange.keep"),
+    danger: dirty,
+  });
+  return answer ? "reload" : "dismiss";
+}
+
+// Re-read the file from disk, dropping the overlay: `/api/edit/revert` returns
+// the tab to the file as it now exists. The caller has already asked.
+async function reloadFromDisk() {
+  try {
+    await apiPost("/api/edit/revert");
+    await reloadActiveDocument();
+    flashCount(t("externalChange.reloaded"));
+    return true;
+  } catch (e) {
+    flashCount(t("externalChange.reloadError"), "error");
+    showMessage(t("externalChange.title"), serverMessage(e));
+    return false;
+  }
+}
+
+// One dialog at a time: focus can bounce (dialog open, alt-tab, native menus)
+// and every bounce would otherwise queue another identical question.
+let externalChangePending = false;
+
+/// Whether a focus-triggered check is worth making at all. Split out from
+/// [`checkExternalChange`] so the skip rules can be exercised on their own.
+export function externalChangeWatchable(): boolean {
+  if (externalChangePending || savingCount > 0) return false;
+  // An untitled buffer's backing file is this session's own scratch: nothing
+  // else knows the path, so nothing else can have written it.
+  if (!state.doc.stat?.open || isUntitled(state.doc.stat.path)) return false;
+  // Tail-follow already polls, reports, and adopts appended bytes; asking on
+  // top of it would double up on every line the log gains.
+  return !state.doc.followTail;
+}
+
+export async function checkExternalChange() {
+  if (!externalChangeWatchable()) return;
+  externalChangePending = true;
+  try {
+    if (!(await diskChanged())) return;
+    if ((await askExternalChange("focus")) === "reload") await reloadFromDisk();
   } finally {
-    savingCount--;
-    setSavingUI();
-    retryPendingNativeClose();
+    externalChangePending = false;
   }
 }
 

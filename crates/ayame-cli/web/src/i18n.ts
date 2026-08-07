@@ -283,6 +283,17 @@ export const MESSAGES = {
     "status.followingTail": "末尾に追従中 (tail -f)",
     "status.followStopped": "追従を停止しました",
     "status.tailFileChanged": "ファイルが外部で変更されました — 追従を停止しました",
+    // -- external changes on disk (#163) --
+    "externalChange.title": "ファイルが外部で変更されました",
+    "externalChange.message":
+      "このファイルは Ayame の外で書き換えられました。ディスクの内容を読み直しますか？",
+    "externalChange.messageDirty":
+      "このファイルは Ayame の外で書き換えられました。読み直すとこのタブの未保存の編集は破棄され、上書き保存するとディスク側の変更が失われます。",
+    "externalChange.reload": "読み直す",
+    "externalChange.overwrite": "上書き保存",
+    "externalChange.keep": "そのまま",
+    "externalChange.reloaded": "ディスクの内容を読み直しました",
+    "externalChange.reloadError": "読み直しに失敗しました",
     "notification.region": "通知",
     "notification.dismiss": "通知を閉じる",
     // -- editor (clipboard, edits, caps) --
@@ -559,6 +570,8 @@ export const MESSAGES = {
     "error.server.workerFailed": "ワーカープロセスでエラーが発生しました。",
     "error.server.restartRequired":
       "実行中に Ayame が更新されました。この操作には再起動が必要です（開いているファイルと未保存の編集はそのままです）。",
+    "error.server.diskChanged":
+      "このファイルは Ayame の外で書き換えられています。読み直すか、上書きを選び直してください。",
     "error.server.unsupported": "この操作には対応していません。",
     "error.server.search": "検索条件が正しくありません。",
     "error.server.io": "ファイルの入出力エラーが発生しました。",
@@ -836,6 +849,16 @@ export const MESSAGES = {
     "status.followingTail": "Following tail (tail -f)",
     "status.followStopped": "Stopped following tail",
     "status.tailFileChanged": "The file changed externally. Tail following stopped.",
+    // -- external changes on disk (#163) --
+    "externalChange.title": "The file changed outside the editor",
+    "externalChange.message": "This file was rewritten outside Ayame. Reload it from disk?",
+    "externalChange.messageDirty":
+      "This file was rewritten outside Ayame. Reloading discards this tab's unsaved edits; overwriting discards the changes on disk.",
+    "externalChange.reload": "Reload",
+    "externalChange.overwrite": "Overwrite",
+    "externalChange.keep": "Keep mine",
+    "externalChange.reloaded": "Reloaded from disk",
+    "externalChange.reloadError": "Reloading failed",
     "notification.region": "Notifications",
     "notification.dismiss": "Dismiss notification",
     "editor.label": "Editor",
@@ -1090,6 +1113,8 @@ export const MESSAGES = {
     "error.server.workerFailed": "The worker process failed.",
     "error.server.restartRequired":
       "Ayame was updated while running. Restart it to run this operation — the open file and any unsaved edits are unaffected.",
+    "error.server.diskChanged":
+      "This file was rewritten outside the editor. Reload it, or choose to overwrite.",
     "error.server.unsupported": "This operation is not supported.",
     "error.server.search": "The search request is invalid.",
     "error.server.io": "A file I/O error occurred.",
@@ -1121,6 +1146,7 @@ export const SERVER_CODE_KEYS = {
   timeout: "error.server.timeout",
   worker_failed: "error.server.workerFailed",
   restart_required: "error.server.restartRequired",
+  disk_changed: "error.server.diskChanged",
   unsupported: "error.server.unsupported",
   search: "error.server.search",
   io: "error.server.io",

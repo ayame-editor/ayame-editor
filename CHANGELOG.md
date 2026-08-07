@@ -12,6 +12,15 @@ All notable changes to Ayame Editor are tracked here.
   exit rather than run a job from another build. The native app's "update
   installed" dialog now offers to restart, and windows opened after an update
   start the newly installed binary (#137).
+- Detected files rewritten outside the editor with tail-follow off, where the
+  next save used to bury them silently. The server keeps a per-tab baseline of
+  what the open file looked like when the session last read or wrote it —
+  seeded on open/reload, carried with parked tabs, and moved by tail follows
+  and the session's own saves — exposes it as `/api/disk/check`, and refuses an
+  overwrite of the changed file with a 409 `disk_changed` until the request
+  says the user chose to overwrite. The client asks on window focus and at save
+  time, offering reload or overwrite; the confirm dialog grew an optional third
+  button for it (#163).
 
 ## v0.8.7 - 2026-08-05
 

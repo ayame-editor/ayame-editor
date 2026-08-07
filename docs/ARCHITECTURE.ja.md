@@ -82,6 +82,7 @@ cap し、長い処理は専用 endpoint または blocking task に逃がしま
 | `/api/sort/save`, `/api/replace/save`, `/api/case/save`, `/api/split/save` | GUI から実行する長い file operations。 |
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | workspace と tab management。 |
 | `/api/tail/poll` | 追記ファイルの tail-follow polling。 |
+| `/api/disk/check` | 開いているファイルがエディタ外で書き換えられたか。 |
 
 ## Web UI
 

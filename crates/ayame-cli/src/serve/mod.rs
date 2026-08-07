@@ -44,7 +44,7 @@ pub(crate) mod workspace;
 
 use error::ApiError;
 use security::NetPolicy;
-use state::{AppState, SharedState, TabsResponse, TailStatus, UiState};
+use state::{AppState, DiskCheckResponse, SharedState, TabsResponse, TailStatus, UiState};
 
 /// Hard cap on lines returned in one viewport request, so a hostile/buggy
 /// client can never ask us to materialize the whole file.
@@ -170,6 +170,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/iris-watercolor.png", get(assets::iris_watercolor_png))
         .route("/api/stat", get(api_stat))
         .route("/api/tail/poll", post(api_tail_poll))
+        .route("/api/disk/check", post(api_disk_check))
         .route("/api/open", post(workspace::api_open))
         .route("/api/new", post(workspace::api_new))
         .route("/api/tabs", get(workspace::api_tabs))
@@ -464,6 +465,19 @@ async fn api_tail_poll(State(state): State<SharedState>) -> Json<TailStatus> {
     let status = tokio::task::spawn_blocking(move || state.poll_tail())
         .await
         .unwrap_or_else(|_| TailStatus::closed());
+    Json(status)
+}
+
+/// Has anything else written the open file since we last read or wrote it?
+/// One `stat`, so the client can ask on every window focus and before every
+/// overwrite instead of only while tail-follow happens to be on (#163).
+async fn api_disk_check(State(state): State<SharedState>) -> Json<DiskCheckResponse> {
+    let status = tokio::task::spawn_blocking(move || state.disk_check())
+        .await
+        .unwrap_or(DiskCheckResponse {
+            open: false,
+            changed: false,
+        });
     Json(status)
 }
 

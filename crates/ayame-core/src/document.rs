@@ -135,6 +135,38 @@ impl FileIdentity {
     }
 }
 
+/// What a `stat` of a document's path says about it right now: which file the
+/// name resolves to, how long it is, and when it was last written.
+///
+/// Opaque and comparable rather than readable: its only job is to answer "is
+/// this still the file we last read?" for external-change detection. Equality
+/// is conservative in the safe direction — every replacement, truncation,
+/// append, or rewrite that moves the mtime compares unequal. A rewrite that
+/// keeps both the length and the mtime (possible within one filesystem
+/// timestamp tick) is indistinguishable from no change; no `stat`-based check
+/// can do better, and the editor's own overwrite protection still applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskState {
+    identity: FileIdentity,
+    len: u64,
+    mtime: (u64, u32),
+}
+
+impl DiskState {
+    /// `stat` `path`, or `None` when it cannot be read (missing, or a
+    /// permission/IO failure). `None` is deliberately not equal to anything,
+    /// including another `None`, at the call sites that compare it — a file
+    /// that vanished has certainly changed.
+    pub fn of(path: &Path) -> Option<DiskState> {
+        let meta = std::fs::metadata(path).ok()?;
+        Some(DiskState {
+            identity: FileIdentity::from_metadata(&meta),
+            len: meta.len(),
+            mtime: mtime_of(&meta),
+        })
+    }
+}
+
 pub struct Document {
     path: PathBuf,
     // The mapping must outlive every borrow of `buf()`; `_file` keeps the fd open.
@@ -309,6 +341,18 @@ impl Document {
         std::fs::metadata(&self.path)
             .map(|meta| FileIdentity::from_metadata(&meta) == self.identity)
             .unwrap_or(false)
+    }
+
+    /// What a `stat` of this document's path says right now. Compare two
+    /// samples to detect an external write; `None` means the path could not be
+    /// read at all, which callers treat as changed.
+    ///
+    /// Deliberately stats the *path* rather than the open descriptor: an
+    /// atomic replacement (write-to-temp-then-rename, how most tools and
+    /// editors save) leaves the old inode perfectly readable through this
+    /// document's fd, so only the name can reveal it.
+    pub fn disk_state(&self) -> Option<DiskState> {
+        DiskState::of(&self.path)
     }
 
     /// Identity comparison used to adopt an append-only refreshed document
@@ -1260,6 +1304,56 @@ mod tests {
             "changed file must not be served from cache"
         );
         assert_eq!(d3.line_count(), n + 1);
+    }
+
+    /// The disk-state probe backs the editor's "changed outside the editor"
+    /// warning (#163), so it has to see every shape an external write takes.
+    #[test]
+    fn disk_state_tracks_external_writes_to_the_open_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("watched.log");
+        std::fs::write(&path, b"line 0\nline 1\n").unwrap();
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let opened = doc.disk_state().expect("the open file can be stat'ed");
+
+        assert_eq!(doc.disk_state(), Some(opened), "an idle file is unchanged");
+
+        std::fs::write(&path, b"line 0\nline 1\nline 2\n").unwrap();
+        assert_ne!(doc.disk_state(), Some(opened), "an append is a change");
+    }
+
+    /// The common save shape — write a sibling, rename it over the target —
+    /// leaves this document's descriptor reading the old inode happily, so
+    /// only a stat of the *path* can notice it.
+    #[test]
+    fn disk_state_notices_an_atomic_replacement_the_descriptor_cannot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("replaced.log");
+        std::fs::write(&path, b"original\n").unwrap();
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+        let opened = doc.disk_state().expect("the open file can be stat'ed");
+
+        let staged = dir.path().join("replaced.log.new");
+        std::fs::write(&staged, b"replaced!\n").unwrap();
+        std::fs::rename(&staged, &path).unwrap();
+
+        assert_eq!(
+            doc.line(0).unwrap(),
+            "original",
+            "the mapping is unaffected"
+        );
+        assert_ne!(doc.disk_state(), Some(opened));
+    }
+
+    #[test]
+    fn disk_state_of_a_removed_file_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doomed.log");
+        std::fs::write(&path, b"here for now\n").unwrap();
+        let doc = Document::open(&path, &OpenOptions::default()).unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(doc.disk_state(), None);
     }
 
     #[test]

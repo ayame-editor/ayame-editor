@@ -93,6 +93,7 @@ The main endpoint groups are:
 | `/api/sort/save`, `/api/replace/save`, `/api/case/save`, `/api/split/save` | Long-running file operations exposed from the GUI. |
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | Workspace and tab management. |
 | `/api/tail/poll` | Tail-follow polling for appended files. |
+| `/api/disk/check` | Whether the open file was written outside the editor. |
 
 ## Web UI
 

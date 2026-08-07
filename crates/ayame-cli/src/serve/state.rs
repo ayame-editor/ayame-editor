@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 
 use axum::http::StatusCode;
 use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
-use ayame_core::{Document, EditSession, EditStats, Encoding, OpenOptions};
+use ayame_core::{DiskState, Document, EditSession, EditStats, Encoding, OpenOptions};
 use serde::{Deserialize, Serialize};
 
 use super::analysis::{AnalysisProfile, AnalysisStore};
@@ -53,6 +53,10 @@ struct InactiveTab {
     /// Pending crash-recovery decision travelling with the tab (see
     /// [`Workspace::recoverable`]).
     recoverable: Option<usize>,
+    /// External-change baseline (see [`Workspace::disk_baseline`]) travelling
+    /// with the tab, so a file rewritten while its tab sat in the background
+    /// is still reported when the tab comes back.
+    disk_baseline: Option<DiskState>,
 }
 
 #[derive(Default)]
@@ -85,6 +89,16 @@ pub(super) struct Workspace {
     /// (`/api/edit/recover`). While pending, NO writer is attached — creating
     /// one would truncate the very log waiting to be replayed.
     recoverable: Option<usize>,
+    /// What the ACTIVE document's file looked like on disk the last time this
+    /// session was the author of its contents — at open/reload, after a tail
+    /// follow adopted appended bytes, and after each of our own saves. A later
+    /// sample that differs means somebody else wrote the file, which the
+    /// client warns about before an overwrite can bury it (#163).
+    ///
+    /// `None` when there is no document, or when the path could not be stat'ed
+    /// at install time; a baseline we never had cannot be compared, so
+    /// detection simply stays off rather than crying wolf.
+    disk_baseline: Option<DiskState>,
     tabs: TabList,
 }
 
@@ -92,6 +106,61 @@ impl Workspace {
     /// The active document, if any.
     pub(super) fn doc(&self) -> Option<&Shared> {
         self.doc.as_ref()
+    }
+
+    /// Install (or clear) the active document and re-seed the external-change
+    /// baseline from what is on disk right now.
+    ///
+    /// The ONE way the `doc` slot changes for freshly read content, so no open,
+    /// reload, or tail follow can leave the baseline describing the previous
+    /// file. Tab focus takes [`Workspace::adopt_tab`] instead, which restores
+    /// the baseline the tab was parked with.
+    fn set_doc(&mut self, doc: Option<Shared>) {
+        self.disk_baseline = doc.as_ref().and_then(|d| d.disk_state());
+        self.doc = doc;
+    }
+
+    /// Re-seed the baseline against the document already installed — for the
+    /// in-place save, which replaces the file on disk while deliberately
+    /// keeping the live mapping, overlay, and undo history untouched. Without
+    /// this the session would flag its own save as somebody else's write.
+    fn reseed_disk_baseline(&mut self) {
+        self.disk_baseline = self.doc.as_ref().and_then(|d| d.disk_state());
+    }
+
+    /// Whether the active document's file has been written by something other
+    /// than this session since the baseline was taken. `false` with no
+    /// document, and `false` when no baseline could be established.
+    fn disk_changed(&self) -> bool {
+        let Some(baseline) = self.disk_baseline else {
+            return false;
+        };
+        self.doc
+            .as_ref()
+            .is_some_and(|doc| doc.disk_state() != Some(baseline))
+    }
+
+    /// Take over `tab`'s live state (or empty the slots when the workspace is
+    /// left with no tabs). Shared by tab focus, close, and detach so all three
+    /// move the same fields — including the parked external-change baseline.
+    fn adopt_tab(&mut self, tab: Option<InactiveTab>) {
+        match tab {
+            Some(t) => {
+                self.doc = Some(t.doc);
+                self.edits = t.edits;
+                self.markers = t.markers;
+                self.aside_files = t.aside_files;
+                self.recoverable = t.recoverable;
+                self.disk_baseline = t.disk_baseline;
+            }
+            None => {
+                self.doc = None;
+                self.edits = EditSession::default();
+                self.markers = MarkerSession::default();
+                self.recoverable = None;
+                self.disk_baseline = None;
+            }
+        }
     }
 
     /// Pending crash-recovery count for the ACTIVE document, if any (see the
@@ -149,6 +218,7 @@ impl Workspace {
                 let markers = std::mem::take(&mut self.markers);
                 let aside_files = std::mem::take(&mut self.aside_files);
                 let recoverable = self.recoverable.take();
+                let disk_baseline = self.disk_baseline.take();
                 self.tabs.inactive.insert(
                     aid,
                     InactiveTab {
@@ -157,6 +227,7 @@ impl Workspace {
                         markers,
                         aside_files,
                         recoverable,
+                        disk_baseline,
                     },
                 );
             }
@@ -176,21 +247,8 @@ impl Workspace {
         }
         self.park_active();
         self.tabs.active = Some(id);
-        match self.tabs.inactive.remove(&id) {
-            Some(t) => {
-                self.doc = Some(t.doc);
-                self.edits = t.edits;
-                self.markers = t.markers;
-                self.aside_files = t.aside_files;
-                self.recoverable = t.recoverable;
-            }
-            None => {
-                self.doc = None;
-                self.edits = EditSession::default();
-                self.markers = MarkerSession::default();
-                self.recoverable = None;
-            }
-        }
+        let tab = self.tabs.inactive.remove(&id);
+        self.adopt_tab(tab);
         attach_live_wal(cache_root, self);
         Ok(())
     }
@@ -231,7 +289,7 @@ impl Workspace {
         self.tabs.next_id += 1;
         self.tabs.order.push(id);
         self.tabs.active = Some(id);
-        self.doc = Some(doc);
+        self.set_doc(Some(doc));
         self.edits = EditSession::default();
         self.markers = MarkerSession::default();
         self.recoverable = None;
@@ -503,6 +561,7 @@ impl AppState {
         }
         AppState {
             ws: RwLock::new(Workspace {
+                disk_baseline: shared.as_ref().and_then(|d| d.disk_state()),
                 doc: shared,
                 edits,
                 markers: MarkerSession::default(),
@@ -771,23 +830,10 @@ impl AppState {
                 .or_else(|| ws.tabs.order.last())
                 .copied();
             ws.tabs.active = next;
-            match next.and_then(|nid| ws.tabs.inactive.remove(&nid)) {
-                Some(t) => {
-                    // Replacing `edits` drops the closed tab's session — and
-                    // with it any writer handle, so the log file is deletable.
-                    ws.doc = Some(t.doc);
-                    ws.edits = t.edits;
-                    ws.markers = t.markers;
-                    ws.aside_files = t.aside_files;
-                    ws.recoverable = t.recoverable;
-                }
-                None => {
-                    ws.doc = None;
-                    ws.edits = EditSession::default();
-                    ws.markers = MarkerSession::default();
-                    ws.recoverable = None;
-                }
-            }
+            // Replacing `edits` drops the closed tab's session — and with it
+            // any writer handle, so the log file is deletable.
+            let neighbor = next.and_then(|nid| ws.tabs.inactive.remove(&nid));
+            ws.adopt_tab(neighbor);
             // The neighbor is live now: re-attach its crash log.
             attach_live_wal(cache_root.as_deref(), ws);
             if let (Some(root), Some(path)) = (cache_root.as_deref(), dead_wal.as_deref()) {
@@ -869,21 +915,8 @@ impl AppState {
                     .or_else(|| ws.tabs.order.last())
                     .copied();
                 ws.tabs.active = next;
-                match next.and_then(|nid| ws.tabs.inactive.remove(&nid)) {
-                    Some(t) => {
-                        ws.doc = Some(t.doc);
-                        ws.edits = t.edits;
-                        ws.markers = t.markers;
-                        ws.aside_files = t.aside_files;
-                        ws.recoverable = t.recoverable;
-                    }
-                    None => {
-                        ws.doc = None;
-                        ws.edits = EditSession::default();
-                        ws.markers = MarkerSession::default();
-                        ws.recoverable = None;
-                    }
-                }
+                let neighbor = next.and_then(|nid| ws.tabs.inactive.remove(&nid));
+                ws.adopt_tab(neighbor);
                 attach_live_wal(cache_root.as_deref(), ws);
             }
             Ok((asides, sync_file))
@@ -1068,7 +1101,9 @@ impl AppState {
                         && !ws.edits.has_edits()
                         && cur.byte_len() == snap.known_bytes;
                     if unchanged {
-                        ws.doc = Some(Arc::new(new_doc.take().unwrap()));
+                        // The appended bytes are now part of the view, so this
+                        // growth is no longer an unseen external change.
+                        ws.set_doc(Some(Arc::new(new_doc.take().unwrap())));
                         let mut s = TailStatus::at(lines, bytes);
                         s.grew = true;
                         return s;
@@ -1114,9 +1149,41 @@ impl AppState {
                     "the document changed while saving — nothing was overwritten; save again",
                 ));
             }
-            ws.doc = None; // edits stay: they are restored if the replace fails
+            // Edits stay: they are restored if the replace fails. The baseline
+            // goes with the document — whatever lands at the path next is
+            // installed by a reload, which seeds a fresh one.
+            ws.set_doc(None);
             Ok(())
         })
+    }
+
+    /// Whether the active document's file has been written by something other
+    /// than this session. One `stat`; safe to call on every window focus.
+    pub(super) fn disk_check(&self) -> DiskCheckResponse {
+        self.read(|ws| DiskCheckResponse {
+            open: ws.doc.is_some(),
+            changed: ws.disk_changed(),
+        })
+    }
+
+    /// Refuse an overwrite that would bury somebody else's write. The client
+    /// asks the user and retries with `force` when they choose to overwrite
+    /// anyway, so this is a prompt rather than a wall.
+    ///
+    /// Checked with the transitions lock held, right before the swap: a
+    /// client-side check alone would leave a window between the question and
+    /// the answer wide enough for the external writer to land in (#163).
+    pub(super) fn confirm_disk_unchanged(&self) -> Result<(), ApiError> {
+        if self.read(|ws| ws.disk_changed()) {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "disk_changed",
+                "this file was changed outside the editor after it was opened — \
+                 saving would overwrite those changes; reload it, or save again \
+                 to overwrite them deliberately",
+            ));
+        }
+        Ok(())
     }
 
     /// The staged bytes reached the target file: the pending edits are now on
@@ -1193,6 +1260,10 @@ impl AppState {
                     }
                 }
             }
+            // The file at the path is our own staged output now: adopt it as
+            // the external-change baseline, or the very next check would read
+            // this save as somebody else's write (#163).
+            ws.reseed_disk_baseline();
             if let Some(aside) = aside {
                 ws.aside_files.push(aside);
             }
@@ -1233,7 +1304,7 @@ impl AppState {
                 ))
             })?;
         let asides = self.write(|ws| {
-            ws.doc = Some(Arc::new(doc));
+            ws.set_doc(Some(Arc::new(doc)));
             // Fresh log for the reloaded base (in-place sort commits arrive
             // here with a just-cleared overlay; the failed-replace restore
             // path re-snapshots its still-pending edits).
@@ -1295,7 +1366,7 @@ impl AppState {
                     ));
                 }
             }
-            ws.doc = Some(Arc::new(doc));
+            ws.set_doc(Some(Arc::new(doc)));
             ws.edits = EditSession::default();
             ws.markers = MarkerSession::default();
             // Reset: a clean session over the file as it now exists on disk
@@ -1331,7 +1402,7 @@ impl AppState {
                 ))
             })?;
         let asides = self.write(|ws| {
-            ws.doc = Some(Arc::new(doc));
+            ws.set_doc(Some(Arc::new(doc)));
             ws.edits = EditSession::default();
             ws.markers = MarkerSession::default();
             // The encoding is part of the log's base identity: start a fresh
@@ -1785,6 +1856,18 @@ impl TailStatus {
     }
 }
 
+/// Answer to "has anything else written this file since we read it?" (#163).
+/// Polled by the client when the window regains focus and before an overwrite,
+/// so the user is warned rather than silently burying somebody else's work.
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct DiskCheckResponse {
+    /// Whether a file is open at all; `changed` is meaningless when false.
+    pub(super) open: bool,
+    /// The file on disk is no longer the one this session last read or wrote.
+    pub(super) changed: bool,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct TabInfo {
@@ -1902,6 +1985,7 @@ mod tests {
                     markers: MarkerSession::default(),
                     aside_files: Vec::new(),
                     recoverable: None,
+                    disk_baseline: None,
                 },
             );
             (active_id, duplicate_id)
