@@ -1,16 +1,89 @@
-import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applySettings,
   clampFontSize,
   filterSettings,
+  flushSettings,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   freshDefaultSettings,
   loadSettings,
   migratedFontSize,
   normalizeSettingsSearch,
+  persistBackgroundImage,
+  resetSettingsToDefaults,
+  saveSettings,
+  SETTINGS_SAVE_DELAY_MS,
 } from "../src/settings.js";
-import { DEFAULT_SETTINGS, SETTINGS_BG_IMAGE_KEY, SETTINGS_KEY } from "../src/state.js";
+import {
+  DEFAULT_SETTINGS,
+  LINE_HEIGHT,
+  setLineHeight,
+  SETTINGS_BG_IMAGE_KEY,
+  SETTINGS_KEY,
+  state,
+} from "../src/state.js";
+
+const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const indexHtml = readFileSync(path.join(webRoot, "index.html"), "utf8");
+
+function memoryStorage(initial: Record<string, string> = {}): Storage {
+  const values = new Map(Object.entries(initial));
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, String(value)),
+  };
+}
+
+function installApplicationDom() {
+  const parsed = new DOMParser().parseFromString(indexHtml, "text/html");
+  document.head.innerHTML = parsed.head.innerHTML;
+  document.body.innerHTML = parsed.body.innerHTML;
+}
+
+function stubBrowserSettingsEnvironment() {
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1),
+  );
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
+
+afterEach(() => {
+  flushSettings();
+  setLineHeight(18);
+  state.settings = {
+    ...DEFAULT_SETTINGS,
+    keymap: {},
+    customThemes: {},
+  };
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-bg");
+  document.documentElement.removeAttribute("class");
+  document.documentElement.removeAttribute("style");
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
+});
 
 describe("editor font size (#170)", () => {
   it("clamps the single effective pixel value", () => {
@@ -138,5 +211,111 @@ describe("organized settings (#165)", () => {
 
     expect(filterSettings("missing")).toBe(0);
     expect(document.getElementById("settings-empty")!.classList.contains("hidden")).toBe(false);
+  });
+});
+
+describe("settings execution paths (#188)", () => {
+  it("round-trips user settings and the separately stored wallpaper", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("localStorage", memoryStorage());
+    const wallpaper = "data:image/png;base64,roundtrip";
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      theme: "dark",
+      fontSize: 21,
+      wordWrap: true,
+      restoreSession: false,
+      bgMode: "image",
+      bgImage: wallpaper,
+      bgImageName: "roundtrip.png",
+      keymap: { saveFile: "Alt+S" },
+      customThemes: { Plum: { name: "Plum" } },
+    };
+
+    expect(persistBackgroundImage(wallpaper)).toBe(true);
+    saveSettings(settings);
+    vi.advanceTimersByTime(SETTINGS_SAVE_DELAY_MS);
+
+    expect(loadSettings()).toMatchObject(settings);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!)).not.toHaveProperty("bgImage");
+    expect(localStorage.getItem(SETTINGS_BG_IMAGE_KEY)).toBe(wallpaper);
+  });
+
+  it("returns independent defaults for malformed storage", () => {
+    vi.stubGlobal("localStorage", memoryStorage({ [SETTINGS_KEY]: "{" }));
+
+    const loaded = loadSettings();
+    loaded.keymap.saveFile = "Alt+S";
+    loaded.customThemes.Plum = { name: "Plum" };
+
+    expect(loaded).toMatchObject(DEFAULT_SETTINGS);
+    expect(DEFAULT_SETTINGS.keymap).toEqual({});
+    expect(DEFAULT_SETTINGS.customThemes).toEqual({});
+  });
+
+  it("applies clamped font, wrapping, minimap, and theme state to the live DOM", () => {
+    document.head.innerHTML = '<meta name="theme-color" content="#fff">';
+    document.body.innerHTML = `
+      <main id="viewport"><div id="content"></div></main>
+      <button id="st-fontsize"></button>`;
+    stubBrowserSettingsEnvironment();
+
+    applySettings({
+      ...DEFAULT_SETTINGS,
+      theme: "dark",
+      font: "system",
+      fontSize: FONT_SIZE_MAX + 20,
+      wordWrap: true,
+      minimap: false,
+      zenkakuUnderline: true,
+    });
+
+    const root = document.documentElement;
+    expect(root.dataset.theme).toBe("dark");
+    expect(root.classList.contains("zenkaku-underline")).toBe(true);
+    expect(root.style.getPropertyValue("--fs-editor")).toBe(`${FONT_SIZE_MAX}px`);
+    expect(root.style.getPropertyValue("--lh-editor")).toBe(`${FONT_SIZE_MAX + 6}px`);
+    expect(LINE_HEIGHT).toBe(FONT_SIZE_MAX + 6);
+    expect(document.getElementById("content")!.classList.contains("wrap")).toBe(true);
+    expect(document.getElementById("viewport")!.classList.contains("has-minimap")).toBe(false);
+    expect(document.getElementById("st-fontsize")!.textContent).toBe(`${FONT_SIZE_MAX}px`);
+  });
+
+  it("restores defaults through the real dialog path while preserving authored assets", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("localStorage", memoryStorage());
+    stubBrowserSettingsEnvironment();
+    installApplicationDom();
+    const wallpaper = "data:image/png;base64,preserved";
+    state.settings = {
+      ...DEFAULT_SETTINGS,
+      theme: "dark",
+      fontSize: 32,
+      wordWrap: true,
+      bgMode: "image",
+      bgImage: wallpaper,
+      bgImageName: "preserved.png",
+      keymap: { saveFile: "Alt+S" },
+      customThemes: { Plum: { name: "Plum", color: {} } },
+    };
+    persistBackgroundImage(wallpaper);
+
+    resetSettingsToDefaults();
+    flushSettings();
+
+    expect(state.settings).toMatchObject({
+      theme: DEFAULT_SETTINGS.theme,
+      fontSize: DEFAULT_SETTINGS.fontSize,
+      wordWrap: DEFAULT_SETTINGS.wordWrap,
+      keymap: {},
+      customThemes: { Plum: { name: "Plum", color: {} } },
+      bgImage: wallpaper,
+      bgImageName: "preserved.png",
+    });
+    expect(loadSettings()).toMatchObject(state.settings);
+    expect((document.getElementById("set-fontsize-number") as HTMLInputElement).value).toBe(
+      String(DEFAULT_SETTINGS.fontSize),
+    );
+    expect((document.getElementById("set-word-wrap") as HTMLInputElement).checked).toBe(false);
   });
 });

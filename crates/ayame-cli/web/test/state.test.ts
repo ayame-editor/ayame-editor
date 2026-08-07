@@ -7,7 +7,7 @@ import {
   setOpenerMode,
   setOpenerResolver,
 } from "../src/opener-state.js";
-import { state } from "../src/state.js";
+import { createInitialState, DEFAULT_SETTINGS, state } from "../src/state.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -16,6 +16,31 @@ afterEach(() => {
 });
 
 describe("AppState boundaries (#122)", () => {
+  it("creates isolated mutable state for each application window", () => {
+    const first = createInitialState();
+    const second = createInitialState();
+
+    first.view.cache.lines.push({ text: "cached" });
+    first.search.history.push("needle");
+    first.analysis.visibleRuleIds.add("errors");
+    first.analysis.lastHits.set("errors", { line: 1 } as never);
+    first.markers.bookmarks.add(7);
+    first.settings.keymap.saveFile = "Alt+S";
+    first.settings.customThemes.Plum = { name: "Plum" };
+    first.caret.extraCursors.push({ line: 2, col: 3 });
+
+    expect(second.view.cache.lines).toEqual([]);
+    expect(second.search.history).toEqual([]);
+    expect(second.analysis.visibleRuleIds.size).toBe(0);
+    expect(second.analysis.lastHits.size).toBe(0);
+    expect(second.markers.bookmarks.size).toBe(0);
+    expect(second.settings.keymap).toEqual({});
+    expect(second.settings.customThemes).toEqual({});
+    expect(second.caret.extraCursors).toEqual([]);
+    expect(DEFAULT_SETTINGS.keymap).toEqual({});
+    expect(DEFAULT_SETTINGS.customThemes).toEqual({});
+  });
+
   it("exposes typed responsibility groups without legacy flat aliases", () => {
     expect(Object.keys(state).sort()).toEqual([
       "analysis",

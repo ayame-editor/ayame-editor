@@ -18,6 +18,7 @@ import type { AnalysisProfile } from "./types/api.js";
 import type { UiState } from "./types/api.js";
 
 let sharedUiState: UiState | null = null;
+let sharedUiStateWrites: Promise<void> = Promise.resolve();
 
 function cleanList(list, max) {
   const out = [];
@@ -133,13 +134,21 @@ async function currentUiStateBase(): Promise<UiState | null> {
   }
 }
 
+function queueSharedUiStateWrite(update: (base: UiState) => UiState) {
+  // Recent files, search history, and analysis profiles can change in the same
+  // event turn. Serialize their read-modify-writes so each update sees the
+  // snapshot produced by the previous one instead of restoring stale fields.
+  sharedUiStateWrites = sharedUiStateWrites.then(async () => {
+    const base = await currentUiStateBase();
+    if (!base) return;
+    await saveSharedUiState(update(base));
+  });
+}
+
 export function saveRecentFilesShared(list) {
   const recent = cleanList(list, RECENT_MAX);
   saveLocalList(RECENT_KEY, recent, RECENT_MAX);
-  void currentUiStateBase().then((base) => {
-    if (!base) return; // can't read current state — don't clobber the server
-    void saveSharedUiState(normalizeUiState({ ...base, recent_files: recent }));
-  });
+  queueSharedUiStateWrite((base) => normalizeUiState({ ...base, recent_files: recent }));
 }
 
 export function loadSearchHistoryShared() {
@@ -149,10 +158,7 @@ export function loadSearchHistoryShared() {
 export function saveSearchHistoryShared(list) {
   const history = cleanList(list, 50);
   saveLocalList(SEARCH_HISTORY_KEY, history, 50);
-  void currentUiStateBase().then((base) => {
-    if (!base) return; // can't read current state — don't clobber the server
-    void saveSharedUiState(normalizeUiState({ ...base, search_history: history }));
-  });
+  queueSharedUiStateWrite((base) => normalizeUiState({ ...base, search_history: history }));
 }
 
 export function loadReplaceHistoryShared() {
@@ -198,16 +204,13 @@ export function saveAnalysisProfilesShared(profiles, active) {
   } catch {
     // ignore private-mode quota errors
   }
-  void currentUiStateBase().then((base) => {
-    if (!base) return;
-    void saveSharedUiState(
-      normalizeUiState({
-        ...base,
-        analysis_profiles: clean,
-        active_analysis_profile: activeId,
-      }),
-    );
-  });
+  queueSharedUiStateWrite((base) =>
+    normalizeUiState({
+      ...base,
+      analysis_profiles: clean,
+      active_analysis_profile: activeId,
+    }),
+  );
 }
 
 export async function restoreSessionSnapshot(): Promise<{ open: boolean; [key: string]: unknown }> {
