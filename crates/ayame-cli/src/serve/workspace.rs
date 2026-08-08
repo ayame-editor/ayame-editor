@@ -616,9 +616,9 @@ async fn create_unique_upload_file(
         .map(|file| (fallback, file))
 }
 
-fn unique_upload_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(10_000);
-    out.push(dir.join(name));
+fn unique_upload_candidates(dir: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
+    let first = dir.join(name);
+    let dir = dir.to_path_buf();
     let stem = Path::new(name)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -627,10 +627,7 @@ fn unique_upload_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
         .extension()
         .map(|s| format!(".{}", s.to_string_lossy()))
         .unwrap_or_default();
-    for n in 1..10_000 {
-        out.push(dir.join(format!("{stem}-{n}{ext}")));
-    }
-    out
+    std::iter::once(first).chain((1..10_000).map(move |n| dir.join(format!("{stem}-{n}{ext}"))))
 }
 
 #[cfg(test)]
@@ -677,6 +674,21 @@ mod tests {
         } else {
             assert_eq!(at_root, None);
         }
+    }
+
+    #[test]
+    fn upload_candidates_are_generated_on_demand_in_order() {
+        let candidates = unique_upload_candidates(Path::new("uploads"), "data.csv")
+            .take(3)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            candidates,
+            [
+                PathBuf::from("uploads/data.csv"),
+                PathBuf::from("uploads/data-1.csv"),
+                PathBuf::from("uploads/data-2.csv"),
+            ]
+        );
     }
 
     #[test]

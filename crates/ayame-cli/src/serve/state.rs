@@ -1,17 +1,35 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use axum::http::StatusCode;
-use ayame_core::wal::{self, WalCompactionPlan, WalWriter};
-use ayame_core::{DiskState, Document, EditSession, EditStats, Encoding, OpenOptions};
-use serde::{Deserialize, Serialize};
+use ayame_core::wal;
+use ayame_core::{DiskState, Document, EditSession, Encoding, OpenOptions};
 
-use super::analysis::{AnalysisProfile, AnalysisStore};
+use super::analysis::AnalysisStore;
 use super::markers::MarkerSession;
 use super::ops::WorkerInput;
 use super::{bad_request, internal, ApiError};
+
+mod tabs;
+mod tail;
+mod ui_state;
+mod wal_policy;
+
+#[cfg(feature = "typegen")]
+pub(super) use tabs::TabInfo;
+pub(super) use tabs::TabsResponse;
+pub(super) use tail::{DiskCheckResponse, TailStatus};
+#[cfg(feature = "typegen")]
+pub(super) use ui_state::SessionState;
+pub(super) use ui_state::UiState;
+
+use tabs::{remove_aside_files as cleanup_aside_paths, TabList as WorkspaceTabs};
+use wal_policy::{
+    attach_live_wal as attach_wal, wal_setup_for_open as setup_wal_for_open,
+    WalSetup as InitialWalSetup,
+};
 
 type Shared = Arc<Document>;
 
@@ -38,33 +56,6 @@ pub(super) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 /// abort, the opposite of "stability is a feature" (#106).
 pub(super) fn lock_recover<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
     lock.lock().unwrap_or_else(|p| p.into_inner())
-}
-
-/// State of a tab that is open but not currently focused. The focused tab's
-/// document and edits live in `Workspace::doc`/`edits` so every existing
-/// endpoint keeps operating on "the active document" unchanged; switching tabs
-/// just swaps that live state with an entry here.
-struct InactiveTab {
-    doc: Shared,
-    edits: EditSession,
-    markers: MarkerSession,
-    /// Aside files (see [`Workspace::aside_files`]) travelling with the tab.
-    aside_files: Vec<PathBuf>,
-    /// Pending crash-recovery decision travelling with the tab (see
-    /// [`Workspace::recoverable`]).
-    recoverable: Option<usize>,
-    /// External-change baseline (see [`Workspace::disk_baseline`]) travelling
-    /// with the tab, so a file rewritten while its tab sat in the background
-    /// is still reported when the tab comes back.
-    disk_baseline: Option<DiskState>,
-}
-
-#[derive(Default)]
-struct TabList {
-    order: Vec<u64>,
-    active: Option<u64>,
-    inactive: HashMap<u64, InactiveTab>,
-    next_id: u64,
 }
 
 /// Everything mutable about the workspace: the active document, its edit
@@ -99,7 +90,7 @@ pub(super) struct Workspace {
     /// at install time; a baseline we never had cannot be compared, so
     /// detection simply stays off rather than crying wolf.
     disk_baseline: Option<DiskState>,
-    tabs: TabList,
+    tabs: WorkspaceTabs,
 }
 
 impl Workspace {
@@ -113,7 +104,7 @@ impl Workspace {
     ///
     /// The ONE way the `doc` slot changes for freshly read content, so no open,
     /// reload, or tail follow can leave the baseline describing the previous
-    /// file. Tab focus takes [`Workspace::adopt_tab`] instead, which restores
+    /// file. Tab focus takes [`Workspace::install_tab_state`] instead, which restores
     /// the baseline the tab was parked with.
     fn set_doc(&mut self, doc: Option<Shared>) {
         self.disk_baseline = doc.as_ref().and_then(|d| d.disk_state());
@@ -138,29 +129,6 @@ impl Workspace {
         self.doc
             .as_ref()
             .is_some_and(|doc| doc.disk_state() != Some(baseline))
-    }
-
-    /// Take over `tab`'s live state (or empty the slots when the workspace is
-    /// left with no tabs). Shared by tab focus, close, and detach so all three
-    /// move the same fields — including the parked external-change baseline.
-    fn adopt_tab(&mut self, tab: Option<InactiveTab>) {
-        match tab {
-            Some(t) => {
-                self.doc = Some(t.doc);
-                self.edits = t.edits;
-                self.markers = t.markers;
-                self.aside_files = t.aside_files;
-                self.recoverable = t.recoverable;
-                self.disk_baseline = t.disk_baseline;
-            }
-            None => {
-                self.doc = None;
-                self.edits = EditSession::default();
-                self.markers = MarkerSession::default();
-                self.recoverable = None;
-                self.disk_baseline = None;
-            }
-        }
     }
 
     /// Pending crash-recovery count for the ACTIVE document, if any (see the
@@ -202,200 +170,6 @@ impl Workspace {
 
     pub(super) fn markers_mut(&mut self) -> &mut MarkerSession {
         &mut self.markers
-    }
-
-    /// Park the currently active tab's live state so a different tab can take
-    /// over the `doc`/`edits` slots.
-    fn park_active(&mut self) {
-        if let Some(aid) = self.tabs.active {
-            if let Some(doc) = self.doc.clone() {
-                // Parked sessions carry NO crash-log writer: exactly one live
-                // logger exists per file, and it belongs to the focused tab.
-                // The log file itself stays on disk with everything committed
-                // so far; re-selecting the tab re-attaches and snapshots.
-                self.edits.set_wal(None);
-                let edits = std::mem::take(&mut self.edits);
-                let markers = std::mem::take(&mut self.markers);
-                let aside_files = std::mem::take(&mut self.aside_files);
-                let recoverable = self.recoverable.take();
-                let disk_baseline = self.disk_baseline.take();
-                self.tabs.inactive.insert(
-                    aid,
-                    InactiveTab {
-                        doc,
-                        edits,
-                        markers,
-                        aside_files,
-                        recoverable,
-                        disk_baseline,
-                    },
-                );
-            }
-        }
-    }
-
-    /// Make `doc` a brand-new tab and focus it (used by open / new / upload).
-    /// Returns aside files orphaned by the transition (an active tab whose
-    /// document was gone cannot be parked); the caller deletes them outside
-    /// the workspace lock.
-    fn focus_tab(&mut self, id: u64, cache_root: Option<&Path>) -> Result<(), ApiError> {
-        if self.tabs.active == Some(id) {
-            return Ok(());
-        }
-        if !self.tabs.order.contains(&id) {
-            return Err(bad_request("no such tab"));
-        }
-        self.park_active();
-        self.tabs.active = Some(id);
-        let tab = self.tabs.inactive.remove(&id);
-        self.adopt_tab(tab);
-        attach_live_wal(cache_root, self);
-        Ok(())
-    }
-
-    fn tab_with_path_literal(&self, path: &Path) -> Option<u64> {
-        self.tabs.order.iter().copied().find(|&id| {
-            let doc = if self.tabs.active == Some(id) {
-                self.doc.as_ref()
-            } else {
-                self.tabs.inactive.get(&id).map(|t| &t.doc)
-            };
-            doc.is_some_and(|doc| doc.path() == path)
-        })
-    }
-
-    fn wal_path_in_use(&self, cache_root: &Path, wal_path: &Path) -> bool {
-        let active = self
-            .doc
-            .as_ref()
-            .is_some_and(|doc| wal::wal_path_for(cache_root, doc.path()) == wal_path);
-        active
-            || self
-                .tabs
-                .inactive
-                .values()
-                .any(|tab| wal::wal_path_for(cache_root, tab.doc.path()) == wal_path)
-    }
-
-    fn install_new_tab(
-        &mut self,
-        doc: Shared,
-        wal: WalSetup,
-        cache_root: Option<&Path>,
-    ) -> Vec<PathBuf> {
-        self.park_active();
-        let orphaned = std::mem::take(&mut self.aside_files);
-        let id = self.tabs.next_id;
-        self.tabs.next_id += 1;
-        self.tabs.order.push(id);
-        self.tabs.active = Some(id);
-        self.set_doc(Some(doc));
-        self.edits = EditSession::default();
-        self.markers = MarkerSession::default();
-        self.recoverable = None;
-        match wal {
-            WalSetup::Attach(w) => self.edits.set_wal(Some(*w)),
-            WalSetup::Create => attach_live_wal(cache_root, self),
-            WalSetup::Recoverable(n) => self.recoverable = Some(n),
-            WalSetup::Off => {}
-        }
-        orphaned
-    }
-}
-
-/// Outcome of the pre-open crash-log inspection ([`wal_setup_for_open`]),
-/// applied when the opened document is installed as the live session.
-pub(super) enum WalSetup {
-    /// No cache dir configured (`--no-cache`, or none resolvable) or the log
-    /// could not be created: edit without crash persistence, silently.
-    Off,
-    /// A fresh writer for the document (any stale/invalid log was removed).
-    /// Boxed so the enum stays small on the happy paths.
-    Attach(Box<WalWriter>),
-    /// The log was inspected and is safe to replace, but the writer should be
-    /// created only when the document is installed as the live tab.
-    Create,
-    /// The log holds unsaved edits from a previous process. Do NOT attach or
-    /// touch it; report `recoverable` in stat and wait for
-    /// `/api/edit/recover` to restore or discard.
-    Recoverable(usize),
-}
-
-/// Inspect (and prepare) the crash log for a freshly opened `doc` — the one
-/// place recovery is DETECTED. Stale/invalid logs are deleted silently; a
-/// recoverable log is left untouched for the user's decision; otherwise a
-/// fresh writer is created. Blocking file I/O: call off the async runtime.
-pub(super) fn wal_setup_for_open(cache_root: Option<&Path>, doc: &Document) -> WalSetup {
-    match wal_prepare_for_open(cache_root, doc) {
-        WalSetup::Create => {}
-        other => return other,
-    }
-    let Some(root) = cache_root else {
-        return WalSetup::Off;
-    };
-    let Ok(header) = wal::Header::for_document(doc) else {
-        return WalSetup::Off;
-    };
-    let path = wal::wal_path_for(root, doc.path());
-    match WalWriter::create(&path, header) {
-        Ok(w) => WalSetup::Attach(Box::new(w)),
-        // Crash logging is best-effort: an unwritable cache dir must never
-        // block opening the file.
-        Err(_) => WalSetup::Off,
-    }
-}
-
-pub(super) fn wal_prepare_for_open(cache_root: Option<&Path>, doc: &Document) -> WalSetup {
-    let Some(root) = cache_root else {
-        return WalSetup::Off;
-    };
-    let Ok(header) = wal::Header::for_document(doc) else {
-        return WalSetup::Off;
-    };
-    let path = wal::wal_path_for(root, doc.path());
-    match wal::inspect(&path, &header) {
-        ayame_core::RecoveryInfo::Recoverable { transactions } => {
-            // A compaction-snapshot-only log recovers with transactions == 0;
-            // report at least 1 so the client knows there is something there.
-            return WalSetup::Recoverable(transactions.max(1));
-        }
-        ayame_core::RecoveryInfo::Stale | ayame_core::RecoveryInfo::Invalid => {
-            // Recorded against different bytes (or unreadable): must never
-            // replay, and keeping it would only re-report forever.
-            let _ = std::fs::remove_file(&path);
-        }
-        ayame_core::RecoveryInfo::Clean => {}
-    }
-    WalSetup::Create
-}
-
-/// Attach a fresh crash-log writer to the session that just became live (tab
-/// switch, close-neighbor focus, revert/encoding/sort reloads). Skipped while
-/// the tab still has an undecided recoverable log — creating a writer would
-/// truncate it. If the session already holds edits (a parked tab coming
-/// back), a full snapshot is written immediately so the log reflects reality;
-/// starting from the header alone is a fresh log, i.e. the save/revert-time
-/// RESET for the new base identity. Small blocking file I/O under the
-/// workspace write lock (a few hundred bytes + fsync) — same order of cost as
-/// the lock's other users.
-fn attach_live_wal(cache_root: Option<&Path>, ws: &mut Workspace) {
-    if ws.recoverable.is_some() {
-        return;
-    }
-    let Some(root) = cache_root else { return };
-    let Some(doc) = ws.doc.clone() else { return };
-    let Ok(header) = wal::Header::for_document(&doc) else {
-        return;
-    };
-    let path = wal::wal_path_for(root, doc.path());
-    match WalWriter::create(&path, header) {
-        Ok(w) => {
-            ws.edits.set_wal(Some(w));
-            if ws.edits.has_edits() || ws.edits.is_dirty() {
-                ws.edits.wal_compact();
-            }
-        }
-        Err(_) => ws.edits.set_wal(None),
     }
 }
 
@@ -446,21 +220,6 @@ pub(super) struct DirtySnapshotCache {
     /// An `ayame_core::Document` opened over the materialized file (no index
     /// cache dir — throwaway snapshots must not pollute the on-disk cache).
     pub(super) snapshot: Arc<Document>,
-}
-
-struct TailPollSnapshot {
-    doc: Shared,
-    revision: u64,
-    has_edits: bool,
-    known_bytes: u64,
-    known_lines: u64,
-}
-
-struct WalPolicyWork {
-    doc: Shared,
-    revision: u64,
-    sync_file: Option<std::fs::File>,
-    compact: Option<(EditSession, WalCompactionPlan)>,
 }
 
 pub(crate) struct AppState {
@@ -522,43 +281,18 @@ pub(crate) struct AppState {
     analysis: AnalysisStore,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub(super) struct SessionState {
-    pub(super) paths: Vec<String>,
-    pub(super) active_path: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub(super) struct UiState {
-    pub(super) recent_files: Vec<String>,
-    pub(super) search_history: Vec<String>,
-    /// Replacement strings the user has committed, newest first — the find
-    /// field's history had no counterpart for the replace field (#173).
-    /// `#[serde(default)]` so a stored state written before this field is
-    /// still readable.
-    #[serde(default)]
-    pub(super) replace_history: Vec<String>,
-    pub(super) session: SessionState,
-    #[serde(default)]
-    pub(super) analysis_profiles: Vec<AnalysisProfile>,
-    #[serde(default)]
-    pub(super) active_analysis_profile: Option<String>,
-}
-
 impl AppState {
     pub(super) fn new(doc: Option<Document>, open_opts: OpenOptions) -> AppState {
         // The document passed on the command line is an "open" like any
         // other: inspect its crash log before the first writer is created.
         let wal_setup = match &doc {
-            Some(d) => wal_setup_for_open(open_opts.cache_dir.as_deref(), d),
-            None => WalSetup::Off,
+            Some(d) => setup_wal_for_open(open_opts.cache_dir.as_deref(), d),
+            None => InitialWalSetup::Off,
         };
         let shared = doc.map(Arc::new);
-        let mut tabs = TabList {
+        let mut tabs = WorkspaceTabs {
             next_id: 1,
-            ..TabList::default()
+            ..WorkspaceTabs::default()
         };
         if shared.is_some() {
             let id = tabs.next_id;
@@ -569,10 +303,10 @@ impl AppState {
         let mut edits = EditSession::default();
         let mut recoverable = None;
         match wal_setup {
-            WalSetup::Attach(w) => edits.set_wal(Some(*w)),
-            WalSetup::Create => {}
-            WalSetup::Recoverable(n) => recoverable = Some(n),
-            WalSetup::Off => {}
+            InitialWalSetup::Attach(w) => edits.set_wal(Some(*w)),
+            InitialWalSetup::Create => {}
+            InitialWalSetup::Recoverable(n) => recoverable = Some(n),
+            InitialWalSetup::Off => {}
         }
         AppState {
             ws: RwLock::new(Workspace {
@@ -596,113 +330,6 @@ impl AppState {
 
     pub(super) fn analysis_store(&self) -> &AnalysisStore {
         &self.analysis
-    }
-
-    /// Root directory for crash logs — the same per-user cache dir the index
-    /// uses (`--cache-dir` / `AYAME_CACHE_DIR`; `None` under `--no-cache`).
-    pub(super) fn wal_root(&self) -> Option<&Path> {
-        self.open_opts.cache_dir.as_deref()
-    }
-
-    fn ui_state_path(&self) -> Option<PathBuf> {
-        self.open_opts
-            .cache_dir
-            .as_ref()
-            .map(|d| d.join("ui-state.json"))
-    }
-
-    pub(super) fn load_ui_state(&self) -> UiState {
-        let Some(path) = self.ui_state_path() else {
-            return UiState::default();
-        };
-        let Ok(bytes) = std::fs::read(path) else {
-            return UiState::default();
-        };
-        let mut ui: UiState = serde_json::from_slice(&bytes).unwrap_or_default();
-        (ui.analysis_profiles, ui.active_analysis_profile) =
-            super::analysis::sanitize_persisted_profiles(
-                ui.analysis_profiles,
-                ui.active_analysis_profile,
-            );
-        ui
-    }
-
-    pub(super) fn save_ui_state(&self, mut ui: UiState) -> Result<UiState, ApiError> {
-        ui.recent_files = clean_path_list(ui.recent_files, 24);
-        ui.search_history = clean_string_list(ui.search_history, 50);
-        ui.replace_history = clean_string_list(ui.replace_history, 50);
-        ui.session.paths = clean_path_list(ui.session.paths, SESSION_MAX_PATHS);
-        if let Some(active) = ui.session.active_path.take() {
-            ui.session.active_path = clean_one_string(active);
-        }
-        (ui.analysis_profiles, ui.active_analysis_profile) =
-            super::analysis::sanitize_persisted_profiles(
-                ui.analysis_profiles,
-                ui.active_analysis_profile,
-            );
-        let Some(path) = self.ui_state_path() else {
-            return Ok(ui);
-        };
-        let json = serde_json::to_vec_pretty(&ui).map_err(internal)?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(internal)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(internal)?;
-        std::fs::rename(&tmp, &path).map_err(internal)?;
-        Ok(ui)
-    }
-
-    pub(super) fn save_session_snapshot(&self) -> Result<UiState, ApiError> {
-        let mut ui = self.load_ui_state();
-        let tabs = self.tabs_response().tabs;
-        // Scratch/untitled buffers can't be reopened next launch, so keep them
-        // out of the snapshot (they would only consume slots and fail to open).
-        ui.session.paths = tabs
-            .iter()
-            .map(|t| t.path.clone())
-            .filter(|p| !super::workspace::is_scratch_path(p))
-            .collect();
-        ui.session.active_path = tabs
-            .iter()
-            .find(|t| t.active)
-            .map(|t| t.path.clone())
-            .filter(|p| !super::workspace::is_scratch_path(p));
-        self.save_ui_state(ui)
-    }
-
-    pub(super) async fn restore_session(&self) -> Result<(), ApiError> {
-        let session = self.load_ui_state().session;
-        if session.paths.is_empty() {
-            return Ok(());
-        }
-        let paths = clean_path_list(session.paths, SESSION_MAX_PATHS);
-        for path in &paths {
-            if let Err(e) = self.open_path(path.clone()).await {
-                eprintln!("ayame: session restore skipped '{}': {}", path, e.message());
-            }
-        }
-        if let Some(active) = session.active_path {
-            let tabs = self.tabs_response().tabs;
-            if let Some(tab) = tabs.iter().find(|t| t.path == active) {
-                self.switch_tab(tab.id).await?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Record a crash-log failure for one-shot surfacing via stat.
-    pub(super) fn note_wal_error(&self, msg: String) {
-        let mut slot = self.wal_error.lock().unwrap_or_else(|p| p.into_inner());
-        slot.get_or_insert(msg);
-    }
-
-    /// Drain the pending crash-log failure (shown once in the next stat).
-    pub(super) fn take_wal_error(&self) -> Option<String> {
-        self.wal_error
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take()
     }
 
     /// The cached dirty snapshot, if it still matches (same document identity,
@@ -760,232 +387,6 @@ impl AppState {
         f(&mut write_lock(&self.ws))
     }
 
-    /// Focus an already-open tab.
-    pub(super) async fn switch_tab(&self, id: u64) -> Result<(), ApiError> {
-        let _transitions = self.transitions.lock().await;
-        // Leaf lock, taken while no ws guard is held (see `find_snapshot`).
-        self.invalidate_dirty_snapshot();
-        self.write(|ws| ws.focus_tab(id, self.open_opts.cache_dir.as_deref()))
-    }
-
-    /// Move an open tab before another tab, or to the end when `before_id` is
-    /// absent. The active document and every inactive edit session stay put;
-    /// only the user-visible order changes.
-    pub(super) async fn reorder_tab(
-        &self,
-        id: u64,
-        before_id: Option<u64>,
-    ) -> Result<(), ApiError> {
-        let _transitions = self.transitions.lock().await;
-        self.write(|ws| {
-            let Some(from) = ws.tabs.order.iter().position(|tab_id| *tab_id == id) else {
-                return Err(bad_request("no such tab"));
-            };
-            if before_id == Some(id) {
-                return Ok(());
-            }
-            if before_id.is_some_and(|before| !ws.tabs.order.contains(&before)) {
-                return Err(bad_request("no such destination tab"));
-            }
-
-            ws.tabs.order.remove(from);
-            let to = before_id
-                .and_then(|before| ws.tabs.order.iter().position(|tab_id| *tab_id == before))
-                .unwrap_or(ws.tabs.order.len());
-            ws.tabs.order.insert(to, id);
-            Ok(())
-        })
-    }
-
-    /// Close a tab; if it was active, focus a neighbor (or empty the workspace).
-    pub(super) async fn close_tab(&self, id: u64) {
-        let _transitions = self.transitions.lock().await;
-        self.invalidate_dirty_snapshot();
-        let cache_root = self.open_opts.cache_dir.clone();
-        let (asides, dead_wal) = self.write(|ws| {
-            let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
-                return (Vec::new(), None);
-            };
-            ws.tabs.order.remove(idx);
-            // Closing a tab is a graceful discard of its unsaved edits (the
-            // client confirms dirty closes first): its crash log goes with it
-            // — UNLESS a recovery decision is still pending; that log belongs
-            // to a previous process and stays until restored or discarded.
-            let mut dead_wal: Option<PathBuf> = None;
-            let mut wal_path_of = |doc: &Shared, recoverable: Option<usize>| {
-                if recoverable.is_none() {
-                    if let Some(root) = cache_root.as_deref() {
-                        dead_wal = Some(wal::wal_path_for(root, doc.path()));
-                    }
-                }
-            };
-            let mut asides = match ws.tabs.inactive.remove(&id) {
-                Some(t) => {
-                    wal_path_of(&t.doc, t.recoverable);
-                    t.aside_files
-                }
-                None => Vec::new(),
-            };
-            if ws.tabs.active != Some(id) {
-                if let (Some(root), Some(path)) = (cache_root.as_deref(), dead_wal.as_deref()) {
-                    if ws.wal_path_in_use(root, path) {
-                        dead_wal = None;
-                    }
-                }
-                return (asides, dead_wal); // closed a background tab; active state untouched
-            }
-            // The closed tab was active: its document goes away with it.
-            if let Some(doc) = ws.doc.clone() {
-                wal_path_of(&doc, ws.recoverable);
-            }
-            asides.append(&mut ws.aside_files);
-            // Pick the neighbor at the same slot.
-            let next = ws
-                .tabs
-                .order
-                .get(idx)
-                .or_else(|| ws.tabs.order.last())
-                .copied();
-            ws.tabs.active = next;
-            // Replacing `edits` drops the closed tab's session — and with it
-            // any writer handle, so the log file is deletable.
-            let neighbor = next.and_then(|nid| ws.tabs.inactive.remove(&nid));
-            ws.adopt_tab(neighbor);
-            // The neighbor is live now: re-attach its crash log.
-            attach_live_wal(cache_root.as_deref(), ws);
-            if let (Some(root), Some(path)) = (cache_root.as_deref(), dead_wal.as_deref()) {
-                if ws.wal_path_in_use(root, path) {
-                    dead_wal = None;
-                }
-            }
-            (asides, dead_wal)
-        });
-        // The closed tab's document handle is gone (or going): its aside
-        // files are deletable now. Outside the lock; failures are retried at
-        // shutdown via the pid-scoped sweep on the next open.
-        remove_aside_files(asides);
-        if let Some(p) = dead_wal {
-            let _ = std::fs::remove_file(p);
-        }
-    }
-
-    /// Detach a tab for a window-to-window handoff (issue #35): remove it
-    /// exactly like [`AppState::close_tab`], but KEEP its crash log on disk —
-    /// fsynced before returning — so the adopting window can replay the
-    /// unsaved edits through the normal `/api/edit/recover` path. Refused
-    /// with 409 when the tab holds unsaved edits but has no crash log to
-    /// carry them (`--no-cache`, or logging degraded): moving it would
-    /// silently drop the edits, which is exactly what this endpoint exists to
-    /// prevent.
-    pub(super) async fn detach_tab(&self, id: u64) -> Result<(), ApiError> {
-        let _transitions = self.transitions.lock().await;
-        self.invalidate_dirty_snapshot();
-        let cache_root = self.open_opts.cache_dir.clone();
-        let (asides, sync_file) = self.write(|ws| {
-            let Some(idx) = ws.tabs.order.iter().position(|x| *x == id) else {
-                return Err(ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    "no such tab",
-                ));
-            };
-            // Clone the log's file handle before the session (and with it the
-            // live writer) is dropped; a cloned handle syncs the same file.
-            let (dirty, sync_file, recoverable) = if ws.tabs.active == Some(id) {
-                let dirty = ws.doc.as_ref().is_some_and(|d| ws.edits.stats(d).dirty);
-                (
-                    dirty,
-                    ws.edits.wal_sync_file().ok().flatten(),
-                    ws.recoverable,
-                )
-            } else {
-                match ws.tabs.inactive.get(&id) {
-                    Some(t) => (
-                        t.edits.stats(&t.doc).dirty,
-                        t.edits.wal_sync_file().ok().flatten(),
-                        t.recoverable,
-                    ),
-                    None => (false, None, None),
-                }
-            };
-            if dirty && sync_file.is_none() && recoverable.is_none() {
-                return Err(ApiError::new(
-                    StatusCode::CONFLICT,
-                    "conflict",
-                    "unsaved edits have no crash log to hand off",
-                ));
-            }
-            ws.tabs.order.remove(idx);
-            let mut asides = match ws.tabs.inactive.remove(&id) {
-                Some(t) => t.aside_files, // dropping `t` releases its writer handle
-                None => Vec::new(),
-            };
-            if ws.tabs.active == Some(id) {
-                asides.append(&mut ws.aside_files);
-                // Same neighbor-focus dance as close_tab; replacing `edits`
-                // drops the detached session's writer so the log file is free
-                // for the adopting process.
-                let next = ws
-                    .tabs
-                    .order
-                    .get(idx)
-                    .or_else(|| ws.tabs.order.last())
-                    .copied();
-                ws.tabs.active = next;
-                let neighbor = next.and_then(|nid| ws.tabs.inactive.remove(&nid));
-                ws.adopt_tab(neighbor);
-                attach_live_wal(cache_root.as_deref(), ws);
-            }
-            Ok((asides, sync_file))
-        })?;
-        // The handoff contract: the log is durable before the caller spawns
-        // (or signals) the adopting window. Surfaced on failure — proceeding
-        // could hand off a log a power loss would tear.
-        if let Some(f) = sync_file {
-            f.sync_data().map_err(|e| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal",
-                    format!("crash log sync failed: {e}"),
-                )
-            })?;
-        }
-        remove_aside_files(asides);
-        Ok(())
-    }
-
-    /// Snapshot every open tab for the tab bar.
-    pub(super) fn tabs_response(&self) -> TabsResponse {
-        self.read(|ws| {
-            let active = ws.tabs.active;
-            let mut out = Vec::with_capacity(ws.tabs.order.len());
-            for &id in &ws.tabs.order {
-                let (path, dirty) = if Some(id) == active {
-                    match &ws.doc {
-                        Some(d) => (d.path().to_path_buf(), ws.edits.stats(d).dirty),
-                        None => continue,
-                    }
-                } else {
-                    match ws.tabs.inactive.get(&id) {
-                        Some(t) => (t.doc.path().to_path_buf(), t.edits.stats(&t.doc).dirty),
-                        None => continue,
-                    }
-                };
-                // UI-facing path (and the name derived from it): never leak a
-                // Windows verbatim prefix.
-                let path = super::workspace::display_path(&path);
-                out.push(TabInfo {
-                    id,
-                    name: tab_name(&path),
-                    path,
-                    dirty,
-                    active: Some(id) == active,
-                });
-            }
-            TabsResponse { tabs: out }
-        })
-    }
-
     /// The open document, if any (cheap `Arc` clone).
     pub(super) fn doc_opt(&self) -> Option<Shared> {
         self.read(|ws| ws.doc.clone())
@@ -1035,110 +436,6 @@ impl AppState {
         self.open_opts.clone()
     }
 
-    /// Poll the active document for appended data (`tail -f`). When it grew and
-    /// the session has no pending edits, the refreshed document is opened off
-    /// the workspace lock and installed only if the active tab and edit
-    /// revision are still unchanged; a shrink or external replacement reports
-    /// `changed` so the client can reopen. Blocking (stat + mmap + appended-byte
-    /// scan), so
-    /// callers should run it off the async runtime.
-    pub(super) fn poll_tail(&self) -> TailStatus {
-        // Cheap peek under a short read lock: an Arc handle plus whether the
-        // overlay holds edits (we only follow a clean, unedited view — the
-        // overlay's line anchors reference the original document).
-        let snap = self.read(|ws| {
-            ws.doc().map(|doc| TailPollSnapshot {
-                doc: doc.clone(),
-                revision: ws.edits.revision(),
-                has_edits: ws.edits.has_edits(),
-                known_bytes: doc.byte_len(),
-                known_lines: doc.line_count(),
-            })
-        });
-        let Some(snap) = snap else {
-            return TailStatus::closed();
-        };
-        if !snap.doc.path_identity_matches() {
-            let mut status = TailStatus::at(snap.known_lines, snap.known_bytes);
-            status.changed = true;
-            return status;
-        }
-        let disk = match snap.doc.disk_len() {
-            Ok(n) => n,
-            // A stat failure (the file vanished) reads as "changed externally".
-            Err(_) => {
-                let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-                s.changed = true;
-                return s;
-            }
-        };
-        if disk == snap.known_bytes {
-            return TailStatus::at(snap.known_lines, snap.known_bytes);
-        }
-        if disk < snap.known_bytes || snap.known_bytes == 0 {
-            // Shrunk/rotated, or grown from empty (encoding never detected).
-            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-            s.changed = true;
-            return s;
-        }
-        // Growth detected. If edits are pending we do not follow — report it so
-        // the client stops auto-scrolling into a view its overlay predates.
-        if snap.has_edits {
-            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-            s.pending_edits = true;
-            return s;
-        }
-
-        // Clone the sparse index and scan only the current final line plus the
-        // appended bytes. `Document::open` would re-scan the entire file and
-        // create a fresh cache entry for every (len, mtime) pair (#76).
-        let followed = snap.doc.follow_tail();
-        let Ok(Some(new_doc)) = followed else {
-            let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-            s.changed = true;
-            return s;
-        };
-        match new_doc.byte_len().cmp(&snap.known_bytes) {
-            std::cmp::Ordering::Less => {
-                let mut s = TailStatus::at(snap.known_lines, snap.known_bytes);
-                s.changed = true;
-                s
-            }
-            std::cmp::Ordering::Equal => TailStatus::at(snap.known_lines, snap.known_bytes),
-            std::cmp::Ordering::Greater => {
-                let lines = new_doc.line_count();
-                let bytes = new_doc.byte_len();
-                let mut new_doc = Some(new_doc);
-                let status = self.write(|ws| {
-                    let Some(cur) = ws.doc.as_ref() else {
-                        return TailStatus::closed();
-                    };
-                    let unchanged = Arc::ptr_eq(cur, &snap.doc)
-                        && ws.edits.revision() == snap.revision
-                        && !ws.edits.has_edits()
-                        && cur.byte_len() == snap.known_bytes;
-                    if unchanged {
-                        // The appended bytes are now part of the view, so this
-                        // growth is no longer an unseen external change.
-                        ws.set_doc(Some(Arc::new(new_doc.take().unwrap())));
-                        let mut s = TailStatus::at(lines, bytes);
-                        s.grew = true;
-                        return s;
-                    }
-                    let mut s = TailStatus::at(cur.line_count(), cur.byte_len());
-                    if Arc::ptr_eq(cur, &snap.doc) && ws.edits.has_edits() {
-                        s.pending_edits = true;
-                    }
-                    s
-                });
-                if status.grew {
-                    self.invalidate_dirty_snapshot();
-                }
-                status
-            }
-        }
-    }
-
     /// The session's in-flight artifact operations. See the field docs for why
     /// this is per-session rather than a process global.
     pub(super) fn artifact_ops(
@@ -1180,35 +477,6 @@ impl AppState {
             ws.set_doc(None);
             Ok(())
         })
-    }
-
-    /// Whether the active document's file has been written by something other
-    /// than this session. One `stat`; safe to call on every window focus.
-    pub(super) fn disk_check(&self) -> DiskCheckResponse {
-        self.read(|ws| DiskCheckResponse {
-            open: ws.doc.is_some(),
-            changed: ws.disk_changed(),
-        })
-    }
-
-    /// Refuse an overwrite that would bury somebody else's write. The client
-    /// asks the user and retries with `force` when they choose to overwrite
-    /// anyway, so this is a prompt rather than a wall.
-    ///
-    /// Checked with the transitions lock held, right before the swap: a
-    /// client-side check alone would leave a window between the question and
-    /// the answer wide enough for the external writer to land in (#163).
-    pub(super) fn confirm_disk_unchanged(&self) -> Result<(), ApiError> {
-        if self.read(|ws| ws.disk_changed()) {
-            return Err(ApiError::new(
-                StatusCode::CONFLICT,
-                "disk_changed",
-                "this file was changed outside the editor after it was opened — \
-                 saving would overwrite those changes; reload it, or save again \
-                 to overwrite them deliberately",
-            ));
-        }
-        Ok(())
     }
 
     /// The staged bytes reached the target file: the pending edits are now on
@@ -1297,7 +565,7 @@ impl AppState {
         if let Some(e) = reset_err {
             self.note_wal_error(e);
         }
-        let survivors = remove_aside_files(pending);
+        let survivors = cleanup_aside_paths(pending);
         if !survivors.is_empty() {
             self.write(|ws| {
                 let mut kept = survivors;
@@ -1317,28 +585,7 @@ impl AppState {
     /// deleted (its mmap is gone with it). Caller must hold the transitions
     /// lock.
     pub(super) async fn install_reloaded(&self, path: PathBuf) -> Result<(), ApiError> {
-        let opts = self.open_opts.clone();
-        let p = path.clone();
-        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
-            .await
-            .map_err(internal)?
-            .map_err(|e| {
-                bad_request(format!(
-                    "reopening '{}': {e}",
-                    super::workspace::display_path(&path)
-                ))
-            })?;
-        let asides = self.write(|ws| {
-            ws.set_doc(Some(Arc::new(doc)));
-            // Fresh log for the reloaded base (in-place sort commits arrive
-            // here with a just-cleared overlay; the failed-replace restore
-            // path re-snapshots its still-pending edits).
-            attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
-            std::mem::take(&mut ws.aside_files)
-        });
-        remove_aside_files(asides);
-        self.invalidate_dirty_snapshot(); // the doc identity changed
-        Ok(())
+        self.reload(path, None, None, false).await
     }
 
     /// Revert the active document to its last SAVED state: reload from disk
@@ -1369,39 +616,7 @@ impl AppState {
         path: PathBuf,
         snap: Option<&EditSnapshot>,
     ) -> Result<(), ApiError> {
-        let opts = self.open_opts.clone();
-        let p = path.clone();
-        let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
-            .await
-            .map_err(internal)?
-            .map_err(|e| {
-                bad_request(format!(
-                    "reopening '{}': {e}",
-                    super::workspace::display_path(&path)
-                ))
-            })?;
-        let asides = self.write(|ws| {
-            if let Some(snap) = snap {
-                let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
-                if !same_doc || ws.edits.revision() != snap.revision {
-                    return Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        "conflict",
-                        "the document changed while saving — nothing was overwritten; save again",
-                    ));
-                }
-            }
-            ws.set_doc(Some(Arc::new(doc)));
-            ws.edits = EditSession::default();
-            ws.markers = MarkerSession::default();
-            // Reset: a clean session over the file as it now exists on disk
-            // gets a fresh, empty log for the new base identity.
-            attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
-            Ok(std::mem::take(&mut ws.aside_files))
-        })?;
-        remove_aside_files(asides);
-        self.invalidate_dirty_snapshot(); // the doc identity changed
-        Ok(())
+        self.reload(path, None, snap, true).await
     }
 
     /// Reopen `path` as the active document, forcing `enc` instead of detecting
@@ -1415,498 +630,58 @@ impl AppState {
     ) -> Result<(), ApiError> {
         let mut opts = self.open_opts.clone();
         opts.encoding = Some(enc);
+        self.reload(path, Some(opts), None, true).await
+    }
+
+    /// The single reopen/install path. Callers select only the real policy
+    /// differences: an options override, an optional stale-snapshot guard, and
+    /// whether the edit and marker sessions reset with the document.
+    async fn reload(
+        &self,
+        path: PathBuf,
+        opts_override: Option<OpenOptions>,
+        snap: Option<&EditSnapshot>,
+        reset_edits: bool,
+    ) -> Result<(), ApiError> {
+        let forced_encoding = opts_override.as_ref().and_then(|opts| opts.encoding);
+        let opts = opts_override.unwrap_or_else(|| self.open_opts.clone());
         let p = path.clone();
         let doc = tokio::task::spawn_blocking(move || Document::open(&p, &opts))
             .await
             .map_err(internal)?
             .map_err(|e| {
+                let forced = forced_encoding
+                    .map(|encoding| format!(" as {}", encoding.label()))
+                    .unwrap_or_default();
                 bad_request(format!(
-                    "reopening '{}' as {}: {e}",
+                    "reopening '{}'{}: {e}",
                     super::workspace::display_path(&path),
-                    enc.label()
+                    forced
                 ))
             })?;
-        let asides = self.write(|ws| {
+        let asides = self.write(|ws| -> Result<Vec<PathBuf>, ApiError> {
+            if let Some(snap) = snap {
+                let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &snap.doc));
+                if !same_doc || ws.edits.revision() != snap.revision {
+                    return Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "conflict",
+                        "the document changed while saving — nothing was overwritten; save again",
+                    ));
+                }
+            }
             ws.set_doc(Some(Arc::new(doc)));
-            ws.edits = EditSession::default();
-            ws.markers = MarkerSession::default();
-            // The encoding is part of the log's base identity: start a fresh
-            // log recorded against the forced-encoding view.
-            attach_live_wal(self.open_opts.cache_dir.as_deref(), ws);
-            std::mem::take(&mut ws.aside_files)
-        });
-        remove_aside_files(asides);
-        self.invalidate_dirty_snapshot();
+            if reset_edits {
+                ws.edits = EditSession::default();
+                ws.markers = MarkerSession::default();
+            }
+            attach_wal(self.open_opts.cache_dir.as_deref(), ws);
+            Ok(std::mem::take(&mut ws.aside_files))
+        })?;
+        cleanup_aside_paths(asides);
+        self.invalidate_dirty_snapshot(); // the document identity changed
         Ok(())
     }
-
-    /// Open `path` with the workspace's options and make it the active document
-    /// in a brand-new tab. The blocking open/index runs off the async runtime;
-    /// the install itself is one atomic workspace mutation, serialized against
-    /// other transitions. Stale aside files of `path` (crash leftovers from
-    /// any previous session) are swept before opening.
-    ///
-    /// A path that is ALREADY open in some tab focuses that tab instead of
-    /// opening a duplicate — choosing an already-open file means "go to that
-    /// file", the same as every tabbed editor.
-    pub(super) async fn open_path(&self, path: String) -> Result<(), ApiError> {
-        if let Some(id) = self.tab_with_path(Path::new(&path)).await {
-            return self.switch_tab(id).await;
-        }
-        let opts = self.open_opts.clone();
-        let p = path.clone();
-        let (doc, wal_setup) = tokio::task::spawn_blocking(move || {
-            super::workspace::sweep_stale_asides(Path::new(&p));
-            let doc = Document::open(&p, &opts)?;
-            // Detect crash leftovers before any fresh writer can truncate them.
-            // The writer itself is created only after the transition-lock
-            // duplicate recheck below.
-            let wal_setup = wal_prepare_for_open(opts.cache_dir.as_deref(), &doc);
-            Ok::<_, ayame_core::Error>((doc, wal_setup))
-        })
-        .await
-        .map_err(internal)?
-        .map_err(|e| {
-            bad_request(format!(
-                "opening '{}': {e}",
-                super::workspace::strip_verbatim(&path)
-            ))
-        })?;
-        let _transitions = self.transitions.lock().await;
-        let target = doc.path().to_path_buf();
-        let orphaned = self.write(|ws| -> Result<Vec<std::path::PathBuf>, ApiError> {
-            if let Some(id) = ws.tab_with_path_literal(&target) {
-                ws.focus_tab(id, self.open_opts.cache_dir.as_deref())?;
-                return Ok(Vec::new());
-            }
-            Ok(ws.install_new_tab(
-                Arc::new(doc),
-                wal_setup,
-                self.open_opts.cache_dir.as_deref(),
-            ))
-        })?;
-        remove_aside_files(orphaned);
-        self.invalidate_dirty_snapshot(); // a different tab is active now
-        Ok(())
-    }
-
-    /// The tab (if any) whose document is `path`, compared literally first and
-    /// then by canonical path so `C:\x\f.txt` and `\\?\C:\x\f.txt`, or a path
-    /// reached through a symlink, still match. Filesystem calls run off the
-    /// async runtime and never under the workspace lock.
-    async fn tab_with_path(&self, path: &Path) -> Option<u64> {
-        let target = path.to_path_buf();
-        let tabs: Vec<(u64, PathBuf)> = self.read(|ws| {
-            ws.tabs
-                .order
-                .iter()
-                .filter_map(|&id| {
-                    let doc = if ws.tabs.active == Some(id) {
-                        ws.doc.as_ref()
-                    } else {
-                        ws.tabs.inactive.get(&id).map(|t| &t.doc)
-                    }?;
-                    Some((id, doc.path().to_path_buf()))
-                })
-                .collect()
-        });
-        if tabs.is_empty() {
-            return None;
-        }
-        tokio::task::spawn_blocking(move || {
-            let canon = std::fs::canonicalize(&target).ok();
-            tabs.into_iter()
-                .find(|(_, p)| {
-                    *p == target
-                        || canon
-                            .as_deref()
-                            .is_some_and(|c| std::fs::canonicalize(p).is_ok_and(|pc| pc == c))
-                })
-                .map(|(id, _)| id)
-        })
-        .await
-        .ok()
-        .flatten()
-    }
-
-    /// Best-effort deletion of every tracked aside file (all tabs), for the
-    /// graceful-shutdown path. Failures are ignored — mapped files refuse
-    /// deletion on Windows; the on-open sweep collects them next time.
-    pub(super) fn cleanup_aside_files(&self) {
-        let all = self.write(|ws| {
-            let mut v = std::mem::take(&mut ws.aside_files);
-            for tab in ws.tabs.inactive.values_mut() {
-                v.append(&mut tab.aside_files);
-            }
-            v
-        });
-        remove_aside_files(all);
-    }
-
-    /// Graceful-shutdown crash-log policy: CLEAN sessions delete their log
-    /// (nothing to recover; a fresh one is created on the next open), DIRTY
-    /// sessions leave it in place — it is the recovery artifact the next
-    /// process will offer to replay. Undecided recoverable logs stay too.
-    pub(super) fn cleanup_wal_files(&self) {
-        let Some(root) = self.open_opts.cache_dir.clone() else {
-            return;
-        };
-        let dead: Vec<PathBuf> = self.write(|ws| {
-            let mut dead = Vec::new();
-            // Close the live writer first so its file is deletable everywhere.
-            ws.edits.set_wal(None);
-            if let Some(doc) = &ws.doc {
-                if !ws.edits.is_dirty() && ws.recoverable.is_none() {
-                    dead.push(wal::wal_path_for(&root, doc.path()));
-                }
-            }
-            for tab in ws.tabs.inactive.values() {
-                if !tab.edits.is_dirty() && tab.recoverable.is_none() {
-                    dead.push(wal::wal_path_for(&root, tab.doc.path()));
-                }
-            }
-            dead
-        });
-        for p in dead {
-            let _ = std::fs::remove_file(p);
-        }
-    }
-
-    /// One tick of the crash-log policy loop (runs every ~3 s on a dedicated
-    /// thread): fsync the live log so committed transactions also survive
-    /// power loss, compact it past the size threshold, and pick up the
-    /// session's deferred write error for one-shot surfacing via stat.
-    /// Potentially slow sync/stage work happens off the workspace lock; the
-    /// compacted writer is installed only if no edit landed meanwhile.
-    pub(super) fn wal_policy_tick(&self) {
-        /// Compact (header + one overlay snapshot) once the append log grows
-        /// past this many bytes.
-        const WAL_COMPACT_BYTES: u64 = 64 << 20; // 64 MiB
-        if let Some(e) = self.write(|ws| ws.edits.take_wal_error()) {
-            self.note_wal_error(e);
-        }
-        let work = self.read(|ws| {
-            let doc = ws.doc()?.clone();
-            let revision = ws.edits.revision();
-            let sync_file = match ws.edits.wal_sync_file() {
-                Ok(f) => f,
-                Err(e) => return Some(Err((doc, revision, format!("crash log disabled: {e}")))),
-            };
-            let compact = ws
-                .edits
-                .wal_len_bytes()
-                .is_some_and(|n| n > WAL_COMPACT_BYTES)
-                .then(|| {
-                    ws.edits
-                        .wal_compaction_plan()
-                        .map(|p| (ws.edits.clone(), p))
-                })
-                .flatten();
-            Some(Ok(WalPolicyWork {
-                doc,
-                revision,
-                sync_file,
-                compact,
-            }))
-        });
-        let Some(work) = work else { return };
-        let work = match work {
-            Ok(work) => work,
-            Err((doc, revision, e)) => {
-                self.disable_wal_if_unchanged(&doc, revision, e);
-                return;
-            }
-        };
-
-        if let Some(file) = work.sync_file {
-            if let Err(e) = file.sync_data() {
-                self.disable_wal_if_unchanged(
-                    &work.doc,
-                    work.revision,
-                    format!("crash log disabled: {e}"),
-                );
-                return;
-            }
-        }
-
-        let Some((edits, plan)) = work.compact else {
-            return;
-        };
-        let staged = match plan.stage(&edits) {
-            Ok(staged) => staged,
-            Err(e) => {
-                self.disable_wal_if_unchanged(
-                    &work.doc,
-                    work.revision,
-                    format!("crash log disabled: {e}"),
-                );
-                return;
-            }
-        };
-        let err = self.write(|ws| {
-            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &work.doc));
-            if same_doc && ws.edits.revision() == work.revision {
-                ws.edits.wal_install_compaction(staged);
-                ws.edits.take_wal_error()
-            } else {
-                staged.cleanup();
-                None
-            }
-        });
-        if let Some(e) = err {
-            self.note_wal_error(e);
-        }
-    }
-
-    fn disable_wal_if_unchanged(&self, doc: &Shared, revision: u64, error: String) {
-        let err = self.write(|ws| {
-            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, doc));
-            if same_doc && ws.edits.revision() == revision {
-                ws.edits.set_wal(None);
-                Some(error)
-            } else {
-                None
-            }
-        });
-        if let Some(e) = err {
-            self.note_wal_error(e);
-        }
-    }
-
-    /// `/api/edit/recover`: apply — or discard — the crash log detected when
-    /// the active document was opened. Serialized against every doc-slot
-    /// transition; the replay happens OFF the workspace lock into a scratch
-    /// session and is installed only after re-validating that the workspace
-    /// still shows the same pristine document (same `Arc` identity, revision
-    /// 0, no edits), the same discipline as the save commit. Returns the
-    /// post-recovery stats and how many transactions were replayed.
-    pub(super) async fn recover_wal(&self, discard: bool) -> Result<(EditStats, usize), ApiError> {
-        let _transitions = self.transitions.lock().await;
-        let Some(root) = self.open_opts.cache_dir.clone() else {
-            return Err(ApiError::new(
-                StatusCode::CONFLICT,
-                "conflict",
-                "クラッシュログは無効です（キャッシュディレクトリなし）",
-            ));
-        };
-        let doc = self.read(|ws| {
-            let (doc, _) = ws.doc_and_edits()?;
-            if ws.recoverable.is_none() {
-                return Err(ApiError::new(
-                    StatusCode::CONFLICT,
-                    "conflict",
-                    "復元できるクラッシュログはありません".to_string(),
-                ));
-            }
-            Ok(doc.clone())
-        })?;
-        let wal_path = wal::wal_path_for(&root, doc.path());
-
-        if discard {
-            let p = wal_path.clone();
-            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(p)).await;
-            // The doc slot cannot have changed (transitions held); clear the
-            // pending flag and start logging normally from here.
-            return self.write(|ws| {
-                ws.recoverable = None;
-                attach_live_wal(Some(&root), ws);
-                let (doc, edits) = ws.doc_and_edits()?;
-                Ok((edits.stats(doc), 0))
-            });
-        }
-
-        // Replay off-lock into a scratch session over the same document, then
-        // re-arm logging: a fresh log whose first record set (header + one
-        // overlay snapshot) IS the recovered state, so the restored edits are
-        // crash-safe again the moment they are installed.
-        let doc_for_replay = doc.clone();
-        let wal_for_replay = wal_path.clone();
-        let replayed = tokio::task::spawn_blocking(move || {
-            let mut session = EditSession::default();
-            let n = wal::replay(&wal_for_replay, &doc_for_replay, &mut session)?;
-            if let Ok(header) = wal::Header::for_document(&doc_for_replay) {
-                if let Ok(w) = WalWriter::create(&wal_for_replay, header) {
-                    session.set_wal(Some(w));
-                    session.wal_compact();
-                }
-            }
-            Ok::<_, ayame_core::Error>((session, n))
-        })
-        .await
-        .map_err(internal)?
-        .map_err(|e| bad_request(format!("クラッシュログを復元できません: {e}")))?;
-        let (session, n) = replayed;
-
-        let out = self.write(|ws| {
-            let same_doc = ws.doc.as_ref().is_some_and(|d| Arc::ptr_eq(d, &doc));
-            // Edits are the only thing that can race (they don't take the
-            // transitions lock): replaying onto a session that moved on would
-            // clobber the user's typing — reject instead.
-            if !same_doc || ws.edits.revision() != 0 || ws.edits.has_edits() {
-                return Err(ApiError::new(
-                    StatusCode::CONFLICT,
-                    "conflict",
-                    "復元中に編集が入ったため中断しました。ファイルを開き直してください"
-                        .to_string(),
-                ));
-            }
-            ws.recoverable = None;
-            ws.edits = session;
-            // Recovery installs a different logical view whose transactions
-            // have no marker sidecar in the WAL. Keeping pre-recovery line
-            // numbers would silently misplace them, so invalidate safely.
-            ws.markers = MarkerSession::default();
-            ws.markers.sync_change_history(&ws.edits, &doc);
-            let (doc, edits) = ws.doc_and_edits()?;
-            Ok((edits.stats(doc), n))
-        })?;
-        // The view changed without an edit request: drop the find snapshot
-        // (leaf lock, taken with no ws guard held).
-        self.invalidate_dirty_snapshot();
-        Ok(out)
-    }
-}
-
-/// Best-effort deletion of aside files; returns the ones that still exist but
-/// could not be deleted (e.g. mapped on Windows) so the caller can keep
-/// tracking them.
-fn remove_aside_files(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    paths
-        .into_iter()
-        .filter(|p| std::fs::remove_file(p).is_err() && p.exists())
-        .collect()
-}
-
-/// Friendly tab label: "untitled" for scratch buffers, else the file's basename.
-fn tab_name(path: &str) -> String {
-    let basename = Path::new(path)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string());
-    // Current scratch dirs are "ayame-srv-untitled-…"; restored sessions may
-    // still carry the pre-rename "ayame-untitled-<pid>" form.
-    if super::workspace::is_scratch_path(path) {
-        return if basename == "untitled.txt" {
-            "untitled".to_string()
-        } else {
-            basename
-        };
-    }
-    basename
-}
-
-/// How many open files a saved session may carry. Comfortably above any
-/// realistic tab count so restoring ~100 tabs never silently drops the tail.
-const SESSION_MAX_PATHS: usize = 512;
-
-fn clean_path_list(list: Vec<String>, max: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for value in list {
-        let Some(value) = clean_one_string(value) else {
-            continue;
-        };
-        if !out.iter().any(|x| x == &value) {
-            out.push(value);
-        }
-        if out.len() >= max {
-            break;
-        }
-    }
-    out
-}
-
-fn clean_string_list(list: Vec<String>, max: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for value in list {
-        let Some(value) = clean_one_string(value) else {
-            continue;
-        };
-        if !out.iter().any(|x| x == &value) {
-            out.push(value);
-        }
-        if out.len() >= max {
-            break;
-        }
-    }
-    out
-}
-
-fn clean_one_string(value: String) -> Option<String> {
-    let value: String = value
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(4096)
-        .collect();
-    let value = value.trim().to_string();
-    (!value.is_empty()).then_some(value)
-}
-
-/// Result of a `tail -f` poll on the active document. `lines`/`bytes` are the
-/// current totals so the client can grow its scrollbar even when it decides not
-/// to auto-scroll.
-#[derive(Serialize)]
-pub(super) struct TailStatus {
-    /// Whether a file is open at all.
-    open: bool,
-    /// New bytes were appended and the line index was extended in place.
-    grew: bool,
-    /// The file shrank or was replaced externally — the client should reopen.
-    changed: bool,
-    /// Growth was seen but NOT followed because the session has pending edits.
-    pending_edits: bool,
-    lines: u64,
-    bytes: u64,
-}
-
-impl TailStatus {
-    pub(super) fn closed() -> TailStatus {
-        TailStatus {
-            open: false,
-            grew: false,
-            changed: false,
-            pending_edits: false,
-            lines: 0,
-            bytes: 0,
-        }
-    }
-    fn at(lines: u64, bytes: u64) -> TailStatus {
-        TailStatus {
-            open: true,
-            grew: false,
-            changed: false,
-            pending_edits: false,
-            lines,
-            bytes,
-        }
-    }
-}
-
-/// Answer to "has anything else written this file since we read it?" (#163).
-/// Polled by the client when the window regains focus and before an overwrite,
-/// so the user is warned rather than silently burying somebody else's work.
-#[derive(Serialize)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub(super) struct DiskCheckResponse {
-    /// Whether a file is open at all; `changed` is meaningless when false.
-    pub(super) open: bool,
-    /// The file on disk is no longer the one this session last read or wrote.
-    pub(super) changed: bool,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub(super) struct TabInfo {
-    id: u64,
-    name: String,
-    path: String,
-    dirty: bool,
-    active: bool,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub(super) struct TabsResponse {
-    tabs: Vec<TabInfo>,
 }
 
 pub(crate) type SharedState = Arc<AppState>;
@@ -1920,7 +695,7 @@ mod tests {
     fn a_hundred_session_paths_survive_the_cap() {
         // Regression for #52: a ~100-tab session must not be truncated to 64.
         let paths: Vec<String> = (0..100).map(|i| format!("/files/f{i}.txt")).collect();
-        let cleaned = clean_path_list(paths.clone(), SESSION_MAX_PATHS);
+        let cleaned = ui_state::clean_string_list(paths.clone(), ui_state::SESSION_MAX_PATHS);
         assert_eq!(cleaned.len(), 100);
         assert_eq!(cleaned, paths);
     }
@@ -1976,7 +751,7 @@ mod tests {
             ws.tabs.order.push(duplicate_id);
             ws.tabs.inactive.insert(
                 duplicate_id,
-                InactiveTab {
+                tabs::InactiveTab {
                     doc: ws.doc.as_ref().unwrap().clone(),
                     edits: EditSession::default(),
                     markers: MarkerSession::default(),

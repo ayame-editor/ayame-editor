@@ -4,6 +4,13 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Split `serve/state.rs` along its existing responsibilities into tab,
+  crash-WAL policy, UI-state, and tail-follow modules, leaving the documented
+  workspace lock invariants with `AppState` and reducing the core file from
+  2,099 lines to 874. Tab removal/focus and tab-state installation now each
+  have one path, the three reopen variants share one guarded reload routine,
+  persisted string lists share one sanitizer, and upload collision candidates
+  are generated lazily instead of allocating 10,000 paths per upload (#107).
 - Moved the 31 real-router endpoint tests out of `serve/mod.rs` and into a
   dedicated `serve/tests` module, shrinking the production router file from
   2,297 lines to 507. Their raw HTTP client, ephemeral server startup, WAL
