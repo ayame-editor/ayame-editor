@@ -1913,29 +1913,8 @@ pub(crate) type SharedState = Arc<AppState>;
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
+    use super::super::test_support::{scratch_dir, scratch_file_in, wal_opts};
     use super::*;
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ayame-state-test-{}-{}-{name}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn scratch_file(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let path = dir.join(name);
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(bytes).unwrap();
-        path
-    }
 
     #[test]
     fn a_hundred_session_paths_survive_the_cap() {
@@ -1946,17 +1925,10 @@ mod tests {
         assert_eq!(cleaned, paths);
     }
 
-    fn wal_opts(cache: &Path) -> OpenOptions {
-        OpenOptions {
-            cache_dir: Some(cache.to_path_buf()),
-            ..OpenOptions::default()
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_open_of_same_file_installs_one_tab_and_one_wal() {
         let dir = scratch_dir("open-dedup");
-        let path = scratch_file(&dir, "same.txt", b"same\n");
+        let path = scratch_file_in(&dir, "same.txt", b"same\n");
         let cache = dir.join("cache");
         let state = Arc::new(AppState::new(None, wal_opts(&cache)));
 
@@ -1989,7 +1961,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn close_tab_keeps_wal_when_same_wal_path_is_still_open() {
         let dir = scratch_dir("close-wal-guard");
-        let path = scratch_file(&dir, "guard.txt", b"guard\n");
+        let path = scratch_file_in(&dir, "guard.txt", b"guard\n");
         let cache = dir.join("cache");
         let opts = wal_opts(&cache);
         let doc = Document::open(&path, &opts).unwrap();
@@ -2027,9 +1999,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn close_tab_focuses_neighbor_and_removes_asides() {
         let dir = scratch_dir("close-focus-aside");
-        let a = scratch_file(&dir, "a.txt", b"a\n");
-        let b = scratch_file(&dir, "b.txt", b"b\n");
-        let c = scratch_file(&dir, "c.txt", b"c\n");
+        let a = scratch_file_in(&dir, "a.txt", b"a\n");
+        let b = scratch_file_in(&dir, "b.txt", b"b\n");
+        let c = scratch_file_in(&dir, "c.txt", b"c\n");
         let state = AppState::new(
             Some(Document::open(&a, &OpenOptions::default()).unwrap()),
             OpenOptions::default(),
@@ -2076,9 +2048,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn reorder_tab_changes_only_the_visible_order() {
         let dir = scratch_dir("tab-reorder");
-        let a = scratch_file(&dir, "a.txt", b"a\n");
-        let b = scratch_file(&dir, "b.txt", b"b\n");
-        let c = scratch_file(&dir, "c.txt", b"c\n");
+        let a = scratch_file_in(&dir, "a.txt", b"a\n");
+        let b = scratch_file_in(&dir, "b.txt", b"b\n");
+        let c = scratch_file_in(&dir, "c.txt", b"c\n");
         let state = AppState::new(
             Some(Document::open(&a, &OpenOptions::default()).unwrap()),
             OpenOptions::default(),

@@ -875,6 +875,7 @@ mod tests {
     use ayame_core::{Document, OpenOptions};
 
     use super::super::state::AppState;
+    use super::super::test_support::scratch_file;
     use super::*;
 
     #[test]
@@ -888,21 +889,6 @@ mod tests {
         let error = parse_save_encoding("not-an-encoding").unwrap_err();
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
         assert_eq!(error.message(), "unknown encoding 'not-an-encoding'");
-    }
-
-    fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ayame-edit-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!(
-            "{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            name
-        ));
-        std::fs::write(&path, contents).unwrap();
-        path
     }
 
     #[test]

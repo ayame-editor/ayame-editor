@@ -4,6 +4,12 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Moved the 31 real-router endpoint tests out of `serve/mod.rs` and into a
+  dedicated `serve/tests` module, shrinking the production router file from
+  2,297 lines to 507. Their raw HTTP client, ephemeral server startup, WAL
+  options, and parallel-safe scratch fixtures now live in one test-only support
+  module shared with the tests in `state.rs`, `ops.rs`, and `edit.rs`, replacing
+  four independently maintained fixture implementations (#118).
 - Stopped a self-update landing under a running editor from breaking its op
   workers. The server now spawns workers from an executable it fingerprints at
   startup and refuses — with a dedicated `restart_required` error instead of a

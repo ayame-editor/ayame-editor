@@ -1426,27 +1426,10 @@ fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
     use ayame_core::{Encoding, OpenOptions};
 
+    use super::super::test_support::scratch_file;
     use super::*;
-
-    fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ayame-ops-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!(
-            "{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            name
-        ));
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(contents).unwrap();
-        path
-    }
 
     fn command_args(cmd: &Command) -> Vec<String> {
         cmd.as_std()
