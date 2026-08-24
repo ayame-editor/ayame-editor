@@ -51,6 +51,7 @@ describe("AppState boundaries (#122)", () => {
       "runtime",
       "search",
       "settings",
+      "syntax",
       "view",
     ]);
     expect("query" in state).toBe(false);

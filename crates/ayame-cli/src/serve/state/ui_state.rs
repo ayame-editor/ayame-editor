@@ -17,6 +17,20 @@ pub(in crate::serve) struct SessionState {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(in crate::serve) struct SyntaxMapping {
+    pub(in crate::serve) glob: String,
+    pub(in crate::serve) scheme: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(in crate::serve) struct SyntaxOverride {
+    pub(in crate::serve) path: String,
+    pub(in crate::serve) scheme: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(in crate::serve) struct UiState {
     pub(in crate::serve) recent_files: Vec<String>,
     pub(in crate::serve) search_history: Vec<String>,
@@ -31,6 +45,16 @@ pub(in crate::serve) struct UiState {
     pub(in crate::serve) analysis_profiles: Vec<AnalysisProfile>,
     #[serde(default)]
     pub(in crate::serve) active_analysis_profile: Option<String>,
+    /// Distinguishes an intentional empty favorite/mapping list from a state
+    /// written before syntax preferences existed (#244).
+    #[serde(default)]
+    pub(in crate::serve) syntax_configured: bool,
+    #[serde(default)]
+    pub(in crate::serve) syntax_favorites: Vec<String>,
+    #[serde(default)]
+    pub(in crate::serve) syntax_mappings: Vec<SyntaxMapping>,
+    #[serde(default)]
+    pub(in crate::serve) syntax_overrides: Vec<SyntaxOverride>,
 }
 
 impl AppState {
@@ -51,6 +75,7 @@ impl AppState {
         let mut ui: UiState = serde_json::from_slice(&bytes).unwrap_or_default();
         (ui.analysis_profiles, ui.active_analysis_profile) =
             sanitize_persisted_profiles(ui.analysis_profiles, ui.active_analysis_profile);
+        sanitize_syntax_preferences(&mut ui);
         ui
     }
 
@@ -64,6 +89,7 @@ impl AppState {
         }
         (ui.analysis_profiles, ui.active_analysis_profile) =
             sanitize_persisted_profiles(ui.analysis_profiles, ui.active_analysis_profile);
+        sanitize_syntax_preferences(&mut ui);
         let Some(path) = self.ui_state_path() else {
             return Ok(ui);
         };
@@ -117,9 +143,13 @@ impl AppState {
 }
 
 fn clean_string_list(list: Vec<String>, max: usize) -> Vec<String> {
+    clean_bounded_string_list(list, max, 4096)
+}
+
+fn clean_bounded_string_list(list: Vec<String>, max: usize, max_chars: usize) -> Vec<String> {
     let mut out = Vec::new();
     for value in list {
-        let Some(value) = clean_one_string(value) else {
+        let Some(value) = clean_bounded_string(value, max_chars) else {
             continue;
         };
         if !out.iter().any(|x| x == &value) {
@@ -133,10 +163,61 @@ fn clean_string_list(list: Vec<String>, max: usize) -> Vec<String> {
 }
 
 fn clean_one_string(value: String) -> Option<String> {
+    clean_bounded_string(value, 4096)
+}
+
+fn sanitize_syntax_preferences(ui: &mut UiState) {
+    ui.syntax_favorites =
+        clean_bounded_string_list(std::mem::take(&mut ui.syntax_favorites), 32, 64);
+
+    let mut mappings = Vec::new();
+    for mapping in std::mem::take(&mut ui.syntax_mappings) {
+        let Some(glob) = clean_bounded_string(mapping.glob, 256) else {
+            continue;
+        };
+        let Some(scheme) = clean_bounded_string(mapping.scheme, 64) else {
+            continue;
+        };
+        if mappings
+            .iter()
+            .any(|entry: &SyntaxMapping| entry.glob == glob)
+        {
+            continue;
+        }
+        mappings.push(SyntaxMapping { glob, scheme });
+        if mappings.len() >= 64 {
+            break;
+        }
+    }
+    ui.syntax_mappings = mappings;
+
+    let mut overrides = Vec::new();
+    for entry in std::mem::take(&mut ui.syntax_overrides) {
+        let Some(path) = clean_one_string(entry.path) else {
+            continue;
+        };
+        let Some(scheme) = clean_bounded_string(entry.scheme, 64) else {
+            continue;
+        };
+        if overrides
+            .iter()
+            .any(|existing: &SyntaxOverride| existing.path == path)
+        {
+            continue;
+        }
+        overrides.push(SyntaxOverride { path, scheme });
+        if overrides.len() >= 256 {
+            break;
+        }
+    }
+    ui.syntax_overrides = overrides;
+}
+
+fn clean_bounded_string(value: String, max: usize) -> Option<String> {
     let value: String = value
         .chars()
         .filter(|c| !c.is_control())
-        .take(4096)
+        .take(max)
         .collect();
     let value = value.trim().to_string();
     (!value.is_empty()).then_some(value)
@@ -153,5 +234,41 @@ mod tests {
         let cleaned = clean_string_list(paths.clone(), SESSION_MAX_PATHS);
         assert_eq!(cleaned.len(), 100);
         assert_eq!(cleaned, paths);
+    }
+
+    #[test]
+    fn syntax_preferences_are_bounded_and_bad_entries_do_not_break_good_ones() {
+        let mut ui = UiState {
+            syntax_configured: true,
+            syntax_favorites: vec![" rust ".into(), "rust".into(), "json".into()],
+            syntax_mappings: vec![
+                SyntaxMapping {
+                    glob: " *.conf ".into(),
+                    scheme: " nginx ".into(),
+                },
+                SyntaxMapping {
+                    glob: "*.conf".into(),
+                    scheme: "plain".into(),
+                },
+                SyntaxMapping::default(),
+            ],
+            syntax_overrides: vec![
+                SyntaxOverride {
+                    path: " /tmp/app.conf ".into(),
+                    scheme: " nginx ".into(),
+                },
+                SyntaxOverride::default(),
+            ],
+            ..UiState::default()
+        };
+
+        sanitize_syntax_preferences(&mut ui);
+
+        assert_eq!(ui.syntax_favorites, ["rust", "json"]);
+        assert_eq!(ui.syntax_mappings.len(), 1);
+        assert_eq!(ui.syntax_mappings[0].glob, "*.conf");
+        assert_eq!(ui.syntax_mappings[0].scheme, "nginx");
+        assert_eq!(ui.syntax_overrides.len(), 1);
+        assert_eq!(ui.syntax_overrides[0].path, "/tmp/app.conf");
     }
 }

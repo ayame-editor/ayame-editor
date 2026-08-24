@@ -123,6 +123,9 @@
   --analysis-chip-max-w: 28ch;
   --analysis-highlight-stroke: 2px;
   --analysis-tick-w: var(--space-1);
+  --syntax-panel-w: 49rem;
+  --syntax-panel-max-h: 92vh;
+  --syntax-scheme-list-max-h: 16rem;
   --modal-edge: 94vw;
   --modal-body-padding:
     var(--space-3) var(--space-3-5) var(--space-3-5);

@@ -38,7 +38,10 @@ use super::ops::{
     GrepSaveRequest, LineByteResponse, OperationCancelRequest, ReplaceSaveRequest, SearchResponse,
     SortSaveRequest, SplitSaveRequest,
 };
-use super::state::{DiskCheckResponse, SessionState, TabInfo, TabsResponse, TailStatus, UiState};
+use super::state::{
+    DiskCheckResponse, SessionState, SyntaxMapping, SyntaxOverride, TabInfo, TabsResponse,
+    TailStatus, UiState,
+};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest, TabReorderRequest};
 use super::{OpenResponse, StatResponse};
 
@@ -113,6 +116,8 @@ fn bridge() -> Bridge {
         .decl(&decl::<AnalysisNavigateResponse>())
         .decl(&decl::<AnalysisHitsResponse>())
         .decl(&decl::<SessionState>())
+        .decl(&decl::<SyntaxMapping>())
+        .decl(&decl::<SyntaxOverride>())
         .decl(&decl::<UiState>())
         .decl(&decl::<TabInfo>())
         .decl(&decl::<TabsResponse>())

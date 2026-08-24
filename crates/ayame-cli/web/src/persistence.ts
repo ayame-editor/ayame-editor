@@ -16,6 +16,14 @@ import { api, apiPost } from "./api.js";
 import { normalizeAnalysisProfiles } from "./analysis-model.js";
 import type { AnalysisProfile, StatResponse } from "./types/api.js";
 import type { UiState } from "./types/api.js";
+import {
+  defaultSyntaxPreferences,
+  moveSyntaxOverride,
+  normalizeSyntaxPreferences,
+  SYNTAX_PREFERENCES_KEY,
+  syntaxPreferenceJson,
+  type SyntaxPreferences,
+} from "./syntax-preference-model.js";
 
 let sharedUiState: UiState | null = null;
 let sharedUiStateWrites: Promise<void> = Promise.resolve();
@@ -50,6 +58,7 @@ function saveLocalList(key: string, list: unknown, max: number) {
 function normalizeUiState(ui: Partial<UiState> = {}): UiState {
   const analysisProfiles = normalizeAnalysisProfiles(ui.analysis_profiles);
   const active = String(ui.active_analysis_profile || "").trim();
+  const syntax = normalizeSyntaxPreferences(ui);
   return {
     recent_files: cleanList(ui.recent_files, RECENT_MAX),
     search_history: cleanList(ui.search_history, 50),
@@ -62,6 +71,37 @@ function normalizeUiState(ui: Partial<UiState> = {}): UiState {
     active_analysis_profile: analysisProfiles.some((profile) => profile.id === active)
       ? active
       : null,
+    syntax_configured: syntax.configured,
+    syntax_favorites: syntax.favorites,
+    syntax_mappings: syntax.mappings,
+    syntax_overrides: Object.entries(syntax.overrides).map(([path, scheme]) => ({ path, scheme })),
+  };
+}
+
+function localSyntaxPreferences(): SyntaxPreferences {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SYNTAX_PREFERENCES_KEY) || "null");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultSyntaxPreferences();
+    const normalized = normalizeSyntaxPreferences(raw);
+    if (!normalized.configured) return defaultSyntaxPreferences();
+    return {
+      configured: normalized.configured,
+      favorites: normalized.favorites,
+      mappings: normalized.mappings,
+      overrides: normalized.overrides,
+    };
+  } catch {
+    return defaultSyntaxPreferences();
+  }
+}
+
+function syntaxPreferencesFromUiState(ui: UiState): SyntaxPreferences {
+  const normalized = normalizeSyntaxPreferences(ui);
+  return {
+    configured: normalized.configured,
+    favorites: normalized.favorites,
+    mappings: normalized.mappings,
+    overrides: normalized.overrides,
   };
 }
 
@@ -71,6 +111,7 @@ export async function hydrateSharedUiState() {
     const localRecent = localList(RECENT_KEY, RECENT_MAX);
     const localHistory = localList(SEARCH_HISTORY_KEY, 50);
     const localReplaceHistory = localList(REPLACE_HISTORY_KEY, 50);
+    const localSyntax = localSyntaxPreferences();
     let localProfiles: AnalysisProfile[] = [];
     try {
       localProfiles = normalizeAnalysisProfiles(
@@ -79,28 +120,47 @@ export async function hydrateSharedUiState() {
     } catch {
       // ignore malformed local fallback
     }
+    const remoteSyntax = syntaxPreferencesFromUiState(remote);
+    const syntax = remoteSyntax.configured
+      ? remoteSyntax
+      : localSyntax.configured
+        ? localSyntax
+        : defaultSyntaxPreferences();
     const merged = normalizeUiState({
       ...remote,
       recent_files: remote.recent_files.length ? remote.recent_files : localRecent,
       search_history: remote.search_history.length ? remote.search_history : localHistory,
       replace_history: remote.replace_history.length ? remote.replace_history : localReplaceHistory,
       analysis_profiles: remote.analysis_profiles.length ? remote.analysis_profiles : localProfiles,
+      syntax_configured: syntax.configured,
+      syntax_favorites: syntax.favorites,
+      syntax_mappings: syntax.mappings,
+      syntax_overrides: Object.entries(syntax.overrides).map(([path, scheme]) => ({
+        path,
+        scheme,
+      })),
     });
     sharedUiState = merged;
     state.search.history = merged.search_history;
     state.search.replaceHistory = merged.replace_history;
     state.analysis.profiles = merged.analysis_profiles;
     state.analysis.activeProfile = merged.active_analysis_profile;
+    state.syntax = syntaxPreferencesFromUiState(merged);
     if (
       merged.recent_files.length !== remote.recent_files.length ||
       merged.search_history.length !== remote.search_history.length ||
       merged.replace_history.length !== remote.replace_history.length ||
-      merged.analysis_profiles.length !== remote.analysis_profiles.length
+      merged.analysis_profiles.length !== remote.analysis_profiles.length ||
+      merged.syntax_configured !== remote.syntax_configured ||
+      merged.syntax_favorites.length !== remote.syntax_favorites.length ||
+      merged.syntax_mappings.length !== remote.syntax_mappings.length ||
+      merged.syntax_overrides.length !== remote.syntax_overrides.length
     ) {
       await saveSharedUiState(merged);
     }
   } catch {
     sharedUiState = null;
+    state.syntax = localSyntaxPreferences();
   }
 }
 
@@ -211,6 +271,45 @@ export function saveAnalysisProfilesShared(profiles, active) {
       active_analysis_profile: activeId,
     }),
   );
+}
+
+export function saveSyntaxPreferencesShared(preferences: SyntaxPreferences) {
+  const clean = normalizeSyntaxPreferences({ ...preferences, configured: true });
+  state.syntax = {
+    configured: true,
+    favorites: clean.favorites,
+    mappings: clean.mappings,
+    overrides: clean.overrides,
+  };
+  try {
+    localStorage.setItem(
+      SYNTAX_PREFERENCES_KEY,
+      JSON.stringify({ configured: true, ...syntaxPreferenceJson(state.syntax) }),
+    );
+  } catch {
+    // localStorage is only the browser fallback; the server write still runs.
+  }
+  queueSharedUiStateWrite((base) =>
+    normalizeUiState({
+      ...base,
+      syntax_configured: true,
+      syntax_favorites: state.syntax.favorites,
+      syntax_mappings: state.syntax.mappings,
+      syntax_overrides: Object.entries(state.syntax.overrides).map(([path, scheme]) => ({
+        path,
+        scheme,
+      })),
+    }),
+  );
+}
+
+export function migrateSyntaxOverrideShared(oldPath: string, newPath: string) {
+  if (!oldPath || !newPath || oldPath === newPath || !state.syntax.overrides[oldPath]) return false;
+  saveSyntaxPreferencesShared({
+    ...state.syntax,
+    overrides: moveSyntaxOverride(state.syntax.overrides, oldPath, newPath),
+  });
+  return true;
 }
 
 export async function restoreSessionSnapshot(): Promise<StatResponse> {

@@ -3,6 +3,7 @@ import type { ChangeHistoryResponse, LineRecord, SearchHit, StatResponse } from 
 import type { MessageKey } from "./i18n.js";
 import { setLanguagePreferenceReader } from "./locale-preference.js";
 import type { AnalysisMatcher } from "./analysis-model.js";
+import { defaultSyntaxPreferences, type SyntaxPreferences } from "./syntax-preference-model.js";
 import type {
   AnalysisHit,
   AnalysisProfile,
@@ -269,6 +270,7 @@ export interface AppState {
     selectedRule: string | null;
     lastHits: Map<string, AnalysisHit>;
   };
+  syntax: SyntaxPreferences;
   markers: {
     bookmarks: Set<number>;
     bookmarkCount: number;
@@ -351,6 +353,7 @@ export function createInitialState(): AppState {
       selectedRule: null,
       lastHits: new Map<string, AnalysisHit>(),
     },
+    syntax: defaultSyntaxPreferences(),
     // Sparse marker cache for the same range as `view.cache.lines`. It is
     // replaced, not accumulated, on each viewport fetch so edits can never leave
     // stale line-number markers behind.

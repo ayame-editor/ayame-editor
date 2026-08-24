@@ -193,7 +193,7 @@ describe("application chrome", () => {
       expect(button?.getAttribute("aria-label")).toBeTruthy();
       expect(button?.getAttribute("aria-pressed")).toBe("false");
     }
-    for (const id of ["st-enc", "st-eol", "st-fontsize"]) {
+    for (const id of ["st-syntax", "st-enc", "st-eol", "st-fontsize"]) {
       expect(doc.querySelector(`#${id}`)?.getAttribute("aria-label")).toBeTruthy();
     }
     const input = doc.querySelector("#palette-input");
@@ -495,6 +495,7 @@ describe("application chrome", () => {
       ".confirm-panel",
       ".prompt-panel",
       ".form-panel",
+      ".syntax-panel",
     ]) {
       expect(block(selector), selector).toContain("var(--modal-edge)");
     }
@@ -503,6 +504,34 @@ describe("application chrome", () => {
       expect(css).not.toContain(legacyPadding);
     }
     expect(block("#statusbar button.seg-btn")).toMatch(/border:\s*1px solid/);
+  });
+
+  it("exposes syntax selection, favorites, mappings, and import/export from registry UI (#244)", () => {
+    const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
+    expect(doc.querySelector("#statusbar #st-syntax")).not.toBeNull();
+    expect(doc.querySelector("#settings #syntax-manage")).not.toBeNull();
+    for (const id of [
+      "syntax-current",
+      "syntax-search",
+      "syntax-scheme-list",
+      "syntax-mapping-list",
+      "syntax-import",
+      "syntax-export",
+    ]) {
+      expect(doc.querySelector(`#syntax-modal #${id}`), id).not.toBeNull();
+    }
+    const source = read("src/syntax-ui.ts");
+    expect(source).toContain("for (const scheme of SYNTAX_SCHEMES)");
+    expect(source).toContain('$("syntax-current") as HTMLSelectElement).value = scheme.id');
+    const css = read("style.css");
+    for (const token of [
+      "--syntax-panel-w",
+      "--syntax-panel-max-h",
+      "--syntax-scheme-list-max-h",
+    ]) {
+      expect(css).toContain(`${token}:`);
+      expect(css).toContain(`var(${token})`);
+    }
   });
 
   it("keeps inactive bookmark-list states visually hidden (#241)", () => {

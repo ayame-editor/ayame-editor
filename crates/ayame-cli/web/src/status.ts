@@ -5,6 +5,7 @@ import { currentLocale, t } from "./i18n.js";
 import { setAppTitle } from "./app.js";
 import { isKeymapDoc, isThemeDoc } from "./document-kind.js";
 import { encodingLabel } from "./encodings.js";
+import { resolveSyntaxScheme, schemeDefinition } from "./syntax.js";
 
 export function enc(encoding) {
   return encodingLabel(encoding);
@@ -23,6 +24,13 @@ export function eol(lineEnding) {
   );
 }
 
+export function syntaxStatusValue(path: string) {
+  const selection = state.syntax.overrides[path] || "auto";
+  const resolved = resolveSyntaxScheme(path, selection, state.syntax.mappings);
+  const scheme = t(schemeDefinition(resolved || "plain").labelKey);
+  return selection === "auto" ? t("syntax.autoValue", { scheme }) : scheme;
+}
+
 export function updateStatusMeta() {
   const stat = state.doc.stat;
   if (!stat) {
@@ -30,13 +38,14 @@ export function updateStatusMeta() {
     return;
   }
   if (!stat.open) {
-    for (const id of ["st-enc", "st-eol", "st-edit", "st-index"]) {
+    for (const id of ["st-syntax", "st-enc", "st-eol", "st-edit", "st-index"]) {
       $(id).textContent = "—";
     }
     $("st-edit").title = "";
     $("st-index").title = "";
     $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: "—" }));
     $("st-eol").setAttribute("aria-label", t("status.eolValue", { value: "—" }));
+    $("st-syntax").setAttribute("aria-label", t("syntax.statusValue", { value: "—" }));
     $("st-pos").textContent = t("status.line0");
     $("undo-edit").disabled = true;
     $("redo-edit").disabled = true;
@@ -54,6 +63,9 @@ export function updateStatusMeta() {
   const encoding =
     stat.bom_bytes > 0 ? t("status.encWithBom", { enc: enc(stat.encoding) }) : enc(stat.encoding);
   const lineEnding = eol(stat.eol);
+  const syntax = syntaxStatusValue(stat.path);
+  $("st-syntax").textContent = syntax;
+  $("st-syntax").setAttribute("aria-label", t("syntax.statusValue", { value: syntax }));
   $("st-enc").textContent = encoding;
   $("st-enc").setAttribute("aria-label", t("status.encodingValue", { value: encoding }));
   $("st-eol").textContent = lineEnding;

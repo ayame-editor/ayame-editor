@@ -9,7 +9,7 @@ import {
   type SearchHit,
 } from "./api.js";
 import { t } from "./i18n.js";
-import { highlightSpans } from "./syntax.js";
+import { highlightSpans, resolveSyntaxScheme } from "./syntax.js";
 import { analysisRanges } from "./analysis-model.js";
 import { flashCount } from "./notifications.js";
 
@@ -45,6 +45,7 @@ function refreshRowEpoch() {
     state.view.cache,
     state.view.total,
     state.settings,
+    state.syntax,
     state.markers.bookmarks,
     state.markers.changeSaved,
     state.markers.changeUnsaved,
@@ -355,7 +356,10 @@ export function fillRow(row, line, rec) {
     tx.textContent = "⋯";
   } else if (state.search.matcher || state.analysis.matchers.length) {
     appendLayeredHighlighted(tx, rec.text);
-  } else if (state.settings.syntaxHighlight !== false && appendSyntaxHighlighted(tx, rec.text)) {
+  } else if (
+    state.settings.syntaxHighlight !== false &&
+    appendSyntaxHighlighted(tx, rec.text, line)
+  ) {
     // rendered by appendSyntaxHighlighted
   } else if (state.settings.showWhitespace) {
     appendText(tx, rec.text, true);
@@ -734,8 +738,13 @@ export function appendLayeredHighlighted(container, text) {
   }
 }
 
-export function appendSyntaxHighlighted(container, text) {
-  const spans = highlightSpans(text, state.doc.stat?.path || "");
+export function appendSyntaxHighlighted(container, text, line = -1) {
+  const path = state.doc.stat?.path || "";
+  const selection = state.syntax.overrides[path] || "auto";
+  const spans = highlightSpans(text, path, {
+    line,
+    scheme: resolveSyntaxScheme(path, selection, state.syntax.mappings),
+  });
   if (!spans) return false;
   for (let i = 0; i < spans.length; i++) {
     const span = spans[i];

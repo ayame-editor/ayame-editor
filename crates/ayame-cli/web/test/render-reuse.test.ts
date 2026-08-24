@@ -43,6 +43,7 @@ function fixture() {
 
 function loadDocument(lines: string[]) {
   state.settings = { ...DEFAULT_SETTINGS, ruler: false, syntaxHighlight: true };
+  state.syntax = { configured: false, favorites: [], mappings: [], overrides: {} };
   state.view.cache = { start: 0, lines: lines.map((text, number) => ({ number, text })) };
   state.view.total = lines.length;
   state.view.first = 0;
@@ -136,6 +137,14 @@ describe("render row reuse (#142)", () => {
     state.settings = { ...state.settings, showWhitespace: true };
     render();
     expect(rebuiltRows(before, rowFingerprints())).toBeGreaterThan(ROWS);
+  });
+
+  it("rebuilds visible rows when the current tab's manual scheme changes", () => {
+    const before = rowFingerprints();
+    state.syntax = { ...state.syntax, configured: true, overrides: { "/w/app.ts": "plain" } };
+    render();
+    expect(rebuiltRows(before, rowFingerprints())).toBeGreaterThan(ROWS);
+    expect(document.querySelector(".syn-keyword")).toBeNull();
   });
 
   // Rule visibility is toggled in place on one Set, so it is the one shared

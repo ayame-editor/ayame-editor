@@ -40,6 +40,7 @@ import { initMinimap } from "./minimap.js";
 import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest, OpenResponse } from "./types/api.js";
+import { initSyntaxUi } from "./syntax-ui.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -68,6 +69,7 @@ export async function boot() {
   state.search.history = loadSearchHistory();
   initSettings();
   await hydrateSharedUiState();
+  initSyntaxUi();
   state.search.history = loadSearchHistory();
   initAnalysis();
   initCommandPalette();

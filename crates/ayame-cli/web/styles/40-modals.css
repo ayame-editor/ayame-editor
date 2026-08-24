@@ -36,6 +36,7 @@
 .confirm-body,
 .prompt-body,
 .form-body,
+.syntax-body,
 .analysis-body {
   padding: var(--modal-body-padding);
 }

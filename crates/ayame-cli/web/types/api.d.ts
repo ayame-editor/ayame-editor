@@ -264,6 +264,10 @@ export type AnalysisHitsResponse = { rule: string, total_count: bigint, stored_h
 
 export type SessionState = { paths: Array<string>, active_path: string | null, };
 
+export type SyntaxMapping = { glob: string, scheme: string, };
+
+export type SyntaxOverride = { path: string, scheme: string, };
+
 export type UiState = { recent_files: Array<string>, search_history: Array<string>,
 /**
  * Replacement strings the user has committed, newest first — the find
@@ -271,7 +275,12 @@ export type UiState = { recent_files: Array<string>, search_history: Array<strin
  * `#[serde(default)]` so a stored state written before this field is
  * still readable.
  */
-replace_history: Array<string>, session: SessionState, analysis_profiles: Array<AnalysisProfile>, active_analysis_profile: string | null, };
+replace_history: Array<string>, session: SessionState, analysis_profiles: Array<AnalysisProfile>, active_analysis_profile: string | null,
+/**
+ * Distinguishes an intentional empty favorite/mapping list from a state
+ * written before syntax preferences existed (#244).
+ */
+syntax_configured: boolean, syntax_favorites: Array<string>, syntax_mappings: Array<SyntaxMapping>, syntax_overrides: Array<SyntaxOverride>, };
 
 export type TabInfo = { id: bigint, name: string, path: string, dirty: boolean, active: boolean, };
 
