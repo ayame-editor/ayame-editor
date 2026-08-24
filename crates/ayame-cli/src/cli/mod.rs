@@ -123,6 +123,11 @@ SERVE OPTIONS:
                        the editor (unauthenticated read/write access to this
                        machine's files) to the network - trusted networks only
 
+GUI OPTIONS:
+    --line <N>         Open at 1-based line N (-1 means the final line)
+    --column <N>       Open at 1-based Unicode-scalar column N (default 1)
+    --reuse-window     Reuse an existing Ayame window when available
+
 GROUP OPTIONS:
     --value <COL>      Numeric value column for sum/min/max/avg
     --out-groups <FILE>
@@ -214,8 +219,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
     }
 
     #[cfg(feature = "gui")]
-    if should_open_path_in_gui(&cmd) {
-        return crate::gui::cmd_gui(&args).map(|_| 0);
+    if let Some(gui_args) = direct_path_gui_args(&args) {
+        return crate::gui::cmd_gui(&gui_args).map(|_| 0);
     }
 
     let rest = &args[1..];
@@ -241,8 +246,26 @@ fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
 }
 
 #[cfg(feature = "gui")]
-fn should_open_path_in_gui(cmd: &str) -> bool {
-    !commands::is_known(cmd) && std::path::Path::new(cmd).exists()
+fn direct_path_gui_args(args: &[String]) -> Option<Vec<String>> {
+    let cmd = args.first()?;
+    if commands::is_known(cmd) {
+        return None;
+    }
+    if std::path::Path::new(cmd).exists() {
+        return Some(args.to_vec());
+    }
+    let target = crate::launch::existing_path_position(cmd)?;
+    let mut normalized = args.to_vec();
+    normalized[0] = target.path;
+    if !args.iter().any(|arg| arg == "--line") {
+        normalized.push("--line".into());
+        normalized.push(target.position.line.to_string());
+    }
+    if target.position.column != 1 && !args.iter().any(|arg| arg == "--column") {
+        normalized.push("--column".into());
+        normalized.push(target.position.column.to_string());
+    }
+    Some(normalized)
 }
 
 #[cfg(test)]
@@ -316,6 +339,27 @@ mod tests {
                 assert!(seen.insert(name), "{name:?} names two commands");
             }
         }
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn direct_gui_paths_accept_editor_suffixes_without_breaking_literal_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app log.txt");
+        std::fs::write(&path, b"one\ntwo\n").unwrap();
+        let suffixed = format!("{}:2:3", path.display());
+        let args = direct_path_gui_args(&[suffixed]).unwrap();
+        assert_eq!(args[0], path.to_string_lossy());
+        assert!(args.windows(2).any(|pair| pair == ["--line", "2"]));
+        assert!(args.windows(2).any(|pair| pair == ["--column", "3"]));
+
+        let literal = dir.path().join("literal:12");
+        std::fs::write(&literal, b"literal").unwrap();
+        let input = literal.to_string_lossy().into_owned();
+        assert_eq!(
+            direct_path_gui_args(std::slice::from_ref(&input)).unwrap(),
+            [input]
+        );
     }
 
     /// The gap the table cannot close by itself: the option sections of the

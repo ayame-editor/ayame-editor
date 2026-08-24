@@ -83,6 +83,8 @@ cap し、長い処理は専用 endpoint または blocking task に逃がしま
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | workspace と tab management。 |
 | `/api/tail/poll` | 追記ファイルの tail-follow polling。 |
 | `/api/disk/check` | 開いているファイルがエディタ外で書き換えられたか。 |
+| `/api/position/resolve`, `/api/selection/recognize` | server-authoritative deep-link 座標と上限付き path/URL 認識。 |
+| `/api/actions/run` | 確認済み shell-free 外部 tool。出力上限、timeout、cancel を server が管理。 |
 
 ## Web UI
 

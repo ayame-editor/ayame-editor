@@ -140,6 +140,26 @@ ayame <COMMAND> [OPTIONS]
 | `--port <N>` | port。既定は `8777`。 |
 | `--allow-remote` | non-loopback host に必要。認証なしのファイルアクセスをネットワークへ公開します。 |
 
+## Native GUI deep link
+
+Native GUI build は 1-based の行番号と Unicode scalar 列を受け取ります。
+
+```sh
+ayame path/to/app.log --line 12345 --column 67
+ayame gui path/to/app.log --line 12345 --column 67
+ayame path/to/app.log --line -1
+ayame gui 'path/to/app.log:12345:67'
+```
+
+`--line -1` は最後の論理行です。ファイル末尾・行末を越えた座標は、通常のカーソル
+移動と同じ server-side resolver で clamp します。`path:line:column` は右から解析する
+ため、Windows drive letter、UNC path、空白、非 ASCII 名、path 内の colon を保持します。
+数値 suffix を含む literal file が実在する場合は、その file 名を優先します。
+
+`--reuse-window` は opt-in です。起動済み Ayame があれば、per-user cache 内の random
+token で認証した loopback listener へ上限付き typed open request を送ります。URL や
+script の eval は行いません。認証済み window がなければ通常どおり新規 window を開きます。
+
 ## group / top / distinct
 
 | コマンド | オプション |

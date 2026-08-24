@@ -191,6 +191,8 @@ export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["grepFolder", "menu.grep", "Ctrl+Shift+F"],
   ["grepSave", "menu.grepSave", "Ctrl+Alt+G"],
   ["analysisRules", "analysis.title", "Ctrl+Shift+L"],
+  ["externalAction", "externalAction.title", ""],
+  ["openRecognized", "recognition.open", ""],
   ["analysisNext", "analysis.next", ""],
   ["analysisPrevious", "analysis.previous", ""],
   ["analysisCancel", "analysis.cancel", ""],

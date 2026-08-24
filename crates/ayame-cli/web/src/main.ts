@@ -44,6 +44,7 @@ import { initSyntaxUi } from "./syntax-ui.js";
 import { initFolding } from "./fold-actions.js";
 import { initCompletion } from "./completion.js";
 import { initInspector } from "./inspector.js";
+import { gotoLaunchPosition } from "./edits.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -62,6 +63,31 @@ window.__ayameOpenNativePaths = (paths) => {
     }
   })();
 };
+
+window.__ayameReuseOpen = (request) => {
+  if (!request || typeof request !== "object") return;
+  void (async () => {
+    try {
+      if (typeof request.path === "string" && request.path) await openPath(request.path);
+      if (request.position) await gotoLaunchPosition(request.position);
+    } catch (error) {
+      console.error("reuse-window open failed", error);
+      flashCount(t("error.loadError"), "error");
+    }
+  })();
+};
+
+async function applyPendingLaunchPosition() {
+  const position = window.__ayamePendingPosition;
+  delete window.__ayamePendingPosition;
+  if (!position) return;
+  try {
+    await gotoLaunchPosition(position);
+  } catch (error) {
+    console.error("launch position failed", error);
+    flashCount(t("error.loadError"), "error");
+  }
+}
 
 export async function boot() {
   initApp();
@@ -109,6 +135,7 @@ export async function boot() {
       // tab's crash log replays silently instead of prompting.
       if (window.__ayamePendingRecover) expectWalHandoff(pending);
       onDocumentOpened(await apiPost<OpenResponse, OpenRequest>("/api/open", { path: pending }));
+      await applyPendingLaunchPosition();
     } catch (e) {
       flashCount(t("error.cannotOpen", { msg: pending }), "error");
       console.error(e);
@@ -144,6 +171,7 @@ export async function boot() {
     // A document passed on the command line goes through refreshStat, not
     // onDocumentOpened — offer its crash recovery here.
     maybeOfferWalRecovery(state.doc.stat);
+    await applyPendingLaunchPosition();
   }
   postNativeMessage({ type: "ready" });
 }

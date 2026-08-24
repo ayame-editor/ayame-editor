@@ -181,6 +181,10 @@
                     title="複数の検索ルールで巨大ログを段階分析します" data-i18n-title="analysis.menuTitle">
               <span class="menu-label" data-i18n="analysis.title">ログ分析ルール</span><span class="menu-key" data-key-action="analysisRules">Ctrl+Shift+L</span>
             </button>
+            <button class="menu-item" data-menu-action="externalAction" role="menuitem"
+                    title="シェルを介さず、確認済みの外部分析ツールを実行します" data-i18n-title="externalAction.menuTitle">
+              <span class="menu-label" data-i18n="externalAction.title">外部分析アクション</span><span class="menu-key" data-key-action="externalAction"></span>
+            </button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="sortSave" role="menuitem"
                     title="行単位で並び替えた結果を一時ファイルに作成し、新しいタブで開きます" data-i18n-title="menu.sortTitle">
@@ -898,6 +902,8 @@
          items disable themselves; 選択箇所をファイルに保存 streams server-side
          so it is not limited by the clipboard cap. -->
     <div id="ctx-menu" class="file-menu ctx-menu hidden" role="menu" aria-label="コンテキストメニュー" data-i18n-aria-label="ctx.menu">
+      <button class="menu-item" data-ctx="openRecognized" role="menuitem"><span class="menu-label" data-i18n="recognition.open">選択したパスまたは URL を開く</span><span class="menu-key" data-key-action="openRecognized"></span></button>
+      <div class="menu-sep" aria-hidden="true"></div>
       <button class="menu-item" data-ctx="cut" role="menuitem"><span class="menu-label" data-i18n="menu.cut">切り取り</span><span class="menu-key" data-key-action="cut">Ctrl+X</span></button>
       <button class="menu-item" data-ctx="copy" role="menuitem"><span class="menu-label" data-i18n="menu.copy">コピー</span><span class="menu-key" data-key-action="copy">Ctrl+C</span></button>
       <button class="menu-item" data-ctx="paste" role="menuitem"><span class="menu-label" data-i18n="menu.paste">貼り付け</span><span class="menu-key" data-key-action="paste">Ctrl+V</span></button>

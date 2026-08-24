@@ -181,6 +181,35 @@ panel also shows a swatch and color picker. Applying a color preserves the
 prefix, letter case, and alpha placement; shorthand expands only when retaining
 it would lose the selected RGB/alpha precision.
 
+## External Analysis Actions and Recognized Targets
+
+Choose `Tools` -> `External Analysis Action` to run a configured executable.
+Arguments are a JSON string array, not a shell command. Ayame calls the
+executable directly, so spaces, semicolons, quotes, and other shell characters
+inside a path stay inside one argument. The confirmation dialog always shows
+the executable and complete argument array before the run. Repository settings
+are never imported or trusted implicitly, and Ayame does not generate or run
+scripts automatically; any script must be selected and approved explicitly.
+
+Available placeholders are `{file}`, `{dir}`, `{line}`, `{column}`,
+`{selection_file}`, and `{snapshot_file}`. Input can be the saved file, one
+fixed generation of the current dirty snapshot, or the selection on stdin / in
+a private temporary file. Output can be shown as a result, inserted into a new
+temporary tab, or written to a user-entered path. `stdout`, `stderr`, exit code,
+and duration are reported separately. Timeout and the combined output cap are
+enforced by the server; Cancel and timeout terminate the process tree, and
+private snapshots/selections are removed afterward. Child processes inherit
+Ayame's environment, but environment values and secrets are not displayed or
+written to the UI log.
+
+Ayame also recognizes a bounded selected token as an existing file/folder or an
+`http`/`https` URL. Use the editor context menu, the bindable `Open Selected
+Path or URL` action, or Ctrl+Click. The same confirmation and allowlist apply to
+all three paths. Files may include a `:line:column` suffix. Other URL schemes,
+including `javascript:`, `data:`, and `file:`, are rejected. In the native app,
+folders open in the platform file manager; the browser build only displays the
+resolved folder because browsers cannot safely reveal arbitrary local paths.
+
 ## Default Shortcuts
 
 `Ctrl` can be entered as `Cmd` on macOS. Shortcuts can be changed from `Edit`

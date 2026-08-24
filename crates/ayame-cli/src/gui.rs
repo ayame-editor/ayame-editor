@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
@@ -26,7 +26,31 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // `--recover` is internal: a window spawned by a dirty-tab handoff (issue
     // #35) passes it so the page replays the detached tab's crash log without
     // the crash-recovery prompt.
-    let (pos, opts, flags) = parse_for("gui", args)?;
+    let (mut pos, mut opts, flags) = parse_for("gui", args)?;
+    // `ayame gui path:line:column` follows the same conservative rule as the
+    // direct `ayame path:line:column` form: only split when the literal name
+    // does not exist and the suffix-free path does.
+    if !opts.contains_key("--line") && !opts.contains_key("--column") {
+        if let Some(target) = pos
+            .first()
+            .and_then(|path| crate::launch::existing_path_position(path))
+        {
+            pos[0] = target.path;
+            opts.insert("--line".into(), target.position.line.to_string());
+            if target.position.column != 1 {
+                opts.insert("--column".into(), target.position.column.to_string());
+            }
+        }
+    }
+    let launch_position = crate::launch::from_options(&opts)?;
+    if launch_position.is_some() && pos.is_empty() {
+        bail!("--line/--column requires a FILE");
+    }
+    if has_flag(&flags, &["--reuse-window"])
+        && crate::reuse::try_forward(pos.first().map(String::as_str), launch_position)?
+    {
+        return Ok(());
+    }
     let recover_pending = has_flag(&flags, &["--recover"]);
     let title = initial_window_title(&pos);
 
@@ -34,7 +58,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     // /api/open) so the window appears immediately instead of after the first
     // index build of a huge file. Explicit open options (--encoding etc.)
     // still take the synchronous path because /api/open does not carry them.
-    let async_open = !pos.is_empty() && opts.is_empty();
+    let launch_only = opts
+        .keys()
+        .all(|option| matches!(option.as_str(), "--line" | "--column"));
+    let async_open = !pos.is_empty() && launch_only;
     let state = if async_open {
         let no_file: Vec<String> = Vec::new();
         Arc::new(crate::serve::build_state(&no_file, &opts, &flags)?)
@@ -58,6 +85,10 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
 
     let event_loop = EventLoopBuilder::<GuiEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let reuse_proxy = proxy.clone();
+    let reuse_registration = crate::reuse::start(move |request| {
+        reuse_proxy.send_event(GuiEvent::ReuseOpen(request)).is_ok()
+    });
     let ipc_proxy = proxy.clone();
     // Created hidden: the page reveals it with a "ready" IPC event (fallback timer
     // below), which removes the white flash before first paint.
@@ -82,26 +113,28 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
     };
     let window = builder.build(&event_loop).context("creating window")?;
 
-    let init_script = match &pending_open {
-        Some(p) => {
-            // Absolute-ize so the server resolves the path regardless of cwd.
-            // The Windows verbatim prefix canonicalize adds is stripped so it
-            // never surfaces in tab tooltips or save dialogs.
-            let abs = std::fs::canonicalize(p)
-                .map(|x| crate::serve::workspace::display_path(&x))
-                .unwrap_or_else(|_| p.clone());
-            let recover_js = if recover_pending {
-                "window.__ayamePendingRecover = true;"
-            } else {
-                ""
-            };
-            format!(
-                "window.__ayamePendingOpen = {};{recover_js}",
-                serde_json::to_string(&abs).unwrap_or_else(|_| "\"\"".into())
-            )
-        }
-        None => String::new(),
-    };
+    let mut init_script = String::new();
+    if let Some(p) = &pending_open {
+        // Absolute-ize so the server resolves the path regardless of cwd.
+        // The Windows verbatim prefix canonicalize adds is stripped so it
+        // never surfaces in tab tooltips or save dialogs.
+        let abs = std::fs::canonicalize(p)
+            .map(|x| crate::serve::workspace::display_path(&x))
+            .unwrap_or_else(|_| p.clone());
+        let recover_js = if recover_pending {
+            "window.__ayamePendingRecover = true;"
+        } else {
+            ""
+        };
+        init_script.push_str(&format!(
+            "window.__ayamePendingOpen = {};{recover_js}",
+            serde_json::to_string(&abs).unwrap_or_else(|_| "\"\"".into())
+        ));
+    }
+    if let Some(position) = launch_position {
+        let json = serde_json::to_string(&position).unwrap_or_else(|_| "null".into());
+        init_script.push_str(&format!("window.__ayamePendingPosition = {json};"));
+    }
 
     // Pin the webview's profile data to our platform cache directory. Without
     // this, WebView2 on Windows drops an `ayame.exe.WebView2` folder next to
@@ -198,6 +231,7 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
         };
         let _ = &webview;
         let _ = &web_context; // keep the webview profile directory binding alive
+        let _ = &reuse_registration; // owns the authenticated rendezvous file
         #[cfg(target_os = "macos")]
         let _ = &macos_menu;
         match event {
@@ -339,6 +373,30 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                     let _ = webview.evaluate_script(&js);
                 }
             }
+            Event::UserEvent(GuiEvent::OpenExternalUrl(url)) => {
+                if let Err(error) = open_external_url(&url) {
+                    eprintln!("ayame: opening external URL failed: {error:#}");
+                }
+            }
+            Event::UserEvent(GuiEvent::RevealPath(path)) => {
+                if let Err(error) = reveal_path(&path) {
+                    eprintln!("ayame: revealing path failed: {error:#}");
+                }
+            }
+            Event::UserEvent(GuiEvent::ReuseOpen(request)) => {
+                window.set_visible(true);
+                window.set_minimized(false);
+                window.set_focus();
+                let payload = serde_json::json!({
+                    "path": request.path,
+                    "position": request.position,
+                });
+                if let Ok(json) = serde_json::to_string(&payload) {
+                    let _ = webview.evaluate_script(&format!(
+                        "window.__ayameReuseOpen && window.__ayameReuseOpen({json});"
+                    ));
+                }
+            }
             Event::UserEvent(GuiEvent::NewWindow) => {
                 spawn_new_window();
             }
@@ -410,6 +468,9 @@ enum GuiEvent {
     UpdateInstalled(crate::UpdateInstallReport),
     UpdateInstallFailed(String),
     OpenPaths(Vec<String>),
+    OpenExternalUrl(String),
+    RevealPath(String),
+    ReuseOpen(crate::reuse::ReuseOpenRequest),
     /// The page (Ctrl+Shift+N, rebindable) asked for a fresh window.
     NewWindow,
     NewWindowPath(String),
@@ -440,6 +501,8 @@ enum IpcMessage {
     NewWindowPath { path: String, recover: bool },
     PickSave { dir: String, name: String },
     PickOpen { dir: String },
+    OpenExternalUrl { url: String },
+    RevealPath { path: String },
     MenuConfig { items: Vec<NativeMenuItemConfig> },
 }
 
@@ -563,6 +626,18 @@ fn decode_ipc_message(body: &str) -> serde_json::Result<Option<GuiEvent>> {
         IpcMessage::NewWindowPath { path, .. } => GuiEvent::NewWindowPath(path),
         IpcMessage::PickSave { dir, name } => GuiEvent::PickSave(PickSaveRequest { dir, name }),
         IpcMessage::PickOpen { dir } => GuiEvent::PickOpen(PickOpenRequest { dir }),
+        IpcMessage::OpenExternalUrl { url } => {
+            let Some(url) = validate_external_url(&url) else {
+                return Ok(None);
+            };
+            GuiEvent::OpenExternalUrl(url)
+        }
+        IpcMessage::RevealPath { path } => {
+            let Some(path) = validate_reveal_path(&path) else {
+                return Ok(None);
+            };
+            GuiEvent::RevealPath(path)
+        }
         IpcMessage::MenuConfig { items } => GuiEvent::MenuConfig(normalize_menu_config(items)),
     };
     Ok(Some(event))
@@ -637,6 +712,21 @@ mod pure_tests {
         assert_eq!(clean_window_title("").len(), "Ayame Editor".len());
         assert_eq!(clean_window_title("   "), "Ayame Editor");
         assert_eq!(clean_window_title(&"x".repeat(1000)).chars().count(), 256);
+    }
+
+    #[test]
+    fn native_external_targets_are_revalidated() {
+        assert_eq!(
+            validate_external_url("https://example.test/path"),
+            Some("https://example.test/path".to_string())
+        );
+        assert!(validate_external_url("javascript:alert(1)").is_none());
+        assert!(validate_external_url("data:text/plain,hello").is_none());
+        assert!(validate_external_url("https://example.test/\nattack").is_none());
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert!(validate_reveal_path(&file.path().to_string_lossy()).is_some());
+        assert!(validate_reveal_path("/definitely/not/an/ayame/path").is_none());
     }
 
     #[test]
@@ -844,6 +934,10 @@ mod ipc_tests {
             GuiEvent::SetTitle(title) => assert_eq!(title, "draft"),
             other => panic!("unexpected event: {other:?}"),
         }
+        match event(r#"{"type":"open_external_url","url":"https://example.test/a:b"}"#) {
+            GuiEvent::OpenExternalUrl(url) => assert_eq!(url, "https://example.test/a:b"),
+            other => panic!("unexpected event: {other:?}"),
+        }
         match event(
             r#"{"type":"menu_config","items":[{"id":"find","label":"Find\u0000","shortcut":"Ctrl+Shift+F"},{"id":"***","label":"bad","shortcut":""},{"id":"empty","label":"\u0000","shortcut":""}]}"#,
         ) {
@@ -870,6 +964,16 @@ mod ipc_tests {
         );
         assert!(decode_ipc_message(r#"{"type":"menu_config","items":{}}"#).is_err());
         assert!(decode_ipc_message(r#"{"type":"not_a_message"}"#).is_err());
+        assert!(
+            decode_ipc_message(r#"{"type":"open_external_url","url":"javascript:alert(1)"}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            decode_ipc_message(r#"{"type":"reveal_path","path":"/missing/ayame/path"}"#)
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -993,6 +1097,93 @@ fn file_dialog(dir: &str) -> rfd::FileDialog {
         dlg = dlg.set_directory(dir);
     }
     dlg
+}
+
+fn validate_external_url(value: &str) -> Option<String> {
+    if value.chars().count() > 4096 || value.chars().any(char::is_control) {
+        return None;
+    }
+    let url = url::Url::parse(value).ok()?;
+    (matches!(url.scheme(), "http" | "https") && url.host().is_some()).then(|| url.to_string())
+}
+
+fn validate_reveal_path(value: &str) -> Option<String> {
+    if value.chars().count() > 4096 || value.chars().any(char::is_control) {
+        return None;
+    }
+    let path = std::fs::canonicalize(value).ok()?;
+    path.exists()
+        .then(|| crate::serve::workspace::display_path(&path))
+}
+
+fn open_external_url(value: &str) -> Result<()> {
+    let url = validate_external_url(value).context("URL is not an allowed http/https target")?;
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("rundll32.exe");
+        command.arg("url.dll,FileProtocolHandler").arg(url);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(url);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("starting the platform URL opener")?;
+    Ok(())
+}
+
+fn reveal_path(value: &str) -> Result<()> {
+    let clean = validate_reveal_path(value).context("path does not exist or is not allowed")?;
+    let path = PathBuf::from(&clean);
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("explorer.exe");
+        if path.is_file() {
+            command.arg(format!("/select,{}", path.to_string_lossy()));
+        } else {
+            command.arg(&path);
+        }
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        if path.is_file() {
+            command.arg("-R");
+        }
+        command.arg(&path);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(if path.is_dir() {
+            path.as_path()
+        } else {
+            path.parent().unwrap_or_else(|| Path::new("."))
+        });
+        command
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("starting the platform file manager")?;
+    Ok(())
 }
 
 /// Open a new editor window: spawn a fresh, detached `<installed-exe> gui`
@@ -1304,6 +1495,25 @@ fn build_macos_menu(locale: UiLocale, config: Option<&NativeMenuConfig>) -> Opti
         label("section.tools", "ツール", "Tools"),
         true,
         &[
+            &item(
+                "analysisRules",
+                "ログ分析ルール",
+                "Log Analysis Rules",
+                None,
+            ),
+            &item(
+                "externalAction",
+                "外部分析アクション",
+                "External Analysis Action",
+                None,
+            ),
+            &item(
+                "openRecognized",
+                "選択したパスまたは URL を開く",
+                "Open Selected Path or URL",
+                None,
+            ),
+            &PredefinedMenuItem::separator(),
             &item("sortSave", "ソート", "Sort", None),
             &item("splitFile", "ファイルを分割", "Split File", None),
             &item("grepFolder", "フォルダ内検索", "Grep Folder", None),

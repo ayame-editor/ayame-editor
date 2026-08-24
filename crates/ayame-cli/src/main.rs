@@ -15,6 +15,9 @@ mod gui;
 // Compiled (and unit-tested) in every build, but only the gui build draws it.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod icon;
+mod launch;
+#[cfg(feature = "gui")]
+mod reuse;
 mod serve;
 mod temp_paths;
 mod worker;

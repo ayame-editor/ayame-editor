@@ -1186,3 +1186,24 @@ export function gotoLine(n) {
   revealLine(line);
   focusEditor();
 }
+
+// Native/CLI deep link. Coordinate validation, EOF resolution and clamping
+// live on the server so every encoding and huge logical line number follows
+// one conversion path. Only resolved editor-native coordinates cross back.
+export async function gotoLaunchPosition(position) {
+  if (!position || !Number.isSafeInteger(position.line) || !Number.isSafeInteger(position.column)) {
+    return;
+  }
+  const resolved = await apiPost<
+    { line: number; column: number; truncated: boolean },
+    { line: number; column: number }
+  >("/api/position/resolve", position);
+  const page = await api<LinesResponse>(`/api/lines?start=${resolved.line}&count=1`);
+  cacheLineResponse(resolved.line, page);
+  const available = charLenOf(page.lines[0]?.text ?? "");
+  setSelection(null);
+  setCaret(resolved.line, resolved.column, available);
+  revealLine(resolved.line);
+  render();
+  focusEditor();
+}

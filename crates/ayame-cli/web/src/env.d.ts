@@ -17,6 +17,13 @@ declare global {
     __ayameMenu?: (action: string) => void;
     /** Native launch-with-file: path to open once the UI is ready. */
     __ayamePendingOpen?: string;
+    /** Native launch caret using the documented 1-based coordinates. */
+    __ayamePendingPosition?: { line: number; column: number };
+    /** Authenticated native instance → page open request (--reuse-window). */
+    __ayameReuseOpen?: (request: {
+      path?: string | null;
+      position?: { line: number; column: number } | null;
+    }) => void;
     /** Set alongside __ayamePendingOpen by a dirty-tab handoff (issue #35):
      *  replay the path's detached crash log without the crash prompt. */
     __ayamePendingRecover?: boolean;

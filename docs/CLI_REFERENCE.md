@@ -141,6 +141,28 @@ Default split files use `<stem>.partNNNN<.ext>` names.
 | `--port <N>` | Port. Default: `8777`. |
 | `--allow-remote` | Required for non-loopback hosts. This exposes unauthenticated file access to the network. |
 
+## Native GUI Deep Links
+
+Native GUI builds accept 1-based line and Unicode-scalar column coordinates:
+
+```sh
+ayame path/to/app.log --line 12345 --column 67
+ayame gui path/to/app.log --line 12345 --column 67
+ayame path/to/app.log --line -1
+ayame gui 'path/to/app.log:12345:67'
+```
+
+`--line -1` means the final logical line. Coordinates past the file or line are
+clamped by the same server-side resolver used by ordinary caret navigation.
+The `path:line:column` parser works from the right, preserving Windows drive
+letters, UNC paths, spaces, non-ASCII names, and colons inside a path. A real
+file whose literal name ends in a numeric suffix wins over suffix parsing.
+
+`--reuse-window` is opt-in. When an Ayame window is already running, the new
+invocation sends a bounded typed open request through a loopback listener
+authenticated by a random token in the per-user cache; no URL or script is
+evaluated. If no authenticated window is available, a new one opens normally.
+
 ## Group, Top, Distinct
 
 | Command | Options |

@@ -5,6 +5,7 @@ import { coordsFromEvent, focusEditor, scheduleRender, setCaret, setSelection } 
 import { hasTextSelection, posInsideSelection, saveSelectionToFile } from "./selection.js";
 import { anyModalOpen } from "./modal-state.js";
 import { runMenuAction } from "./menu-actions.js";
+import { openRecognizedSelection } from "./recognition.js";
 
 export function ctxMenuVisible() {
   return !$("ctx-menu").classList.contains("hidden");
@@ -18,6 +19,7 @@ export function runCtxAction(action) {
   hideCtxMenu();
   let out;
   if (action === "saveSelection") out = saveSelectionToFile();
+  else if (action === "openRecognized") out = openRecognizedSelection();
   else out = runMenuAction(action);
   return Promise.resolve(out).finally(() => {
     if (!anyModalOpen() && !state.search.findOpen) focusEditor();
