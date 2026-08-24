@@ -103,6 +103,10 @@ export type BrowseResponse = { dir: string, parent: string | null, entries: Arra
 
 export type LinesResponse = { start: bigint, total: bigint, lines: Array<EditLine>, markers: Array<LineMarker>, };
 
+export type CompletionRequest = { prefix: string, deadline_ms: bigint | null, };
+
+export type CompletionResponse = { candidates: Array<string>, scanned_lines: bigint, scanned_bytes: number, complete: boolean, timed_out: boolean, truncated: boolean, revision: bigint, };
+
 export type FindResponse = { hit: SearchHit | null, };
 
 export type SearchResponse = { hits: Array<SearchHit>, truncated: boolean, };

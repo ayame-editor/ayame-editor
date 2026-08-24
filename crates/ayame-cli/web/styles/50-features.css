@@ -61,6 +61,43 @@
 #apply-theme.hidden,
 #apply-keymap.hidden { display: none; }
 
+/* ---- bounded document-word completion ----------------------------------- */
+.completion-popup {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: var(--z-find);
+  min-width: 20ch;
+  max-width: calc(100% - var(--space-4));
+  max-height: calc(12 * var(--lh-editor) + var(--space-6));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-editor);
+  line-height: var(--lh-editor);
+}
+.completion-popup.hidden { display: none; }
+.completion-option,
+.completion-status {
+  overflow: hidden;
+  padding: var(--space-0-5) var(--space-2);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.completion-option { cursor: pointer; }
+.completion-option[aria-selected="true"] {
+  background: var(--mark-bg);
+  color: var(--mark-fg);
+}
+.completion-status {
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+}
+
 .keymap-panel { width: min(620px, var(--modal-edge)); }
 .keymap-body {
   display: flex;

@@ -32,6 +32,7 @@ use crate::{first_opt, has_flag, open_opts, parse_for};
 
 mod analysis;
 mod assets;
+mod completion;
 mod edit;
 mod error;
 mod markers;
@@ -184,6 +185,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
                 )),
         )
         .route("/api/lines", get(edit::api_lines))
+        .route("/api/completion", post(completion::api_completion))
         .route(
             "/api/edit/replace_range",
             post(edit::api_edit_replace_range),

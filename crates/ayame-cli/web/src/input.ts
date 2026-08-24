@@ -52,6 +52,7 @@ import {
   pasteText,
   redoEdit,
   setFollowTail,
+  typeAssistedText,
   typeText,
   undoEdit,
 } from "./edits.js";
@@ -85,6 +86,7 @@ import { isWordChar } from "./text.js";
 import { anyModalOpen, closeTopModal, initModalRegistry, registerModal } from "./modal-state.js";
 import { encodingSupportsBom, populateEncodingSelect } from "./encodings.js";
 import { logicalLineAtVisible, visibleIndexForLine } from "./fold-state.js";
+import { handleCompletionKey, hideCompletion, showAutomaticCompletion } from "./completion.js";
 
 export { anyModalOpen };
 
@@ -142,6 +144,7 @@ export function initEvents() {
   vp.addEventListener(
     "wheel",
     (e) => {
+      hideCompletion();
       if (e.ctrlKey || e.metaKey) {
         // Ctrl/Cmd + wheel changes the one persisted editor font-size value.
         e.preventDefault();
@@ -298,6 +301,7 @@ export function onGlobalKey(e) {
   if (action) {
     e.preventDefault();
     hideFileMenu();
+    if (action !== "showCompletion") hideCompletion();
     runAction(action);
   }
 }
@@ -370,6 +374,7 @@ export function onEditKey(e) {
     flashCount(t("editor.savingWait"));
     return;
   }
+  if (handleCompletionKey(e)) return;
   const mod = e.ctrlKey || e.metaKey;
   const shift = e.shiftKey;
   const c = state.caret.position;
@@ -519,7 +524,7 @@ export function onEditKey(e) {
 }
 
 export function onBeforeInput(e) {
-  if (state.caret.composing) return; // composition text is committed on compositionend
+  if (state.caret.composing || e.isComposing) return; // committed only on compositionend
   if (anyModalOpen()) {
     e.preventDefault();
     return;
@@ -527,29 +532,38 @@ export function onBeforeInput(e) {
   switch (e.inputType) {
     case "insertText":
       e.preventDefault();
-      if (e.data != null) typeText(e.data);
+      if (e.data != null) {
+        void Promise.resolve(typeAssistedText(e.data)).then(() => {
+          if (!state.caret.composing) showAutomaticCompletion();
+        });
+      }
       break;
     case "insertLineBreak":
     case "insertParagraph":
       e.preventDefault();
+      hideCompletion();
       insertNewline();
       break;
     case "deleteContentBackward":
     case "deleteSoftLineBackward":
       e.preventDefault();
+      hideCompletion();
       backspace();
       break;
     case "deleteWordBackward":
       e.preventDefault();
+      hideCompletion();
       deleteWordBack();
       break;
     case "deleteContentForward":
     case "deleteSoftLineForward":
       e.preventDefault();
+      hideCompletion();
       forwardDelete();
       break;
     case "deleteWordForward":
       e.preventDefault();
+      hideCompletion();
       deleteWordFwd();
       break;
     case "insertFromPaste":
@@ -563,10 +577,12 @@ export function onBeforeInput(e) {
 export function onPaste(e) {
   const text = (e.clipboardData || window.clipboardData)?.getData("text") ?? "";
   e.preventDefault();
+  hideCompletion();
   if (text) pasteText(text);
 }
 
 export function onCompStart() {
+  hideCompletion();
   state.caret.composing = true;
   $("hidden-input").classList.add("composing");
   positionCaret();

@@ -546,14 +546,22 @@ impl Document {
     /// Like [`Document::line`], but also reports whether the text was cut at
     /// the view cap.
     pub fn line_view(&self, i: u64) -> Option<(String, bool)> {
+        self.line_view_capped(i, Self::MAX_VIEW_LINE_BYTES)
+    }
+
+    /// Decode at most `max_bytes` raw bytes of line `i`.  Callers with a
+    /// smaller fixed budget (for example document-word completion) do not
+    /// need to allocate the regular 4 MiB view cap first.
+    pub fn line_view_capped(&self, i: u64, max_bytes: usize) -> Option<(String, bool)> {
         if !self.base_ok() {
             return None;
         }
         let buf = self.buf();
         let (s, e) = self.index.line_range(buf, i)?;
-        let decoded = self
-            .encoding
-            .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
+        let decoded = self.encoding.decode_line_capped(
+            &buf[s as usize..e as usize],
+            max_bytes.min(Self::MAX_VIEW_LINE_BYTES),
+        );
         // Re-check after the read: if the range faulted into a truncated page,
         // the text was decoded from zero-fill and must not be shown.
         if !self.base_ok() {

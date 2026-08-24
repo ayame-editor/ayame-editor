@@ -34,9 +34,11 @@ import {
   deleteLines,
   duplicateLines,
   enqueueEdit,
+  insertNewline,
   moveLines,
   reloadViewport,
   settleEditQueue,
+  typeAssistedText,
 } from "../src/edits.js";
 import { state } from "../src/state.js";
 import { refreshChangeHistoryOverview, setCaret } from "../src/editor.js";
@@ -188,6 +190,144 @@ describe("edit generation guards", () => {
     expect(state.caret.selection).toBeNull();
     expect(state.caret.position).toEqual({ line: 0, col: 1 });
     expect(setCaret).not.toHaveBeenCalled();
+  });
+});
+
+describe("batched input assistance (#246)", () => {
+  beforeEach(() => {
+    state.doc.stat = { open: true, path: "/tmp/example.rs" };
+    state.doc.generation = 1;
+    state.caret.editGeneration = 0;
+    state.caret.position = { line: 0, col: 0 };
+    state.caret.activeLine = 0;
+    state.caret.goalCol = 0;
+    state.caret.selection = null;
+    state.caret.extraCursors = [];
+    state.view.first = 0;
+    state.view.total = 2;
+    state.view.cache = { start: 0, lines: [] };
+    state.settings.closePairs = true;
+    state.settings.selectionEnclosure = true;
+    state.settings.autoIndent = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await settleEditQueue();
+    vi.unstubAllGlobals();
+  });
+
+  function captureInputEdits(lines: string[]) {
+    const batches: unknown[][] = [];
+    const ranges: unknown[] = [];
+    state.view.total = lines.length;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input, init?: RequestInit) => {
+        const path = String(input);
+        if (path.startsWith("/api/lines?")) {
+          const url = new URL(path, "http://localhost");
+          const start = Number(url.searchParams.get("start"));
+          const count = Number(url.searchParams.get("count"));
+          return jsonResponse({
+            lines: lines.slice(start, start + count).map((text, offset) => ({
+              number: start + offset,
+              text,
+            })),
+            total: lines.length,
+          });
+        }
+        if (path === "/api/edit/replace_batch") {
+          const body = JSON.parse(String(init?.body));
+          batches.push(body.edits);
+          return jsonResponse({
+            stats: { total_lines: lines.length },
+            carets: body.edits.map((edit) => ({
+              line: edit.l0,
+              col: edit.c0 + Array.from(edit.text).length,
+            })),
+          });
+        }
+        if (path === "/api/edit/replace_range") {
+          const body = JSON.parse(String(init?.body));
+          ranges.push(body);
+          return jsonResponse({
+            stats: { total_lines: lines.length },
+            caret_line: body.l0,
+            caret_col: body.c0 + Array.from(body.text).length,
+          });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+    return { batches, ranges };
+  }
+
+  it("auto-closes at multiple carets as one undo batch", async () => {
+    const captured = captureInputEdits(["ab", "cd"]);
+    state.caret.position = { line: 0, col: 1 };
+    state.caret.extraCursors = [{ line: 1, col: 1 }];
+
+    await typeAssistedText("(");
+
+    expect(captured.batches).toEqual([
+      [
+        { l0: 0, c0: 1, l1: 0, c1: 1, text: "()" },
+        { l0: 1, c0: 1, l1: 1, c1: 1, text: "()" },
+      ],
+    ]);
+    expect(state.caret.position).toEqual({ line: 0, col: 2 });
+    expect(state.caret.extraCursors).toEqual([{ line: 1, col: 2 }]);
+  });
+
+  it("encloses a rectangular selection with boundary-only edits", async () => {
+    const captured = captureInputEdits(["abcd", "efgh"]);
+    state.caret.position = { line: 1, col: 3 };
+    state.caret.selection = {
+      anchor: { line: 0, col: 1 },
+      head: { line: 1, col: 3 },
+      rect: true,
+    };
+
+    await typeAssistedText("[");
+
+    expect(captured.batches).toEqual([
+      [
+        { l0: 0, c0: 1, l1: 0, c1: 1, text: "[" },
+        { l0: 0, c0: 3, l1: 0, c1: 3, text: "]" },
+        { l0: 1, c0: 1, l1: 1, c1: 1, text: "[" },
+        { l0: 1, c0: 3, l1: 1, c1: 3, text: "]" },
+      ],
+    ]);
+  });
+
+  it("skips an existing closer locally without creating an undo edit", async () => {
+    const captured = captureInputEdits(["call()"]);
+    state.caret.position = { line: 0, col: 5 };
+
+    await typeAssistedText(")");
+
+    expect(captured.batches).toEqual([]);
+    expect(state.caret.position).toEqual({ line: 0, col: 6 });
+  });
+
+  it("deletes both sides of an empty pair with one range edit", async () => {
+    const captured = captureInputEdits(["call()"]);
+    state.caret.position = { line: 0, col: 5 };
+
+    backspace();
+    await settleEditQueue();
+
+    expect(captured.ranges).toEqual([{ l0: 0, c0: 4, l1: 0, c1: 6, text: "" }]);
+  });
+
+  it("inherits indentation and adds one scheme-safe brace level", async () => {
+    const captured = captureInputEdits(["  if ready {"]);
+    state.caret.position = { line: 0, col: 12 };
+
+    await insertNewline();
+
+    expect(captured.batches).toEqual([[{ l0: 0, c0: 12, l1: 0, c1: 12, text: "\n    " }]]);
   });
 });
 

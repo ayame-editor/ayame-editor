@@ -515,6 +515,17 @@ enum LineRef {
     Inserted { anchor: u64, index: usize },
 }
 
+fn capped_edit_text(text: &str, max_bytes: usize) -> (String, bool) {
+    if text.len() <= max_bytes {
+        return (text.to_owned(), false);
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (text[..end].to_owned(), true)
+}
+
 impl EditSession {
     /// Whether the current content differs from the last save — the flag
     /// editors show as "unsaved changes". Compares content GENERATIONS, not
@@ -910,13 +921,14 @@ impl EditSession {
 
             for (index, text) in ev.inserts.iter().enumerate() {
                 if logical_pos >= start && logical_pos < end {
+                    let (text, truncated) = capped_edit_text(text, Document::MAX_VIEW_LINE_BYTES);
                     out.push(EditLine {
                         number: logical_pos,
-                        text: text.clone(),
+                        text,
                         edited: true,
                         inserted: true,
                         original_line: None,
-                        truncated: false,
+                        truncated,
                     });
                 }
                 logical_pos += 1;
@@ -931,13 +943,15 @@ impl EditSession {
                 } else {
                     if logical_pos >= start && logical_pos < end {
                         if let Some(text) = &ev.replacement {
+                            let (text, truncated) =
+                                capped_edit_text(text, Document::MAX_VIEW_LINE_BYTES);
                             out.push(EditLine {
                                 number: logical_pos,
-                                text: text.clone(),
+                                text,
                                 edited: true,
                                 inserted: false,
                                 original_line: Some(anchor),
-                                truncated: false,
+                                truncated,
                             });
                         } else {
                             push_original_view_lines(
@@ -972,9 +986,18 @@ impl EditSession {
     }
 
     pub fn line(&self, doc: &Document, logical: u64) -> Option<EditLine> {
+        self.line_capped(doc, logical, Document::MAX_VIEW_LINE_BYTES)
+    }
+
+    /// Read one overlay-resolved line through a caller-selected view cap.
+    /// This applies equally to mmap-backed and unsaved inserted/replaced text,
+    /// so bounded consumers never clone a giant edit before enforcing their
+    /// own memory budget.
+    pub fn line_capped(&self, doc: &Document, logical: u64, max_bytes: usize) -> Option<EditLine> {
+        let max_bytes = max_bytes.min(Document::MAX_VIEW_LINE_BYTES);
         match self.locate(logical, doc.line_count())? {
             LineRef::Original(orig) => {
-                let (text, truncated) = doc.line_view(orig)?;
+                let (text, truncated) = doc.line_view_capped(orig, max_bytes)?;
                 Some(EditLine {
                     number: logical,
                     text,
@@ -985,25 +1008,27 @@ impl EditSession {
                 })
             }
             LineRef::Replaced(orig) => {
-                let text = self.events.get(&orig)?.replacement.clone()?;
+                let source = self.events.get(&orig)?.replacement.as_ref()?;
+                let (text, truncated) = capped_edit_text(source, max_bytes);
                 Some(EditLine {
                     number: logical,
                     text,
                     edited: true,
                     inserted: false,
                     original_line: Some(orig),
-                    truncated: false,
+                    truncated,
                 })
             }
             LineRef::Inserted { anchor, index } => {
-                let text = self.events.get(&anchor)?.inserts.get(index)?.clone();
+                let source = self.events.get(&anchor)?.inserts.get(index)?;
+                let (text, truncated) = capped_edit_text(source, max_bytes);
                 Some(EditLine {
                     number: logical,
                     text,
                     edited: true,
                     inserted: true,
                     original_line: None,
-                    truncated: false,
+                    truncated,
                 })
             }
         }
@@ -2959,6 +2984,19 @@ mod tests {
         assert_eq!(carets, vec![(0, 1)]);
         assert_eq!(edits.revision(), rev);
         assert!(!edits.can_undo());
+    }
+
+    #[test]
+    fn capped_line_view_bounds_unsaved_overlay_text() {
+        let (_f, doc) = doc_from(b"seed\n");
+        let mut edits = EditSession::default();
+        edits.replace_line(&doc, 0, "日本語".repeat(100)).unwrap();
+
+        let line = edits.line_capped(&doc, 0, 31).unwrap();
+
+        assert!(line.truncated);
+        assert!(line.text.len() <= 31);
+        assert!(line.text.is_char_boundary(line.text.len()));
     }
 
     #[test]

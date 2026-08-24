@@ -159,6 +159,11 @@ export const ACTIONS: Record<
   find: { run: () => showFind(), globalShortcut: true },
   replace: { run: () => showFind(true), globalShortcut: true },
   gotoLine: { run: promptGotoLine, globalShortcut: true },
+  showCompletion: {
+    run: () => import("./completion.js").then(({ showCompletion }) => showCompletion()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
   toggleFold: {
     run: () => import("./fold-actions.js").then(({ toggleCurrentFold }) => toggleCurrentFold()),
     globalShortcut: true,
@@ -326,6 +331,7 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "newFile",
   "newWindow",
   "gotoLine",
+  "showCompletion",
   "toggleBookmark",
   "nextBookmark",
   "previousBookmark",

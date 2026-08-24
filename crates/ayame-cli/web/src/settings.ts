@@ -347,6 +347,9 @@ export function updateSetting(key, value) {
     filterSettings();
   }
   if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
+  if (key === "wordCompletion" && value === false) {
+    void import("./completion.js").then(({ hideCompletion }) => hideCompletion());
+  }
 }
 
 function syncFontSizeControls(value) {
@@ -613,6 +616,10 @@ export function syncSettingsControls() {
   $("set-minimap").checked = state.settings.minimap !== false;
   $("set-zenkaku-underline").checked = !!state.settings.zenkakuUnderline;
   $("set-word-wrap").checked = !!state.settings.wordWrap;
+  $("set-auto-indent").checked = state.settings.autoIndent !== false;
+  $("set-close-pairs").checked = state.settings.closePairs !== false;
+  $("set-selection-enclosure").checked = state.settings.selectionEnclosure !== false;
+  $("set-word-completion").checked = state.settings.wordCompletion !== false;
   $("set-restore-session").checked = state.settings.restoreSession !== false;
   $("set-update-check-startup").checked = state.settings.updateCheckOnStartup !== false;
   $("set-confirm-last-tab-close").checked = state.settings.confirmLastTabClose !== false;
@@ -739,6 +746,18 @@ export function initSettings() {
   );
   $("set-word-wrap").addEventListener("change", () =>
     updateSetting("wordWrap", $("set-word-wrap").checked),
+  );
+  $("set-auto-indent").addEventListener("change", () =>
+    updateSetting("autoIndent", $("set-auto-indent").checked),
+  );
+  $("set-close-pairs").addEventListener("change", () =>
+    updateSetting("closePairs", $("set-close-pairs").checked),
+  );
+  $("set-selection-enclosure").addEventListener("change", () =>
+    updateSetting("selectionEnclosure", $("set-selection-enclosure").checked),
+  );
+  $("set-word-completion").addEventListener("change", () =>
+    updateSetting("wordCompletion", $("set-word-completion").checked),
   );
   $("set-restore-session").addEventListener("change", () =>
     updateSetting("restoreSession", $("set-restore-session").checked),

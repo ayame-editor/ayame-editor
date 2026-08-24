@@ -71,6 +71,10 @@ export interface Settings {
   minimap: boolean;
   zenkakuUnderline: boolean;
   wordWrap: boolean;
+  autoIndent: boolean;
+  closePairs: boolean;
+  selectionEnclosure: boolean;
+  wordCompletion: boolean;
   bgMode: string;
   bgImage: string | null;
   bgImageName: string;
@@ -99,6 +103,10 @@ export const DEFAULT_SETTINGS: Settings = {
   minimap: true,
   zenkakuUnderline: false,
   wordWrap: false,
+  autoIndent: true,
+  closePairs: true,
+  selectionEnclosure: true,
+  wordCompletion: true,
   bgMode: "watercolor", // "watercolor" (theme default) | "solid" | "image"
   bgImage: null, // data: URL of the custom wallpaper when bgMode === "image"
   bgImageName: "", // its original file name, shown in the settings dialog
@@ -135,6 +143,7 @@ export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["findNext", "find.next", "F3"],
   ["findPrev", "find.prev", "Shift+F3"],
   ["gotoLine", "menu.gotoLine", "Ctrl+G"],
+  ["showCompletion", "completion.show", "Ctrl+Space"],
   ["toggleFold", "fold.toggle", ""],
   ["foldCurrentLevel", "fold.currentLevel", ""],
   ["unfoldCurrentLevel", "fold.unfoldCurrentLevel", ""],
