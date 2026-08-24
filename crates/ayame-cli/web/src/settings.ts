@@ -344,7 +344,6 @@ export function updateSetting(key, value) {
   saveSettings(state.settings);
   if (key === "language") {
     applyLocale();
-    postNativeMessage({ type: "language", language: state.settings.language });
     filterSettings();
   }
   if (key === "updateCheckOnStartup") notifyNativeUpdateCheckSetting();
@@ -626,7 +625,6 @@ export function resetSettingsToDefaults() {
   saveSettings(state.settings);
   applySettings(state.settings);
   notifyNativeUpdateCheckSetting();
-  postNativeMessage({ type: "language", language: state.settings.language });
   syncSettingsControls();
   updateKeyHints();
   renderKeymapRows();

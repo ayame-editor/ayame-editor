@@ -12,6 +12,7 @@ import {
   normalizeShortcut,
 } from "./keys.js";
 import { hideSettings, saveSettings } from "./settings.js";
+import { syncNativeMenu } from "./native-menu.js";
 
 let rebuildShortcutMap = () => {};
 
@@ -60,6 +61,7 @@ export function resetKeymap() {
 
 export function updateKeyHints() {
   rebuildShortcutMap();
+  syncNativeMenu(shortcutFor);
   document.querySelectorAll("[data-key-action]").forEach((el) => {
     el.textContent = displayShortcut(shortcutFor((el as any).dataset.keyAction));
   });

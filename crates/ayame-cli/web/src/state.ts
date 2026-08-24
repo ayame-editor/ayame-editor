@@ -178,7 +178,7 @@ export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["caseSnake", "menu.caseSnake", ""],
   ["caseKebab", "menu.caseKebab", ""],
   ["caseConstant", "menu.caseConstant", ""],
-  ["settings", "menu.settings", ""],
+  ["settings", "menu.settings", "Ctrl+,"],
   ["keymap", "keymap.title", ""],
 ];
 
