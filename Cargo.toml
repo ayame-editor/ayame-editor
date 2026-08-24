@@ -43,6 +43,13 @@ serde_json = "1"
 anyhow = "1"
 toml_edit = "0.25"
 unicode-normalization = "0.1"
+unicode-segmentation = "1.13"
+unicode-width = "0.2"
+unicode_names2 = "3.1"
+unicode-general-category = "1.1"
+unicode-script = "0.5"
+unicode-bidi = "0.3"
+east-asian-width = "0.1"
 sha2 = "0.10"
 
 # Release builds favor raw throughput for the indexing/scan hot paths.

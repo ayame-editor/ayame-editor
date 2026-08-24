@@ -37,7 +37,8 @@
 .prompt-body,
 .form-body,
 .syntax-body,
-.analysis-body {
+.analysis-body,
+.inspect-body {
   padding: var(--modal-body-padding);
 }
 .modal-head {

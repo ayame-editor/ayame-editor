@@ -919,6 +919,82 @@ async fn completion_returns_only_bounded_words_from_the_edited_view() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inspector_endpoint_keeps_original_bytes_distinct_from_the_edit_overlay() {
+    let f = scratch_file("inspect.txt", b"\xEF\xBB\xBFA\xE2\x80\xAE #AaBbCc80\r\n");
+    let addr = start_server(&f).await;
+    let host = format!("127.0.0.1:{}", addr.port());
+    let origin = format!("http://{host}");
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/inspect",
+            &host,
+            Some(&origin),
+            r#"{"start":{"line":0,"col":1},"end":{"line":0,"col":1}}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+    let json = response_json(&body);
+    assert_eq!(json["bom_hex"], "EF BB BF");
+    assert_eq!(json["clusters"][0]["raw_hex"], "E2 80 AE");
+    assert_eq!(json["clusters"][0]["original_byte_offset"], 4);
+    assert_eq!(json["clusters"][0]["source"], "original");
+    assert!(json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("bidi-control")));
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/inspect",
+            &host,
+            Some(&origin),
+            r#"{"start":{"line":0,"col":4},"end":{"line":0,"col":4}}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+    let color = response_json(&body)["color"].clone();
+    assert_eq!(color["literal"], "#AaBbCc80");
+    assert_eq!(color["alpha"], 128);
+    assert_eq!(color["prefix"], "#");
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/edit/replace_range",
+            &host,
+            Some(&origin),
+            r#"{"l0":0,"c0":1,"l1":0,"c1":2,"text":"X"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/inspect",
+            &host,
+            Some(&origin),
+            r#"{"start":{"line":0,"col":1},"end":{"line":0,"col":1}}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+    let cluster = response_json(&body)["clusters"][0].clone();
+    assert_eq!(cluster["text"], "X");
+    assert_eq!(cluster["raw_hex"], serde_json::Value::Null);
+    assert_eq!(cluster["original_byte_offset"], serde_json::Value::Null);
+    assert_eq!(cluster["source"], "overlay");
+
+    let _ = std::fs::remove_file(&f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn find_sees_unsaved_edits_through_a_cached_snapshot() {
     let f = scratch_file("find.txt", b"alpha\nbeta\ngamma\n");
     let (addr, state) = start_server_with_state(&f).await;

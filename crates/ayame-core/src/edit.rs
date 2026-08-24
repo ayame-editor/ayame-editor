@@ -989,6 +989,19 @@ impl EditSession {
         self.line_capped(doc, logical, Document::MAX_VIEW_LINE_BYTES)
     }
 
+    /// Map a logical editor line back to the mmap-backed source when that
+    /// mapping still exists. The boolean reports whether the logical text is
+    /// edited: replaced lines retain an original line number for history but
+    /// their current characters no longer have authoritative source bytes;
+    /// inserted lines have no original line at all.
+    pub fn line_origin(&self, doc: &Document, logical: u64) -> Option<(Option<u64>, bool)> {
+        match self.locate(logical, doc.line_count())? {
+            LineRef::Original(original) => Some((Some(original), false)),
+            LineRef::Replaced(original) => Some((Some(original), true)),
+            LineRef::Inserted { .. } => Some((None, true)),
+        }
+    }
+
     /// Read one overlay-resolved line through a caller-selected view cap.
     /// This applies equally to mmap-backed and unsaved inserted/replaced text,
     /// so bounded consumers never clone a giant edit before enforcing their

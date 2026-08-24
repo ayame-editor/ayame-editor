@@ -7,6 +7,8 @@ export type {
   CompletionResponse,
   FindResponse,
   GrepResponse,
+  InspectRequest,
+  InspectResponse,
   LineByteResponse,
   LineRecord,
   LinesResponse,
@@ -19,6 +21,8 @@ export type {
   MarkerSaveRequest,
   MarkerSaveResponse,
   OpenResponse,
+  ParseEscapeRequest,
+  ParseEscapeResponse,
   SearchHit,
   SearchResponse,
   StatResponse,
@@ -68,11 +72,13 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
 export async function apiPost<T = unknown, B = Record<string, unknown>>(
   path: string,
   body: B = {} as B,
+  signal?: AbortSignal,
 ): Promise<T> {
   const r = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!r.ok) throw await errorFromResponse(r);
   return r.json();

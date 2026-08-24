@@ -28,6 +28,10 @@ use super::edit::{
     CaretPosition, EditSaveRequest, EditSaveResponse, LinesResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
+use super::inspect::{
+    ClusterInfo, ColorLiteral, InspectPoint, InspectRequest, InspectResponse, InspectSummary,
+    ParseEscapeRequest, ParseEscapeResponse, ScalarInfo,
+};
 use super::markers::{
     ChangeHistoryResponse, ChangeMarkerOverview, MarkerBulkRequest, MarkerBulkResponse,
     MarkerClearRequest, MarkerListQuery, MarkerListResponse, MarkerMutationResponse,
@@ -73,6 +77,15 @@ fn bridge() -> Bridge {
         .decl(&decl::<LinesResponse>())
         .decl(&decl::<CompletionRequest>())
         .decl(&decl::<CompletionResponse>())
+        .decl(&decl::<InspectPoint>())
+        .decl(&decl::<InspectRequest>())
+        .decl(&decl::<InspectSummary>())
+        .decl(&decl::<ScalarInfo>())
+        .decl(&decl::<ClusterInfo>())
+        .decl(&decl::<ColorLiteral>())
+        .decl(&decl::<InspectResponse>())
+        .decl(&decl::<ParseEscapeRequest>())
+        .decl(&decl::<ParseEscapeResponse>())
         .decl(&decl::<FindResponse>())
         .decl(&decl::<SearchResponse>())
         .decl(&decl::<GrepResponse>())

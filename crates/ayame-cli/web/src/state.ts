@@ -143,6 +143,7 @@ export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["findNext", "find.next", "F3"],
   ["findPrev", "find.prev", "Shift+F3"],
   ["gotoLine", "menu.gotoLine", "Ctrl+G"],
+  ["inspectCharacter", "inspect.title", "Ctrl+Alt+I"],
   ["showCompletion", "completion.show", "Ctrl+Space"],
   ["toggleFold", "fold.toggle", ""],
   ["foldCurrentLevel", "fold.currentLevel", ""],
