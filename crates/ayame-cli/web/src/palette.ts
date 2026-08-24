@@ -1,5 +1,5 @@
 // Ayame Editor — command palette.
-import { $, setModalOpen } from "./dom.js";
+import { $, button, el, setModalOpen } from "./dom.js";
 import { KEYMAP_ACTIONS } from "./state.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
@@ -69,19 +69,13 @@ export function renderCommandPalette() {
   list.textContent = "";
   const frag = document.createDocumentFragment();
   visible.forEach((item, index) => {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = button("palette-row", "");
     row.id = `palette-option-${index}`;
-    row.className = "palette-row";
     row.classList.toggle("active", index === paletteIndex);
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", index === paletteIndex ? "true" : "false");
-    const label = document.createElement("span");
-    label.className = "palette-label";
-    label.textContent = item.label;
-    const key = document.createElement("span");
-    key.className = "palette-key";
-    key.textContent = displayShortcut(item.shortcut);
+    const label = el("span", "palette-label", item.label);
+    const key = el("span", "palette-key", displayShortcut(item.shortcut));
     row.append(label, key);
     row.addEventListener("mouseenter", () => {
       if (paletteIndex === index) return;

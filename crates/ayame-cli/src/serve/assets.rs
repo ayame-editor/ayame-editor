@@ -3,7 +3,8 @@ use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
-const STYLE_CSS: &str = include_str!("../../web/style.css");
+const STYLE_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/web/style.css"));
+const THEMES_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/web/themes.css"));
 const FAVICON_SVG: &str = include_str!("../../web/favicon.svg");
 const AYAME_LOGO_SVG: &str = include_str!("../../web/ayame-logo.svg");
 const IRIS_WATERCOLOR: &[u8] = include_bytes!("../../web/iris-watercolor.png");
@@ -31,6 +32,10 @@ pub(super) async fn style_css() -> Response {
     asset("text/css; charset=utf-8", STYLE_CSS)
 }
 
+pub(super) async fn themes_css() -> Response {
+    asset("text/css; charset=utf-8", THEMES_CSS)
+}
+
 pub(super) async fn favicon_svg() -> Response {
     asset("image/svg+xml; charset=utf-8", FAVICON_SVG)
 }
@@ -49,4 +54,33 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
 
 fn asset_bytes(content_type: &'static str, body: &'static [u8]) -> Response {
     ([(header::CONTENT_TYPE, content_type)], body).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{STYLE_CSS, THEMES_CSS};
+
+    #[test]
+    fn build_concatenates_styles_in_responsibility_order() {
+        let foundations = STYLE_CSS.find(":root {").unwrap();
+        let chrome = STYLE_CSS.find("/* ---- menu bar").unwrap();
+        let editor = STYLE_CSS.find("/* ---- main area").unwrap();
+        let modals = STYLE_CSS.find("/* ---- modals").unwrap();
+        assert!(foundations < chrome && chrome < editor && editor < modals);
+        assert!(!STYLE_CSS.contains(".seg-control"));
+        assert!(!STYLE_CSS.contains("html[data-theme="));
+    }
+
+    #[test]
+    fn build_generates_every_theme_from_the_canonical_json() {
+        let themes: serde_json::Value =
+            serde_json::from_str(include_str!("../../web/themes.json")).unwrap();
+        let themes = themes.as_object().unwrap();
+        for id in themes.keys() {
+            assert!(THEMES_CSS.contains(&format!("html[data-theme={id:?}]")));
+        }
+        for variable in ["--bg:", "--fg:", "--accent:", "--syn-string:", "--desk:"] {
+            assert_eq!(THEMES_CSS.matches(variable).count(), themes.len());
+        }
+    }
 }

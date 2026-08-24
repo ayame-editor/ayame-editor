@@ -67,6 +67,7 @@ muda = { version = "0.19", optional = true }
 # build.rs and src/serve/assets.rs. tsc is only a CI type gate, never a runtime
 # or release-build dependency.
 [build-dependencies]
+serde_json.workspace = true
 oxc_allocator = "0.138"
 oxc_parser = "0.138"
 oxc_span = "0.138"

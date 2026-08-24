@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  button,
   commas,
   displayPath,
+  el,
   humanBytes,
   isAbsolutePath,
   isUntitled,
@@ -23,6 +25,20 @@ describe("localized number helpers (#176)", () => {
       localeSpy.mockRestore();
       state.settings.language = originalLanguage;
     }
+  });
+});
+
+describe("DOM construction helpers (#126)", () => {
+  it("creates consistently initialized elements and buttons", () => {
+    expect(el("span", "label", "Ayame").outerHTML).toBe(
+      '<span class="label">Ayame</span>',
+    );
+    const clicked = vi.fn();
+    const action = button("cmd primary", "Save", clicked);
+    expect(action.type).toBe("button");
+    expect(action.className).toBe("cmd primary");
+    action.click();
+    expect(clicked).toHaveBeenCalledOnce();
   });
 });
 

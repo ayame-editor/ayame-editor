@@ -1,0 +1,610 @@
+/* ---- main area ------------------------------------------------------- */
+
+#main {
+  grid-area: main;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+/* ---- viewport / editor ----------------------------------------------- */
+
+#viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--edit-bg);
+  outline: none;
+}
+
+#content {
+  position: absolute;
+  inset: 0 14px 0 0; /* room for the custom vertical scrollbar */
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-family: var(--mono);
+  font-size: var(--fs-editor);
+  line-height: var(--lh-editor);
+  user-select: none; /* rows use a custom (line,col) selection, not native */
+  z-index: var(--z-content);
+}
+#viewport.has-minimap #content {
+  right: calc(var(--space-3-5) + var(--minimap-width));
+}
+
+/* Zero-height spacer that holds #content's horizontal scroll width while rows
+   are still loading, so scrolling vertically into not-yet-fetched lines can't
+   collapse the width and reset scrollLeft. Hidden, but still affects layout. */
+.hkeeper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Custom multi-line selection highlight (drawn behind/over the text). */
+#sel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.selrect {
+  position: absolute;
+  height: var(--lh-editor);
+  /* A clearly readable selection box: the old 24% wash was easy to miss, so
+     a selection now reads as a solid highlight with a defined 1px edge, like
+     a desktop editor. */
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: calc(var(--radius-control) - 4px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* The fluid text caret: a thin blinking bar positioned by transform.
+   Deliberately slim — a 2px bar with only a hairline paper halo; the old
+   3px bar + accent glow read as "too fat". */
+#caret {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  width: 2px;
+  height: calc(var(--lh-editor) - 2px);
+  background: var(--fg);
+  border-radius: calc(var(--radius-control) - 5px);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
+  pointer-events: none;
+  display: none;
+  will-change: transform;
+  z-index: var(--z-caret);
+}
+#caret.on {
+  display: block;
+  animation: caret-blink 1.06s steps(1) infinite;
+}
+@keyframes caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* Multi-cursor: extra carets look like #caret at 75% strength and blink on
+   the same clock (same duration/steps, own keyframes for the dimmed phase). */
+.caret.extra {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  width: 2px;
+  height: calc(var(--lh-editor) - 2px);
+  background: var(--fg);
+  border-radius: calc(var(--radius-control) - 5px);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-bg) 85%, transparent);
+  pointer-events: none;
+  display: none;
+  will-change: transform;
+  z-index: var(--z-caret);
+}
+.caret.extra.on {
+  display: block;
+  animation: caret-blink-extra 1.06s steps(1) infinite;
+}
+@keyframes caret-blink-extra {
+  0%, 50% { opacity: 0.75; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* The hidden text/IME input that actually receives keystrokes. It sits exactly
+   at the caret so the OS IME candidate window appears in the right place; it is
+   invisible until an IME composition is in progress, when it shows the string
+   being composed inline. */
+#hidden-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: var(--lh-editor);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font: inherit;
+  line-height: var(--lh-editor);
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  z-index: var(--z-ime);
+}
+#hidden-input.composing {
+  width: auto;
+  min-width: 1ch;
+  color: var(--fg);
+  background: var(--edit-bg);
+  caret-color: var(--accent);
+  text-decoration: underline;
+  box-shadow: 0 1px 0 var(--accent);
+}
+#viewport.has-ruler #content { top: 18px; }
+
+#minimap {
+  position: absolute;
+  top: 0;
+  right: var(--space-3-5);
+  width: var(--minimap-width);
+  height: 100%;
+  box-sizing: border-box;
+  display: none;
+  background: color-mix(in srgb, var(--gutter-bg) 88%, var(--edit-bg));
+  border-left: 1px solid var(--border);
+  cursor: grab;
+  touch-action: none;
+  z-index: var(--z-scrollbar);
+}
+#viewport.has-minimap #minimap { display: block; }
+#viewport.has-ruler #minimap {
+  top: 18px;
+  height: calc(100% - 18px);
+}
+#minimap.drag { cursor: grabbing; }
+#minimap:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* ---- column ruler ---------------------------------------------------- */
+
+#ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 14px;
+  height: 18px;
+  overflow: hidden;
+  display: none;
+  background: color-mix(in srgb, var(--gutter-bg) 94%, transparent);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: var(--fs-ruler);
+  color: var(--fg-faint);
+  user-select: none;
+}
+#viewport.has-ruler #ruler { display: block; }
+#viewport.has-minimap #ruler {
+  right: calc(var(--space-3-5) + var(--minimap-width));
+}
+#ruler-inner { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
+.rtick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--border);
+  padding-left: var(--space-0-5);
+  line-height: var(--lh-editor);
+}
+#ruler-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--gutter-surface);
+  border-right: var(--gutter-border-width) solid var(--gutter-border);
+}
+
+.row {
+  height: var(--lh-editor);
+  white-space: pre;
+  display: block;
+  cursor: text;
+  position: relative;
+}
+.row.active { background: var(--bg-active-line); }
+.row.active .ln { color: var(--fg); }
+/* Hover affordance: the row under the pointer gets a faint wash so the text
+   reads as selectable. Kept lighter than the active-line and selection washes
+   so they still win when they apply. */
+.row:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.row.active:hover { background: var(--bg-active-line); }
+.row.eof { cursor: default; }
+.row.eof .tx { color: var(--fg-faint); font-family: var(--ui); font-style: italic; }
+
+/* Lightweight syntax colors. Applied only to pooled visible rows, so the
+   highlighter stays compatible with multi-GB files and virtual scrolling. */
+.syn { color: inherit; }
+.syn-comment {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+.syn-keyword,
+.syn-heading {
+  color: color-mix(in srgb, var(--accent-bright) 84%, var(--fg));
+  font-weight: 600;
+}
+.syn-string {
+  color: color-mix(in srgb, var(--syn-string) 76%, var(--fg));
+}
+.syn-number {
+  color: color-mix(in srgb, var(--syn-number) 78%, var(--fg));
+}
+.syn-literal {
+  color: color-mix(in srgb, var(--syn-literal) 78%, var(--fg));
+  font-weight: 600;
+}
+.syn-function {
+  color: color-mix(in srgb, var(--syn-function) 78%, var(--fg));
+}
+.syn-key {
+  color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+}
+.syn-op {
+  color: var(--fg-dim);
+}
+.syn-link {
+  color: color-mix(in srgb, var(--syn-link) 84%, var(--fg));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.syn-level-trace,
+.syn-level-debug {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.syn-level-info {
+  color: color-mix(in srgb, var(--syn-link) 84%, var(--fg));
+  font-weight: 700;
+}
+.syn-level-warn {
+  color: color-mix(in srgb, var(--gold) 88%, var(--fg));
+  font-weight: 700;
+}
+.syn-level-error {
+  color: color-mix(in srgb, var(--danger) 88%, var(--fg));
+  font-weight: 700;
+}
+
+/* ---- 折り返し (word wrap) --------------------------------------------------
+   A conservative, CSS-only wrap toggle (state.settings.wordWrap → #content.wrap
+   in applySettings). Rows switch to pre-wrap and are allowed to grow past one
+   LINE_HEIGHT, so long lines wrap instead of scrolling horizontally; the
+   horizontal scroll container is pinned so no h-scrollbar appears.
+
+   LIMITATIONS (by design — full variable-height virtualization is out of scope):
+   the virtual scroll and the caret/selection layers still assume 1 logical line
+   == 1 LINE_HEIGHT screen row (see positionCaret/renderSelection). So on lines
+   that actually wrap, the caret/selection rectangles and the on-screen line
+   count drift, and a very long single line can push later rows off the bottom
+   (overflow-y is hidden). Files whose lines fit the viewport wrap trivially and
+   stay pixel-exact. */
+#content.wrap { overflow-x: hidden; }
+#content.wrap .row {
+  white-space: pre-wrap;
+  height: auto;
+  min-height: var(--lh-editor);
+  overflow-wrap: anywhere; /* break even unbroken runs so nothing overflows */
+}
+
+.ln {
+  position: sticky;
+  left: 0;
+  display: inline-block;
+  /* Width is driven from the widest line number (commas included) via a CSS
+     variable set in render(), so every gutter — including the empty [EOF]
+     row — reserves the same width and the numbers right-align cleanly. */
+  width: calc(
+    var(--gutter-ch, 1ch) + var(--gutter-pad-start) + var(--gutter-pad-end) +
+      var(--gutter-border-width)
+  );
+  /* The whole gutter→text gap lives inside the padding (border box), so
+     getBoundingClientRect().width in gutterPixels() measures the true text
+     origin — a margin here would be excluded and shift the caret 8px left. */
+  padding:
+    var(--space-0) var(--gutter-pad-end)
+    var(--space-0) var(--gutter-pad-start);
+  text-align: right;
+  color: var(--gutter-text);
+  background: var(--gutter-surface);
+  border-right: var(--gutter-border-width) solid var(--gutter-border);
+  user-select: none;
+}
+.row.active .ln { background: var(--gutter-active-bg); }
+.ln[role="button"] { cursor: pointer; }
+.ln[role="button"]:hover {
+  color: var(--fg);
+  background: var(--gutter-hover-bg);
+}
+.row.bookmarked .ln {
+  color: var(--mark-fg);
+  font-weight: 600;
+  background: var(--gutter-bookmark-bg);
+  box-shadow: inset var(--marker-rail-w) 0 var(--mark-fg);
+}
+.row.active.bookmarked .ln {
+  background: var(--gutter-active-bookmark-bg);
+}
+.row:is(.change-saved, .change-unsaved) .ln::before {
+  content: "";
+  position: absolute;
+  right: var(--change-marker-offset);
+  top: 50%;
+  width: var(--change-marker-w);
+  height: var(--change-marker-saved-h);
+  border-radius: var(--radius-control);
+  background: var(--change-saved);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.row.change-unsaved .ln::before {
+  height: var(--change-marker-unsaved-h);
+  background: var(--change-unsaved);
+}
+.row.change-deleted .ln::before {
+  width: var(--change-deleted-size);
+  height: var(--change-deleted-size);
+  border-radius: var(--space-0);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: inset 0 0 0 var(--change-deleted-stroke) var(--change-deleted-outline);
+}
+.row:is(.change-saved, .change-unsaved) .ln:focus-visible {
+  outline: var(--gutter-border-width) solid var(--focus-ring);
+  outline-offset: var(--offset-focus-inset);
+}
+
+.tx { color: var(--fg); }
+.tx.pending { color: var(--fg-faint); }
+
+/* "空白・改行を表示": tab keeps its real \t (so column geometry is unchanged);
+   the arrow is an overlay drawn at the tab's left edge. The ↵ marker trails
+   the line text and is deliberately faint. */
+.ws-tab { position: relative; }
+.ws-tab::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--fg-faint);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.ws-eol {
+  color: var(--fg-faint);
+  opacity: 0.55;
+}
+/* Full-width (zenkaku) space: keep the real 　 for width, overlay a box so it
+   is not mistaken for an ASCII run of spaces. */
+.ws-zsp { position: relative; }
+.ws-zsp::before {
+  content: "□";
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--fg-faint);
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* "全角空白を下線で表示": swap the box for a full-width underline drawn along
+   the bottom of the cell. The real 　 stays for width, so caret geometry is
+   unchanged. */
+.zenkaku-underline .ws-zsp::before {
+  content: "";
+  border-bottom: 1px solid var(--fg-faint);
+  bottom: var(--offset-glyph-underline);
+}
+/* Trailing half-width spaces before a line end: keep the real space for width,
+   overlay a faint middle dot (one per space) so they are noticeable. */
+.ws-trail { position: relative; }
+.ws-trail::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--fg-faint);
+  opacity: 0.6;
+  pointer-events: none;
+}
+:is(mark, .grep-match) {
+  background: var(--mark-bg);
+  color: var(--mark-fg);
+  border-radius: calc(var(--radius-control) - 3px);
+  box-shadow: var(--match-ring);
+}
+mark {
+  /* Optical exception: preserve match ink without changing text geometry. */
+  padding: var(--space-0) var(--space-optical);
+}
+mark.current {
+  background: var(--mark-active-bg);
+  color: var(--mark-active-fg);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mark-active-bg) 52%, transparent);
+}
+
+/* Semantic analysis colors. Profiles persist only these names; themes remain
+   free to redefine their actual colors without migrating saved rules. */
+[data-analysis-color="accent"] { --analysis-color: var(--accent); }
+[data-analysis-color="danger"] { --analysis-color: var(--danger); }
+[data-analysis-color="warn"] { --analysis-color: var(--warn); }
+[data-analysis-color="string"] { --analysis-color: var(--syn-string); }
+[data-analysis-color="number"] { --analysis-color: var(--syn-number); }
+[data-analysis-color="literal"] { --analysis-color: var(--syn-literal); }
+[data-analysis-color="function"] { --analysis-color: var(--syn-function); }
+[data-analysis-color="link"] { --analysis-color: var(--syn-link); }
+
+.analysis-mark {
+  color: inherit;
+  border-radius: calc(var(--radius-control) - var(--space-1));
+  background: color-mix(in srgb, var(--analysis-color) 20%, transparent);
+  box-shadow: inset 0 calc(-1 * var(--analysis-highlight-stroke)) 0
+    color-mix(in srgb, var(--analysis-color) 72%, transparent);
+}
+.analysis-mark.overlap {
+  text-decoration-line: underline;
+  text-decoration-style: double;
+  text-decoration-color: var(--analysis-color);
+  text-decoration-thickness: var(--analysis-highlight-stroke);
+}
+
+/* ---- custom vertical scrollbar --------------------------------------- */
+
+#vscrollbar {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 14px;
+  background:
+    linear-gradient(to right, transparent, color-mix(in srgb, var(--fg) 8%, transparent));
+  z-index: var(--z-scrollbar);
+}
+#vticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.vtick {
+  position: absolute;
+  right: 2px;
+  width: 9px;
+  height: 2px;
+  border-radius: calc(var(--radius-control) - 4px);
+  background: var(--gold);
+  opacity: .78;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 10%, transparent);
+}
+.vtick.current {
+  right: 1px;
+  width: 11px;
+  height: 3px;
+  background: var(--accent);
+  opacity: 1;
+}
+.vtick.analysis-vtick {
+  right: var(--space-0-5);
+  width: var(--analysis-tick-w);
+  background: var(--analysis-color);
+  box-shadow: none;
+}
+.vtick.change-vtick {
+  height: var(--change-marker-w);
+  box-shadow: none;
+  opacity: 1;
+}
+.vtick.change-saved-vtick {
+  right: var(--space-2);
+  width: var(--change-tick-saved-w);
+  background: var(--change-saved);
+}
+.vtick.change-unsaved-vtick {
+  right: var(--space-0-5);
+  width: var(--change-tick-unsaved-w);
+  background: var(--change-unsaved);
+}
+.vtick.change-deleted-vtick {
+  width: var(--change-tick-deleted-size);
+  height: var(--change-tick-deleted-size);
+  border-radius: var(--space-0);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: inset 0 0 0 var(--change-deleted-stroke) var(--change-deleted-outline);
+}
+#vthumb {
+  position: absolute;
+  right: 2px;
+  width: 10px;
+  min-height: 24px;
+  border-radius: calc(var(--radius-control) - 1px);
+  background: color-mix(in srgb, var(--fg) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 24%, transparent);
+}
+#vthumb:hover { background: color-mix(in srgb, var(--fg) 40%, transparent); }
+#vthumb.drag { background: color-mix(in srgb, var(--fg) 52%, transparent); }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-progress);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  color: var(--fg-dim);
+  font-size: var(--fs-ui-lg);
+  pointer-events: none;
+}
+.overlay.hidden { display: none; }
+
+/* The determinate progress card shown during long artifact ops (sort / split /
+   grep-to-file, #78). The backdrop is translucent, but the card itself must be
+   opaque so its text stays legible over a dense data grid instead of bleeding
+   into it, and it opts back into pointer events so Cancel stays clickable
+   through the pointer-events:none backdrop. */
+.overlay-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 260px;
+  max-width: min(440px, 82vw);
+  padding: var(--space-5) var(--space-5-5);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--bg-elevated, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  text-align: center;
+}
+.overlay-text {
+  font-weight: 600;
+  color: var(--fg);
+  line-height: var(--lh-tight);
+}
+.overlay-progress {
+  width: 100%;
+  height: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+.overlay-progress::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: 999px;
+}
+.overlay-progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 999px;
+}
+.overlay-progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 999px;
+}
+.overlay-detail {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.overlay-progress.hidden,
+.overlay-detail.hidden,
+#overlay-cancel.hidden {
+  display: none;
+}

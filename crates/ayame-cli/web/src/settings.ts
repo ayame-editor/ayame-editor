@@ -1,5 +1,5 @@
 // Ayame Editor — settings module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, setModalOpen } from "./dom.js";
+import { $, el, setModalOpen } from "./dom.js";
 import {
   DEFAULT_KEYMAP,
   DEFAULT_SETTINGS,
@@ -22,8 +22,9 @@ import { settleEditQueue } from "./edits.js";
 import { flashCount } from "./notifications.js";
 import { onDocumentOpened } from "./workspace.js";
 import { isKeymapDoc, isThemeDoc } from "./document-kind.js";
+import { BUILTIN_THEMES, THEME_PRESETS } from "./theme-presets.js";
 
-export { isKeymapDoc, isThemeDoc };
+export { isKeymapDoc, isThemeDoc, THEME_PRESETS };
 
 let applyLocale = () => {};
 let hideKeymap = () => {};
@@ -184,153 +185,6 @@ export function persistBackgroundImage(dataUrl) {
   }
 }
 
-// Built-in themes are also defined as CSS `html[data-theme=...]` blocks in
-// style.css; these JSON mirrors let the Settings JSON editor show/export them
-// and act as a base for custom themes. Custom themes apply at runtime by
-// setting the same CSS variables the built-ins use.
-export const THEME_PRESETS = {
-  "iris-light": {
-    name: "Iris Light",
-    type: "light",
-    radius: 10,
-    color: {
-      paper: "#FBF8F1",
-      paper2: "#FDFCF8",
-      ink: "#2A2140",
-      inkDim: "#6E6383",
-      inkFaint: "#A99DBC",
-      accent: "#7A5CC0",
-      accent2: "#6A4CB0",
-      gold: "#C79A2E",
-      edge: "#E7E0D3",
-      err: "#C0506A",
-      markBg: "#FBEBB0",
-      markFg: "#6B5510",
-      markCur: "#E8B84B",
-      markCurFg: "#2A2205",
-    },
-    acrylic: { tint: "rgba(255,253,248,0.72)", blur: 20 },
-    background: { mode: "watercolor", solid: "#FBF8F1" },
-    illustration: 0.18,
-    watercolor: [
-      { x: "12%", y: "84%", r: "46vh", color: "rgba(122,92,192,0.12)" },
-      { x: "88%", y: "14%", r: "42vh", color: "rgba(185,139,214,0.10)" },
-      { x: "70%", y: "96%", r: "30vh", color: "rgba(231,197,107,0.08)" },
-    ],
-  },
-  "iris-mist": {
-    name: "Iris Mist",
-    type: "light",
-    radius: 12,
-    color: {
-      paper: "#F7F9FC",
-      paper2: "#FDFEFF",
-      ink: "#26314A",
-      inkDim: "#5E6E8A",
-      inkFaint: "#9DAAC0",
-      accent: "#5B79C9",
-      accent2: "#4A68B8",
-      gold: "#C9A24E",
-      edge: "#DCE4EF",
-      err: "#C05C74",
-      markBg: "#E3ECFB",
-      markFg: "#2C3E6B",
-      markCur: "#7EC7C0",
-      markCurFg: "#0F2A28",
-    },
-    acrylic: { tint: "rgba(250,252,255,0.68)", blur: 24 },
-    background: { mode: "watercolor", solid: "#F7F9FC" },
-    illustration: 0.22,
-    watercolor: [
-      { x: "14%", y: "82%", r: "44vh", color: "rgba(91,121,201,0.12)" },
-      { x: "86%", y: "16%", r: "42vh", color: "rgba(143,182,224,0.10)" },
-      { x: "74%", y: "96%", r: "30vh", color: "rgba(126,199,192,0.08)" },
-    ],
-  },
-  "iris-dawn": {
-    name: "Iris Dawn",
-    type: "light",
-    radius: 10,
-    color: {
-      paper: "#FDF6EE",
-      paper2: "#FFFBF7",
-      ink: "#3A2438",
-      inkDim: "#7A5A6E",
-      inkFaint: "#B79AA6",
-      accent: "#A65CB0",
-      accent2: "#944EA0",
-      gold: "#E0A94E",
-      edge: "#EFE0D6",
-      err: "#D96A86",
-      markBg: "#FBE7C8",
-      markFg: "#7A4A16",
-      markCur: "#F0B85A",
-      markCurFg: "#3A2205",
-    },
-    acrylic: { tint: "rgba(255,250,244,0.70)", blur: 20 },
-    background: { mode: "watercolor", solid: "#FDF6EE" },
-    illustration: 0.22,
-    watercolor: [
-      { x: "12%", y: "84%", r: "46vh", color: "rgba(166,92,176,0.13)" },
-      { x: "84%", y: "16%", r: "42vh", color: "rgba(224,169,78,0.11)" },
-      { x: "70%", y: "96%", r: "30vh", color: "rgba(227,154,176,0.10)" },
-    ],
-  },
-  "sumi-light": {
-    name: "Sumi Light",
-    type: "light",
-    radius: 10,
-    color: {
-      paper: "#FAFAF8",
-      paper2: "#FFFFFF",
-      ink: "#222024",
-      inkDim: "#63616A",
-      inkFaint: "#A7A4AE",
-      accent: "#7A5CC0",
-      accent2: "#6A4CB0",
-      gold: "#B7912F",
-      edge: "#E6E4DE",
-      err: "#B24A5E",
-      markBg: "#ECE6FA",
-      markFg: "#3E2E63",
-      markCur: "#7A5CC0",
-      markCurFg: "#FFFFFF",
-    },
-    acrylic: { tint: "rgba(252,252,250,0.74)", blur: 22 },
-    background: { mode: "watercolor", solid: "#FAFAF8" },
-    illustration: 0.16,
-    watercolor: [
-      { x: "16%", y: "82%", r: "40vh", color: "rgba(122,92,192,0.07)" },
-      { x: "84%", y: "20%", r: "34vh", color: "rgba(40,36,48,0.03)" },
-    ],
-  },
-  "mono-paper": {
-    name: "Mono Paper",
-    type: "light",
-    radius: 10,
-    color: {
-      paper: "#F5F3ED",
-      paper2: "#FBFAF5",
-      ink: "#24231F",
-      inkDim: "#6C6A63",
-      inkFaint: "#A9A69D",
-      accent: "#6F6B79",
-      accent2: "#605C6C",
-      gold: "#7A7568",
-      edge: "#E2DFD6",
-      err: "#9A6A6A",
-      markBg: "#E7E4EC",
-      markFg: "#3A3745",
-      markCur: "#6F6B79",
-      markCurFg: "#FFFFFF",
-    },
-    acrylic: { tint: "rgba(245,243,237,0.92)", blur: 8 },
-    background: { mode: "solid", solid: "#F4F2EC" },
-    illustration: 0,
-    watercolor: [],
-  },
-};
-
 // CSS variables a custom/JSON theme drives (cleared when switching back to a
 // built-in data-theme so its CSS block wins).
 export const THEME_VARS = [
@@ -370,7 +224,8 @@ export function deskFrom(t) {
   const bg = t.background || { mode: "watercolor" };
   if (bg.mode === "solid") return bg.solid || t.color.paper2 || t.color.paper;
   const layers = (t.watercolor || []).map(
-    (b) => `radial-gradient(${b.r} ${b.r} at ${b.x} ${b.y}, ${b.color}, transparent 62%)`,
+    (b) =>
+      `radial-gradient(${b.rx || b.r} ${b.ry || b.r} at ${b.x} ${b.y}, ${b.color}, transparent 62%)`,
   );
   layers.push(t.color.paper);
   return layers.join(", ");
@@ -598,9 +453,8 @@ export function populateLanguageSelect() {
   if (!sel) return;
   sel.replaceChildren();
   for (const code of ["auto", ...availableLocales()]) {
-    const opt = document.createElement("option");
+    const opt = el("option", "", localeLabel(code));
     opt.value = code;
-    opt.textContent = localeLabel(code);
     sel.appendChild(opt);
   }
   sel.value = normalizeLanguage(state.settings.language);
@@ -608,14 +462,22 @@ export function populateLanguageSelect() {
 
 export function populateThemeSelect() {
   const sel = $("set-theme");
-  [...sel.querySelectorAll("option[data-custom]")].forEach((o) => o.remove());
+  sel.replaceChildren();
+  const auto = el("option", "", t("settings.themeAuto"));
+  auto.value = "auto";
+  sel.appendChild(auto);
+  for (const theme of BUILTIN_THEMES) {
+    const option = el("option", "", theme.labelKey ? t(theme.labelKey) : theme.name);
+    option.value = theme.id;
+    sel.appendChild(option);
+  }
   for (const name of Object.keys(state.settings.customThemes || {})) {
-    const o = document.createElement("option");
+    const o = el("option", "", "★ " + name);
     o.value = "custom:" + name;
-    o.textContent = "★ " + name;
     o.dataset.custom = "1";
     sel.appendChild(o);
   }
+  sel.value = state.settings.theme || "auto";
 }
 
 export function persistCustomTheme(t) {

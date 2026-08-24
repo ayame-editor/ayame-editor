@@ -4,20 +4,10 @@ import { state } from "./state.js";
 import { currentLocale, t } from "./i18n.js";
 import { setAppTitle } from "./app.js";
 import { isKeymapDoc, isThemeDoc } from "./document-kind.js";
+import { encodingLabel } from "./encodings.js";
 
 export function enc(encoding) {
-  // Keys match the core Encoding enum's kebab-case serialization (Utf8 → "utf8").
-  return (
-    {
-      utf8: "UTF-8",
-      "utf-8": "UTF-8",
-      "utf-16le": "UTF-16 LE",
-      "utf-16be": "UTF-16 BE",
-      "shift-jis": "Shift_JIS",
-      "euc-jp": "EUC-JP",
-      ascii: "ASCII",
-    }[encoding] || String(encoding)
-  );
+  return encodingLabel(encoding);
 }
 
 export function eol(lineEnding) {

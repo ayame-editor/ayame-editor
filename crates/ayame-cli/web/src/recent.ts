@@ -1,5 +1,5 @@
 // Ayame Editor — recent file persistence and opener rows.
-import { $, iconSvg, isUntitled, pathBaseName, pathDirName } from "./dom.js";
+import { $, button, el, iconSvg, isUntitled, pathBaseName, pathDirName } from "./dom.js";
 import { t } from "./i18n.js";
 import { loadRecentFilesShared, saveRecentFilesShared } from "./persistence.js";
 import { prepareOpenerOption, resetOpenerSelection } from "./browse.js";
@@ -48,32 +48,23 @@ export function renderRecentFiles() {
     box.classList.add("hidden");
     return;
   }
-  const heading = document.createElement("div");
-  heading.className = "opener-recent-head";
+  const heading = el("div", "opener-recent-head", t("dialog.open.recent"));
   heading.setAttribute("aria-hidden", "true");
-  heading.textContent = t("dialog.open.recent");
   box.append(heading);
   for (const path of list) box.append(recentRow(path));
   box.classList.remove("hidden");
 }
 
 export function recentRow(path) {
-  const row = document.createElement("button");
-  row.className = "opener-row recent";
-  row.type = "button";
+  const row = button("opener-row recent", "");
   prepareOpenerOption(row);
   row.title = path;
   row.setAttribute("aria-label", `${t("dialog.open.recent")}: ${pathBaseName(path) || path}`);
-  const icon = document.createElement("span");
-  icon.className = "ic";
+  const icon = el("span", "ic");
   icon.setAttribute("aria-hidden", "true");
   icon.append(iconSvg("i-clock"));
-  const name = document.createElement("span");
-  name.className = "nm";
-  name.textContent = pathBaseName(path) || path;
-  const directory = document.createElement("span");
-  directory.className = "sz";
-  directory.textContent = pathDirName(path) || "";
+  const name = el("span", "nm", pathBaseName(path) || path);
+  const directory = el("span", "sz", pathDirName(path) || "");
   row.append(icon, name, directory);
   row.addEventListener("click", () => openRecent(path));
   return row;

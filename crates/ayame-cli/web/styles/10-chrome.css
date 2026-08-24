@@ -1,0 +1,504 @@
+/* ---- menu bar --------------------------------------------------------- */
+
+#menubar {
+  grid-area: menubar;
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  height: 100%;
+  padding: var(--space-0) var(--space-2-5);
+  background: color-mix(in srgb, var(--bg-toolbar) 96%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  user-select: none;
+  position: relative;
+  z-index: var(--z-menubar);
+}
+.menubar-button {
+  height: 24px;
+  min-width: 0;
+  padding: var(--space-0) var(--space-2-5);
+  border-radius: calc(var(--radius-control) - 1px);
+  color: var(--fg);
+  font-size: var(--fs-ui);
+}
+.menubar-button:hover,
+.menubar-button.on {
+  background: var(--hover);
+  color: var(--accent-bright);
+}
+
+/* ---- tab bar ---------------------------------------------------------- */
+
+#tabbar {
+  grid-area: tabbar;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+  height: var(--control-h);
+  user-select: none;
+  overflow: hidden;
+}
+#tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#tabs::-webkit-scrollbar { display: none; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding:
+    var(--space-0) var(--space-2) var(--space-0) var(--space-3);
+  max-width: 220px;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+  position: relative;
+}
+.tab:hover { background: var(--hover); }
+.tab.dragging {
+  background: var(--hover);
+  color: var(--fg-faint);
+}
+.tab.tab-drop-before::before,
+.tab.tab-drop-after::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: var(--stroke-tab-drop);
+  background: var(--accent);
+  border-radius: var(--radius-control);
+}
+.tab.tab-drop-before::before { left: var(--space-0); }
+.tab.tab-drop-after::after { right: var(--space-0); }
+.tab.active {
+  background: color-mix(in srgb, var(--bg-elevated) 84%, transparent);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tab .tab-name { overflow: hidden; text-overflow: ellipsis; }
+.tab.dirty .tab-name { font-style: italic; }
+.tab .tab-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+  visibility: hidden;
+}
+.tab.dirty .tab-dot { visibility: visible; }
+.tab .tab-x {
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: calc(var(--radius-control) - 2px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
+  flex: 0 0 auto;
+}
+.tab .tab-x .ay-icon { width: var(--space-3); height: var(--space-3); }
+.tab .tab-x:hover { background: var(--hover); color: var(--fg); }
+.tab-new,
+.tab-list {
+  width: var(--control-h);
+  height: 100%;
+  padding: var(--space-0);
+  border: none;
+  border-radius: 0;
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+.tab-list { border-left: 1px solid var(--border); }
+.tab-new:hover,
+.tab-list:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+/* ---- toolbar ---------------------------------------------------------- */
+
+#toolbar {
+  grid-area: toolbar;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+  height: 100%;
+  padding:
+    var(--space-0) var(--space-2-5) var(--space-0) var(--space-0-5);
+  background: color-mix(in srgb, var(--bg-toolbar) 96%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  font-size: var(--fs-ui);
+  user-select: none;
+  position: relative;
+  z-index: var(--z-chrome);
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+.tb-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--space-1) var(--space-0-5);
+  background: var(--border);
+  flex: 0 0 auto;
+}
+/* Pushes the contextual apply-theme/apply-keymap group to the right edge so it
+   claims its own lane and never shoves the primary controls when it appears. */
+.tb-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+
+/* Buttons: text commands (.cmd) and square icon buttons (.ico). */
+button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg);
+  border-radius: var(--radius);
+  height: 30px;
+  cursor: pointer;
+  font-family: var(--ui);
+  font-size: var(--fs-ui);
+  padding: var(--space-0) var(--space-1-5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1-5);
+  white-space: nowrap;
+}
+button,
+.tab,
+.field,
+.row,
+#vthumb,
+.menu-item,
+.input-control,
+.opener-row {
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+button.cmd {
+  height: var(--control-h);
+  min-width: var(--cmd-min-width);
+  padding: var(--space-0) var(--space-2-5);
+}
+
+/* Canonical text-entry control. Dialogs use one height, type scale, surface,
+   and focus treatment; only path-like values opt into the mono stack. */
+.input-control {
+  height: var(--control-h);
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-0) var(--space-2-5);
+  font-family: var(--ui);
+  font-size: var(--fs-ui);
+  outline: none;
+}
+.input-control:focus {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.input-control::placeholder { color: var(--fg-faint); }
+.input-control--mono { font-family: var(--mono); }
+
+.menu-shell {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.file-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: var(--z-menu);
+  /* Wide enough for the longest label+shortcut pair: labels must never be
+     ellipsized into "カーソルを上に...". */
+  width: max-content;
+  min-width: 252px;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - var(--chrome-top-h) - var(--space-2));
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elevated) 98%, transparent);
+  box-shadow:
+    0 18px 44px -26px color-mix(in srgb, var(--fg) 54%, #000),
+    0 0 0 1px color-mix(in srgb, #fff 40%, transparent);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+}
+.file-menu.hidden { display: none; }
+.menu-item {
+  width: 100%;
+  height: 32px;
+  justify-content: space-between;
+  gap: var(--space-3-5);
+  padding: var(--space-0) var(--space-2-5);
+  border-radius: calc(var(--radius) - 4px);
+}
+.menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-section-label {
+  padding:
+    var(--space-1) var(--space-2-5)
+    var(--space-0-5);
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.menu-recent-path {
+  max-width: var(--menu-secondary-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-item.checked .menu-label::after {
+  content: " ✓";
+  color: var(--accent-bright, var(--accent));
+}
+.menu-key {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-family: var(--ui);
+  font-size: var(--fs-ui-sm);
+}
+.menu-sep {
+  height: 1px;
+  margin: var(--space-1);
+  background: var(--border);
+}
+button.ico {
+  width: 32px;
+  padding: var(--space-0);
+  line-height: var(--lh-icon);
+  color: var(--fg-dim);
+}
+button:hover { background: var(--hover); color: var(--accent-bright); }
+button.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  color: var(--accent-bright);
+}
+button:active { transform: translateY(var(--offset-pressed)); }
+/* Disabled uses ONE dimming mechanism (faint color, now WCAG AA) — never color
+   *and* opacity together, which drove contrast below 2:1 (#152). */
+button:disabled { color: var(--fg-faint); cursor: default; }
+button:disabled:hover { background: transparent; color: var(--fg-faint); }
+/* Filled buttons keep their legible on-accent text; a single opacity step is
+   their one dimming mechanism (no faint color on top). */
+.cmd.primary:disabled, .cmd.danger:disabled {
+  color: var(--on-accent);
+  opacity: 0.55;
+}
+.cmd.primary:disabled:hover { background: var(--accent); color: var(--on-accent); }
+.cmd.danger:disabled:hover { background: var(--danger); color: var(--on-accent); }
+button.toggle {
+  width: 30px;
+  font-size: var(--fs-ui-sm);
+  font-family: var(--mono);
+  color: var(--fg-dim);
+}
+button.toggle.on {
+  background: var(--accent);
+  border-color: var(--accent-bright);
+  color: var(--on-accent);
+}
+button.toggle.on:hover {
+  background: color-mix(in srgb, var(--accent) 86%, var(--fg));
+  border-color: color-mix(in srgb, var(--accent-bright) 78%, var(--fg));
+}
+/* "Replace in selection only" is disabled while nothing is selected; the
+   generic button:disabled color is not enough on a toggle, whose whole job is
+   to look pressable. */
+button.toggle:disabled {
+  opacity: 0.45;
+  border-color: var(--border);
+}
+
+/* Floating in-editor search & replace: overlays the viewport's top-right
+   (VS Code style) so opening it never reflows the toolbar or the text. */
+.find-group {
+  display: none;
+  position: absolute;
+  top: 10px;
+  right: 24px;
+  z-index: var(--z-find);
+  width: min(520px, calc(100% - 48px));
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-0);
+}
+html.find-open .find-group { display: flex; }
+/* Sit below the column ruler instead of overlapping it. */
+#viewport.has-ruler .find-group { top: 26px; }
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-0-5) var(--space-1-5);
+  height: 30px;
+}
+.field input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-ui);
+  width: 110px;
+  min-width: 0;
+}
+.find {
+  width: 100%;
+  height: 30px;
+  padding: var(--space-0-5) var(--space-2);
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow:
+    0 8px 20px -18px color-mix(in srgb, var(--fg) 52%, #000),
+    0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+}
+.find input {
+  flex: 1 1 160px;
+  width: auto;
+}
+.find-mag {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-faint);
+  margin-left: var(--space-0-5);
+}
+.field input::placeholder { color: var(--fg-faint); }
+.field:focus-within {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+:is(
+  .field.error,
+  .keymap-row.conflict .keymap-input,
+  .opener-msg:not(.busy):not(:empty)
+) {
+  border-color: var(--danger);
+  box-shadow: var(--invalid-ring);
+}
+.field .ico { height: 24px; width: 26px; font-size: var(--fs-ui-sm); }
+.field .toggle { height: 24px; }
+#find-close {
+  color: var(--fg-dim);
+  font-size: var(--fs-title);
+}
+
+/* Match counter sits right after the input; an empty counter collapses so no
+   stray gap opens up between the buttons. */
+.find-count {
+  color: var(--fg-dim);
+  font-size: var(--fs-ui-sm);
+  padding: var(--space-0) var(--space-1);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+  flex: 0 1 auto;
+}
+.find-count:empty { display: none; }
+
+/* Chevron that expands the replace row (rotates when open). */
+.find-expand {
+  width: 20px;
+  height: 24px;
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+.find-expand::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+html.replace-open .find-expand::before { transform: rotate(90deg); }
+
+/* Keep the row in layout so its expansion can follow the chevron motion.
+   inert/aria-hidden in setReplaceRow keep collapsed controls out of focus and
+   the accessibility tree. */
+.find-group .replace-row {
+  height: 0;
+  min-height: 0;
+  margin-top: var(--space-0);
+  padding: var(--space-0) var(--space-2);
+  border-width: 0;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.25);
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    height var(--motion-fast) var(--motion-ease),
+    margin-top var(--motion-fast) var(--motion-ease),
+    padding var(--motion-fast) var(--motion-ease),
+    border-width var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+html.replace-open .find-group .replace-row {
+  height: 30px;
+  margin-top: var(--space-1-5);
+  padding: var(--space-0-5) var(--space-2);
+  border-width: 1px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.replace-row input {
+  flex: 1 1 120px;
+  width: auto;
+}
+.replace-btn {
+  height: 24px;
+  min-width: 0;
+  padding: var(--space-0) var(--space-2-5);
+  font-size: var(--fs-ui-sm);
+  flex: 0 0 auto;
+}

@@ -3,9 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FONT_STACKS } from "../src/state.ts";
+import { readCssSource } from "./css-source.js";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const css = readFileSync(path.join(webRoot, "style.css"), "utf8");
+const css = readCssSource();
+const themes = JSON.parse(readFileSync(path.join(webRoot, "themes.json"), "utf8"));
 
 const compactStack = (value: string) => value.replace(/[\s"]/g, "");
 
@@ -35,12 +37,22 @@ function mixHex(foreground: string, background: string, share: number): string {
   );
   return `#${mixed.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
-// Read a `--token: #hex` value from a CSS block body.
-function token(block: string, name: string): string | undefined {
-  return block.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1];
-}
-
 describe("Ayame design tokens", () => {
+  it("keeps built-in theme definitions only in themes.json (#126)", () => {
+    const settingsSource = readFileSync(path.join(webRoot, "src/settings.ts"), "utf8");
+    expect(Object.keys(themes)).toEqual([
+      "iris-light",
+      "iris-mist",
+      "iris-dawn",
+      "sumi-light",
+      "mono-paper",
+      "dark",
+      "black",
+    ]);
+    expect(settingsSource).not.toContain('"iris-light": {');
+    expect(css).not.toContain("html[data-theme=");
+  });
+
   it("uses one CJK-capable mono stack in CSS and runtime settings", () => {
     const cssMono = css.match(/--mono:\s*([^;]+);/s)?.[1];
     expect(cssMono).toBeTruthy();
@@ -71,31 +83,25 @@ describe("Ayame design tokens", () => {
   });
 
   it("completes dark theme chrome tokens", () => {
-    for (const theme of ["dark", "black"]) {
-      const block = css.match(
-        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
-      )?.[1];
-      expect(block).toBeTruthy();
-      expect(block).toContain("--accent: #9b82d8");
-      expect(block).toContain("--accent-bright: #b49de6");
-      expect(block).toContain("--status:");
-      expect(block).toContain("--status-fg:");
+    for (const name of ["dark", "black"]) {
+      const theme = themes[name];
+      expect(theme.color.accent).toBe("#9b82d8");
+      expect(theme.color.accent2).toBe("#b49de6");
+      expect(theme.acrylic.tint).toBeTruthy();
+      expect(theme.ui.statusForeground).toBe(theme.color.ink);
     }
   });
 
   it("gives every named theme its own syntax palette and keeps Mono Paper monochrome (#154)", () => {
     const names = ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"];
     for (const name of names) {
-      const block = css.match(
-        new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"),
-      )?.[1];
-      expect(block).toBeTruthy();
       for (const token of ["string", "number", "literal", "function", "link"]) {
-        expect(block).toContain(`--syn-${token}:`);
+        expect(themes[name].ui.syntax[token]).toBeTruthy();
       }
     }
-    const mono = css.match(/html\[data-theme="mono-paper"\]\s*\{([^}]+)\}/s)?.[1] || "";
-    const colors = [...mono.matchAll(/--syn-[\w-]+:\s*#([\da-f]{6})/gi)].map((match) => match[1]);
+    const colors = Object.values(themes["mono-paper"].ui.syntax).map((color) =>
+      String(color).replace("#", ""),
+    );
     expect(colors).toHaveLength(5);
     for (const color of colors) {
       expect(color.slice(0, 2)).toBe(color.slice(2, 4));
@@ -119,24 +125,11 @@ describe("Ayame design tokens", () => {
   });
 
   it("keeps --fg-faint legible on --bg (WCAG AA >= 4.5:1) in every theme (#152)", () => {
-    // Default theme lives in :root; named themes in their html[data-theme] block.
-    const root = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] || "";
-    const rootBg = token(root, "--bg");
-    const rootFaint = token(root, "--fg-faint");
-    expect(rootBg).toBeTruthy();
-    expect(rootFaint).toBeTruthy();
-    expect(contrast(rootFaint!, rootBg!)).toBeGreaterThanOrEqual(4.5);
-
-    for (const theme of ["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"]) {
-      const block = css.match(
-        new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]+)\\}`, "s"),
-      )?.[1];
-      expect(block, theme).toBeTruthy();
-      const bg = token(block!, "--bg");
-      const faint = token(block!, "--fg-faint");
-      expect(bg, theme).toBeTruthy();
-      expect(faint, theme).toBeTruthy();
-      expect(contrast(faint!, bg!), `${theme} --fg-faint on --bg`).toBeGreaterThanOrEqual(4.5);
+    for (const [name, theme] of Object.entries<any>(themes)) {
+      expect(
+        contrast(theme.ui.foregroundFaint, theme.color.paper),
+        `${name} --fg-faint on --bg`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -150,25 +143,12 @@ describe("Ayame design tokens", () => {
       expect(root).toContain(declaration);
     }
 
-    const themes: [string, string][] = [
-      ["iris-light", root],
-      ...["iris-mist", "iris-dawn", "sumi-light", "mono-paper", "dark", "black"].map(
-        (name) =>
-          [
-            name,
-            css.match(new RegExp(`html\\[data-theme="${name}"\\]\\s*\\{([^}]+)\\}`, "s"))?.[1] ||
-              "",
-          ] as [string, string],
-      ),
-    ];
-
-    for (const [name, block] of themes) {
-      const required = (variable: string) => token(block, variable) || token(root, variable);
-      const gutter = required("--gutter-bg");
-      const editor = required("--edit-bg");
-      const accent = required("--accent");
-      const foreground = required("--fg");
-      const gutterForeground = required("--gutter-fg");
+    for (const [name, theme] of Object.entries<any>(themes)) {
+      const gutter = theme.color.paper;
+      const editor = theme.ui.edit;
+      const accent = theme.color.accent;
+      const foreground = theme.color.ink;
+      const gutterForeground = theme.color.inkFaint;
       for (const value of [gutter, editor, accent, foreground, gutterForeground]) {
         expect(value, name).toBeTruthy();
       }
@@ -192,7 +172,9 @@ describe("Ayame design tokens", () => {
   });
 
   it("uses a theme-aware focus ring for controls and the editor viewport (#183)", () => {
-    expect(css).toContain("--focus-ring:");
+    for (const theme of Object.values<any>(themes)) {
+      expect(theme.ui.focusRing || theme.color.accent2).toBeTruthy();
+    }
     expect(css).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus-ring\)/);
     expect(css).toMatch(
       /#viewport:focus-visible\s*\{[^}]*box-shadow: inset 0 0 0 2px var\(--focus-ring\)/s,

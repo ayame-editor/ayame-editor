@@ -83,6 +83,7 @@ import {
 } from "./settings.js";
 import { isWordChar } from "./text.js";
 import { anyModalOpen, closeTopModal, initModalRegistry, registerModal } from "./modal-state.js";
+import { encodingSupportsBom, populateEncodingSelect } from "./encodings.js";
 
 export { anyModalOpen };
 
@@ -212,11 +213,12 @@ export function initEvents() {
   });
   $("convert-close").addEventListener("click", hideConvert);
   $("convert-cancel").addEventListener("click", hideConvert);
+  populateEncodingSelect($("convert-enc"));
   $("convert-enc").addEventListener("change", syncConvertBom);
   $("convert-go").addEventListener("click", () => {
     const encoding = $("convert-enc").value;
     const eolVal = $("convert-eol").value;
-    const bom = ["utf-8", "utf-16le", "utf-16be"].includes(encoding) && $("convert-bom").checked;
+    const bom = encodingSupportsBom(encoding) && $("convert-bom").checked;
     hideConvert();
     convertSave(encoding, eolVal, bom);
   });

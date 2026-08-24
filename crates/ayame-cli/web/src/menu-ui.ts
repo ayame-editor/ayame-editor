@@ -1,5 +1,5 @@
 // Ayame Editor — dropdown content, localization, and dynamic menu state.
-import { $, displayName, displayPath, pathDirName } from "./dom.js";
+import { $, button, displayName, displayPath, el, pathDirName } from "./dom.js";
 import { state } from "./state.js";
 import { applyStaticI18n, t } from "./i18n.js";
 import { hasTextSelection } from "./selection.js";
@@ -13,7 +13,7 @@ import {
   renderRecentFiles,
   renderTabs,
 } from "./workspace.js";
-import { populateLanguageSelect } from "./settings.js";
+import { populateLanguageSelect, populateThemeSelect } from "./settings.js";
 import { hideFileMenu } from "./menu-surface.js";
 import { updateStatusMeta, updateStatusPos } from "./status.js";
 import { keymapVisible, renderKeymapRows, updateKeyHints } from "./keymap-menu.js";
@@ -72,19 +72,13 @@ export function renderFileMenuRecentFiles() {
   box.textContent = "";
   section.classList.toggle("hidden", !list.length);
   for (const path of list) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "menu-item";
+    const item = button("menu-item", "");
     item.setAttribute("role", "menuitem");
     item.setAttribute("tabindex", "-1");
     item.title = displayPath(path);
     item.setAttribute("aria-label", `${t("menu.recentFiles")}: ${displayPath(path)}`);
-    const name = document.createElement("span");
-    name.className = "menu-label";
-    name.textContent = displayName(path);
-    const dir = document.createElement("span");
-    dir.className = "menu-key menu-recent-path";
-    dir.textContent = pathDirName(displayPath(path)) || "";
+    const name = el("span", "menu-label", displayName(path));
+    const dir = el("span", "menu-key menu-recent-path", pathDirName(displayPath(path)) || "");
     item.append(name, dir);
     item.addEventListener("click", () => {
       hideFileMenu();
@@ -97,6 +91,7 @@ export function renderFileMenuRecentFiles() {
 export function applyLocale() {
   applyStaticI18n();
   populateLanguageSelect();
+  populateThemeSelect();
   updateKeyHints();
   updateStatusMeta();
   updateStatusPos();

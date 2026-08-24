@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { readCssSource } from "./css-source.js";
 
 vi.mock("../src/editor.js", () => ({
   cachedLine: vi.fn(() => null),
@@ -28,9 +29,7 @@ describe("bounded minimap (#144)", () => {
     expect(MINIMAP_ROW).toBe(3);
     expect(minimapCapacity(300)).toBe(100);
     expect(minimapCapacity(0)).toBe(1);
-    expect(readFileSync(path.join(webRoot, "style.css"), "utf8")).toContain(
-      "--minimap-width: 88px",
-    );
+    expect(readCssSource()).toContain("--minimap-width: 88px");
   });
 
   it("shows the whole document from line zero when it fits", () => {

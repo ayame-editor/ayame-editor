@@ -1,0 +1,170 @@
+/* Ayame Editor chrome — light-first "Iris" look.
+   Themeable via html[data-theme] (iris-light default, plus iris-mist/dawn,
+   sumi-light, mono-paper, dark, black); custom JSON themes set the same CSS
+   variables at runtime. Acrylic chrome, iris accent, gold search marks. */
+
+:root {
+  /* Editor data typography. Settings updates these two values live; their
+     defaults intentionally match the UI scale but must remain independent. */
+  --fs-editor: 13px;
+  --lh-editor: 18px;
+  --mono: "SFMono-Regular", "Menlo", "Consolas", "DejaVu Sans Mono",
+    "Noto Sans Mono CJK JP", "MS Gothic", monospace;
+  --ui: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  /* Stable chrome type scale. --fs-ui is not an alias for the user-controlled
+     --fs-editor even though both default to 13px. */
+  --fs-ui: 13px;
+  --fs-ui-sm: 12px;
+  --fs-hint: 11px;
+  --fs-ui-lg: 14px;
+  --fs-title: 16px;
+  --fs-ruler: 10px;
+  /* Unitless UI leading: icons suppress extra leading, compact labels stay
+     tight, and prose/status messages share one readable body rhythm. */
+  --lh-icon: 1;
+  --lh-tight: 1.4;
+  --lh-body: 1.5;
+
+  /* Spacing scale: a 4px grid with 2px half-steps where compact chrome needs
+     them. Components must consume these tokens instead of naked lengths. */
+  --space-0: 0;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-5-5: 22px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --minimap-width: 88px;
+  /* Optical-only nudge for inline glyph ink; never use this for layout. */
+  --space-optical: 1px;
+
+  /* Optical geometry. Fractional values preserve the intended visual weight
+     on small glyphs and controls; they are not layout spacing. */
+  --stroke-icon: 1.8;
+  --stroke-folder: 1.5px;
+  --stroke-tab-drop: 2px;
+  --offset-pressed: 0.5px;
+  --offset-focus-inset: -1px;
+  --offset-glyph-underline: 0.12em;
+
+  /* Layer order, low to high. Ten-point steps leave room for local states
+     without introducing one-off z-index literals in components. */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-content: 20;
+  --z-scrollbar: 30;
+  --z-caret: 40;
+  --z-ime: 50;
+  --z-find: 60;
+  --z-progress: 70;
+  --z-chrome: 80;
+  --z-menu: 90;
+  --z-menubar: 100;
+  --z-notification: 110;
+  --z-modal: 120;
+  --z-dropzone: 130;
+  --z-context-menu: 140;
+
+  /* Built-in theme values come from themes.json → generated themes.css.
+     Derived palettes live here so built-in and custom themes consume the same
+     opaque, contrast-aware surfaces. */
+  --gutter-surface: color-mix(in srgb, var(--accent) 12%, var(--gutter-bg));
+  --gutter-border: var(--accent);
+  --gutter-text: color-mix(in srgb, var(--fg) 55%, var(--gutter-fg));
+  --gutter-active-bg:
+    color-mix(in srgb, var(--bg-active-line) 72%, var(--gutter-surface));
+  --gutter-hover-bg: color-mix(in srgb, var(--mark-bg) 70%, var(--gutter-surface));
+  --gutter-bookmark-bg: color-mix(in srgb, var(--mark-bg) 82%, var(--gutter-surface));
+  --gutter-active-bookmark-bg:
+    color-mix(in srgb, var(--mark-bg) 64%, var(--gutter-active-bg));
+  --warn: var(--gold);
+  --on-accent: #FFFFFF;
+  --shadow: 0 10px 34px rgb(0 0 0 / .28);
+  --radius-control: 6px;
+  --control-h: 34px;
+  --cmd-min-width: 46px;
+  --menu-secondary-max: 18ch;
+  --chrome-top-h: 38px;
+  --gutter-pad-start: var(--space-2);
+  --gutter-pad-end: var(--space-5);
+  --gutter-border-width: 1px;
+  --marker-rail-w: var(--space-1);
+  /* Change-history semantics and geometry are shared by gutter rails and the
+     fixed-bin position pane. Built-in/custom themes only provide their normal
+     accent/string/danger colors; feature selectors never hardcode a theme. */
+  --change-saved: color-mix(in srgb, var(--syn-string) 82%, var(--fg));
+  --change-unsaved: var(--accent-bright);
+  --change-deleted-outline: var(--danger);
+  --change-marker-w: var(--space-0-5);
+  --change-marker-offset: var(--space-1);
+  --change-marker-saved-h: var(--space-2);
+  --change-marker-unsaved-h: calc(var(--lh-editor) - var(--space-1));
+  --change-deleted-size: var(--space-1-5);
+  --change-deleted-stroke: 1px;
+  --change-tick-saved-w: var(--space-1);
+  --change-tick-unsaved-w: var(--space-2);
+  --change-tick-deleted-size: var(--space-1);
+  --bookmark-panel-w: 44rem;
+  --bookmark-list-max-h: 55vh;
+  --analysis-panel-w: 62rem;
+  --analysis-panel-max-h: 90vh;
+  --analysis-strip-max-w: 68%;
+  --analysis-rule-list-max-h: 34vh;
+  --analysis-hit-list-max-h: 28vh;
+  --analysis-progress-w: 8rem;
+  --analysis-pattern-min-w: 18ch;
+  --analysis-chip-max-w: 28ch;
+  --analysis-highlight-stroke: 2px;
+  --analysis-tick-w: var(--space-1);
+  --modal-edge: 94vw;
+  --modal-body-padding:
+    var(--space-3) var(--space-3-5) var(--space-3-5);
+  --motion-fast: 120ms;
+  --motion-normal: 160ms;
+  --motion-ease: cubic-bezier(.2, 0, 0, 1);
+  --invalid-ring: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  --match-ring: 0 0 0 1px color-mix(in srgb, var(--gold) 30%, transparent);
+}
+
+* { box-sizing: border-box; }
+
+.icon-sprite { display: none; }
+.ay-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--stroke-icon);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html, body {
+  margin: var(--space-0);
+  height: 100%;
+  background: var(--desk, var(--bg));
+  color: var(--fg);
+  font-family: var(--ui);
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  grid-template-areas:
+    "menubar toolbar"
+    "tabbar tabbar"
+    "main main"
+    "statusbar statusbar";
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: var(--chrome-top-h) auto minmax(0, 1fr) auto;
+  height: 100vh;
+  background: transparent;
+  position: relative;
+}

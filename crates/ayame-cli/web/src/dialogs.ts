@@ -1,6 +1,6 @@
 // Ayame Editor — dialogs module. Type-stripped to JS at build time (build.rs, oxc).
 import { api, apiPost } from "./api.js";
-import { $, commas, registerModal, setModalOpen } from "./dom.js";
+import { $, button, commas, el, registerModal, setModalOpen } from "./dom.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
 import type { ArtifactOpStatus, OperationCancelRequest } from "./types/api.js";
@@ -173,17 +173,14 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
   const readers: Record<string, () => any> = {};
   for (const f of fields) {
     if (f.type === "hint") {
-      const hint = document.createElement("div");
-      hint.className = "form-hint";
-      hint.textContent = f.label;
+      const hint = el("div", "form-hint", f.label);
       body.append(hint);
       continue;
     }
     if (f.type === "check") {
-      const lab = document.createElement("label");
-      lab.className = "form-check";
+      const lab = el("label", "form-check");
       if (f.title) lab.title = f.title;
-      const cb = document.createElement("input");
+      const cb = el("input");
       cb.type = "checkbox";
       cb.checked = !!f.value;
       lab.append(cb, document.createTextNode(f.label));
@@ -194,23 +191,15 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
     if (f.type === "path") {
       // A text field with a "Choose Folder" button that runs the caller's
       // picker (`onBrowse`) and writes the chosen path back (issue #79.1).
-      const prow = document.createElement("div");
-      prow.className = "form-row";
-      const plabel = document.createElement("span");
-      plabel.textContent = f.label;
-      const wrap = document.createElement("div");
-      wrap.className = "form-path";
-      const input = document.createElement("input");
+      const prow = el("div", "form-row");
+      const plabel = el("span", "", f.label);
+      const wrap = el("div", "form-path");
+      const input = el("input", "input-control input-control--mono");
       input.type = "text";
-      input.className = "input-control input-control--mono";
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
-      const browseBtn = document.createElement("button");
-      browseBtn.type = "button";
-      browseBtn.className = "cmd";
-      browseBtn.textContent = f.browseLabel || t("dialog.open.chooseFolder");
-      browseBtn.addEventListener("click", async () => {
+      const browseBtn = button("cmd", f.browseLabel || t("dialog.open.chooseFolder"), async () => {
         if (!f.onBrowse) return;
         const picked = await f.onBrowse(input.value);
         if (picked != null && picked !== "") input.value = picked;
@@ -222,27 +211,22 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       readers[f.id] = () => input.value;
       continue;
     }
-    const row = document.createElement("label");
-    row.className = "form-row";
-    const span = document.createElement("span");
-    span.textContent = f.label;
+    const row = el("label", "form-row");
+    const span = el("span", "", f.label);
     row.append(span);
     if (f.type === "select") {
-      const sel = document.createElement("select");
-      sel.className = "input-control";
+      const sel = el("select", "input-control");
       for (const [v, text] of f.options || []) {
-        const o = document.createElement("option");
+        const o = el("option", "", text);
         o.value = v;
-        o.textContent = text;
         sel.append(o);
       }
       if (f.value != null) sel.value = f.value;
       row.append(sel);
       readers[f.id] = () => sel.value;
     } else {
-      const input = document.createElement("input");
+      const input = el("input", "input-control");
       input.type = "text";
-      input.className = "input-control";
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
@@ -300,30 +284,23 @@ function loadingParts() {
   let box = document.getElementById("overlay-box");
   if (!box) {
     o.textContent = "";
-    box = document.createElement("div");
+    box = el("div", "overlay-box");
     box.id = "overlay-box";
-    box.className = "overlay-box";
-    const textEl = document.createElement("div");
+    const textEl = el("div", "overlay-text");
     textEl.id = "overlay-text";
-    textEl.className = "overlay-text";
     // The operation name and the "finishing" state change rarely, so announce
     // them politely. The per-tick detail below is deliberately NOT live —
     // re-reading "45,000 / 100,000" every 500ms would swamp a screen reader.
     textEl.setAttribute("aria-live", "polite");
-    const bar = document.createElement("progress");
+    const bar = el("progress", "overlay-progress");
     bar.id = "overlay-progress";
-    bar.className = "overlay-progress";
     bar.max = 100;
     bar.value = 0;
     bar.setAttribute("aria-label", t("dialog.operation.busy"));
-    const detail = document.createElement("div");
+    const detail = el("div", "overlay-detail");
     detail.id = "overlay-detail";
-    detail.className = "overlay-detail";
-    const cancel = document.createElement("button");
+    const cancel = button("cmd danger", t("common.cancel"));
     cancel.id = "overlay-cancel";
-    cancel.className = "cmd danger";
-    cancel.type = "button";
-    cancel.textContent = t("common.cancel");
     box.append(textEl, bar, detail, cancel);
     o.append(box);
   }

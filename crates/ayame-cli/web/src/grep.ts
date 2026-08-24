@@ -1,5 +1,5 @@
 // Ayame Editor — folder grep dialog and result rendering.
-import { $, commas, displayPath, pathDirName, setModalOpen } from "./dom.js";
+import { $, button, commas, displayPath, el, pathDirName, setModalOpen } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
 import { apiPost } from "./api.js";
@@ -112,22 +112,20 @@ export function showGrep(res, query, regex) {
 }
 
 // Highlight the literal match inside a preview line ([col, col+queryChars]).
-export function appendGrepText(el, text, col, query, regex) {
+export function appendGrepText(host, text, col, query, regex) {
   const chars = Array.from(text);
   const qlen = regex ? 0 : Array.from(query).length;
   if (!qlen || col < 0 || col > chars.length) {
-    el.textContent = text;
+    host.textContent = text;
     return;
   }
   const before = chars.slice(0, col).join("");
   const mid = chars.slice(col, col + qlen).join("");
   const after = chars.slice(col + qlen).join("");
-  if (before) el.append(document.createTextNode(before));
-  const mark = document.createElement("span");
-  mark.className = "grep-match";
-  mark.textContent = mid;
-  el.append(mark);
-  if (after) el.append(document.createTextNode(after));
+  if (before) host.append(document.createTextNode(before));
+  const mark = el("span", "grep-match", mid);
+  host.append(mark);
+  if (after) host.append(document.createTextNode(after));
 }
 
 export function renderGrepResults(res, query, regex) {
@@ -137,9 +135,7 @@ export function renderGrepResults(res, query, regex) {
   const maxLine = hits.reduce((max, hit) => Math.max(max, hit.line + 1), 0);
   view.style.setProperty("--gutter-ch", `${lineNumberChars(maxLine)}ch`);
   if (hits.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "grep-empty";
-    empty.textContent = t("dialog.grep.noMatches");
+    const empty = el("div", "grep-empty", t("dialog.grep.noMatches"));
     view.append(empty);
     return;
   }
@@ -149,23 +145,15 @@ export function renderGrepResults(res, query, regex) {
   for (const h of hits) {
     if (h.path !== currentPath) {
       currentPath = h.path;
-      group = document.createElement("section");
-      group.className = "grep-file";
-      const head = document.createElement("div");
-      head.className = "grep-file-head";
-      head.textContent = displayPath(h.path);
+      group = el("section", "grep-file");
+      const head = el("div", "grep-file-head", displayPath(h.path));
       head.title = displayPath(h.path);
       group.append(head);
       frag.append(group);
     }
-    const row = document.createElement("button");
-    row.className = "grep-hit";
-    row.type = "button";
-    const ln = document.createElement("span");
-    ln.className = "grep-ln";
-    ln.textContent = formatLineNo(h.line + 1);
-    const tx = document.createElement("span");
-    tx.className = "grep-tx";
+    const row = button("grep-hit", "");
+    const ln = el("span", "grep-ln", formatLineNo(h.line + 1));
+    const tx = el("span", "grep-tx");
     appendGrepText(tx, h.text, h.col, query, regex);
     row.append(ln, tx);
     row.addEventListener("click", () => openGrepHit(h.path, h.line));

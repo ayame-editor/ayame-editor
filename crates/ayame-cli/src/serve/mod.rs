@@ -154,6 +154,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/", get(assets::index))
         .route("/src/{*path}", get(assets::src_module))
         .route("/style.css", get(assets::style_css))
+        .route("/themes.css", get(assets::themes_css))
         .route("/favicon.svg", get(assets::favicon_svg))
         .route("/ayame-logo.svg", get(assets::ayame_logo_svg))
         .route("/iris-watercolor.png", get(assets::iris_watercolor_png))

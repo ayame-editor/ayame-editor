@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readCssSource } from "./css-source.js";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (file: string) => readFileSync(path.join(webRoot, file), "utf8");
+const read = (file: string) =>
+  file === "style.css" ? readCssSource() : readFileSync(path.join(webRoot, file), "utf8");
 
 describe("application chrome", () => {
   it("removes the unfinished Explorer UI from PR #90", () => {
@@ -404,10 +406,10 @@ describe("application chrome", () => {
 
     const dialogs = read("src/dialogs.ts");
     const keymapMenu = read("src/keymap-menu.ts");
-    expect(dialogs).toContain('input.className = "input-control input-control--mono"');
-    expect(dialogs).toContain('sel.className = "input-control"');
-    expect(dialogs).toContain('input.className = "input-control"');
-    expect(keymapMenu).toContain('input.className = "keymap-input input-control"');
+    expect(dialogs).toContain('el("input", "input-control input-control--mono")');
+    expect(dialogs).toContain('el("select", "input-control")');
+    expect(dialogs).toContain('el("input", "input-control")');
+    expect(keymapMenu).toContain('el("input", "keymap-input input-control")');
 
     for (const selector of [
       ".opener-path input",

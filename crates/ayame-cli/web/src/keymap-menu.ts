@@ -1,5 +1,5 @@
 // Ayame Editor — configurable shortcuts and keymap editor.
-import { $, setModalOpen } from "./dom.js";
+import { $, el, setModalOpen } from "./dom.js";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, state } from "./state.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
@@ -116,15 +116,11 @@ export function renderKeymapRows() {
   list.textContent = "";
   const frag = document.createDocumentFragment();
   for (const [action, label] of KEYMAP_ACTIONS) {
-    const row = document.createElement("label");
+    const row = el("label", "keymap-row");
     const shortcut = shortcutFor(action);
-    row.className = "keymap-row";
     if (shortcut && used.get(shortcut) > 1) row.classList.add("conflict");
-    const name = document.createElement("span");
-    name.className = "keymap-label";
-    name.textContent = t(label);
-    const input = document.createElement("input");
-    input.className = "keymap-input input-control";
+    const name = el("span", "keymap-label", t(label));
+    const input = el("input", "keymap-input input-control");
     input.readOnly = true;
     input.value = displayShortcut(shortcut);
     input.placeholder = t("keymap.unassigned");
