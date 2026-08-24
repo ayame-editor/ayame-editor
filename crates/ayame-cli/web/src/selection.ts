@@ -247,9 +247,15 @@ export function initSelection() {
     e.preventDefault(); // keep focus on the hidden input, not the div
     const p = coordsFromEvent(e);
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-      // Ctrl+Click (Cmd+Click on mac): toggle an extra cursor at the point.
-      if (state.doc.stat?.open) toggleExtraCursorAt(p.line, p.col);
-      focusEditor();
+      // A recognized path/URL gets the platform convention Ctrl+Click. If the
+      // bounded recognizer finds nothing, preserve Ayame's existing
+      // multi-cursor toggle at the same point.
+      if (state.doc.stat?.open) {
+        void import("./recognition.js").then(async ({ openRecognizedAt }) => {
+          if (!(await openRecognizedAt(p))) toggleExtraCursorAt(p.line, p.col);
+          focusEditor();
+        });
+      }
       return;
     }
     if (e.detail >= 3) {

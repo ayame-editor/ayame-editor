@@ -197,7 +197,7 @@ impl DirtyView {
     }
 
     /// The on-disk file a worker child should read for this view.
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         self.doc.path()
     }
 
@@ -1169,6 +1169,38 @@ fn tracked_operation(
     Ok((op, guard))
 }
 
+/// Small public facade for non-Ayame subprocesses. It keeps the operation in
+/// the same status/cancel registry as sort/grep without exposing the registry
+/// internals to the external-action module.
+pub(super) struct TrackedExternalOperation {
+    op: Option<Arc<ArtifactOperation>>,
+    _guard: Option<OperationGuard>,
+}
+
+pub(super) fn track_external_operation(
+    state: &SharedState,
+    op_id: Option<&str>,
+    kind: &str,
+) -> Result<TrackedExternalOperation, ApiError> {
+    let (op, guard) = tracked_operation(state, op_id, kind, 1)?;
+    Ok(TrackedExternalOperation { op, _guard: guard })
+}
+
+impl TrackedExternalOperation {
+    pub(super) async fn canceled(&self) {
+        wait_for_cancel(self.op.clone()).await;
+    }
+
+    pub(super) fn finish(&self, message: &str, canceled: bool) {
+        if let Some(op) = &self.op {
+            op.processed_lines.store(1, AtomicOrdering::Relaxed);
+            op.canceled.store(canceled, AtomicOrdering::Relaxed);
+            op.done.store(true, AtomicOrdering::Relaxed);
+            op.set_message(message);
+        }
+    }
+}
+
 fn lookup_operation(state: &SharedState, id: &str) -> Result<Arc<ArtifactOperation>, ApiError> {
     state
         .artifact_ops()
@@ -1424,7 +1456,12 @@ async fn wait_worker_output_tracked(
 
 async fn wait_for_cancel(op: Option<Arc<ArtifactOperation>>) {
     match op {
-        Some(op) => op.notify_cancel.notified().await,
+        Some(op) => loop {
+            if op.canceled.load(AtomicOrdering::Relaxed) {
+                return;
+            }
+            op.notify_cancel.notified().await;
+        },
         None => future::pending::<()>().await,
     }
 }

@@ -94,6 +94,8 @@ The main endpoint groups are:
 | `/api/open`, `/api/new`, `/api/upload`, `/api/browse`, `/api/tabs*` | Workspace and tab management. |
 | `/api/tail/poll` | Tail-follow polling for appended files. |
 | `/api/disk/check` | Whether the open file was written outside the editor. |
+| `/api/position/resolve`, `/api/selection/recognize` | Server-authoritative deep-link coordinates and bounded path/URL recognition. |
+| `/api/actions/run` | Confirmed, shell-free external tools with capped output, timeout, and cancellation. |
 
 ## Web UI
 

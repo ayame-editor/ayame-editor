@@ -281,6 +281,20 @@ export const ACTIONS: Record<
     run: () => import("./analysis.js").then(({ openAnalysis }) => openAnalysis()),
     globalShortcut: true,
   },
+  externalAction: {
+    run: () =>
+      import("./external-actions.js").then(({ configureAndRunExternalAction }) =>
+        configureAndRunExternalAction(),
+      ),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  openRecognized: {
+    run: () =>
+      import("./recognition.js").then(({ openRecognizedSelection }) => openRecognizedSelection()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
   analysisNext: {
     run: () => import("./analysis.js").then(({ nextAnalysisMatch }) => nextAnalysisMatch()),
     globalShortcut: true,

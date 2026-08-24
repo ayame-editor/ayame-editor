@@ -30,6 +30,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{first_opt, has_flag, open_opts, parse_for};
 
+mod actions;
 mod analysis;
 mod assets;
 mod completion;
@@ -38,6 +39,8 @@ mod error;
 mod inspect;
 mod markers;
 mod ops;
+mod position;
+mod recognize;
 mod security;
 mod state;
 #[cfg(feature = "typegen")]
@@ -186,6 +189,11 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
                 )),
         )
         .route("/api/lines", get(edit::api_lines))
+        .route(
+            "/api/position/resolve",
+            post(position::api_position_resolve),
+        )
+        .route("/api/selection/recognize", post(recognize::api_recognize))
         .route("/api/completion", post(completion::api_completion))
         .route("/api/inspect", post(inspect::api_inspect))
         .route("/api/inspect/parse", post(inspect::api_parse_escape))
@@ -226,6 +234,7 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         )
         .route("/api/analysis/hits", get(analysis::api_analysis_hits))
         .route("/api/analysis/tail", post(analysis::api_analysis_tail))
+        .route("/api/actions/run", post(actions::api_external_action_run))
         .route("/api/ops/status", get(ops::api_operation_status))
         .route("/api/ops/cancel", post(ops::api_operation_cancel))
         .route("/api/sort/save", post(ops::api_sort_save))

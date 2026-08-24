@@ -45,6 +45,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 axum = "0.8"
 tower-http = { version = "0.6", features = ["catch-panic"] }
 futures-util = { version = "0.3", default-features = false }
+getrandom = "0.3"
 regex.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
@@ -53,6 +54,7 @@ unicode-general-category.workspace = true
 unicode-script.workspace = true
 unicode-bidi.workspace = true
 east-asian-width.workspace = true
+url = "2"
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 # Native window (feature = "gui"): the OS webview (WKWebView / WebView2 /
@@ -62,6 +64,9 @@ tao = { version = "0.34", optional = true }
 # OS-native open/save dialogs for the gui build (IFileDialog / NSSavePanel /
 # GTK). The web serve build keeps its in-page picker instead.
 rfd = { version = "0.15", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Native menu bar, macOS only: WKWebView swallows Cmd+C/V/X/A unless real
 # NSMenu items carry those key equivalents. Windows/Linux use the in-page

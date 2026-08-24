@@ -694,15 +694,15 @@ pub(super) async fn api_edit_redo(
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct SelectionSaveRequest {
-    path: String,
+    pub(super) path: String,
     #[serde(default)]
-    overwrite: bool,
+    pub(super) overwrite: bool,
     #[serde(default)]
-    rect: bool,
-    l0: u64,
-    c0: usize,
-    l1: u64,
-    c1: usize,
+    pub(super) rect: bool,
+    pub(super) l0: u64,
+    pub(super) c0: usize,
+    pub(super) l1: u64,
+    pub(super) c1: usize,
 }
 
 #[derive(Serialize)]
@@ -783,7 +783,7 @@ fn pinned_selection_batch(
     Some(ws.edits.lines(doc, start, count))
 }
 
-fn write_selection_to_file(
+pub(super) fn write_selection_to_file(
     state: &SharedState,
     req: &SelectionSaveRequest,
     target: &Path,

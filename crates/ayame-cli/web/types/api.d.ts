@@ -103,6 +103,57 @@ export type BrowseResponse = { dir: string, parent: string | null, entries: Arra
 
 export type LinesResponse = { start: bigint, total: bigint, lines: Array<EditLine>, markers: Array<LineMarker>, };
 
+export type PositionResolveRequest = {
+/**
+ * 1-based line, or -1 for EOF.
+ */
+line: bigint,
+/**
+ * 1-based Unicode-scalar column.
+ */
+column: bigint, };
+
+export type PositionResolveResponse = {
+/**
+ * Editor-native 0-based logical line.
+ */
+line: bigint,
+/**
+ * Editor-native 0-based Unicode-scalar column, clamped to the line.
+ */
+column: number,
+/**
+ * True when the physical line exceeds the bounded viewport representation.
+ */
+truncated: boolean, };
+
+export type RecognizeRequest = { candidate: string, };
+
+export type RecognizedKind = "file" | "directory" | "url";
+
+export type RecognizeResponse = { kind: RecognizedKind, target: string, line: bigint | null, column: bigint | null, };
+
+export type ActionInput = "file" | "snapshot" | "selection_stdin" | "selection_file";
+
+export type ActionOutput = "panel" | "new_tab" | "file";
+
+export type ExternalActionConfig = { name: string, executable: string, arguments: Array<string>, input: ActionInput, output: ActionOutput, timeout_ms: bigint, max_output_bytes: bigint, working_directory: string | null, };
+
+export type ActionSelection = { rect: boolean, l0: bigint, c0: number, l1: bigint, c1: number, };
+
+export type ExternalActionRequest = { config: ExternalActionConfig,
+/**
+ * Must be true for every invocation. The UI sets it only after displaying
+ * the executable and complete argv array in a confirmation dialog.
+ */
+approved: boolean, op_id: string | null,
+/**
+ * Current caret, in the public 1-based convention.
+ */
+line: bigint, column: bigint, selection: ActionSelection | null, output_path: string | null, overwrite: boolean, };
+
+export type ExternalActionResponse = { name: string, success: boolean, exit_code: number | null, timed_out: boolean, canceled: boolean, duration_ms: bigint, stdout: string, stderr: string, stdout_truncated: boolean, stderr_truncated: boolean, output_path: string | null, };
+
 export type CompletionRequest = { prefix: string, deadline_ms: bigint | null, };
 
 export type CompletionResponse = { candidates: Array<string>, scanned_lines: bigint, scanned_bytes: number, complete: boolean, timed_out: boolean, truncated: boolean, revision: bigint, };

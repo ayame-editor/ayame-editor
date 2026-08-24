@@ -19,6 +19,10 @@ use anyhow::{bail, Context, Result};
 use typeship::Bridge;
 use typeship_ts_rs::decl;
 
+use super::actions::{
+    ActionInput, ActionOutput, ActionSelection, ExternalActionConfig, ExternalActionRequest,
+    ExternalActionResponse,
+};
 use super::analysis::{
     AnalysisCancelRequest, AnalysisHit, AnalysisHitsResponse, AnalysisNavigateResponse,
     AnalysisProfile, AnalysisRuleConfig, AnalysisRuleStatus, AnalysisStartRequest, AnalysisStatus,
@@ -44,6 +48,8 @@ use super::ops::{
     GrepSaveRequest, LineByteResponse, OperationCancelRequest, ReplaceSaveRequest, SearchResponse,
     SortSaveRequest, SplitSaveRequest,
 };
+use super::position::{PositionResolveRequest, PositionResolveResponse};
+use super::recognize::{RecognizeRequest, RecognizeResponse, RecognizedKind};
 use super::state::{
     DiskCheckResponse, SessionState, SyntaxMapping, SyntaxOverride, TabInfo, TabsResponse,
     TailStatus, UiState,
@@ -75,6 +81,17 @@ fn bridge() -> Bridge {
         .decl(&decl::<BrowseEntry>())
         .decl(&decl::<BrowseResponse>())
         .decl(&decl::<LinesResponse>())
+        .decl(&decl::<PositionResolveRequest>())
+        .decl(&decl::<PositionResolveResponse>())
+        .decl(&decl::<RecognizeRequest>())
+        .decl(&decl::<RecognizedKind>())
+        .decl(&decl::<RecognizeResponse>())
+        .decl(&decl::<ActionInput>())
+        .decl(&decl::<ActionOutput>())
+        .decl(&decl::<ExternalActionConfig>())
+        .decl(&decl::<ActionSelection>())
+        .decl(&decl::<ExternalActionRequest>())
+        .decl(&decl::<ExternalActionResponse>())
         .decl(&decl::<CompletionRequest>())
         .decl(&decl::<CompletionResponse>())
         .decl(&decl::<InspectPoint>())

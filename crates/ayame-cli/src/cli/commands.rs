@@ -331,10 +331,17 @@ pub(crate) static SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "gui",
         aliases: &[],
-        valued: &["--encoding", "--stride", "--cache-dir", "--scratch-dir"],
+        valued: &[
+            "--encoding",
+            "--stride",
+            "--cache-dir",
+            "--scratch-dir",
+            "--line",
+            "--column",
+        ],
         // `--recover` is internal (a dirty-tab handoff passes it), so it is
         // accepted but deliberately absent from the help text.
-        flags: &["--no-cache", "--recover"],
+        flags: &["--no-cache", "--recover", "--reuse-window"],
         document: false,
         usage: "[FILE]",
         summary: "Open the editor in a native desktop window",

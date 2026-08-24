@@ -174,6 +174,29 @@ undo と crash recovery の対象になります。
 picker も表示します。適用時は prefix、英字の大小、alpha の位置を保ち、選んだ RGB / alpha
 の精度を短縮形で保てない場合だけ長い表記へ展開します。
 
+## 外部分析アクションと選択対象の認識
+
+`ツール` -> `外部分析アクション` で設定した executable を実行できます。引数は shell
+command ではなく JSON string array です。Ayame は executable を直接起動するため、path
+内の空白・semicolon・quote などは 1 個の引数内に留まります。実行前の確認 dialog には
+executable と完全な引数配列を必ず表示します。repository settings を暗黙に import / trust
+せず、script の自動生成・自動実行もしません。script を使う場合は明示的に選び、承認します。
+
+placeholder は `{file}`, `{dir}`, `{line}`, `{column}`, `{selection_file}`,
+`{snapshot_file}` です。入力には保存済み file、現在の dirty buffer の固定 generation、
+selection の stdin / 非公開一時 file を選べます。出力は result、新規一時 tab、指定 path
+です。`stdout`, `stderr`, exit code, duration を分けて表示します。timeout と stdout+stderr
+の合計上限は server が強制し、Cancel / timeout は process tree を終了します。snapshot と
+selection の private temp は実行後に削除します。child process は Ayame の environment を
+継承しますが、environment value や secret を UI / log に表示しません。
+
+上限付きの選択 token は、実在する file / folder または `http` / `https` URL としても認識
+できます。editor context menu、キー設定可能な「選択したパスまたは URL を開く」、Ctrl+Click
+は同じ allowlist と確認処理を使います。file には `:line:column` suffix も付けられます。
+`javascript:`, `data:`, `file:` など他 scheme は拒否します。native app では folder を OS の
+file manager で開きます。browser build は任意の local path を安全に reveal できないため、
+解決済み folder path の表示だけを行います。
+
 ## 既定ショートカット
 
 `Ctrl` は macOS では `Cmd` として入力できます。キー設定は `編集` -> `設定` ->

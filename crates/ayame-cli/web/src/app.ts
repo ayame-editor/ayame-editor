@@ -22,6 +22,8 @@ export type NativeMessage =
   | { type: "new_window_path"; path: string; recover: boolean }
   | { type: "pick_save"; dir: string; name: string }
   | { type: "pick_open"; dir: string }
+  | { type: "open_external_url"; url: string }
+  | { type: "reveal_path"; path: string }
   | { type: "menu_config"; items: NativeMenuItemConfig[] };
 
 export function postNativeMessage(message: NativeMessage) {
