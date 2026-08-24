@@ -15,7 +15,7 @@ import {
   type MarkerPreviewResponse,
   type SearchResponse,
 } from "./api.js";
-import { $, commas, modalVisible, setModalOpen } from "./dom.js";
+import { $, button, commas, el, modalVisible, setModalOpen } from "./dom.js";
 import {
   focusEditor,
   render,
@@ -298,21 +298,15 @@ function renderPreviewEntries(entries, append) {
   if (!append) list.textContent = "";
   const fragment = document.createDocumentFragment();
   for (const entry of entries) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "bookmark-list-row";
+    const row = button("bookmark-list-row", "");
     row.dataset.line = String(entry.line);
     row.setAttribute("role", "option");
     row.setAttribute(
       "aria-label",
       t("bookmark.previewLabel", { line: commas(entry.line + 1), text: entry.text }),
     );
-    const number = document.createElement("span");
-    number.className = "bookmark-list-line";
-    number.textContent = commas(entry.line + 1);
-    const text = document.createElement("span");
-    text.className = "bookmark-list-text";
-    text.textContent = `${entry.text}${entry.truncated ? "…" : ""}`;
+    const number = el("span", "bookmark-list-line", commas(entry.line + 1));
+    const text = el("span", "bookmark-list-text", `${entry.text}${entry.truncated ? "…" : ""}`);
     row.append(number, text);
     row.addEventListener("click", () => void jumpFromList(entry.line));
     fragment.append(row);

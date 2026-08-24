@@ -3,7 +3,7 @@
 // Messages are appended instead of replacing one status-bar string, so a
 // follow-up operation cannot erase the result that preceded it. Informational
 // messages expire independently; errors remain until explicitly dismissed.
-import { iconSvg } from "./dom.js";
+import { button, el, iconSvg } from "./dom.js";
 import { t } from "./i18n.js";
 
 export const NOTIFICATION_DURATION_MS = 6000;
@@ -62,24 +62,18 @@ export function flashCount(msg, kind = "") {
 
   const id = nextNotificationId++;
   const isError = kind === "error";
-  const notification = document.createElement("div");
-  notification.className = `notification ${isError ? "error" : "info"}`;
+  const notification = el("div", `notification ${isError ? "error" : "info"}`);
   notification.dataset.notificationId = String(id);
 
-  const text = document.createElement("span");
-  text.className = "notification-message";
-  text.textContent = message;
+  const text = el("span", "notification-message", message);
   text.setAttribute("role", isError ? "alert" : "status");
   text.setAttribute("aria-live", isError ? "assertive" : "polite");
   text.setAttribute("aria-atomic", "true");
 
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "notification-dismiss";
+  const dismiss = button("notification-dismiss", "", () => dismissNotification(id));
   dismiss.title = t("notification.dismiss");
   dismiss.setAttribute("aria-label", t("notification.dismiss"));
   dismiss.append(iconSvg("i-close"));
-  dismiss.addEventListener("click", () => dismissNotification(id));
 
   notification.append(text, dismiss);
   host.append(notification);

@@ -1,5 +1,5 @@
 // Ayame Editor — tab rendering, ordering, switching, closing, and drag/drop.
-import { $, displayPath, iconSvg, isUntitled, pathDirName } from "./dom.js";
+import { $, button, displayPath, el, iconSvg, isUntitled, pathDirName } from "./dom.js";
 import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { api, apiPost } from "./api.js";
@@ -266,22 +266,16 @@ export function renderTabs(list) {
   container.setAttribute("role", "tablist");
   container.textContent = "";
   for (const tab of list) {
-    const element = document.createElement("div");
-    element.className = "tab" + (tab.active ? " active" : "") + (tab.dirty ? " dirty" : "");
+    const element = el("div", "tab" + (tab.active ? " active" : "") + (tab.dirty ? " dirty" : ""));
     element.dataset.id = String(tab.id);
     element.title = displayPath(tab.path);
     element.setAttribute("role", "tab");
     element.setAttribute("aria-selected", tab.active ? "true" : "false");
     element.tabIndex = 0;
     element.draggable = true;
-    const dot = document.createElement("span");
-    dot.className = "tab-dot";
-    const name = document.createElement("span");
-    name.className = "tab-name";
-    name.textContent = tab.name;
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "tab-x";
+    const dot = el("span", "tab-dot");
+    const name = el("span", "tab-name", tab.name);
+    const close = button("tab-x", "");
     close.append(iconSvg("i-close"));
     close.title = t("common.close");
     close.setAttribute("aria-label", t("tab.closeName", { name: tab.name }));

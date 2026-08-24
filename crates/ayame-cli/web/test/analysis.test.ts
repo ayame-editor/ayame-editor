@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readCssSource } from "./css-source.js";
 
 import {
   ANALYSIS_COLOR_TOKENS,
@@ -14,7 +15,7 @@ import {
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(path.join(webRoot, "index.html"), "utf8");
-const css = readFileSync(path.join(webRoot, "style.css"), "utf8");
+const css = readCssSource();
 
 describe("progressive multi-rule log analysis (#242)", () => {
   it("ships a useful three-rule literal/regex profile", () => {

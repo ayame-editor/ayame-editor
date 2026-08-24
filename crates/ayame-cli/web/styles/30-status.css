@@ -1,0 +1,148 @@
+/* ---- status bar ------------------------------------------------------- */
+
+#statusbar {
+  grid-area: statusbar;
+  display: flex;
+  align-items: center;
+  gap: var(--space-0);
+  height: 26px;
+  padding: var(--space-0) var(--space-1-5);
+  background: var(--status);
+  color: var(--status-fg);
+  font-size: var(--fs-ui-sm);
+  user-select: none;
+  border-top: 1px solid var(--border);
+}
+#statusbar .seg {
+  padding: var(--space-0) var(--space-2-5);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#statusbar #st-pos {
+  color: var(--fg);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+#statusbar #st-edit {
+  color: var(--accent-bright);
+}
+#statusbar .seg.dim { color: color-mix(in srgb, var(--status-fg) 82%, transparent); }
+/* Encoding / line-ending segments double as the entry point for 変換して保存. */
+#statusbar button.seg-btn {
+  height: 20px;
+  border: 1px solid color-mix(in srgb, var(--status-fg) 24%, transparent);
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#statusbar button.seg-btn:hover {
+  background: var(--hover);
+  color: var(--accent-bright);
+}
+/* 末尾に追従 (tail -f) while active: a tinted pill so "following" is visible. */
+#statusbar button.seg-btn.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+#statusbar .spacer { flex: 1; }
+/* Save-in-progress: a small spinner so the (deliberate) edit block reads as
+   "busy", not "broken". */
+#statusbar .saving-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--accent-bright);
+}
+#statusbar .saving-seg.hidden { display: none; }
+#statusbar .saving-seg::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent-bright);
+  animation: ayame-spin 0.9s linear infinite;
+}
+@keyframes ayame-spin {
+  to { transform: rotate(360deg); }
+}
+/* Dim the text area slightly while saving so the block is visible in place. */
+html.saving #content { opacity: 0.75; }
+html.saving #caret,
+html.saving .caret.extra { visibility: hidden; }
+
+/* ---- operation notifications ----------------------------------------- */
+
+.notifications {
+  position: fixed;
+  inset-inline-end: 12px;
+  bottom: 34px;
+  z-index: var(--z-notification);
+  width: min(440px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+.notification {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2-5);
+  min-height: 42px;
+  padding:
+    var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  color: var(--fg);
+  box-shadow: 0 14px 38px -20px color-mix(in srgb, var(--fg) 54%, #000);
+  backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur, 0)) saturate(1.2);
+  pointer-events: auto;
+  animation: ayame-notification-in var(--motion-normal) var(--motion-ease);
+  transition:
+    opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease);
+}
+.notification.error {
+  border-inline-start-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, var(--bg-elevated));
+}
+.notification-message {
+  align-self: center;
+  min-width: 0;
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.notification.error .notification-message { color: var(--danger); }
+.notification-dismiss {
+  width: 26px;
+  height: 26px;
+  padding: var(--space-0);
+  color: var(--fg-dim);
+}
+.notification-dismiss:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.notification-dismiss .ay-icon {
+  width: 13px;
+  height: 13px;
+}
+.notification.closing {
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+}
+@keyframes ayame-notification-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

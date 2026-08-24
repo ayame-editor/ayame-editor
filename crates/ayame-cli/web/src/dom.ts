@@ -18,6 +18,24 @@ export function $<T extends HTMLElement = AyameElement>(id: string): T {
   return el as T;
 }
 
+export function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className = "",
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text != null) element.textContent = text;
+  return element;
+}
+
+export function button(className: string, label: string, onClick?: () => void) {
+  const element = el("button", className, label);
+  element.type = "button";
+  if (onClick) element.addEventListener("click", onClick);
+  return element;
+}
+
 export function commas(n) {
   return n.toLocaleString(currentLocale());
 }

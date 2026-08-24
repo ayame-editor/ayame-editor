@@ -22,12 +22,15 @@ use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use oxc_transformer::{TransformOptions, Transformer};
+use serde_json::{json, Map, Value};
 
 fn main() {
     compile_windows_resources();
 
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let src_dir = manifest.join("web/src");
+    let styles_dir = manifest.join("web/styles");
+    let themes_path = manifest.join("web/themes.json");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let web_out = out_dir.join("web");
 
@@ -35,6 +38,18 @@ fn main() {
     // watch catches added/removed files; per-file watches catch edits.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=web/src");
+    println!("cargo:rerun-if-changed=web/styles");
+    println!("cargo:rerun-if-changed={}", themes_path.display());
+
+    let themes_source = fs::read_to_string(&themes_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", themes_path.display()));
+    let themes: Value = serde_json::from_str(&themes_source)
+        .unwrap_or_else(|e| panic!("parse {}: {e}", themes_path.display()));
+    validate_themes(&themes);
+    let theme_module = generate_theme_module(&themes);
+    fs::create_dir_all(&web_out).unwrap();
+    fs::write(web_out.join("style.css"), concatenate_styles(&styles_dir)).unwrap();
+    fs::write(web_out.join("themes.css"), generate_themes_css(&themes)).unwrap();
 
     let mut ts_files = Vec::new();
     collect_ts(&src_dir, &mut ts_files);
@@ -51,9 +66,13 @@ fn main() {
         let rel = path.strip_prefix(&src_dir).unwrap();
         let rel_js = rel.with_extension("js");
         let rel_js_str = rel_js.to_string_lossy().replace('\\', "/");
-        let source =
-            fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let js = transform_ts(path, &source);
+        let js = if rel == Path::new("theme-presets.ts") {
+            theme_module.clone()
+        } else {
+            let source =
+                fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            transform_ts(path, &source)
+        };
         let dest = web_out.join(&rel_js);
         fs::create_dir_all(dest.parent().unwrap()).unwrap();
         fs::write(&dest, js).unwrap_or_else(|e| panic!("write {}: {e}", dest.display()));
@@ -71,6 +90,264 @@ fn main() {
     }
     gen.push_str("];\n");
     fs::write(out_dir.join("web_modules.rs"), gen).unwrap();
+}
+
+fn concatenate_styles(styles_dir: &Path) -> String {
+    let mut files = fs::read_dir(styles_dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", styles_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "css"))
+        .collect::<Vec<_>>();
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "no CSS files found under {}",
+        styles_dir.display()
+    );
+    let mut output = String::new();
+    for path in files {
+        println!("cargo:rerun-if-changed={}", path.display());
+        output.push_str(
+            &fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display())),
+        );
+    }
+    output
+}
+
+fn ordered_themes(themes: &Value) -> Vec<(&str, &Map<String, Value>)> {
+    let mut ordered = themes
+        .as_object()
+        .unwrap_or_else(|| panic!("web/themes.json must contain an object"))
+        .iter()
+        .map(|(id, value)| {
+            let theme = value
+                .as_object()
+                .unwrap_or_else(|| panic!("theme {id:?} must be an object"));
+            (id.as_str(), theme)
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|(id, theme)| {
+        theme
+            .get("ui")
+            .and_then(|ui| ui.get("order"))
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| panic!("theme {id:?} ui.order must be a non-negative integer"))
+    });
+    ordered
+}
+
+fn theme_string<'a>(theme: &'a Map<String, Value>, id: &str, path: &[&str]) -> &'a str {
+    let mut value = theme
+        .get(path[0])
+        .unwrap_or_else(|| panic!("theme {id:?} is missing {}", path.join(".")));
+    for key in &path[1..] {
+        value = value
+            .get(*key)
+            .unwrap_or_else(|| panic!("theme {id:?} is missing {}", path.join(".")));
+    }
+    value
+        .as_str()
+        .unwrap_or_else(|| panic!("theme {id:?} {} must be a string", path.join(".")))
+}
+
+fn theme_number(theme: &Map<String, Value>, id: &str, path: &[&str]) -> String {
+    let mut value = theme
+        .get(path[0])
+        .unwrap_or_else(|| panic!("theme {id:?} is missing {}", path.join(".")));
+    for key in &path[1..] {
+        value = value
+            .get(*key)
+            .unwrap_or_else(|| panic!("theme {id:?} is missing {}", path.join(".")));
+    }
+    if !value.is_number() {
+        panic!("theme {id:?} {} must be a number", path.join("."));
+    }
+    value.to_string()
+}
+
+fn optional_theme_string<'a>(theme: &'a Map<String, Value>, path: &[&str]) -> Option<&'a str> {
+    let mut value = theme.get(path[0])?;
+    for key in &path[1..] {
+        value = value.get(*key)?;
+    }
+    value.as_str()
+}
+
+fn validate_themes(themes: &Value) {
+    let object = themes
+        .as_object()
+        .unwrap_or_else(|| panic!("web/themes.json must contain an object"));
+    assert!(!object.is_empty(), "web/themes.json must define a theme");
+    let mut order = Vec::new();
+    for (id, value) in object {
+        let theme = value
+            .as_object()
+            .unwrap_or_else(|| panic!("theme {id:?} must be an object"));
+        for path in [
+            &["name"][..],
+            &["type"],
+            &["color", "paper"],
+            &["color", "paper2"],
+            &["color", "ink"],
+            &["color", "inkDim"],
+            &["color", "inkFaint"],
+            &["color", "accent"],
+            &["color", "accent2"],
+            &["color", "gold"],
+            &["color", "edge"],
+            &["color", "err"],
+            &["color", "markBg"],
+            &["color", "markFg"],
+            &["color", "markCur"],
+            &["color", "markCurFg"],
+            &["acrylic", "tint"],
+            &["background", "mode"],
+            &["background", "solid"],
+            &["ui", "activeLine"],
+            &["ui", "edit"],
+            &["ui", "foregroundFaint"],
+            &["ui", "syntax", "string"],
+            &["ui", "syntax", "number"],
+            &["ui", "syntax", "literal"],
+            &["ui", "syntax", "function"],
+            &["ui", "syntax", "link"],
+        ] {
+            theme_string(theme, id, path);
+        }
+        theme_number(theme, id, &["radius"]);
+        theme_number(theme, id, &["acrylic", "blur"]);
+        theme_number(theme, id, &["illustration"]);
+        order.push(
+            theme
+                .get("ui")
+                .and_then(|ui| ui.get("order"))
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| panic!("theme {id:?} ui.order must be a non-negative integer")),
+        );
+    }
+    order.sort_unstable();
+    assert_eq!(
+        order,
+        (0..object.len() as u64).collect::<Vec<_>>(),
+        "theme ui.order values must be unique and contiguous from zero"
+    );
+}
+
+fn generate_theme_module(themes: &Value) -> String {
+    let mut presets = Map::new();
+    let mut builtins = Vec::new();
+    for (id, theme) in ordered_themes(themes) {
+        let mut preset = theme.clone();
+        let ui = preset
+            .remove("ui")
+            .and_then(|value| value.as_object().cloned());
+        let name = preset.get("name").cloned().unwrap();
+        presets.insert(id.to_string(), Value::Object(preset));
+        builtins.push(json!({
+            "id": id,
+            "name": name,
+            "labelKey": ui.as_ref().and_then(|value| value.get("labelKey")).cloned(),
+        }));
+    }
+    format!(
+        "// @generated from web/themes.json by build.rs. Do not edit.\n\
+         export const THEME_PRESETS = {};\n\
+         export const BUILTIN_THEMES = {};\n",
+        serde_json::to_string(&Value::Object(presets)).unwrap(),
+        serde_json::to_string(&builtins).unwrap(),
+    )
+}
+
+fn generate_desk(theme: &Map<String, Value>, id: &str) -> String {
+    if theme_string(theme, id, &["background", "mode"]) == "solid" {
+        return theme_string(theme, id, &["background", "solid"]).to_string();
+    }
+    let blobs = theme
+        .get("watercolor")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("theme {id:?} watercolor must be an array"));
+    let mut layers = Vec::new();
+    for blob in blobs {
+        let blob = blob
+            .as_object()
+            .unwrap_or_else(|| panic!("theme {id:?} watercolor entries must be objects"));
+        let get = |key| {
+            blob.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("theme {id:?} watercolor.{key} must be a string"))
+        };
+        layers.push(format!(
+            "radial-gradient({} {} at {} {}, {}, transparent 60%)",
+            get("rx"),
+            get("ry"),
+            get("x"),
+            get("y"),
+            get("color")
+        ));
+    }
+    layers.push(theme_string(theme, id, &["color", "paper"]).to_string());
+    layers.join(",\n    ")
+}
+
+fn generate_themes_css(themes: &Value) -> String {
+    let mut css = String::from("/* @generated from web/themes.json by build.rs. Do not edit. */\n");
+    for (id, theme) in ordered_themes(themes) {
+        if id == "iris-light" {
+            css.push_str(":root,\n");
+        }
+        css.push_str(&format!("html[data-theme={id:?}] {{\n"));
+        let variables = [
+            ("--bg", &["color", "paper"][..]),
+            ("--bg-elevated", &["color", "paper2"]),
+            ("--bg-toolbar", &["acrylic", "tint"]),
+            ("--bg-active-line", &["ui", "activeLine"]),
+            ("--gutter-bg", &["color", "paper"]),
+            ("--edit-bg", &["ui", "edit"]),
+            ("--fg", &["color", "ink"]),
+            ("--fg-dim", &["color", "inkDim"]),
+            ("--fg-faint", &["ui", "foregroundFaint"]),
+            ("--border", &["color", "edge"]),
+            ("--accent", &["color", "accent"]),
+            ("--accent-bright", &["color", "accent2"]),
+            ("--status", &["acrylic", "tint"]),
+            ("--gutter-fg", &["color", "inkFaint"]),
+            ("--mark-bg", &["color", "markBg"]),
+            ("--mark-fg", &["color", "markFg"]),
+            ("--mark-active-bg", &["color", "markCur"]),
+            ("--mark-active-fg", &["color", "markCurFg"]),
+            ("--danger", &["color", "err"]),
+            ("--gold", &["color", "gold"]),
+            ("--syn-string", &["ui", "syntax", "string"]),
+            ("--syn-number", &["ui", "syntax", "number"]),
+            ("--syn-literal", &["ui", "syntax", "literal"]),
+            ("--syn-function", &["ui", "syntax", "function"]),
+            ("--syn-link", &["ui", "syntax", "link"]),
+        ];
+        for (variable, path) in variables {
+            css.push_str(&format!(
+                "  {variable}: {};\n",
+                theme_string(theme, id, path)
+            ));
+        }
+        let status_foreground = optional_theme_string(theme, &["ui", "statusForeground"])
+            .unwrap_or_else(|| theme_string(theme, id, &["color", "inkDim"]));
+        css.push_str(&format!("  --status-fg: {status_foreground};\n"));
+        let hover = optional_theme_string(theme, &["ui", "hover"])
+            .unwrap_or("color-mix(in srgb, var(--accent) 10%, transparent)");
+        let focus = optional_theme_string(theme, &["ui", "focusRing"])
+            .unwrap_or_else(|| theme_string(theme, id, &["color", "accent2"]));
+        css.push_str(&format!("  --hover: {hover};\n"));
+        css.push_str(&format!("  --focus-ring: {focus};\n"));
+        css.push_str(&format!(
+            "  --radius: {}px;\n  --acrylic-blur: {}px;\n  --illus: {};\n",
+            theme_number(theme, id, &["radius"]),
+            theme_number(theme, id, &["acrylic", "blur"]),
+            theme_number(theme, id, &["illustration"]),
+        ));
+        css.push_str(&format!("  --desk:\n    {};\n", generate_desk(theme, id)));
+        css.push_str("}\n\n");
+    }
+    css
 }
 
 /// Embed the version fields that SignPath validates before accepting a Windows

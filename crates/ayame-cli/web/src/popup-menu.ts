@@ -2,6 +2,8 @@
 // can offer contextual actions without forming a feature <-> command-registry
 // import cycle.
 
+import { button, el } from "./dom.js";
+
 export interface PopupMenuItem {
   label?: string;
   action?: () => void;
@@ -12,9 +14,8 @@ export interface PopupMenuItem {
 
 export function showPopupMenu(x: number, y: number, items: PopupMenuItem[]) {
   document.getElementById("popup-menu")?.remove();
-  const menu = document.createElement("div");
+  const menu = el("div", "file-menu ctx-menu");
   menu.id = "popup-menu";
-  menu.className = "file-menu ctx-menu";
   menu.setAttribute("role", "menu");
   const close = () => {
     menu.remove();
@@ -32,25 +33,18 @@ export function showPopupMenu(x: number, y: number, items: PopupMenuItem[]) {
   };
   for (const item of items) {
     if (item.separator) {
-      const separator = document.createElement("div");
-      separator.className = "menu-sep";
+      const separator = el("div", "menu-sep");
       menu.append(separator);
       continue;
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `menu-item${item.checked ? " checked" : ""}`;
-    button.setAttribute("role", "menuitem");
-    button.disabled = !!item.disabled;
-    const label = document.createElement("span");
-    label.className = "menu-label";
-    label.textContent = item.label || "";
-    button.append(label);
-    button.addEventListener("click", () => {
+    const itemButton = button(`menu-item${item.checked ? " checked" : ""}`, "", () => {
       close();
       item.action?.();
     });
-    menu.append(button);
+    itemButton.setAttribute("role", "menuitem");
+    itemButton.disabled = !!item.disabled;
+    itemButton.append(el("span", "menu-label", item.label || ""));
+    menu.append(itemButton);
   }
   document.body.append(menu);
   const width = menu.offsetWidth;

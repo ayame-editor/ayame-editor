@@ -1,5 +1,6 @@
 // Ayame Editor — save module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath, isUntitled, joinPath, pathDirName, setModalOpen } from "./dom.js";
+import { conversionEncodingValue, encodingSupportsBom } from "./encodings.js";
 import { DEFAULT_SETTINGS, state } from "./state.js";
 import { currentLocale, serverMessage, t, weekdayNames } from "./i18n.js";
 import {
@@ -586,15 +587,7 @@ export function showConvert() {
   // Prefill the pickers with the file's current encoding / line ending. The
   // stat strings are the core enum's kebab-case (Utf8 → "utf8"); map them onto
   // the select's option values.
-  const encOpt = {
-    utf8: "utf-8",
-    "utf-8": "utf-8",
-    "utf-16le": "utf-16le",
-    "utf-16be": "utf-16be",
-    "shift-jis": "shift-jis",
-    "euc-jp": "euc-jp",
-  };
-  $("convert-enc").value = encOpt[state.doc.stat.encoding] || "utf-8";
+  $("convert-enc").value = conversionEncodingValue(state.doc.stat.encoding);
   const l = state.doc.stat.eol;
   $("convert-eol").value = ["lf", "crlf", "cr"].includes(l) ? l : "lf";
   // Prefill 「BOMを付ける」 from the file's current BOM, then gray it out unless
@@ -608,7 +601,7 @@ export function showConvert() {
 // The BOM option only applies to Unicode output; disable it otherwise.
 export function syncConvertBom() {
   const encoding = $("convert-enc").value;
-  const supportsBom = ["utf-8", "utf-16le", "utf-16be"].includes(encoding);
+  const supportsBom = encodingSupportsBom(encoding);
   $("convert-bom").disabled = !supportsBom;
   $("convert-bom-row").classList.toggle("disabled", !supportsBom);
 }

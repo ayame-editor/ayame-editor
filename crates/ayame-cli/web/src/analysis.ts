@@ -5,7 +5,7 @@
 // viewport rows.
 
 import { api, apiPost, type LineByteResponse, type MarkerBulkResponse } from "./api.js";
-import { $, commas, modalVisible, setModalOpen } from "./dom.js";
+import { $, button, commas, el, modalVisible, setModalOpen } from "./dom.js";
 import { focusEditor, render, revealCaret, scheduleRender, setCaret } from "./editor.js";
 import { reloadViewport, setEditAnalysisService, settleEditQueue } from "./edits.js";
 import { serverMessage, t } from "./i18n.js";
@@ -82,9 +82,8 @@ function persistProfiles() {
 }
 
 function option(value: string, text: string) {
-  const element = document.createElement("option");
+  const element = el("option", "", text);
   element.value = value;
-  element.textContent = text;
   return element;
 }
 
@@ -99,21 +98,18 @@ function renderProfileSelect() {
 }
 
 function checkbox(className: string, checked: boolean, label: string) {
-  const wrapper = document.createElement("label");
-  const input = document.createElement("input");
+  const wrapper = el("label");
+  const input = el("input", className);
   input.type = "checkbox";
-  input.className = className;
   input.checked = checked;
-  const text = document.createElement("span");
-  text.textContent = label;
+  const text = el("span", "", label);
   wrapper.append(input, text);
   return wrapper;
 }
 
 function ruleInput(className: string, value: string, ariaLabel: string) {
-  const input = document.createElement("input");
+  const input = el("input", `input-control ${className}`);
   input.type = "text";
-  input.className = `input-control ${className}`;
   input.value = value;
   input.maxLength = className.includes("pattern") ? 4096 : 120;
   input.setAttribute("aria-label", ariaLabel);
@@ -121,22 +117,19 @@ function ruleInput(className: string, value: string, ariaLabel: string) {
 }
 
 function renderRuleRow(rule: AnalysisRuleConfig) {
-  const row = document.createElement("div");
-  row.className = "analysis-rule-row";
+  const row = el("div", "analysis-rule-row");
   row.dataset.ruleId = rule.id;
   row.dataset.analysisColor = rule.color;
 
-  const enabled = document.createElement("input");
+  const enabled = el("input", "analysis-rule-enabled");
   enabled.type = "checkbox";
-  enabled.className = "analysis-rule-enabled";
   enabled.checked = rule.enabled;
   enabled.setAttribute("aria-label", t("analysis.enabled"));
 
   const name = ruleInput("analysis-rule-name", rule.name, t("analysis.ruleName"));
   const pattern = ruleInput("analysis-rule-pattern", rule.pattern, t("analysis.pattern"));
 
-  const color = document.createElement("select");
-  color.className = "input-control analysis-rule-color";
+  const color = el("select", "input-control analysis-rule-color");
   color.setAttribute("aria-label", t("analysis.color"));
   for (const token of ANALYSIS_COLOR_TOKENS)
     color.append(option(token, t(`analysis.color.${token}`)));
@@ -145,20 +138,16 @@ function renderRuleRow(rule: AnalysisRuleConfig) {
     row.dataset.analysisColor = color.value;
   });
 
-  const options = document.createElement("div");
-  options.className = "analysis-rule-options";
+  const options = el("div", "analysis-rule-options");
   options.append(
     checkbox("analysis-rule-regex", rule.regex, t("analysis.regex")),
     checkbox("analysis-rule-case", rule.case_sensitive, t("analysis.case")),
     checkbox("analysis-rule-word", rule.whole_word, t("analysis.word")),
   );
 
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "ico analysis-rule-remove";
+  const remove = button("ico analysis-rule-remove", "×");
   remove.setAttribute("aria-label", t("analysis.removeRule"));
   remove.title = t("analysis.removeRule");
-  remove.textContent = "×";
   remove.addEventListener("click", () => {
     if ($("analysis-rules").children.length <= 1) {
       flashCount(t("analysis.oneRuleRequired"), "error");
@@ -353,24 +342,19 @@ function renderStrip() {
   const chips = $("analysis-chips");
   chips.textContent = "";
   for (const rule of status.rules) {
-    const chip = document.createElement("div");
-    chip.className = "analysis-chip";
+    const chip = el("div", "analysis-chip");
     chip.dataset.analysisColor = rule.color;
     const visible = state.analysis.visibleRuleIds.has(rule.id);
     chip.classList.toggle("off", !visible);
 
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "analysis-chip-toggle";
+    const toggle = button("analysis-chip-toggle", "");
     toggle.dataset.analysisColor = rule.color;
     toggle.setAttribute("aria-pressed", String(visible));
     toggle.setAttribute(
       "aria-label",
       t("analysis.toggleRule", { name: rule.name, count: commas(rule.count) }),
     );
-    const count = document.createElement("span");
-    count.className = "analysis-chip-count";
-    count.textContent = commas(rule.count);
+    const count = el("span", "analysis-chip-count", commas(rule.count));
     toggle.append(document.createTextNode(rule.name), count);
     toggle.addEventListener("click", () => {
       if (state.analysis.visibleRuleIds.has(rule.id)) state.analysis.visibleRuleIds.delete(rule.id);
@@ -379,23 +363,15 @@ function renderStrip() {
       scheduleRender();
     });
 
-    const previous = document.createElement("button");
-    previous.type = "button";
-    previous.className = "analysis-chip-nav";
-    previous.textContent = "↑";
+    const previous = button("analysis-chip-nav", "↑", () => navigateRule(rule.id, "prev"));
     previous.title = t("analysis.previousRule", { name: rule.name });
     previous.setAttribute("aria-label", previous.title);
     previous.disabled = status.phase !== "complete" || !rule.enabled || rule.count === 0;
-    previous.addEventListener("click", () => navigateRule(rule.id, "prev"));
 
-    const next = document.createElement("button");
-    next.type = "button";
-    next.className = "analysis-chip-nav";
-    next.textContent = "↓";
+    const next = button("analysis-chip-nav", "↓", () => navigateRule(rule.id, "next"));
     next.title = t("analysis.nextRule", { name: rule.name });
     next.setAttribute("aria-label", next.title);
     next.disabled = status.phase !== "complete" || !rule.enabled || rule.count === 0;
-    next.addEventListener("click", () => navigateRule(rule.id, "next"));
     if (rule.truncated)
       chip.title = t("analysis.positionsCapped", { count: commas(rule.stored_hits) });
     chip.append(toggle, previous, next);
@@ -574,16 +550,10 @@ export function previousAnalysisMatch() {
 }
 
 function appendHitRow(hit: AnalysisHit) {
-  const row = document.createElement("button");
-  row.type = "button";
-  row.className = "analysis-hit-row";
+  const row = button("analysis-hit-row", "");
   row.setAttribute("role", "option");
-  const line = document.createElement("span");
-  line.className = "analysis-hit-line";
-  line.textContent = commas(hit.line + 1);
-  const text = document.createElement("span");
-  text.className = "analysis-hit-text";
-  text.textContent = `${hit.text}${hit.text_truncated ? "…" : ""}`;
+  const line = el("span", "analysis-hit-line", commas(hit.line + 1));
+  const text = el("span", "analysis-hit-text", `${hit.text}${hit.text_truncated ? "…" : ""}`);
   row.append(line, text);
   row.addEventListener("click", async () => {
     state.analysis.lastHits.set(state.analysis.selectedRule, hit);

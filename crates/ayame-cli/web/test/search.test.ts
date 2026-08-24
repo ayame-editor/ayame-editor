@@ -16,6 +16,7 @@ vi.mock("../src/dialogs.js", () => ({
 vi.mock("../src/notifications.js", () => ({ flashCount: vi.fn() }));
 
 import {
+  appendGrepText,
   buildMatcher,
   COUNT_DEBOUNCE_MS,
   findStep,
@@ -61,6 +62,13 @@ afterEach(async () => {
 });
 
 describe("search pure helpers", () => {
+  it("renders a literal grep highlight through the shared DOM helper", () => {
+    const host = document.createElement("span");
+    appendGrepText(host, "before needle after", 7, "needle", false);
+    expect(host.textContent).toBe("before needle after");
+    expect(host.querySelector(".grep-match")?.textContent).toBe("needle");
+  });
+
   it("maps Unicode-scalar columns to UTF-16 indexes", () => {
     const text = "a😀b";
     expect(charLenOf(text)).toBe(3);

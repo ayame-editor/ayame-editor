@@ -1,0 +1,292 @@
+{
+  "iris-light": {
+    "name": "Iris Light",
+    "type": "light",
+    "radius": 10,
+    "color": {
+      "paper": "#FBF8F1",
+      "paper2": "#FDFCF8",
+      "ink": "#2A2140",
+      "inkDim": "#6E6383",
+      "inkFaint": "#B3A7C9",
+      "accent": "#7A5CC0",
+      "accent2": "#6A4CB0",
+      "gold": "#C79A2E",
+      "edge": "#E7E0D3",
+      "err": "#C0506A",
+      "markBg": "#FBEBB0",
+      "markFg": "#6B5510",
+      "markCur": "#E8B84B",
+      "markCurFg": "#2A2205"
+    },
+    "acrylic": { "tint": "rgba(255,253,248,0.72)", "blur": 20 },
+    "background": { "mode": "watercolor", "solid": "#FBF8F1" },
+    "illustration": 0.18,
+    "watercolor": [
+      { "x": "12%", "y": "84%", "rx": "46vw", "ry": "42vh", "color": "rgba(122,92,192,0.12)" },
+      { "x": "88%", "y": "14%", "rx": "42vw", "ry": "40vh", "color": "rgba(185,139,214,0.10)" },
+      { "x": "70%", "y": "96%", "rx": "30vw", "ry": "30vh", "color": "rgba(231,197,107,0.08)" }
+    ],
+    "ui": {
+      "order": 0,
+      "activeLine": "#EDE6FA",
+      "edit": "#FFFFFF",
+      "foregroundFaint": "#756C82",
+      "syntax": {
+        "string": "#21885F",
+        "number": "#2F7FBF",
+        "literal": "#9A57B0",
+        "function": "#A67319",
+        "link": "#287FB8"
+      }
+    }
+  },
+  "iris-mist": {
+    "name": "Iris Mist",
+    "type": "light",
+    "radius": 12,
+    "color": {
+      "paper": "#F7F9FC",
+      "paper2": "#FDFEFF",
+      "ink": "#26314A",
+      "inkDim": "#5E6E8A",
+      "inkFaint": "#9DAAC0",
+      "accent": "#5B79C9",
+      "accent2": "#4A68B8",
+      "gold": "#C9A24E",
+      "edge": "#DCE4EF",
+      "err": "#C05C74",
+      "markBg": "#E3ECFB",
+      "markFg": "#2C3E6B",
+      "markCur": "#7EC7C0",
+      "markCurFg": "#0F2A28"
+    },
+    "acrylic": { "tint": "rgba(250,252,255,0.68)", "blur": 24 },
+    "background": { "mode": "watercolor", "solid": "#F7F9FC" },
+    "illustration": 0.22,
+    "watercolor": [
+      { "x": "14%", "y": "82%", "rx": "44vw", "ry": "42vh", "color": "rgba(91,121,201,0.12)" },
+      { "x": "86%", "y": "16%", "rx": "42vw", "ry": "40vh", "color": "rgba(143,182,224,0.10)" },
+      { "x": "74%", "y": "96%", "rx": "30vw", "ry": "30vh", "color": "rgba(126,199,192,0.08)" }
+    ],
+    "ui": {
+      "order": 1,
+      "activeLine": "#E6EDFA",
+      "edit": "#FFFFFF",
+      "foregroundFaint": "#697281",
+      "syntax": {
+        "string": "#2F8068",
+        "number": "#3F6FB5",
+        "literal": "#7862A8",
+        "function": "#9B712B",
+        "link": "#336FA8"
+      }
+    }
+  },
+  "iris-dawn": {
+    "name": "Iris Dawn",
+    "type": "light",
+    "radius": 10,
+    "color": {
+      "paper": "#FDF6EE",
+      "paper2": "#FFFBF7",
+      "ink": "#3A2438",
+      "inkDim": "#7A5A6E",
+      "inkFaint": "#B79AA6",
+      "accent": "#A65CB0",
+      "accent2": "#944EA0",
+      "gold": "#E0A94E",
+      "edge": "#EFE0D6",
+      "err": "#D96A86",
+      "markBg": "#FBE7C8",
+      "markFg": "#7A4A16",
+      "markCur": "#F0B85A",
+      "markCurFg": "#3A2205"
+    },
+    "acrylic": { "tint": "rgba(255,250,244,0.70)", "blur": 20 },
+    "background": { "mode": "watercolor", "solid": "#FDF6EE" },
+    "illustration": 0.22,
+    "watercolor": [
+      { "x": "12%", "y": "84%", "rx": "46vw", "ry": "42vh", "color": "rgba(166,92,176,0.13)" },
+      { "x": "84%", "y": "16%", "rx": "42vw", "ry": "40vh", "color": "rgba(224,169,78,0.11)" },
+      { "x": "70%", "y": "96%", "rx": "30vw", "ry": "30vh", "color": "rgba(227,154,176,0.10)" }
+    ],
+    "ui": {
+      "order": 2,
+      "activeLine": "#F6E7F0",
+      "edit": "#FFFFFF",
+      "foregroundFaint": "#7E6A73",
+      "syntax": {
+        "string": "#5B8A62",
+        "number": "#4E78A7",
+        "literal": "#A65CB0",
+        "function": "#B4762E",
+        "link": "#6C69A8"
+      }
+    }
+  },
+  "sumi-light": {
+    "name": "Sumi Light",
+    "type": "light",
+    "radius": 10,
+    "color": {
+      "paper": "#FAFAF8",
+      "paper2": "#FFFFFF",
+      "ink": "#222024",
+      "inkDim": "#63616A",
+      "inkFaint": "#A7A4AE",
+      "accent": "#7A5CC0",
+      "accent2": "#6A4CB0",
+      "gold": "#B7912F",
+      "edge": "#E6E4DE",
+      "err": "#B24A5E",
+      "markBg": "#ECE6FA",
+      "markFg": "#3E2E63",
+      "markCur": "#7A5CC0",
+      "markCurFg": "#FFFFFF"
+    },
+    "acrylic": { "tint": "rgba(252,252,250,0.74)", "blur": 22 },
+    "background": { "mode": "watercolor", "solid": "#FAFAF8" },
+    "illustration": 0.16,
+    "watercolor": [
+      { "x": "16%", "y": "82%", "rx": "40vw", "ry": "40vh", "color": "rgba(122,92,192,0.07)" },
+      { "x": "84%", "y": "20%", "rx": "34vw", "ry": "34vh", "color": "rgba(40,36,48,0.03)" }
+    ],
+    "ui": {
+      "order": 3,
+      "activeLine": "#ECE8F4",
+      "edit": "#FFFFFF",
+      "foregroundFaint": "#737178",
+      "syntax": {
+        "string": "#3F6F5C",
+        "number": "#4D6680",
+        "literal": "#665A78",
+        "function": "#77633D",
+        "link": "#4A6482"
+      }
+    }
+  },
+  "mono-paper": {
+    "name": "Mono Paper",
+    "type": "light",
+    "radius": 10,
+    "color": {
+      "paper": "#F5F3ED",
+      "paper2": "#FBFAF5",
+      "ink": "#24231F",
+      "inkDim": "#6C6A63",
+      "inkFaint": "#A9A69D",
+      "accent": "#6F6B79",
+      "accent2": "#605C6C",
+      "gold": "#7A7568",
+      "edge": "#E2DFD6",
+      "err": "#9A6A6A",
+      "markBg": "#E7E4EC",
+      "markFg": "#3A3745",
+      "markCur": "#6F6B79",
+      "markCurFg": "#FFFFFF"
+    },
+    "acrylic": { "tint": "rgba(245,243,237,0.92)", "blur": 8 },
+    "background": { "mode": "solid", "solid": "#F4F2EC" },
+    "illustration": 0,
+    "watercolor": [],
+    "ui": {
+      "order": 4,
+      "labelKey": "settings.themeMonoPaper",
+      "activeLine": "#E8E6DE",
+      "edit": "#FBFAF5",
+      "foregroundFaint": "#6E6C66",
+      "syntax": {
+        "string": "#4A4A4A",
+        "number": "#565656",
+        "literal": "#626262",
+        "function": "#505050",
+        "link": "#444444"
+      }
+    }
+  },
+  "dark": {
+    "name": "Dark",
+    "type": "dark",
+    "radius": 10,
+    "color": {
+      "paper": "#1e1e1e",
+      "paper2": "#252526",
+      "ink": "#d4d4d4",
+      "inkDim": "#9a9a9a",
+      "inkFaint": "#858585",
+      "accent": "#9b82d8",
+      "accent2": "#b49de6",
+      "gold": "#d9b45a",
+      "edge": "#3c3c3c",
+      "err": "#f14c4c",
+      "markBg": "#5a4a00",
+      "markFg": "#ffe27a",
+      "markCur": "#b8860b",
+      "markCurFg": "#1e1e1e"
+    },
+    "acrylic": { "tint": "#333334", "blur": 12 },
+    "background": { "mode": "solid", "solid": "#1e1e1e" },
+    "illustration": 0,
+    "watercolor": [],
+    "ui": {
+      "order": 5,
+      "labelKey": "settings.themeDark",
+      "activeLine": "#2a2d2e",
+      "edit": "#1b1b1b",
+      "foregroundFaint": "#888888",
+      "statusForeground": "#d4d4d4",
+      "hover": "#ffffff14",
+      "focusRing": "#c7b8f0",
+      "syntax": {
+        "string": "#66c991",
+        "number": "#75bfff",
+        "literal": "#c89bdd",
+        "function": "#e4c46d",
+        "link": "#75bfff"
+      }
+    }
+  },
+  "black": {
+    "name": "Black",
+    "type": "dark",
+    "radius": 10,
+    "color": {
+      "paper": "#000000",
+      "paper2": "#0b0b0b",
+      "ink": "#e8e8e8",
+      "inkDim": "#9a9a9a",
+      "inkFaint": "#6f6f6f",
+      "accent": "#9b82d8",
+      "accent2": "#b49de6",
+      "gold": "#d9b45a",
+      "edge": "#222222",
+      "err": "#ff6b6b",
+      "markBg": "#4a3d00",
+      "markFg": "#ffe27a",
+      "markCur": "#b8860b",
+      "markCurFg": "#000000"
+    },
+    "acrylic": { "tint": "#0d0d0d", "blur": 10 },
+    "background": { "mode": "solid", "solid": "#000000" },
+    "illustration": 0,
+    "watercolor": [],
+    "ui": {
+      "order": 6,
+      "labelKey": "settings.themeBlack",
+      "activeLine": "#151515",
+      "edit": "#0a0a0a",
+      "foregroundFaint": "#777777",
+      "statusForeground": "#e8e8e8",
+      "hover": "#ffffff18",
+      "focusRing": "#d0c4f2",
+      "syntax": {
+        "string": "#66c991",
+        "number": "#75bfff",
+        "literal": "#c89bdd",
+        "function": "#e4c46d",
+        "link": "#75bfff"
+      }
+    }
+  }
+}

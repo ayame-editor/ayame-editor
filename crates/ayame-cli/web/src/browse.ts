@@ -1,5 +1,5 @@
 // Ayame Editor — server-side file browser and opener list behavior.
-import { $, humanBytes, iconSvg, pathCrumbs } from "./dom.js";
+import { $, button, el, humanBytes, iconSvg, pathCrumbs } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
 import { currentLocale, serverMessage, t } from "./i18n.js";
 import { api } from "./api.js";
@@ -166,19 +166,14 @@ export function renderPathCrumbs(host: HTMLElement, path, onNavigate: (value: st
   }
   for (const [index, crumb] of crumbs.entries()) {
     if (index > 0) {
-      const separator = document.createElement("span");
-      separator.className = "cwd-sep";
+      const separator = el("span", "cwd-sep");
       separator.setAttribute("aria-hidden", "true");
       separator.append(iconSvg("i-chevron-right"));
       host.append(separator);
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "cwd-crumb";
-    button.textContent = crumb.label;
-    button.title = crumb.path;
-    button.addEventListener("click", () => onNavigate(crumb.path));
-    host.append(button);
+    const crumbButton = button("cwd-crumb", crumb.label, () => onNavigate(crumb.path));
+    crumbButton.title = crumb.path;
+    host.append(crumbButton);
   }
 }
 
@@ -187,9 +182,7 @@ export function renderCwdCrumbs(path) {
 }
 
 export function browseRow(entry, isUp) {
-  const row = document.createElement("button");
-  row.className = "opener-row" + (entry.is_dir ? " dir" : "") + (isUp ? " up" : "");
-  row.type = "button";
+  const row = button("opener-row" + (entry.is_dir ? " dir" : "") + (isUp ? " up" : ""), "");
   prepareOpenerOption(row);
   row.setAttribute(
     "aria-label",
@@ -197,16 +190,11 @@ export function browseRow(entry, isUp) {
       ? t("dialog.open.up")
       : `${entry.is_dir ? t("dialog.open.folder") : t("menu.file")}: ${entry.name}`,
   );
-  const icon = document.createElement("span");
-  icon.className = "ic";
+  const icon = el("span", "ic");
   icon.setAttribute("aria-hidden", "true");
   icon.append(iconSvg(isUp ? "i-folder-up" : entry.is_dir ? "i-folder" : "i-file"));
-  const name = document.createElement("span");
-  name.className = "nm";
-  name.textContent = isUp ? t("dialog.open.up") : entry.name;
-  const size = document.createElement("span");
-  size.className = "sz";
-  size.textContent = entry.is_dir ? "" : humanBytes(entry.size, currentLocale());
+  const name = el("span", "nm", isUp ? t("dialog.open.up") : entry.name);
+  const size = el("span", "sz", entry.is_dir ? "" : humanBytes(entry.size, currentLocale()));
   row.append(icon, name, size);
   row.addEventListener("click", () => {
     if (entry.is_dir) browse(entry.path);
