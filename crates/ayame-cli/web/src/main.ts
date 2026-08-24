@@ -43,6 +43,7 @@ import type { OpenRequest, OpenResponse } from "./types/api.js";
 import { initSyntaxUi } from "./syntax-ui.js";
 import { initFolding } from "./fold-actions.js";
 import { initCompletion } from "./completion.js";
+import { initInspector } from "./inspector.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -80,6 +81,7 @@ export async function boot() {
   initEvents();
   initEditor();
   initCompletion();
+  initInspector();
   initBookmarks();
   initSelection();
   initFolding();

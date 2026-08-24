@@ -668,6 +668,18 @@ impl Document {
             let off = encoding::iso2022jp_col_offset(&buf[s as usize..e as usize], col)?;
             return Some(s + off as u64);
         }
+        if matches!(self.encoding, Encoding::Utf8 | Encoding::Ascii) {
+            return utf8_lossy_col_offset(&buf[s as usize..e as usize], col)
+                .map(|offset| s + offset as u64);
+        }
+        if matches!(self.encoding, Encoding::Utf16Le | Encoding::Utf16Be) {
+            return utf16_lossy_col_offset(
+                &buf[s as usize..e as usize],
+                col,
+                self.encoding == Encoding::Utf16Le,
+            )
+            .map(|offset| s + offset as u64);
+        }
         let (text, truncated) = self
             .encoding
             .decode_line_capped(&buf[s as usize..e as usize], Self::MAX_VIEW_LINE_BYTES);
@@ -1031,6 +1043,105 @@ fn legacy_col_offset(enc: Encoding, raw: &[u8], col: u64) -> Option<usize> {
     Some(offset.min(raw.len()))
 }
 
+fn utf8_lossy_col_offset(raw: &[u8], col: u64) -> Option<usize> {
+    let mut base = 0usize;
+    let mut scalars = 0u64;
+    let mut decoded_bytes = 0usize;
+    loop {
+        let remaining = &raw[base..];
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                for (offset, scalar) in valid.char_indices() {
+                    if scalars == col {
+                        return Some(base + offset);
+                    }
+                    decoded_bytes = decoded_bytes.checked_add(scalar.len_utf8())?;
+                    if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+                        return None;
+                    }
+                    scalars += 1;
+                }
+                return (scalars == col).then_some(raw.len());
+            }
+            Err(error) => {
+                let valid_len = error.valid_up_to();
+                let valid = std::str::from_utf8(&remaining[..valid_len]).ok()?;
+                for (offset, scalar) in valid.char_indices() {
+                    if scalars == col {
+                        return Some(base + offset);
+                    }
+                    decoded_bytes = decoded_bytes.checked_add(scalar.len_utf8())?;
+                    if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+                        return None;
+                    }
+                    scalars += 1;
+                }
+                if scalars == col {
+                    return Some(base + valid_len);
+                }
+                let invalid_len = error.error_len().unwrap_or(remaining.len() - valid_len);
+                decoded_bytes = decoded_bytes.checked_add('\u{FFFD}'.len_utf8())?;
+                if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+                    return None;
+                }
+                scalars += 1; // lossy decoding publishes one U+FFFD here
+                base += valid_len + invalid_len;
+                if scalars == col {
+                    return Some(base);
+                }
+                if base >= raw.len() {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+fn utf16_lossy_col_offset(raw: &[u8], col: u64, little_endian: bool) -> Option<usize> {
+    let unit_at = |offset: usize| {
+        let bytes = [raw[offset], raw[offset + 1]];
+        if little_endian {
+            u16::from_le_bytes(bytes)
+        } else {
+            u16::from_be_bytes(bytes)
+        }
+    };
+    let mut offset = 0usize;
+    let mut decoded_bytes = 0usize;
+    for _ in 0..col {
+        if offset >= raw.len() {
+            return None;
+        }
+        if offset + 1 >= raw.len() {
+            decoded_bytes = decoded_bytes.checked_add('\u{FFFD}'.len_utf8())?;
+            if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+                return None;
+            }
+            offset = raw.len(); // lossy decoding publishes one U+FFFD
+            continue;
+        }
+        let first = unit_at(offset);
+        if (0xD800..=0xDBFF).contains(&first) && offset + 3 < raw.len() {
+            let second = unit_at(offset + 2);
+            if (0xDC00..=0xDFFF).contains(&second) {
+                decoded_bytes = decoded_bytes.checked_add(4)?;
+                if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+                    return None;
+                }
+                offset += 4;
+                continue;
+            }
+        }
+        let width = char::from_u32(first as u32).map_or('\u{FFFD}'.len_utf8(), char::len_utf8);
+        decoded_bytes = decoded_bytes.checked_add(width)?;
+        if decoded_bytes > Document::MAX_VIEW_LINE_BYTES {
+            return None;
+        }
+        offset += 2;
+    }
+    Some(offset)
+}
+
 fn legacy_step(enc: Encoding, raw: &[u8], i: usize) -> usize {
     let b = raw[i];
     match enc {
@@ -1279,6 +1390,54 @@ mod tests {
 
         assert_eq!(doc.line_col_byte(0, 0), Some(0));
         assert_eq!(doc.line_col_byte(0, 1), Some(1));
+    }
+
+    #[test]
+    fn utf8_line_col_byte_walks_raw_bytes_after_malformed_byte() {
+        let f = write_temp(&[b'a', 0xFF, b'b', b'\n']);
+        let doc = Document::open(
+            f.path(),
+            &OpenOptions {
+                encoding: Some(Encoding::Utf8),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(doc.line(0).as_deref(), Some("a\u{FFFD}b"));
+        assert_eq!(doc.line_col_byte(0, 0), Some(0));
+        assert_eq!(doc.line_col_byte(0, 1), Some(1));
+        assert_eq!(doc.line_col_byte(0, 2), Some(2));
+        assert_eq!(doc.line_col_byte(0, 3), Some(3));
+    }
+
+    #[test]
+    fn utf16_line_col_byte_counts_surrogate_pairs_as_one_scalar() {
+        let mut data = Encoding::Utf16Le.bom().to_vec();
+        data.extend(utf16_bytes("A😀B\n", true, false));
+        let f = write_temp(&data);
+        let doc = Document::open(f.path(), &OpenOptions::default()).unwrap();
+
+        assert_eq!(doc.line_col_byte(0, 0), Some(2));
+        assert_eq!(doc.line_col_byte(0, 1), Some(4));
+        assert_eq!(doc.line_col_byte(0, 2), Some(8));
+        assert_eq!(doc.line_col_byte(0, 3), Some(10));
+    }
+
+    #[test]
+    fn utf16_line_col_byte_keeps_trailing_malformed_byte_addressable() {
+        let f = write_temp(&[0x41, 0x00, 0xFF]);
+        let doc = Document::open(
+            f.path(),
+            &OpenOptions {
+                encoding: Some(Encoding::Utf16Le),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(doc.line_col_byte(0, 1), Some(2));
+        assert_eq!(doc.line_col_byte(0, 2), Some(3));
     }
 
     #[test]

@@ -117,6 +117,9 @@
   --fold-badge-radius: var(--radius-control);
   --bookmark-panel-w: 44rem;
   --bookmark-list-max-h: 55vh;
+  --inspect-panel-w: 62rem;
+  --inspect-list-max-h: 38vh;
+  --inspect-alpha-w: 5rem;
   --analysis-panel-w: 62rem;
   --analysis-panel-max-h: 90vh;
   --analysis-strip-max-w: 68%;

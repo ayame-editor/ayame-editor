@@ -159,6 +159,11 @@ export const ACTIONS: Record<
   find: { run: () => showFind(), globalShortcut: true },
   replace: { run: () => showFind(true), globalShortcut: true },
   gotoLine: { run: promptGotoLine, globalShortcut: true },
+  inspectCharacter: {
+    run: () => import("./inspector.js").then(({ showInspector }) => showInspector()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
   showCompletion: {
     run: () => import("./completion.js").then(({ showCompletion }) => showCompletion()),
     globalShortcut: true,
@@ -331,6 +336,7 @@ const GLOBAL_SHORTCUT_ACTIONS = [
   "newFile",
   "newWindow",
   "gotoLine",
+  "inspectCharacter",
   "showCompletion",
   "toggleBookmark",
   "nextBookmark",

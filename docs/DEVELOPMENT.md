@@ -90,6 +90,45 @@ The timings report is written below `$CARGO_TARGET_DIR/cargo-timings/`.
 `oxc_sourcemap` should not be present: the TypeScript transform emits no source
 maps.
 
+### Unicode inspector tables
+
+The character/raw-byte inspector uses versioned, compile-time tables from Rust
+crates; it never downloads Unicode data or scans the whole document at runtime.
+The lockfile currently resolves these data sources:
+
+| Property | Crate | Crate version | Unicode data |
+| --- | --- | --- | --- |
+| Grapheme boundaries | `unicode-segmentation` | 1.13.3 | 17.0 |
+| Character names | `unicode_names2` | 3.1.0 | 17.0 |
+| Script | `unicode-script` | 0.5.8 | 17.0 |
+| Terminal cell width | `unicode-width` | 0.2.2 | 17.0 |
+| General category | `unicode-general-category` | 1.1.0 | 16.0 |
+| Bidi class | `unicode-bidi` | 0.3.18 | 16.0 |
+| East Asian Width category | `east-asian-width` | 0.1.0 | 15.0 |
+
+These revisions are deliberately recorded separately: do not claim that every
+displayed property comes from one Unicode release. To update them, change the
+workspace dependency constraints if needed, update each package explicitly,
+review its release notes/data version, and rerun the focused encoding and UI
+gates:
+
+```sh
+cargo update -p unicode-segmentation -p unicode_names2 -p unicode-script \
+  -p unicode-width -p unicode-general-category -p unicode-bidi \
+  -p east-asian-width
+cargo test -p ayame-cli serve::inspect
+cargo test -p ayame-core document::tests::utf --lib
+cargo xtask typegen --check
+npm test --prefix crates/ayame-cli/web -- --run test/inspector-model.test.ts test/inspector-ui.test.ts
+```
+
+Measure the release binary before and after a table update with the same
+toolchain, target directory, feature set, and stripped/unstripped state. For
+issue #247, Linux x86-64 release builds made with
+`cargo build -p ayame-cli --release --no-default-features` measured 7,178,384
+bytes before and 8,150,920 bytes after: +972,536 bytes (+13.55%). This is a
+build-specific checkpoint, not a cross-platform size guarantee.
+
 ## Windows
 
 Use PowerShell.

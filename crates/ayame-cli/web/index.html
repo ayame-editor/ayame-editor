@@ -119,6 +119,7 @@
             <button class="menu-item" data-menu-action="find" role="menuitem"><span class="menu-label" data-i18n="menu.find">検索</span><span class="menu-key" data-key-action="find">Ctrl+F</span></button>
             <button class="menu-item" data-menu-action="replace" role="menuitem"><span class="menu-label" data-i18n="menu.replace">置換</span><span class="menu-key" data-key-action="replace">Ctrl+H</span></button>
             <button class="menu-item" data-menu-action="gotoLine" role="menuitem"><span class="menu-label" data-i18n="menu.gotoLine">行へ移動</span><span class="menu-key" data-key-action="gotoLine">Ctrl+G</span></button>
+            <button class="menu-item" data-menu-action="inspectCharacter" role="menuitem"><span class="menu-label" data-i18n="inspect.title">文字・生バイトを検査</span><span class="menu-key" data-key-action="inspectCharacter">Ctrl+Alt+I</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" data-menu-action="toggleBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.toggle">ブックマークを切り替え</span><span class="menu-key" data-key-action="toggleBookmark">Ctrl+F2</span></button>
             <button class="menu-item" data-menu-action="nextBookmark" role="menuitem"><span class="menu-label" data-i18n="bookmark.next">次のブックマーク</span><span class="menu-key" data-key-action="nextBookmark">F2</span></button>
@@ -660,6 +661,60 @@
           <div id="bookmark-empty" class="bookmark-empty hidden" data-i18n="bookmark.none">ブックマークはありません</div>
           <div id="bookmark-list" class="bookmark-list" role="listbox" aria-label="ブックマーク一覧" data-i18n-aria-label="bookmark.showList"></div>
           <button id="bookmark-more" class="cmd hidden" type="button" data-i18n="bookmark.loadMore">さらに表示</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="inspect-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel inspect-panel" role="dialog" aria-modal="true"
+           aria-labelledby="inspect-title" aria-describedby="inspect-summary">
+        <div class="modal-head">
+          <div id="inspect-title" class="modal-title" data-i18n="inspect.title">文字・生バイトを検査</div>
+          <button id="inspect-close" class="modal-x" type="button" title="閉じる (Esc)"
+                  aria-label="閉じる" data-i18n-title="common.closeEsc"
+                  data-i18n-aria-label="common.close">
+            <svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="inspect-body">
+          <div id="inspect-summary" class="inspect-summary" role="status" aria-live="polite"></div>
+          <div id="inspect-file-meta" class="inspect-summary"></div>
+          <div id="inspect-document-diagnostics" aria-live="polite"></div>
+          <div class="inspect-copy-actions" aria-label="コピー" data-i18n-aria-label="inspect.copyActions">
+            <button id="inspect-copy-text" class="cmd" type="button" data-i18n="inspect.copyText">文字をコピー</button>
+            <button id="inspect-copy-codepoints" class="cmd" type="button" data-i18n="inspect.copyCodePoints">U+ をコピー</button>
+            <button id="inspect-copy-escapes" class="cmd" type="button" data-i18n="inspect.copyEscapes">Unicode エスケープをコピー</button>
+            <button id="inspect-copy-utf8" class="cmd" type="button" data-i18n="inspect.copyUtf8">UTF-8 hex をコピー</button>
+            <button id="inspect-copy-encoded" class="cmd" type="button" data-i18n="inspect.copyEncoded">元エンコーディング hex をコピー</button>
+            <button id="inspect-copy-raw" class="cmd" type="button" data-i18n="inspect.copyRaw">生バイトをコピー</button>
+            <button id="inspect-copy-byte-escapes" class="cmd" type="button" data-i18n="inspect.copyByteEscapes">\\x byte escape をコピー</button>
+          </div>
+          <div id="inspect-clusters" class="inspect-clusters"></div>
+          <section class="inspect-tool" aria-labelledby="inspect-expression-title">
+            <h3 id="inspect-expression-title" data-i18n="inspect.expressionTitle">明示表現を変換</h3>
+            <div class="inspect-tool-row">
+              <input id="inspect-expression" class="input-control" maxlength="1024"
+                     autocomplete="off" spellcheck="false" placeholder="U+3042 / \u{3042} / \x82\xA0"
+                     data-i18n-aria-label="inspect.expressionLabel" />
+              <button id="inspect-expression-parse" class="cmd" type="button" data-i18n="inspect.parse">解析</button>
+              <button id="inspect-expression-replace" class="cmd primary" type="button" disabled
+                      data-i18n="inspect.replace">選択文字を置換</button>
+            </div>
+            <div id="inspect-expression-preview" class="inspect-preview" aria-live="polite"></div>
+          </section>
+          <section id="inspect-color-section" class="inspect-tool hidden" aria-labelledby="inspect-color-title">
+            <h3 id="inspect-color-title" data-i18n="inspect.colorTitle">色リテラル</h3>
+            <div class="inspect-tool-row">
+              <span id="inspect-color-swatch" class="inspect-color-swatch" aria-hidden="true"></span>
+              <input id="inspect-color-picker" type="color" data-i18n-aria-label="inspect.colorPicker" />
+              <label class="inspect-alpha-label">
+                <span data-i18n="inspect.alpha">Alpha</span>
+                <input id="inspect-color-alpha" class="input-control" type="number" min="0" max="255" />
+              </label>
+              <code id="inspect-color-preview"></code>
+              <button id="inspect-color-apply" class="cmd primary" type="button" data-i18n="inspect.applyColor">色を適用</button>
+            </div>
+          </section>
         </div>
       </div>
     </div>

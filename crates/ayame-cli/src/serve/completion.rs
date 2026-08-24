@@ -108,7 +108,7 @@ fn collect_words(text: &str, candidates: &mut CandidateSet) {
             end = offset + next.len_utf8();
             count += 1;
         }
-        if count >= 2 && count <= MAX_WORD_CHARS {
+        if (2..=MAX_WORD_CHARS).contains(&count) {
             candidates.add(&text[start..end]);
         }
         if candidates.full() {

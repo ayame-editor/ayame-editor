@@ -107,6 +107,24 @@ export type CompletionRequest = { prefix: string, deadline_ms: bigint | null, };
 
 export type CompletionResponse = { candidates: Array<string>, scanned_lines: bigint, scanned_bytes: number, complete: boolean, timed_out: boolean, truncated: boolean, revision: bigint, };
 
+export type InspectPoint = { line: bigint, col: number, };
+
+export type InspectRequest = { start: InspectPoint, end: InspectPoint, };
+
+export type InspectSummary = { grapheme_count: number, scalar_count: number, utf8_bytes: number, utf16_units: number, truncated: boolean, };
+
+export type ScalarInfo = { text: string, code_point: string, name: string, general_category: string, script: string, bidi_class: string, east_asian_width: string, utf8_hex: string, utf16_hex: string, diagnostics: Array<string>, };
+
+export type ClusterInfo = { line: bigint, col: number, end_col: number, text: string, display: string, kind: string, scalars: Array<ScalarInfo>, cell_width: number, cell_width_cjk: number, utf8_hex: string, utf16_hex: string, original_byte_offset: bigint | null, raw_hex: string | null, original_encoding_hex: string | null, source: string, representable: boolean, diagnostics: Array<string>, };
+
+export type ColorLiteral = { line: bigint, start_col: number, end_col: number, literal: string, rgb_hex: string, alpha: number, format: string, prefix: string, uppercase: boolean, };
+
+export type InspectResponse = { encoding: Encoding, bom_bytes: bigint, bom_hex: string, summary: InspectSummary, clusters: Array<ClusterInfo>, diagnostics: Array<string>, color: ColorLiteral | null, };
+
+export type ParseEscapeRequest = { expression: string, };
+
+export type ParseEscapeResponse = { text: string, code_points: string, original_encoding_hex: string | null, representable: boolean, diagnostics: Array<string>, };
+
 export type FindResponse = { hit: SearchHit | null, };
 
 export type SearchResponse = { hits: Array<SearchHit>, truncated: boolean, };

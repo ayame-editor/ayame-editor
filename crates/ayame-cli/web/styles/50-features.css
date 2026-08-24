@@ -221,6 +221,129 @@
 }
 #bookmark-more { align-self: center; }
 
+/* ---- bounded character / original-byte inspector ------------------------ */
+.inspect-panel {
+  width: min(var(--inspect-panel-w), var(--modal-edge));
+  max-height: var(--analysis-panel-max-h);
+}
+.inspect-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+}
+.inspect-summary,
+.inspect-preview {
+  color: var(--fg-dim);
+  font-size: var(--fs-ui-sm);
+}
+.inspect-copy-actions,
+.inspect-tool-row,
+.inspect-diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.inspect-clusters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: var(--space-2);
+  max-height: var(--inspect-list-max-h);
+  overflow: auto;
+}
+.inspect-cluster,
+.inspect-tool {
+  padding: var(--space-2-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.inspect-cluster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.inspect-glyph {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-title);
+  white-space: pre-wrap;
+}
+.inspect-position,
+.inspect-scalar-facts {
+  color: var(--fg-dim);
+  font-size: var(--fs-hint);
+}
+.inspect-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+}
+.inspect-meta-row { display: contents; }
+.inspect-meta-label { color: var(--fg-dim); }
+.inspect-meta-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+}
+.inspect-scalars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+.inspect-scalar {
+  padding: var(--space-1-5);
+  border-left: 2px solid var(--border);
+}
+.inspect-scalar-name {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+}
+.inspect-diagnostic {
+  padding: var(--space-0-5) var(--space-1-5);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--fg);
+  font-size: var(--fs-hint);
+}
+.inspect-tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.inspect-tool.hidden { display: none; }
+.inspect-tool h3 {
+  margin: var(--space-0);
+  font-size: var(--fs-ui);
+}
+#inspect-expression { flex: 1 1 20rem; }
+.inspect-preview {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+.inspect-color-swatch {
+  width: var(--space-8);
+  height: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background-image:
+    linear-gradient(45deg, var(--border) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border) 75%);
+}
+.inspect-alpha-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+#inspect-color-alpha { width: var(--inspect-alpha-w); }
+
 /* ---- progressive multi-rule log analysis -------------------------------- */
 .analysis-strip {
   position: absolute;

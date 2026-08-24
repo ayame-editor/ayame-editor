@@ -112,6 +112,8 @@ option list. File comparison is provided by the sister project
   are not supported.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
 - Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
+- Inspects a caret grapheme or bounded selection as Unicode scalars and original
+  file bytes, including suspicious invisible/Bidi characters and color literals.
 - Runs sort, replace, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
 - Includes tabs, recent files, and tail-follow mode for appended logs. In the desktop build, tabs can be dragged to another Ayame window or torn out into a new one — unsaved edits move with the tab.
 - Lets you customize themes, fonts, wrapping, whitespace display, zenkaku-space underline, and key bindings.
@@ -155,6 +157,30 @@ Whole-word matching cannot be combined with every regular expression. When it
 cannot, the replace is refused rather than run against a wider set of matches
 than whole-word means — turn `Whole Word` off to run it.
 
+## Character and Raw-byte Inspector
+
+Press `Ctrl+Alt+I`, or choose `Edit` -> `Inspect Character and Raw Bytes`. The
+panel inspects the grapheme under the caret or a bounded normal selection. It
+shows Unicode names, categories, scripts, Bidi classes, East Asian and terminal
+cell widths, UTF-8/UTF-16 values, the logical position, the original file byte
+offset, and both raw and re-encoded bytes. Raw-byte copy is disabled when any
+part comes from the unsaved edit overlay; Ayame never silently drops that part.
+One request decodes at most 256 KiB from each of 16 lines and returns at most 64
+graphemes, 256 scalars, and 16 KiB of inspected text. The panel clearly marks a
+result stopped at one of these limits.
+
+Warnings identify Bidi controls, zero-width characters, NBSP, soft hyphen,
+variation selectors, replacement characters, and possible mixed-script text.
+They are informational and never modify copied text. Enter explicit `U+3042`,
+`\u{3042}`, or `\x82\xA0` forms to preview and replace the inspected text. A
+replacement that the current file encoding cannot represent is refused before
+editing; accepted replacements are normal undoable, crash-recovered edits.
+
+When the caret is on a `#RGB[A]`, `#RRGGBB[AA]`, or `0xRRGGBB[AA]` literal, the
+panel also shows a swatch and color picker. Applying a color preserves the
+prefix, letter case, and alpha placement; shorthand expands only when retaining
+it would lose the selected RGB/alpha precision.
+
 ## Default Shortcuts
 
 `Ctrl` can be entered as `Cmd` on macOS. Shortcuts can be changed from `Edit`
@@ -179,6 +205,7 @@ Shortcuts`.
 | Replace | `Ctrl+H` |
 | Next / previous match | `F3`, `Shift+F3` |
 | Go to line | `Ctrl+G` |
+| Inspect character and raw bytes | `Ctrl+Alt+I` |
 | Undo / redo | `Ctrl+Z`, `Ctrl+Y` or `Ctrl+Shift+Z` |
 | Select all | `Ctrl+A` |
 | Select next occurrence | `Ctrl+D` |
