@@ -6,6 +6,12 @@ import { askConfirm } from "./dialogs.js";
 
 export let lastNativeTitle = "";
 
+export type NativeMenuItemConfig = {
+  id: string;
+  label: string;
+  shortcut: string;
+};
+
 export type NativeMessage =
   | { type: "close_confirmed" }
   | { type: "close_canceled" }
@@ -16,7 +22,7 @@ export type NativeMessage =
   | { type: "new_window_path"; path: string; recover: boolean }
   | { type: "pick_save"; dir: string; name: string }
   | { type: "pick_open"; dir: string }
-  | { type: "language"; language: string };
+  | { type: "menu_config"; items: NativeMenuItemConfig[] };
 
 export function postNativeMessage(message: NativeMessage) {
   try {

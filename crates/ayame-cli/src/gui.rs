@@ -373,8 +373,12 @@ pub fn cmd_gui(args: &[String]) -> Result<()> {
                 ));
             }
             #[cfg(target_os = "macos")]
-            Event::UserEvent(GuiEvent::Language(lang)) => {
-                macos_menu = setup_macos_menu(&proxy, Some(UiLocale::from_setting(&lang)));
+            Event::UserEvent(GuiEvent::MenuConfig(config)) => {
+                macos_menu = setup_macos_menu(&proxy, Some(&config));
+            }
+            #[cfg(not(target_os = "macos"))]
+            Event::UserEvent(GuiEvent::MenuConfig(config)) => {
+                let _ = config;
             }
             // Fires once, after any `ControlFlow::Exit`, before the loop tears
             // the process down — the single choke point where every close path
@@ -416,8 +420,8 @@ enum GuiEvent {
     PickSave(PickSaveRequest),
     /// The page asked for the OS open dialog (ファイルを開く).
     PickOpen(PickOpenRequest),
-    #[cfg(target_os = "macos")]
-    Language(String),
+    /// Current web-localized labels and user key bindings for the macOS menu.
+    MenuConfig(NativeMenuConfig),
     /// A native menu item was activated; carries the muda item id, which is
     /// the frozen action name understood by `window.__ayameMenu` in the page.
     #[cfg(target_os = "macos")]
@@ -436,7 +440,100 @@ enum IpcMessage {
     NewWindowPath { path: String, recover: bool },
     PickSave { dir: String, name: String },
     PickOpen { dir: String },
-    Language { language: String },
+    MenuConfig { items: Vec<NativeMenuItemConfig> },
+}
+
+const MAX_NATIVE_MENU_ITEMS: usize = 128;
+const MAX_NATIVE_MENU_ID_CHARS: usize = 64;
+const MAX_NATIVE_MENU_LABEL_CHARS: usize = 160;
+const MAX_NATIVE_MENU_SHORTCUT_CHARS: usize = 64;
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct NativeMenuItemConfig {
+    id: String,
+    label: String,
+    #[serde(default)]
+    shortcut: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeMenuConfig {
+    items: Vec<NativeMenuItemConfig>,
+}
+
+impl NativeMenuConfig {
+    #[cfg(any(target_os = "macos", test))]
+    fn item(&self, id: &str) -> Option<&NativeMenuItemConfig> {
+        self.items.iter().find(|item| item.id == id)
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn configured_menu_label<'a>(
+    config: Option<&'a NativeMenuConfig>,
+    id: &str,
+    fallback: &'a str,
+) -> &'a str {
+    config
+        .and_then(|config| config.item(id))
+        .map(|item| item.label.as_str())
+        .unwrap_or(fallback)
+}
+
+fn normalize_menu_config(items: Vec<NativeMenuItemConfig>) -> NativeMenuConfig {
+    let items = items
+        .into_iter()
+        .take(MAX_NATIVE_MENU_ITEMS)
+        .filter_map(|item| {
+            let raw_id = item.id.trim();
+            if raw_id.is_empty()
+                || raw_id.chars().count() > MAX_NATIVE_MENU_ID_CHARS
+                || !raw_id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            {
+                return None;
+            }
+            let id = raw_id.to_string();
+            let label: String = item
+                .label
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_NATIVE_MENU_LABEL_CHARS)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            if label.is_empty() {
+                return None;
+            }
+            let shortcut = item
+                .shortcut
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_NATIVE_MENU_SHORTCUT_CHARS)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            Some(NativeMenuItemConfig {
+                id,
+                label,
+                shortcut,
+            })
+        })
+        .collect();
+    NativeMenuConfig { items }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_accelerator_spelling(shortcut: &str) -> Option<String> {
+    let shortcut = shortcut.trim();
+    if shortcut.is_empty() {
+        return None;
+    }
+    Some(match shortcut.strip_prefix("Ctrl+") {
+        Some(rest) => format!("Command+{rest}"),
+        None => shortcut.to_string(),
+    })
 }
 
 /// What the page suggests for the OS save dialog: a starting folder and a
@@ -466,17 +563,7 @@ fn decode_ipc_message(body: &str) -> serde_json::Result<Option<GuiEvent>> {
         IpcMessage::NewWindowPath { path, .. } => GuiEvent::NewWindowPath(path),
         IpcMessage::PickSave { dir, name } => GuiEvent::PickSave(PickSaveRequest { dir, name }),
         IpcMessage::PickOpen { dir } => GuiEvent::PickOpen(PickOpenRequest { dir }),
-        IpcMessage::Language { language } => {
-            #[cfg(target_os = "macos")]
-            {
-                GuiEvent::Language(language)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = language;
-                return Ok(None);
-            }
-        }
+        IpcMessage::MenuConfig { items } => GuiEvent::MenuConfig(normalize_menu_config(items)),
     };
     Ok(Some(event))
 }
@@ -667,6 +754,42 @@ mod pure_tests {
         );
         assert_eq!((restored.x, restored.y), (default.x, default.y));
     }
+
+    #[test]
+    fn web_shortcuts_map_control_to_the_macos_command_key() {
+        assert_eq!(
+            macos_accelerator_spelling("Ctrl+Shift+F").as_deref(),
+            Some("Command+Shift+F")
+        );
+        assert_eq!(
+            macos_accelerator_spelling("Ctrl++").as_deref(),
+            Some("Command++")
+        );
+        assert_eq!(
+            macos_accelerator_spelling("Alt+ArrowUp").as_deref(),
+            Some("Alt+ArrowUp")
+        );
+        assert_eq!(macos_accelerator_spelling(""), None);
+    }
+
+    #[test]
+    fn configured_menu_labels_override_only_their_fallback_item() {
+        let config = NativeMenuConfig {
+            items: vec![NativeMenuItemConfig {
+                id: "find".into(),
+                label: "Search Logs".into(),
+                shortcut: String::new(),
+            }],
+        };
+        assert_eq!(
+            configured_menu_label(Some(&config), "find", "Find"),
+            "Search Logs"
+        );
+        assert_eq!(
+            configured_menu_label(Some(&config), "saveFile", "Save"),
+            "Save"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -721,6 +844,21 @@ mod ipc_tests {
             GuiEvent::SetTitle(title) => assert_eq!(title, "draft"),
             other => panic!("unexpected event: {other:?}"),
         }
+        match event(
+            r#"{"type":"menu_config","items":[{"id":"find","label":"Find\u0000","shortcut":"Ctrl+Shift+F"},{"id":"***","label":"bad","shortcut":""},{"id":"empty","label":"\u0000","shortcut":""}]}"#,
+        ) {
+            GuiEvent::MenuConfig(config) => {
+                assert_eq!(
+                    config.items,
+                    vec![NativeMenuItemConfig {
+                        id: "find".into(),
+                        label: "Find".into(),
+                        shortcut: "Ctrl+Shift+F".into(),
+                    }]
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 
     #[test]
@@ -730,6 +868,7 @@ mod ipc_tests {
         assert!(
             decode_ipc_message(r#"{"type":"new_window_path","path":7,"recover":false}"#).is_err()
         );
+        assert!(decode_ipc_message(r#"{"type":"menu_config","items":{}}"#).is_err());
         assert!(decode_ipc_message(r#"{"type":"not_a_message"}"#).is_err());
     }
 }
@@ -915,18 +1054,6 @@ enum UiLocale {
 
 #[cfg(target_os = "macos")]
 impl UiLocale {
-    fn from_setting(lang: &str) -> UiLocale {
-        let lang = lang.trim().to_ascii_lowercase();
-        if lang == "auto" || lang.is_empty() {
-            return UiLocale::from_env();
-        }
-        if lang == "ja" || lang.starts_with("ja-") || lang.starts_with("ja_") {
-            UiLocale::Ja
-        } else {
-            UiLocale::En
-        }
-    }
-
     fn from_env() -> UiLocale {
         let lang = ["AYAME_LANG", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
             .iter()
@@ -945,13 +1072,13 @@ impl UiLocale {
 #[cfg(target_os = "macos")]
 fn setup_macos_menu(
     proxy: &tao::event_loop::EventLoopProxy<GuiEvent>,
-    locale: Option<UiLocale>,
+    config: Option<&NativeMenuConfig>,
 ) -> Option<muda::Menu> {
     let proxy = proxy.clone();
     muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
         let _ = proxy.send_event(GuiEvent::Menu(event.id.0));
     }));
-    let menu = build_macos_menu(locale.unwrap_or_else(UiLocale::from_env))?;
+    let menu = build_macos_menu(UiLocale::from_env(), config)?;
     // tao's macOS event loop drives NSApp itself, so attaching here — on the
     // main thread, after the event loop exists and before `run` — is the
     // whole interop story.
@@ -964,19 +1091,31 @@ fn setup_macos_menu(
 /// selectors to the focused view when NSMenu items carry those key
 /// equivalents. Windows/Linux use the in-page menubar instead.
 #[cfg(target_os = "macos")]
-fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
+fn build_macos_menu(locale: UiLocale, config: Option<&NativeMenuConfig>) -> Option<muda::Menu> {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
     let cmd = Modifiers::SUPER;
     let shift_cmd = Modifiers::SUPER | Modifiers::SHIFT;
     let key = |mods: Modifiers, code: Code| Some(Accelerator::new(Some(mods), code));
-    // Ids are the frozen `window.__ayameMenu` action names, except "quit"
-    // which is intercepted natively in the event loop.
-    let item = |id: &str, text: &str, accel| MenuItem::with_id(id, text, true, accel);
-    let label = |ja: &'static str, en: &'static str| match locale {
+    let fallback_label = |ja: &'static str, en: &'static str| match locale {
         UiLocale::Ja => ja,
         UiLocale::En => en,
+    };
+    let label = |id: &str, ja: &'static str, en: &'static str| {
+        configured_menu_label(config, id, fallback_label(ja, en))
+    };
+    let accelerator = |id: &str, fallback: Option<Accelerator>| {
+        let Some(item) = config.and_then(|config| config.item(id)) else {
+            return fallback;
+        };
+        macos_accelerator_spelling(&item.shortcut).and_then(|value| value.parse().ok())
+    };
+    // Ids are the frozen `window.__ayameMenu` action names, except "quit"
+    // which is intercepted natively in the event loop. Once the page boots,
+    // both label and accelerator come from its i18n/keymap configuration.
+    let item = |id: &str, ja: &'static str, en: &'static str, fallback| {
+        MenuItem::with_id(id, label(id, ja, en), true, accelerator(id, fallback))
     };
 
     let app = Submenu::with_items(
@@ -984,7 +1123,11 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
         true,
         &[
             &PredefinedMenuItem::about(
-                Some(label("Ayame Editor について", "About Ayame Editor")),
+                Some(label(
+                    "about",
+                    "Ayame Editor について",
+                    "About Ayame Editor",
+                )),
                 Some(AboutMetadata {
                     name: Some("Ayame Editor".into()),
                     version: Some(env!("CARGO_PKG_VERSION").into()),
@@ -992,17 +1135,14 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
                 }),
             ),
             &PredefinedMenuItem::separator(),
-            &item(
-                "settings",
-                label("設定…", "Settings..."),
-                key(cmd, Code::Comma),
-            ),
+            &item("settings", "設定…", "Settings...", key(cmd, Code::Comma)),
             &PredefinedMenuItem::separator(),
             // Not PredefinedMenuItem::quit: quitting must go through the same
             // unsaved-changes confirmation as closing the window.
             &item(
                 "quit",
-                label("Ayame Editor を終了", "Quit Ayame Editor"),
+                "Ayame Editor を終了",
+                "Quit Ayame Editor",
                 key(cmd, Code::KeyQ),
             ),
         ],
@@ -1010,38 +1150,38 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     .ok()?;
 
     let file = Submenu::with_items(
-        label("ファイル", "File"),
+        label("section.file", "ファイル", "File"),
         true,
         &[
-            &item(
-                "newFile",
-                label("新規ファイル", "New File"),
-                key(cmd, Code::KeyN),
-            ),
+            &item("newFile", "新規ファイル", "New File", key(cmd, Code::KeyN)),
             // Handled natively in the event loop (like "quit"): a new window
             // is a new process, not a page action.
             &item(
                 "newWindow",
-                label("新規ウィンドウ", "New Window"),
+                "新規ウィンドウ",
+                "New Window",
                 key(shift_cmd, Code::KeyN),
             ),
-            &item("openFile", label("開く", "Open"), key(cmd, Code::KeyO)),
+            &item("openFile", "開く", "Open", key(cmd, Code::KeyO)),
             &PredefinedMenuItem::separator(),
-            &item("saveFile", label("保存", "Save"), key(cmd, Code::KeyS)),
+            &item("saveFile", "保存", "Save", key(cmd, Code::KeyS)),
             &item(
                 "saveAs",
-                label("名前を付けて保存", "Save As"),
+                "名前を付けて保存",
+                "Save As",
                 key(shift_cmd, Code::KeyS),
             ),
             &item(
                 "encoding",
-                label("文字コード / 改行コード…", "Encoding / Line Endings..."),
+                "文字コード / 改行コード…",
+                "Encoding / Line Endings...",
                 None,
             ),
             &PredefinedMenuItem::separator(),
             &item(
                 "closeTab",
-                label("タブを閉じる", "Close Tab"),
+                "タブを閉じる",
+                "Close Tab",
                 key(cmd, Code::KeyW),
             ),
         ],
@@ -1049,63 +1189,61 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     .ok()?;
 
     let edit = Submenu::with_items(
-        label("編集", "Edit"),
+        label("section.edit", "編集", "Edit"),
         true,
         &[
-            &item("undo", label("元に戻す", "Undo"), key(cmd, Code::KeyZ)),
-            &item(
-                "redo",
-                label("やり直す", "Redo"),
-                key(shift_cmd, Code::KeyZ),
-            ),
+            &item("undo", "元に戻す", "Undo", key(cmd, Code::KeyZ)),
+            &item("redo", "やり直す", "Redo", key(shift_cmd, Code::KeyZ)),
             &PredefinedMenuItem::separator(),
-            &item("cut", label("切り取り", "Cut"), key(cmd, Code::KeyX)),
-            &item("copy", label("コピー", "Copy"), key(cmd, Code::KeyC)),
+            &item("cut", "切り取り", "Cut", key(cmd, Code::KeyX)),
+            &item("copy", "コピー", "Copy", key(cmd, Code::KeyC)),
             // Paste stays a native selector so the DOM paste event (the only
-            // sanctioned clipboard-read path) reaches the hidden textarea.
-            &PredefinedMenuItem::paste(Some(label("貼り付け", "Paste"))),
+            // sanctioned clipboard-read path) reaches the hidden textarea. Its
+            // label is configured, while AppKit intentionally owns Cmd+V.
+            &PredefinedMenuItem::paste(Some(label("paste", "貼り付け", "Paste"))),
             &item(
                 "selectAll",
-                label("すべて選択", "Select All"),
+                "すべて選択",
+                "Select All",
                 key(cmd, Code::KeyA),
             ),
             &PredefinedMenuItem::separator(),
-            &item("find", label("検索", "Find"), key(cmd, Code::KeyF)),
-            &item("replace", label("置換", "Replace"), None),
-            &item(
-                "gotoLine",
-                label("行へ移動", "Go to Line"),
-                key(cmd, Code::KeyG),
-            ),
+            &item("find", "検索", "Find", key(cmd, Code::KeyF)),
+            &item("replace", "置換", "Replace", None),
+            &item("gotoLine", "行へ移動", "Go to Line", key(cmd, Code::KeyG)),
             &PredefinedMenuItem::separator(),
             &item(
                 "duplicateLine",
-                label("行を複製", "Duplicate Line"),
+                "行を複製",
+                "Duplicate Line",
                 key(shift_cmd, Code::KeyD),
             ),
-            &item("deleteLine", label("行を削除", "Delete Line"), None),
+            &item("deleteLine", "行を削除", "Delete Line", None),
         ],
     )
     .ok()?;
 
     let selection = Submenu::with_items(
-        label("選択", "Selection"),
+        label("section.selection", "選択", "Selection"),
         true,
         &[
             &item(
                 "selectNextOccurrence",
-                label("次の一致を選択", "Select Next Occurrence"),
+                "次の一致を選択",
+                "Select Next Occurrence",
                 key(cmd, Code::KeyD),
             ),
             &PredefinedMenuItem::separator(),
             &item(
                 "addCursorAbove",
-                label("カーソルを上に追加", "Add Cursor Above"),
+                "カーソルを上に追加",
+                "Add Cursor Above",
                 None,
             ),
             &item(
                 "addCursorBelow",
-                label("カーソルを下に追加", "Add Cursor Below"),
+                "カーソルを下に追加",
+                "Add Cursor Below",
                 None,
             ),
         ],
@@ -1113,48 +1251,49 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     .ok()?;
 
     let view = Submenu::with_items(
-        label("表示", "View"),
+        label("section.view", "表示", "View"),
         true,
         &[
             &item(
                 "commandPalette",
-                label("コマンドパレット", "Command Palette"),
+                "コマンドパレット",
+                "Command Palette",
                 key(shift_cmd, Code::KeyP),
             ),
             &PredefinedMenuItem::separator(),
             &item(
                 "toggleWhitespace",
-                label("空白・改行を表示", "Show Whitespace"),
+                "空白・改行を表示",
+                "Show Whitespace",
                 None,
             ),
             &item(
                 "toggleZenkakuUnderline",
-                label("全角空白を下線で表示", "Underline Full-width Spaces"),
+                "全角空白を下線で表示",
+                "Underline Full-width Spaces",
                 None,
             ),
-            &item("toggleWordWrap", label("折り返し", "Word Wrap"), None),
-            &item("toggleFollowTail", label("末尾に追従", "Follow Tail"), None),
+            &item("toggleWordWrap", "折り返し", "Word Wrap", None),
+            &item("toggleFollowTail", "末尾に追従", "Follow Tail", None),
         ],
     )
     .ok()?;
 
     let help = Submenu::with_items(
-        label("ヘルプ", "Help"),
+        label("section.help", "ヘルプ", "Help"),
         true,
         &[
-            &item(
-                "help",
-                label("Ayame Editor ヘルプ", "Ayame Editor Help"),
-                None,
-            ),
+            &item("help", "Ayame Editor ヘルプ", "Ayame Editor Help", None),
             &item(
                 "keymap",
-                label("キーボードショートカット", "Keyboard Shortcuts"),
+                "キーボードショートカット",
+                "Keyboard Shortcuts",
                 None,
             ),
             &item(
                 "commandPalette",
-                label("コマンドパレット", "Command Palette"),
+                "コマンドパレット",
+                "Command Palette",
                 key(shift_cmd, Code::KeyP),
             ),
         ],
@@ -1162,23 +1301,24 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     .ok()?;
 
     let tools = Submenu::with_items(
-        label("ツール", "Tools"),
+        label("section.tools", "ツール", "Tools"),
         true,
         &[
-            &item("sortSave", label("ソート", "Sort"), None),
-            &item("splitFile", label("ファイルを分割", "Split File"), None),
-            &item("grepFolder", label("フォルダ内検索", "Grep Folder"), None),
-            &item("grepSave", label("grep して保存", "Grep to File"), None),
+            &item("sortSave", "ソート", "Sort", None),
+            &item("splitFile", "ファイルを分割", "Split File", None),
+            &item("grepFolder", "フォルダ内検索", "Grep Folder", None),
+            &item("grepSave", "grep して保存", "Grep to File", None),
             &PredefinedMenuItem::separator(),
-            &item("caseUpper", label("大文字に変換", "Uppercase"), None),
-            &item("caseLower", label("小文字に変換", "Lowercase"), None),
-            &item("caseCamel", label("camelCase に変換", "camelCase"), None),
-            &item("casePascal", label("PascalCase に変換", "PascalCase"), None),
-            &item("caseSnake", label("snake_case に変換", "snake_case"), None),
-            &item("caseKebab", label("kebab-case に変換", "kebab-case"), None),
+            &item("caseUpper", "大文字に変換", "Uppercase", None),
+            &item("caseLower", "小文字に変換", "Lowercase", None),
+            &item("caseCamel", "camelCase に変換", "camelCase", None),
+            &item("casePascal", "PascalCase に変換", "PascalCase", None),
+            &item("caseSnake", "snake_case に変換", "snake_case", None),
+            &item("caseKebab", "kebab-case に変換", "kebab-case", None),
             &item(
                 "caseConstant",
-                label("CONSTANT_CASE に変換", "CONSTANT_CASE"),
+                "CONSTANT_CASE に変換",
+                "CONSTANT_CASE",
                 None,
             ),
         ],
@@ -1186,11 +1326,11 @@ fn build_macos_menu(locale: UiLocale) -> Option<muda::Menu> {
     .ok()?;
 
     let window = Submenu::with_items(
-        label("ウインドウ", "Window"),
+        label("section.window", "ウインドウ", "Window"),
         true,
         &[
-            &PredefinedMenuItem::minimize(Some(label("しまう", "Minimize"))),
-            &PredefinedMenuItem::maximize(Some(label("拡大/縮小", "Zoom"))),
+            &PredefinedMenuItem::minimize(Some(label("window.minimize", "しまう", "Minimize"))),
+            &PredefinedMenuItem::maximize(Some(label("window.zoom", "拡大/縮小", "Zoom"))),
         ],
     )
     .ok()?;
