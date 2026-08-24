@@ -152,13 +152,6 @@
   gap: var(--space-1);
   flex: 0 0 auto;
 }
-.tb-sep {
-  width: 1px;
-  align-self: stretch;
-  margin: var(--space-1) var(--space-0-5);
-  background: var(--border);
-  flex: 0 0 auto;
-}
 /* Pushes the contextual apply-theme/apply-keymap group to the right edge so it
    claims its own lane and never shoves the primary controls when it appears. */
 .tb-spacer {

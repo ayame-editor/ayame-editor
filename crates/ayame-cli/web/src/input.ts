@@ -252,6 +252,7 @@ export function initEvents() {
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
   $("grep-close").addEventListener("click", hideGrep);
+  $("grep-back").addEventListener("click", hideGrep);
 
   // Keep the column ruler aligned as the text scrolls horizontally.
   $("content").addEventListener("scroll", () => {

@@ -7,7 +7,7 @@ import { focusEditor, formatLineNo, lineNumberChars } from "./editor.js";
 import { gotoLine } from "./edits.js";
 import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import { anyModalOpen } from "./modal-state.js";
-import { openPath, showFolderDialog } from "./workspace.js";
+import { openPath } from "./workspace.js";
 import { flashCount } from "./notifications.js";
 import { lastGrep } from "./grep-state.js";
 import type { GrepRequest } from "./types/api.js";
@@ -53,8 +53,7 @@ export async function grepFolder() {
         label: t("dialog.grep.dir"),
         value: base,
         placeholder: t("dialog.grep.dirPlaceholder"),
-        onBrowse: (cur) =>
-          showFolderDialog(t("dialog.open.chooseFolder"), (cur || base || "").trim()),
+        browseDirectories: true,
       },
       {
         id: "glob",

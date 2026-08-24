@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/editor.js", () => ({ focusEditor: vi.fn() }));
-vi.mock("../src/i18n.js", () => ({ t: (key: string) => key }));
+vi.mock("../src/i18n.js", () => ({
+  serverMessage: (error: unknown) => String(error),
+  t: (key: string) => key,
+}));
 
-import { askConfirm, CONFIRM_ALT } from "../src/dialogs.js";
+import { askConfirm, askForm, CONFIRM_ALT } from "../src/dialogs.js";
 
 function keydownEnter() {
   document
@@ -100,5 +103,73 @@ describe("confirmation dialog keyboard actions", () => {
       .getElementById("confirm")!
       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await expect(backdrop).resolves.toBe(false);
+  });
+});
+
+describe("form directory browser (#172)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = `
+      <div id="editor-hi" tabindex="-1"></div>
+      <div id="form-modal" class="modal hidden" aria-hidden="true">
+        <div id="form-title"></div>
+        <button id="form-close"></button>
+        <div id="form-body"></div>
+        <button id="form-cancel"></button>
+        <button id="form-ok"></button>
+      </div>`;
+  });
+
+  it("chooses a folder inside the active form without opening another modal", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          dir: "/tmp",
+          parent: "/",
+          entries: [
+            { name: "notes.txt", path: "/tmp/notes.txt", is_dir: false, size: 10 },
+            { name: "logs", path: "/tmp/logs", is_dir: true, size: 0 },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ dir: "/tmp/logs", parent: "/tmp", entries: [] }),
+      });
+    vi.stubGlobal("fetch", fetch);
+
+    const result = askForm<{ dir: string }>("grep", [
+      {
+        id: "dir",
+        type: "path",
+        label: "directory",
+        value: "/tmp",
+        browseDirectories: true,
+      },
+    ]);
+    const browse = document.querySelector<HTMLButtonElement>(".form-path .cmd")!;
+    browse.click();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-path="/tmp/logs"]')).not.toBeNull(),
+    );
+    const browser = document.querySelector<HTMLElement>(".form-path-browser")!;
+    expect(browser.classList.contains("hidden")).toBe(false);
+    expect(document.querySelectorAll(".modal:not(.hidden)")).toHaveLength(1);
+    expect(document.querySelector('[data-path="/tmp/notes.txt"]')).toBeNull();
+
+    const logs = document.querySelector<HTMLButtonElement>('[data-path="/tmp/logs"]')!;
+    logs.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(document.getElementById("form-modal")!.classList.contains("hidden")).toBe(false);
+    logs.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector<HTMLInputElement>(".form-path input")!.value).toBe("/tmp/logs"),
+    );
+    expect(fetch).toHaveBeenLastCalledWith("/api/browse?dir=%2Ftmp%2Flogs", undefined);
+
+    document.getElementById("form-cancel")!.click();
+    await expect(result).resolves.toBeNull();
   });
 });
