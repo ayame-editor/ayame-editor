@@ -24,6 +24,8 @@ describe("AppState boundaries (#122)", () => {
     first.search.history.push("needle");
     first.analysis.visibleRuleIds.add("errors");
     first.analysis.lastHits.set("errors", { line: 1 } as never);
+    first.view.sparseCache.set(99, { number: 99, text: "folded" } as never);
+    first.folds.documents.set("/tmp/a", {} as never);
     first.markers.bookmarks.add(7);
     first.settings.keymap.saveFile = "Alt+S";
     first.settings.customThemes.Plum = { name: "Plum" };
@@ -33,6 +35,8 @@ describe("AppState boundaries (#122)", () => {
     expect(second.search.history).toEqual([]);
     expect(second.analysis.visibleRuleIds.size).toBe(0);
     expect(second.analysis.lastHits.size).toBe(0);
+    expect(second.view.sparseCache.size).toBe(0);
+    expect(second.folds.documents.size).toBe(0);
     expect(second.markers.bookmarks.size).toBe(0);
     expect(second.settings.keymap).toEqual({});
     expect(second.settings.customThemes).toEqual({});
@@ -46,6 +50,7 @@ describe("AppState boundaries (#122)", () => {
       "analysis",
       "caret",
       "doc",
+      "folds",
       "markers",
       "opener",
       "runtime",

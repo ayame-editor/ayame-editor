@@ -23,6 +23,7 @@ import {
   type SyntaxPreferences,
 } from "./syntax-preference-model.js";
 import { updateStatusMeta } from "./status.js";
+import { clearAllActiveFolds } from "./fold-state.js";
 
 let initialized = false;
 let draftFavorites: SchemeId[] = [];
@@ -57,6 +58,7 @@ function draftPreferences(selection: SyntaxSelection) {
 }
 
 function refreshSyntaxRendering() {
+  clearAllActiveFolds();
   clearSyntaxCache();
   invalidateRenderedRows();
   updateStatusMeta();

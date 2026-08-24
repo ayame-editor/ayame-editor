@@ -94,6 +94,15 @@ const promptGotoLine = () => {
 const showHelp = () => showMessage(t("help.title"), t("help.body"));
 const showAbout = () => showMessage(t("help.about"), t("help.aboutBody"));
 
+const promptFoldLevel = () => {
+  askPrompt(t("fold.toLevelPrompt"), t("fold.levelLabel"), "1").then((value) => {
+    const level = Number(value);
+    if (Number.isSafeInteger(level) && level > 0) {
+      void import("./fold-actions.js").then(({ foldToLevel }) => foldToLevel(level));
+    }
+  });
+};
+
 const SEARCH_OPTION_KEYS = {
   ci: "caseInsensitive",
   word: "word",
@@ -150,6 +159,58 @@ export const ACTIONS: Record<
   find: { run: () => showFind(), globalShortcut: true },
   replace: { run: () => showFind(true), globalShortcut: true },
   gotoLine: { run: promptGotoLine, globalShortcut: true },
+  toggleFold: {
+    run: () => import("./fold-actions.js").then(({ toggleCurrentFold }) => toggleCurrentFold()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  foldCurrentLevel: {
+    run: () => import("./fold-actions.js").then(({ foldCurrentLevel }) => foldCurrentLevel()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  unfoldCurrentLevel: {
+    run: () => import("./fold-actions.js").then(({ unfoldCurrentLevel }) => unfoldCurrentLevel()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  unfoldAll: {
+    run: () => import("./fold-actions.js").then(({ unfoldAll }) => unfoldAll()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  foldToLevel: { run: promptFoldLevel, globalShortcut: true, editorOnly: true },
+  goBlockStart: {
+    run: () =>
+      import("./fold-actions.js").then(({ goToBlockBoundary }) => goToBlockBoundary(false)),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  goBlockEnd: {
+    run: () => import("./fold-actions.js").then(({ goToBlockBoundary }) => goToBlockBoundary(true)),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  previousSiblingBlock: {
+    run: () => import("./fold-actions.js").then(({ goToSibling }) => goToSibling(-1)),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  nextSiblingBlock: {
+    run: () => import("./fold-actions.js").then(({ goToSibling }) => goToSibling(1)),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  matchingBrace: {
+    run: () => import("./fold-actions.js").then(({ goToMatchingBrace }) => goToMatchingBrace()),
+    globalShortcut: true,
+    editorOnly: true,
+  },
+  selectMatchingBrace: {
+    run: () => import("./fold-actions.js").then(({ goToMatchingBrace }) => goToMatchingBrace(true)),
+    globalShortcut: true,
+    editorOnly: true,
+  },
   toggleBookmark: { run: () => toggleBookmark(), globalShortcut: true, editorOnly: true },
   nextBookmark: { run: nextBookmark, globalShortcut: true, editorOnly: true },
   previousBookmark: { run: previousBookmark, globalShortcut: true, editorOnly: true },

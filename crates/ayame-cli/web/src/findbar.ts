@@ -12,6 +12,7 @@ import {
   setSearchHits,
   setSelection,
 } from "./editor.js";
+import { logicalLineAtVisible, visibleIndexForLine } from "./fold-state.js";
 import {
   loadReplaceHistoryShared,
   loadSearchHistoryShared,
@@ -160,7 +161,7 @@ export async function findStep(dir) {
   } else {
     from = state.search.lastMatch
       ? state.search.lastMatch.byte
-      : await lineByte(Math.min(state.view.total, state.view.first + rowsVisible()));
+      : await lineByte(logicalLineAtVisible(visibleIndexForLine(state.view.first) + rowsVisible()));
   }
   try {
     let res = await api<FindResponse>(`/api/find?dir=${dir}&from=${from}&${qs()}`);

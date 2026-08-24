@@ -176,6 +176,10 @@ export type MarkerListQuery = { kind: string, start: bigint, limit: number, };
 
 export type MarkerListResponse = { kind: string, total: bigint, lines: Array<bigint>, truncated: boolean, };
 
+export type MarkerRangeCountsQuery = { start: bigint, end: bigint, };
+
+export type MarkerRangeCountsResponse = { bookmarks: bigint, search_rules: bigint, change_saved: bigint, change_unsaved: bigint, change_deleted: bigint, };
+
 export type MarkerNavigateQuery = { kind: string, from: bigint, direction: string, wrap: boolean, };
 
 export type MarkerNavigateResponse = { kind: string, line: bigint | null, count: bigint, wrapped: boolean, };

@@ -277,6 +277,16 @@ impl MarkerSet {
             .collect()
     }
 
+    /// Count one marker kind in `[start, end)` without allocating a result page.
+    /// The ordered sparse walk is `O(log M + K)`, independent of document size.
+    #[must_use]
+    pub fn range_count(&self, kind: MarkerKind, start: u64, end: u64) -> usize {
+        if start >= end {
+            return 0;
+        }
+        self.lines[kind.index()].range(start..end).count()
+    }
+
     /// Enumerate at most `limit` markers at or after `start`.
     #[must_use]
     pub fn from(&self, kind: MarkerKind, start: u64, limit: usize) -> Vec<u64> {
@@ -436,6 +446,11 @@ mod tests {
             markers.range(MarkerKind::Bookmark, 0, 10_000_000_000, 10),
             vec![3, 4_000_000_000, 9_999_999_999]
         );
+        assert_eq!(
+            markers.range_count(MarkerKind::Bookmark, 4_000_000_000, 10_000_000_000),
+            2
+        );
+        assert_eq!(markers.range_count(MarkerKind::Bookmark, 4, 4), 0);
     }
 
     #[test]

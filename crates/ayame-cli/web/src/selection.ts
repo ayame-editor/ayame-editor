@@ -15,12 +15,19 @@ import {
   revealLine,
   rowsVisible,
   scheduleRender,
+  scrollVisibleRows,
   setCaret,
   setFirst,
   setActiveLine,
   setSelection,
   setSelectionRenderer,
 } from "./editor.js";
+import {
+  expandFoldsForLine,
+  logicalLineAtVisible,
+  visibleIndexForLine,
+  visibleLinesFrom,
+} from "./fold-state.js";
 import { lineLensFor, pasteText, typeText } from "./edits.js";
 import { flashCount } from "./notifications.js";
 import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
@@ -194,7 +201,7 @@ export function appendSelectionRect(layer, line, startCol, endCol, trailingNewli
   const rect = document.createElement("div");
   rect.className = "selrect";
   rect.style.left = `${left}px`;
-  rect.style.top = `${(line - state.view.first) * LINE_HEIGHT}px`;
+  rect.style.top = `${(visibleIndexForLine(line) - visibleIndexForLine(state.view.first)) * LINE_HEIGHT}px`;
   rect.style.width = `${Math.max(2, width)}px`;
   layer.append(rect);
 }
@@ -202,9 +209,8 @@ export function appendSelectionRect(layer, line, startCol, endCol, trailingNewli
 export function renderRangeSelection(layer, r) {
   if (!r || rangeEmpty(r)) return;
   const vis = rowsVisible() + OVERSCAN;
-  const from = Math.max(r.start.line, state.view.first);
-  const to = Math.min(r.end.line, state.view.first + vis);
-  for (let line = from; line <= to; line++) {
+  for (const line of visibleLinesFrom(state.view.first, vis)) {
+    if (line < r.start.line || line > r.end.line || line >= state.view.total) continue;
     const startCol = line === r.start.line ? r.start.col : 0;
     const len = lineLen(line);
     // A line selected through its end extends a hair past the text so the
@@ -224,9 +230,8 @@ export function renderSelection() {
   const rr = rectRange();
   if (rr) {
     const vis = rowsVisible() + OVERSCAN;
-    const from = Math.max(rr.l0, state.view.first);
-    const to = Math.min(rr.l1, state.view.first + vis);
-    for (let line = from; line <= to; line++) {
+    for (const line of visibleLinesFrom(state.view.first, vis)) {
+      if (line < rr.l0 || line > rr.l1 || line >= state.view.total) continue;
       appendSelectionRect(layer, line, rr.c0, rr.c1);
     }
     return;
@@ -281,8 +286,8 @@ export function initSelection() {
     setCaret(p.line, p.col);
     // Auto-scroll when dragging past the top/bottom edge.
     const rect = content.getBoundingClientRect();
-    if (e.clientY < rect.top + 14) setFirst(state.view.first - 2);
-    else if (e.clientY > rect.bottom - 14) setFirst(state.view.first + 2);
+    if (e.clientY < rect.top + 14) scrollVisibleRows(-2);
+    else if (e.clientY > rect.bottom - 14) scrollVisibleRows(2);
     scheduleRender();
   });
 
@@ -570,11 +575,13 @@ export function addExtraCursorAt(line, col) {
   setSelection(null);
   clearExtraSelections();
   state.caret.extraCursors.push({ line, col, sel: null });
+  expandFoldsForLine(line);
   state.caret.editGeneration++; // user cursor action: an in-flight edit must not clobber it
   // Keep the newest cursor visible, like revealCaret does for the primary.
   const vis = rowsVisible();
-  if (line < state.view.first) setFirst(line);
-  else if (line >= state.view.first + vis) setFirst(line - vis + 1);
+  const row = visibleIndexForLine(line) - visibleIndexForLine(state.view.first);
+  if (row < 0) setFirst(line);
+  else if (row >= vis) setFirst(logicalLineAtVisible(visibleIndexForLine(line) - vis + 1));
   focusEditor();
   scheduleRender();
 }

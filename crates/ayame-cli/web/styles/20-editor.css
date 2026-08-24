@@ -371,6 +371,56 @@
   outline-offset: var(--offset-focus-inset);
 }
 
+.fold-toggle {
+  position: absolute;
+  left: calc(
+    var(--gutter-ch, 1ch) + var(--gutter-pad-start) + var(--gutter-pad-end) -
+      var(--fold-control-size) - var(--fold-control-offset)
+  );
+  top: calc((var(--lh-editor) - var(--fold-control-size)) / 2);
+  width: var(--fold-control-size);
+  height: var(--fold-control-size);
+  padding: var(--space-0);
+  border: var(--space-0);
+  border-radius: var(--radius-control);
+  color: var(--gutter-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-hint);
+  line-height: var(--lh-icon);
+  cursor: pointer;
+}
+.fold-toggle:hover,
+.fold-toggle:focus-visible {
+  color: var(--fg);
+  background: var(--gutter-hover-bg);
+  outline: var(--fold-guide-stroke) solid var(--focus-ring);
+  outline-offset: var(--offset-focus-inset);
+}
+.fold-toggle[hidden] { display: none; }
+.row.fold-current::after {
+  content: "";
+  position: absolute;
+  left: calc(
+    var(--gutter-ch, 1ch) + var(--gutter-pad-start) + var(--gutter-pad-end) -
+      var(--fold-control-offset)
+  );
+  top: var(--space-0);
+  bottom: var(--space-0);
+  width: var(--fold-guide-stroke);
+  background: color-mix(in srgb, var(--accent) 58%, transparent);
+  pointer-events: none;
+}
+.fold-badge {
+  margin-inline-start: var(--space-2);
+  padding-inline: var(--space-1-5);
+  border-radius: var(--fold-badge-radius);
+  color: var(--fg-dim);
+  background: color-mix(in srgb, var(--accent) 12%, var(--edit-bg));
+  font-family: var(--ui);
+  font-size: var(--fs-hint);
+}
+
 .tx { color: var(--fg); }
 .tx.pending { color: var(--fg-faint); }
 

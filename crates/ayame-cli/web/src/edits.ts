@@ -7,6 +7,7 @@ import {
   cacheLineResponse,
   cachedLine,
   focusEditor,
+  loadSparseFoldedData,
   maxFirst,
   refreshChangeHistoryOverview,
   render,
@@ -19,6 +20,7 @@ import {
   setSearchHits,
   setSelection,
 } from "./editor.js";
+import { activeFoldMap, clearActiveFoldsForEdit } from "./fold-state.js";
 import {
   allCursors,
   cloneSelection,
@@ -81,6 +83,7 @@ export function enqueueEdit(fn) {
   editChain = editChain
     .then(async () => {
       if (!sameEditContext(ctx)) return null;
+      clearActiveFoldsForEdit();
       if (savingCount() > 0) {
         flashCount(t("editor.savingWaitInput"));
         await waitForSavingDone();
@@ -109,6 +112,16 @@ export function enqueueEdit(fn) {
 // Re-fetch the padded window around state.view.first into the cache in one shot, so
 // the text never blinks to the "⋯" pending placeholder between keystrokes.
 export async function reloadViewport() {
+  if (activeFoldMap().size) {
+    await Promise.all([
+      loadSparseFoldedData(state.view.first, rowsVisible() + OVERSCAN, true),
+      refreshChangeHistoryOverview().catch((error) => {
+        state.markers.changeHistoryOverview = null;
+        console.error("change-history overview fetch failed", error);
+      }),
+    ]);
+    return;
+  }
   const start = Math.max(0, state.view.first - PAD);
   const count = rowsVisible() + OVERSCAN + 2 * PAD;
   const [res] = await Promise.all([

@@ -20,7 +20,7 @@ import {
   positionCaret,
   rowsVisible,
   scheduleRender,
-  setFirst,
+  scrollVisibleRows,
   setModalOpenProvider,
   setSelection,
 } from "./editor.js";
@@ -84,6 +84,7 @@ import {
 import { isWordChar } from "./text.js";
 import { anyModalOpen, closeTopModal, initModalRegistry, registerModal } from "./modal-state.js";
 import { encodingSupportsBom, populateEncodingSelect } from "./encodings.js";
+import { logicalLineAtVisible, visibleIndexForLine } from "./fold-state.js";
 
 export { anyModalOpen };
 
@@ -119,6 +120,10 @@ const ESCAPE_SURFACES: [() => boolean, () => void][] = [
   ],
 ];
 
+function offsetVisibleLine(line: number, delta: number) {
+  return logicalLineAtVisible(visibleIndexForLine(line) + delta);
+}
+
 // ---- input wiring ----------------------------------------------------------
 
 // Enter confirms the encoding dialog's primary action (Convert & Save) from
@@ -150,7 +155,7 @@ export function initEvents() {
       state.view.fracAcc += dy / LINE_HEIGHT;
       const whole = Math.trunc(state.view.fracAcc);
       state.view.fracAcc -= whole;
-      if (whole !== 0) setFirst(state.view.first + whole);
+      if (whole !== 0) scrollVisibleRows(whole);
     },
     { passive: false },
   );
@@ -422,7 +427,10 @@ export function onEditKey(e) {
         const [l, col] = wordLeft(c.line, c.col);
         moveCaret(l, col, shift);
       } else if (c.col > 0) moveCaret(c.line, c.col - 1, shift);
-      else if (c.line > 0) moveCaret(c.line - 1, lineLen(c.line - 1), shift);
+      else if (c.line > 0) {
+        const line = offsetVisibleLine(c.line, -1);
+        moveCaret(line, lineLen(line), shift);
+      }
       state.caret.goalCol = state.caret.position.col;
       return;
     case "ArrowRight":
@@ -431,18 +439,19 @@ export function onEditKey(e) {
         const [l, col] = wordRight(c.line, c.col);
         moveCaret(l, col, shift);
       } else if (c.col < lineLen(c.line)) moveCaret(c.line, c.col + 1, shift);
-      else if (c.line < state.view.total - 1) moveCaret(c.line + 1, 0, shift);
+      else if (c.line < state.view.total - 1) moveCaret(offsetVisibleLine(c.line, 1), 0, shift);
       state.caret.goalCol = state.caret.position.col;
       return;
     case "ArrowUp":
       take();
-      if (mod) setFirst(state.view.first - 1);
-      else if (c.line > 0) moveCaret(c.line - 1, state.caret.goalCol, shift);
+      if (mod) scrollVisibleRows(-1);
+      else if (c.line > 0) moveCaret(offsetVisibleLine(c.line, -1), state.caret.goalCol, shift);
       return;
     case "ArrowDown":
       take();
-      if (mod) setFirst(state.view.first + 1);
-      else if (c.line < state.view.total - 1) moveCaret(c.line + 1, state.caret.goalCol, shift);
+      if (mod) scrollVisibleRows(1);
+      else if (c.line < state.view.total - 1)
+        moveCaret(offsetVisibleLine(c.line, 1), state.caret.goalCol, shift);
       return;
     case "Home":
       take();
@@ -460,11 +469,11 @@ export function onEditKey(e) {
       return;
     case "PageUp":
       take();
-      moveCaret(c.line - rowsVisible(), state.caret.goalCol, shift);
+      moveCaret(offsetVisibleLine(c.line, -rowsVisible()), state.caret.goalCol, shift);
       return;
     case "PageDown":
       take();
-      moveCaret(c.line + rowsVisible(), state.caret.goalCol, shift);
+      moveCaret(offsetVisibleLine(c.line, rowsVisible()), state.caret.goalCol, shift);
       return;
     case "Backspace":
       take();

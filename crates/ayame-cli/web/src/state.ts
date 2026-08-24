@@ -4,6 +4,7 @@ import type { MessageKey } from "./i18n.js";
 import { setLanguagePreferenceReader } from "./locale-preference.js";
 import type { AnalysisMatcher } from "./analysis-model.js";
 import { defaultSyntaxPreferences, type SyntaxPreferences } from "./syntax-preference-model.js";
+import type { FoldDocumentState } from "./fold-map.js";
 import type {
   AnalysisHit,
   AnalysisProfile,
@@ -134,6 +135,17 @@ export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["findNext", "find.next", "F3"],
   ["findPrev", "find.prev", "Shift+F3"],
   ["gotoLine", "menu.gotoLine", "Ctrl+G"],
+  ["toggleFold", "fold.toggle", ""],
+  ["foldCurrentLevel", "fold.currentLevel", ""],
+  ["unfoldCurrentLevel", "fold.unfoldCurrentLevel", ""],
+  ["unfoldAll", "fold.unfoldAll", ""],
+  ["foldToLevel", "fold.toLevelPrompt", ""],
+  ["goBlockStart", "fold.goStart", ""],
+  ["goBlockEnd", "fold.goEnd", ""],
+  ["previousSiblingBlock", "fold.previousSibling", ""],
+  ["nextSiblingBlock", "fold.nextSibling", ""],
+  ["matchingBrace", "fold.matchBrace", ""],
+  ["selectMatchingBrace", "fold.selectBrace", ""],
   ["toggleBookmark", "bookmark.toggle", "Ctrl+F2"],
   ["nextBookmark", "bookmark.next", "F2"],
   ["previousBookmark", "bookmark.previous", "Shift+F2"],
@@ -238,6 +250,7 @@ export interface AppState {
     first: number;
     fracAcc: number;
     cache: { start: number; lines: LineRecord[] };
+    sparseCache: Map<number, LineRecord>;
     loadToken: number;
   };
   search: {
@@ -271,6 +284,10 @@ export interface AppState {
     lastHits: Map<string, AnalysisHit>;
   };
   syntax: SyntaxPreferences;
+  folds: {
+    documents: Map<string, FoldDocumentState>;
+    revision: number;
+  };
   markers: {
     bookmarks: Set<number>;
     bookmarkCount: number;
@@ -320,6 +337,7 @@ export function createInitialState(): AppState {
       first: 0, // top visible line (0-based)
       fracAcc: 0, // sub-line wheel accumulator
       cache: { start: 0, lines: [] },
+      sparseCache: new Map<number, LineRecord>(),
       loadToken: 0,
     },
     search: {
@@ -354,6 +372,7 @@ export function createInitialState(): AppState {
       lastHits: new Map<string, AnalysisHit>(),
     },
     syntax: defaultSyntaxPreferences(),
+    folds: { documents: new Map<string, FoldDocumentState>(), revision: 0 },
     // Sparse marker cache for the same range as `view.cache.lines`. It is
     // replaced, not accumulated, on each viewport fetch so edits can never leave
     // stale line-number markers behind.

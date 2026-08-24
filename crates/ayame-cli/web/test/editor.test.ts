@@ -9,12 +9,14 @@ import {
   formatLineNo,
   lineNumberChars,
   maxFirst,
+  moveCaret,
   revealCaret,
   renderSearchTicks,
   rowsFullyVisible,
   rowsVisible,
 } from "../src/editor.js";
 import { LINE_HEIGHT, setLineHeight, state } from "../src/state.js";
+import { activeFoldMap, collapseBlock, reconcileActiveFolds } from "../src/fold-state.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -32,6 +34,7 @@ describe("viewport row calculations (#129)", () => {
     document.body.innerHTML = '<div id="viewport"></div>';
     setLineHeight(18);
     state.settings.ruler = false;
+    state.folds.documents.clear();
   });
 
   function setViewportHeight(height: number) {
@@ -108,6 +111,63 @@ describe("viewport row calculations (#129)", () => {
     });
     expect(coordsFromEvent({ clientX: 40, clientY: 0 }).line).toBe(10);
     expect(coordsFromEvent({ clientX: 40, clientY: 1000 }).line).toBe(19);
+  });
+
+  it("maps folded visible rows while keeping logical document coordinates", () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="content"></div>');
+    const content = document.getElementById("content")!;
+    vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 200,
+      width: 200,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    Object.defineProperty(document.getElementById("viewport"), "clientHeight", {
+      configurable: true,
+      value: 3 * LINE_HEIGHT,
+    });
+    state.doc.stat = { open: true, path: "/tmp/fold.json" };
+    state.view.total = 20;
+    state.view.first = 0;
+    collapseBlock({ start: 0, end: 9, level: 0 });
+
+    expect(coordsFromEvent({ clientX: 0, clientY: LINE_HEIGHT + 1 }).line).toBe(10);
+    expect(maxFirst()).toBe(18);
+  });
+
+  it("expands a hidden destination before selection/search-style navigation", () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="content"></div>');
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(0);
+    state.doc.stat = { open: true, path: "/tmp/fold.json" };
+    state.view.total = 20;
+    state.view.cache = {
+      start: 0,
+      lines: Array.from({ length: 20 }, (_, number) => ({ number, text: "value" })),
+    };
+    state.caret.position = { line: 0, col: 0 };
+    collapseBlock({ start: 2, end: 8, level: 0 });
+
+    moveCaret(5, 2, true, 5);
+
+    expect(activeFoldMap().size).toBe(0);
+    expect(state.caret.selection?.head).toEqual({ line: 5, col: 2 });
+    frame.mockRestore();
+  });
+
+  it("preserves existing folds when tail appends logical lines", () => {
+    state.doc.stat = { open: true, path: "/tmp/tail.log" };
+    state.view.total = 20;
+    collapseBlock({ start: 1, end: 8, level: 0 });
+
+    state.view.total = 30;
+    reconcileActiveFolds();
+
+    expect(activeFoldMap().intervals()).toEqual([{ start: 1, end: 8 }]);
   });
 });
 

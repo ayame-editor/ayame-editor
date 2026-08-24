@@ -31,7 +31,8 @@ use super::markers::{
     ChangeHistoryResponse, ChangeMarkerOverview, MarkerBulkRequest, MarkerBulkResponse,
     MarkerClearRequest, MarkerListQuery, MarkerListResponse, MarkerMutationResponse,
     MarkerNavigateQuery, MarkerNavigateResponse, MarkerPreview, MarkerPreviewResponse,
-    MarkerSaveRequest, MarkerSaveResponse, MarkerToggleRequest,
+    MarkerRangeCountsQuery, MarkerRangeCountsResponse, MarkerSaveRequest, MarkerSaveResponse,
+    MarkerToggleRequest,
 };
 use super::ops::{
     ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, FindResponse, GrepRequest, GrepResponse,
@@ -89,6 +90,8 @@ fn bridge() -> Bridge {
         .decl(&decl::<MarkerMutationResponse>())
         .decl(&decl::<MarkerListQuery>())
         .decl(&decl::<MarkerListResponse>())
+        .decl(&decl::<MarkerRangeCountsQuery>())
+        .decl(&decl::<MarkerRangeCountsResponse>())
         .decl(&decl::<MarkerNavigateQuery>())
         .decl(&decl::<MarkerNavigateResponse>())
         .decl(&decl::<MarkerPreview>())

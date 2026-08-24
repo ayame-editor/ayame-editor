@@ -151,6 +151,19 @@
           <div id="view-menu" class="file-menu hidden" role="menu" aria-label="表示" data-i18n-aria-label="menu.view">
             <button class="menu-item" data-menu-action="commandPalette" role="menuitem"><span class="menu-label" data-i18n="menu.commandPalette">コマンドパレット</span><span class="menu-key" data-key-action="commandPalette">Ctrl+Shift+P</span></button>
             <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="toggleFold" role="menuitem"><span class="menu-label" data-i18n="fold.toggle">現在の折りたたみを切り替え</span><span class="menu-key" data-key-action="toggleFold"></span></button>
+            <button class="menu-item" data-menu-action="foldCurrentLevel" role="menuitem"><span class="menu-label" data-i18n="fold.currentLevel">現在のレベルを折りたたむ</span><span class="menu-key" data-key-action="foldCurrentLevel"></span></button>
+            <button class="menu-item" data-menu-action="unfoldCurrentLevel" role="menuitem"><span class="menu-label" data-i18n="fold.unfoldCurrentLevel">現在のレベルを展開</span><span class="menu-key" data-key-action="unfoldCurrentLevel"></span></button>
+            <button class="menu-item" data-menu-action="unfoldAll" role="menuitem"><span class="menu-label" data-i18n="fold.unfoldAll">すべて展開</span><span class="menu-key" data-key-action="unfoldAll"></span></button>
+            <button class="menu-item" data-menu-action="foldToLevel" role="menuitem"><span class="menu-label" data-i18n="fold.toLevelPrompt">指定レベルまで折りたたむ…</span><span class="menu-key" data-key-action="foldToLevel"></span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
+            <button class="menu-item" data-menu-action="goBlockStart" role="menuitem"><span class="menu-label" data-i18n="fold.goStart">ブロックの先頭へ移動</span><span class="menu-key" data-key-action="goBlockStart"></span></button>
+            <button class="menu-item" data-menu-action="goBlockEnd" role="menuitem"><span class="menu-label" data-i18n="fold.goEnd">ブロックの末尾へ移動</span><span class="menu-key" data-key-action="goBlockEnd"></span></button>
+            <button class="menu-item" data-menu-action="previousSiblingBlock" role="menuitem"><span class="menu-label" data-i18n="fold.previousSibling">前の同階層ブロックへ移動</span><span class="menu-key" data-key-action="previousSiblingBlock"></span></button>
+            <button class="menu-item" data-menu-action="nextSiblingBlock" role="menuitem"><span class="menu-label" data-i18n="fold.nextSibling">次の同階層ブロックへ移動</span><span class="menu-key" data-key-action="nextSiblingBlock"></span></button>
+            <button class="menu-item" data-menu-action="matchingBrace" role="menuitem"><span class="menu-label" data-i18n="fold.matchBrace">対応する括弧へ移動</span><span class="menu-key" data-key-action="matchingBrace"></span></button>
+            <button class="menu-item" data-menu-action="selectMatchingBrace" role="menuitem"><span class="menu-label" data-i18n="fold.selectBrace">対応する括弧まで選択</span><span class="menu-key" data-key-action="selectMatchingBrace"></span></button>
+            <div class="menu-sep" aria-hidden="true"></div>
             <button class="menu-item" id="menu-toggle-ws" data-menu-action="toggleWhitespace" role="menuitemcheckbox" aria-checked="false"><span class="menu-label" data-i18n="menu.showWhitespace">空白・改行を表示</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-syntax" data-menu-action="toggleSyntaxHighlight" role="menuitemcheckbox" aria-checked="true"><span class="menu-label" data-i18n="menu.syntaxHighlight">シンタックスハイライト</span><span class="menu-key"></span></button>
             <button class="menu-item" id="menu-toggle-change-history" data-menu-action="toggleChangeHistory" role="menuitemcheckbox" aria-checked="true"><span class="menu-label" data-i18n="changeHistory.toggle">変更履歴マーカー</span><span class="menu-key"></span></button>

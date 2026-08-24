@@ -40,6 +40,7 @@ import {
 } from "../src/edits.js";
 import { state } from "../src/state.js";
 import { refreshChangeHistoryOverview, setCaret } from "../src/editor.js";
+import { activeFoldMap, collapseBlock } from "../src/fold-state.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -90,6 +91,16 @@ describe("edit generation guards", () => {
 
     await expect(queued).resolves.toBeNull();
     expect(ran).toBe(false);
+  });
+
+  it("clears stale fold coordinates before edit/undo/redo queue work", async () => {
+    state.doc.stat = { open: true, path: "/tmp/edit.json" };
+    collapseBlock({ start: 1, end: 8, level: 0 });
+    expect(activeFoldMap().size).toBe(1);
+
+    await enqueueEdit(async () => null);
+
+    expect(activeFoldMap().size).toBe(0);
   });
 
   it("does not overwrite user caret motion when an edit response arrives late", async () => {

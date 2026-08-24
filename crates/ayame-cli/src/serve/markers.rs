@@ -679,6 +679,50 @@ pub(super) async fn api_markers(
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct MarkerRangeCountsQuery {
+    start: u64,
+    end: u64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct MarkerRangeCountsResponse {
+    bookmarks: u64,
+    search_rules: u64,
+    change_saved: u64,
+    change_unsaved: u64,
+    change_deleted: u64,
+}
+
+/// Sparse badge counts for a folded half-open logical-line range.
+pub(super) async fn api_marker_range_counts(
+    State(state): State<SharedState>,
+    Query(req): Query<MarkerRangeCountsQuery>,
+) -> Result<Json<MarkerRangeCountsResponse>, ApiError> {
+    if req.start > req.end {
+        return Err(bad_request("marker count range start exceeds end"));
+    }
+    state.read(|ws| {
+        let total = {
+            let (doc, edits) = ws.doc_and_edits()?;
+            edits.total_lines(doc)
+        };
+        if req.end > total {
+            return Err(bad_request("marker count range exceeds the document"));
+        }
+        let set = ws.markers().set();
+        Ok(Json(MarkerRangeCountsResponse {
+            bookmarks: set.range_count(MarkerKind::Bookmark, req.start, req.end) as u64,
+            search_rules: set.range_count(MarkerKind::SearchRule, req.start, req.end) as u64,
+            change_saved: set.range_count(MarkerKind::ChangeSaved, req.start, req.end) as u64,
+            change_unsaved: set.range_count(MarkerKind::ChangeUnsaved, req.start, req.end) as u64,
+            change_deleted: set.range_count(MarkerKind::ChangeDeleted, req.start, req.end) as u64,
+        }))
+    })
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct MarkerNavigateQuery {
     kind: String,
     from: u64,
