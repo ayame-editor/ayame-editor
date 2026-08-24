@@ -111,6 +111,10 @@
   --change-tick-saved-w: var(--space-1);
   --change-tick-unsaved-w: var(--space-2);
   --change-tick-deleted-size: var(--space-1);
+  --fold-control-size: var(--space-3-5);
+  --fold-control-offset: var(--space-1);
+  --fold-guide-stroke: 1px;
+  --fold-badge-radius: var(--radius-control);
   --bookmark-panel-w: 44rem;
   --bookmark-list-max-h: 55vh;
   --analysis-panel-w: 62rem;

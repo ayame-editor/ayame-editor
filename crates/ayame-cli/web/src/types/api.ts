@@ -49,6 +49,7 @@ export type MarkerSaveRequest = JsonWire<Wire.MarkerSaveRequest>;
 export type MarkerSaveResponse = JsonWire<Wire.MarkerSaveResponse>;
 export type MarkerMutationResponse = JsonWire<Wire.MarkerMutationResponse>;
 export type MarkerListResponse = JsonWire<Wire.MarkerListResponse>;
+export type MarkerRangeCountsResponse = JsonWire<Wire.MarkerRangeCountsResponse>;
 export type MarkerNavigateResponse = JsonWire<Wire.MarkerNavigateResponse>;
 export type MarkerPreviewResponse = JsonWire<Wire.MarkerPreviewResponse>;
 export type ChangeHistoryResponse = JsonWire<Wire.ChangeHistoryResponse>;

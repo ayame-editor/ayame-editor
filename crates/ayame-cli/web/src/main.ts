@@ -41,6 +41,7 @@ import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
 import type { OpenRequest, OpenResponse } from "./types/api.js";
 import { initSyntaxUi } from "./syntax-ui.js";
+import { initFolding } from "./fold-actions.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -79,6 +80,7 @@ export async function boot() {
   initEditor();
   initBookmarks();
   initSelection();
+  initFolding();
   initMenuBar();
   initWorkspace();
   initContextMenu();

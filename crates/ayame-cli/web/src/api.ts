@@ -10,6 +10,7 @@ export type {
   LinesResponse,
   MarkerBulkResponse,
   MarkerListResponse,
+  MarkerRangeCountsResponse,
   MarkerMutationResponse,
   MarkerNavigateResponse,
   MarkerPreviewResponse,

@@ -29,6 +29,8 @@ export type SyntaxSpan = {
 
 export type SyntaxHighlighter = (text: string, line: number) => SyntaxSpan[] | null;
 
+export type StructureProviderId = "brace" | "indent" | "log" | "markup";
+
 export type SyntaxSchemeDefinition = {
   id: string;
   labelKey: MessageKey;
@@ -42,6 +44,7 @@ export type SyntaxSchemeDefinition = {
   tokenKinds: readonly SyntaxKind[];
   /** Reserved, bounded look-behind for a future line-local stateful scheme. */
   contextLines?: number;
+  structure?: StructureProviderId;
   highlight: SyntaxHighlighter;
 };
 
@@ -62,11 +65,12 @@ export const SYNTAX_SCHEMES = [
     labelKey: "syntax.scheme.json",
     categoryKey: "syntax.category.data",
     aliases: {
-      extensions: ["json", "jsonc", "lock"],
+      extensions: ["json", "jsonc", "jsonl", "lock"],
       filenames: ["Cargo.lock", "package-lock.json"],
     },
     priority: 40,
     tokenKinds: ["comment", "key", "string", "number", "literal", "op"],
+    structure: "brace",
     highlight: jsonSpans,
   },
   {
@@ -76,6 +80,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["yaml", "yml"], filenames: ["pnpm-lock.yaml"] },
     priority: 40,
     tokenKinds: ["comment", "key", "string", "number", "literal", "op"],
+    structure: "indent",
     highlight: yamlSpans,
   },
   {
@@ -130,6 +135,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["html", "htm"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "key", "string", "op"],
+    structure: "markup",
     highlight: markupSpans,
   },
   {
@@ -139,6 +145,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["xml", "xsl", "xslt", "svg"] },
     priority: 35,
     tokenKinds: ["comment", "keyword", "key", "string", "op"],
+    structure: "markup",
     highlight: markupSpans,
   },
   {
@@ -148,6 +155,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["log", "out"] },
     priority: 30,
     tokenKinds: ["number", "level-trace", "level-debug", "level-info", "level-warn", "level-error"],
+    structure: "log",
     highlight: logSpans,
   },
   {
@@ -157,6 +165,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["js", "jsx", "mjs", "cjs", "ts", "tsx"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "javascript"),
   },
   {
@@ -166,6 +175,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["py", "pyi"], filenames: ["SConstruct"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "indent",
     highlight: (text) => codeSpans(text, "python"),
   },
   {
@@ -175,6 +185,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["rs"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "rust"),
   },
   {
@@ -184,6 +195,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["go"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "go"),
   },
   {
@@ -193,6 +205,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["c", "h", "cc", "cpp", "cxx", "hpp", "hxx"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "c"),
   },
   {
@@ -202,6 +215,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["java"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "java"),
   },
   {
@@ -211,6 +225,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["cs"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "literal", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "csharp"),
   },
   {
@@ -241,6 +256,7 @@ export const SYNTAX_SCHEMES = [
     aliases: { extensions: ["css", "scss", "less"] },
     priority: 30,
     tokenKinds: ["comment", "keyword", "string", "number", "function", "op"],
+    structure: "brace",
     highlight: (text) => codeSpans(text, "css"),
   },
   {
@@ -297,7 +313,7 @@ export function isSchemeId(value: unknown): value is SchemeId {
   return typeof value === "string" && SCHEME_BY_ID.has(value as SchemeId);
 }
 
-export function schemeDefinition(id: SchemeId) {
+export function schemeDefinition(id: SchemeId): SyntaxSchemeDefinition {
   return SCHEME_BY_ID.get(id)!;
 }
 

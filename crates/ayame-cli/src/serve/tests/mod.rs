@@ -217,6 +217,14 @@ async fn sparse_bookmarks_follow_edits_undo_redo_and_viewport_queries() {
     assert!(body.contains("\"added\":2"), "body: {body}");
     assert!(body.contains("\"count\":2"), "body: {body}");
 
+    let (status, body) = send(addr, get("/api/markers/range-counts?start=1&end=3", &host)).await;
+    assert_eq!(status, 200, "body: {body}");
+    assert!(body.contains("\"bookmarks\":1"), "body: {body}");
+    assert!(body.contains("\"change_saved\":0"), "body: {body}");
+
+    let (status, _) = send(addr, get("/api/markers/range-counts?start=0&end=99", &host)).await;
+    assert_eq!(status, 400);
+
     let exported = f.parent().unwrap().join("bookmarks-export.txt");
     let request = serde_json::json!({
         "kind": "bookmark",

@@ -31,6 +31,7 @@ import {
   saveSessionSnapshot,
 } from "./persistence.js";
 import { withOverwriteRetry } from "./saveflow.js";
+import { clearAllActiveFolds, migrateFoldDocument } from "./fold-state.js";
 import type {
   ArtifactResponse,
   BrowseResponse,
@@ -198,11 +199,13 @@ export async function reloadActiveDocument({
   bumpGeneration = true,
   keepCaret = true,
   refreshTabList = true,
+  keepFolds = false,
 } = {}) {
   if (bumpGeneration) {
     state.doc.generation++;
     state.caret.editGeneration++;
   }
+  if (!keepFolds) clearAllActiveFolds();
   clearLineCache();
   await refreshStat();
   await reloadViewport();
@@ -229,7 +232,8 @@ export async function finishSaveAs(res, { announce = true }: SaveOptions = {}) {
   if (res.switched) {
     // Same tab, new document identity: refresh in place, keep the caret.
     migrateSyntaxOverrideShared(previousPath, res.path);
-    await reloadActiveDocument();
+    migrateFoldDocument(previousPath, res.path);
+    await reloadActiveDocument({ keepFolds: true });
   } else {
     // The workspace changed while saving (rare): fall back to focusing the
     // saved file — the server dedupes, so this never duplicates a tab.

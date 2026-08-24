@@ -201,6 +201,10 @@ fn router(state: SharedState, policy: Arc<NetPolicy>) -> Router {
         .route("/api/edit/recover", post(edit::api_edit_recover))
         .route("/api/reopen_encoding", post(edit::api_reopen_encoding))
         .route("/api/markers", get(markers::api_markers))
+        .route(
+            "/api/markers/range-counts",
+            get(markers::api_marker_range_counts),
+        )
         .route("/api/change-history", get(markers::api_change_history))
         .route("/api/markers/previews", get(markers::api_marker_previews))
         .route("/api/markers/navigate", get(markers::api_marker_navigate))

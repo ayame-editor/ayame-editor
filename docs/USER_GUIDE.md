@@ -219,6 +219,7 @@ the menu, status bar, or command palette (`Ctrl+Shift+P`) where listed.
 | Show whitespace and line endings | `View` -> `Show Whitespace and Line Endings` or command palette |
 | Underline full-width spaces | `View` -> `Underline Full-width Spaces` or command palette |
 | Word wrap | `View` -> `Word Wrap` or command palette |
+| Fold or navigate document structure | Fold control in the line-number gutter, or `View` -> folding/block actions. JSON/JSONL, YAML, Python, HTML/XML, brace-based code, and multi-line log events are supported |
 | Convert encoding / line endings and save | `File` -> `Encoding / Line Endings...`, or click the encoding/EOL status segment |
 | Switch syntax scheme between Auto and manual | Click the `Auto · ...` status segment. Search and select non-favorite schemes under `Manage Schemes...` |
 | Reopen with a different encoding | Open `Encoding / Line Endings...`, choose an encoding, then use `Reopen` |
@@ -233,3 +234,8 @@ The syntax-scheme manager edits favorites and their order, plus ordered
 `file name/glob -> scheme` mappings. Preferences are stored in shared UI state
 and can be imported or exported as JSON. Invalid JSON entries are skipped
 individually without discarding valid entries.
+
+Folding stores only collapsed line intervals and fetches only visible line
+ranges. A folded header reports hidden lines and any known bookmark, change,
+or match counts. Search and marker navigation automatically expand a hidden
+destination; editing, undo/redo, or an external reload clears stale folds.
