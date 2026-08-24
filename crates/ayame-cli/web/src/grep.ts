@@ -2,7 +2,7 @@
 import { $, button, commas, displayPath, el, pathDirName, setModalOpen } from "./dom.js";
 import { BROWSE_KEY, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
-import { apiPost } from "./api.js";
+import { apiPost, type GrepResponse } from "./api.js";
 import { focusEditor, formatLineNo, lineNumberChars } from "./editor.js";
 import { gotoLine } from "./edits.js";
 import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
@@ -13,13 +13,6 @@ import { lastGrep } from "./grep-state.js";
 import type { GrepRequest } from "./types/api.js";
 
 export { lastGrep };
-
-type GrepResponse = {
-  hits: { path: string; line: number; col: number; text: string }[];
-  truncated: boolean;
-  files_scanned: number;
-  files_truncated: boolean;
-};
 
 export function grepVisible() {
   return !$("grep-modal").classList.contains("hidden");
@@ -37,7 +30,14 @@ export async function grepFolder() {
     localStorage.getItem(BROWSE_KEY) ||
     pathDirName(state.doc.stat?.path || "") ||
     "";
-  const form = await askForm(
+  const form = await askForm<{
+    query: string;
+    dir: string;
+    glob: string;
+    ci: boolean;
+    word: boolean;
+    regex: boolean;
+  }>(
     t("menu.grep"),
     [
       {

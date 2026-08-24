@@ -334,6 +334,7 @@ impl RebaseSource {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct EditLine {
     pub number: u64,
     pub text: String,

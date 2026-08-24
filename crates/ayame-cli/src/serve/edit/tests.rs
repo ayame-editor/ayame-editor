@@ -1,4 +1,3 @@
-
 use ayame_core::{Document, OpenOptions};
 
 use super::super::state::AppState;

@@ -6,10 +6,11 @@
 // unrelated editor features.
 import type { OpenerMode } from "./state.js";
 
-export type OpenerResult = string | { path: string; overwrite: boolean } | null;
+export type SaveDialogTarget = { path: string; overwrite: boolean };
+export type OpenerResult = string | SaveDialogTarget | null;
 
 let mode: OpenerMode = "open";
-let resolver: ((value: any) => void) | null = null;
+let resolver: ((value: OpenerResult) => void) | null = null;
 
 export function currentOpenerMode(): OpenerMode {
   return mode;
@@ -19,8 +20,10 @@ export function setOpenerMode(next: OpenerMode) {
   mode = next;
 }
 
-export function setOpenerResolver(next: ((value: any) => void) | null) {
-  resolver = next;
+export function setOpenerResolver<T extends OpenerResult>(next: ((value: T) => void) | null) {
+  // The mode-specific controller installs and resolves this callback as one
+  // transaction. Store the narrow Promise resolver behind the shared union.
+  resolver = next as ((value: OpenerResult) => void) | null;
 }
 
 export function resolveOpener(value: OpenerResult) {

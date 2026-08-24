@@ -24,7 +24,7 @@ use super::analysis::{
     AnalysisProfile, AnalysisRuleConfig, AnalysisRuleStatus, AnalysisStartRequest, AnalysisStatus,
 };
 use super::edit::{
-    CaretPosition, EditSaveRequest, EditSaveResponse, RecoverRequest, ReopenRequest,
+    CaretPosition, EditSaveRequest, EditSaveResponse, LinesResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
 };
 use super::markers::{
@@ -34,11 +34,13 @@ use super::markers::{
     MarkerSaveRequest, MarkerSaveResponse, MarkerToggleRequest,
 };
 use super::ops::{
-    ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, GrepRequest, GrepSaveRequest,
-    OperationCancelRequest, ReplaceSaveRequest, SortSaveRequest, SplitSaveRequest,
+    ArtifactOpStatus, ArtifactResponse, CaseSaveRequest, FindResponse, GrepRequest, GrepResponse,
+    GrepSaveRequest, LineByteResponse, OperationCancelRequest, ReplaceSaveRequest, SearchResponse,
+    SortSaveRequest, SplitSaveRequest,
 };
-use super::state::{DiskCheckResponse, SessionState, TabInfo, TabsResponse, UiState};
+use super::state::{DiskCheckResponse, SessionState, TabInfo, TabsResponse, TailStatus, UiState};
 use super::workspace::{BrowseEntry, BrowseResponse, OpenRequest, TabIdRequest, TabReorderRequest};
+use super::{OpenResponse, StatResponse};
 
 fn output_path() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/ayame-cli; the generated file lives next to
@@ -48,11 +50,26 @@ fn output_path() -> PathBuf {
 
 fn bridge() -> Bridge {
     Bridge::fetch()
+        .decl(&decl::<ayame_core::Encoding>())
+        .decl(&decl::<ayame_core::Eol>())
+        .decl(&decl::<ayame_core::EditLine>())
+        .decl(&decl::<ayame_core::MarkerKind>())
+        .decl(&decl::<ayame_core::LineMarker>())
+        .decl(&decl::<ayame_core::SearchHit>())
+        .decl(&decl::<ayame_core::GrepHit>())
         .decl(&decl::<OpenRequest>())
+        .decl(&decl::<OpenResponse>())
+        .decl(&decl::<StatResponse>())
+        .decl(&decl::<TailStatus>())
         .decl(&decl::<TabIdRequest>())
         .decl(&decl::<TabReorderRequest>())
         .decl(&decl::<BrowseEntry>())
         .decl(&decl::<BrowseResponse>())
+        .decl(&decl::<LinesResponse>())
+        .decl(&decl::<FindResponse>())
+        .decl(&decl::<SearchResponse>())
+        .decl(&decl::<GrepResponse>())
+        .decl(&decl::<LineByteResponse>())
         .decl(&decl::<ReplaceRangeRequest>())
         .decl(&decl::<ReplaceRectRequest>())
         .decl(&decl::<CaretPosition>())

@@ -39,7 +39,7 @@ import { initBookmarks } from "./bookmarks.js";
 import { initMinimap } from "./minimap.js";
 import { handleAnalysisDocumentOpened, initAnalysis } from "./analysis.js";
 import { hydrateSharedUiState, restoreSessionSnapshot } from "./persistence.js";
-import type { OpenRequest } from "./types/api.js";
+import type { OpenRequest, OpenResponse } from "./types/api.js";
 
 // ---- boot ------------------------------------------------------------------
 
@@ -100,7 +100,7 @@ export async function boot() {
       // A window spawned by a dirty-tab handoff (issue #35): the detached
       // tab's crash log replays silently instead of prompting.
       if (window.__ayamePendingRecover) expectWalHandoff(pending);
-      onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: pending }));
+      onDocumentOpened(await apiPost<OpenResponse, OpenRequest>("/api/open", { path: pending }));
     } catch (e) {
       flashCount(t("error.cannotOpen", { msg: pending }), "error");
       console.error(e);

@@ -64,6 +64,7 @@ impl Default for GrepOptions {
 
 /// One match in one file.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct GrepHit {
     pub path: String,
     /// 0-based line number (the UI shows `line + 1`).

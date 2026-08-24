@@ -2,6 +2,7 @@
 // embeds the same JSON as a plain JavaScript module for the shipped browser;
 // Vite/tsc consume this source adapter during frontend tests and type checks.
 import themeSource from "../themes.json";
+import type { MessageKey } from "./i18n.js";
 
 export const THEME_PRESETS = Object.fromEntries(
   Object.entries(themeSource).map(([id, source]) => {
@@ -15,5 +16,5 @@ export const BUILTIN_THEMES = Object.entries(themeSource)
   .map(([id, source]) => ({
     id,
     name: source.name,
-    labelKey: "labelKey" in source.ui ? source.ui.labelKey : null,
+    labelKey: ("labelKey" in source.ui ? source.ui.labelKey : null) as MessageKey | null,
   }));

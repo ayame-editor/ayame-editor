@@ -37,13 +37,20 @@ import {
 } from "./browse.js";
 import { pushRecentFile, renderRecentFiles } from "./recent.js";
 import { refreshTabs } from "./tabs.js";
-import type { OpenRequest, TabIdRequest, TabsResponse } from "./types/api.js";
+import type {
+  OpenRequest,
+  OpenResponse,
+  StatResponse,
+  TabIdRequest,
+  TabsResponse,
+} from "./types/api.js";
 import {
   currentOpenerMode,
   resolveOpener,
   setOpenerMode,
   setOpenerResolver,
 } from "./opener-state.js";
+import type { SaveDialogTarget } from "./opener-state.js";
 
 export function onOpenerListKeydown(event) {
   handleOpenerListKeydown(event, hideOpener);
@@ -83,16 +90,19 @@ export async function openFileDialog() {
   for (const path of paths) await openPath(path);
 }
 
-export function showSaveDialog(title, suggestedPath): Promise<any> {
+export function showSaveDialog(
+  title: string,
+  suggestedPath: string,
+): Promise<SaveDialogTarget | null> {
   if (isNativeApp()) {
     return nativeSaveDialog(
       pathDirName(suggestedPath) || "",
       pathBaseName(suggestedPath) || "untitled.txt",
     ).then((path) => (path ? { path, overwrite: true } : null));
   }
-  return new Promise((resolve) => {
+  return new Promise<SaveDialogTarget | null>((resolve) => {
     configureOpener("save", title);
-    setOpenerResolver(resolve);
+    setOpenerResolver<SaveDialogTarget | null>((value) => resolve(value));
     const input = $("opener-input");
     const directory = pathDirName(suggestedPath) || localStorage.getItem(BROWSE_KEY) || ".";
     input.value = pathBaseName(suggestedPath) || "untitled.txt";
@@ -106,16 +116,16 @@ export function showSaveDialog(title, suggestedPath): Promise<any> {
 }
 
 export function showFolderDialog(title, startDir): Promise<string | null> {
-  return new Promise((resolve) => {
+  return new Promise<string | null>((resolve) => {
     configureOpener("folder", title);
-    setOpenerResolver(resolve);
+    setOpenerResolver<string | null>((value) => resolve(value));
     setModalOpen($("opener"), true);
     void browse(startDir || localStorage.getItem(BROWSE_KEY) || null);
     queueMicrotask(() => ($("opener-open") as HTMLButtonElement).focus());
   });
 }
 
-export function finishFolderDialog(value) {
+export function finishFolderDialog(value: string | null) {
   setOpenerMode("open");
   setModalOpen($("opener"), false);
   configureOpener("open");
@@ -170,7 +180,7 @@ export function hideOpener() {
   focusEditor();
 }
 
-export function finishSaveDialog(value) {
+export function finishSaveDialog(value: SaveDialogTarget | null) {
   setOpenerMode("open");
   setModalOpen($("opener"), false);
   configureOpener("open");
@@ -252,7 +262,7 @@ export async function openPath(path) {
   openerMsg(t("dialog.open.opening"), true);
   showLoading(t("dialog.open.loadingFile", { name: pathBaseName(value) || value }));
   try {
-    const stat = await apiPost<unknown, OpenRequest>("/api/open", { path: value });
+    const stat = await apiPost<OpenResponse, OpenRequest>("/api/open", { path: value });
     onDocumentOpened(stat);
     await closeTabSilently(pristine);
     return true;
@@ -302,7 +312,8 @@ export function reportOpenError(message) {
   }
 }
 
-export function onDocumentOpened(stat) {
+export function onDocumentOpened(stat: StatResponse) {
+  if (!stat.open || !stat.path) return;
   state.doc.generation++;
   state.caret.editGeneration++;
   setFollowTail(false);
@@ -368,7 +379,7 @@ export function initDropZone() {
 export async function newUntitled() {
   try {
     await settleEditQueue();
-    onDocumentOpened(await apiPost("/api/new", {}));
+    onDocumentOpened(await apiPost<StatResponse>("/api/new", {}));
     setCaret(0, 0);
     focusEditor();
   } catch (error) {

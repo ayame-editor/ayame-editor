@@ -9,6 +9,7 @@ import { $, button, commas, el, modalVisible, setModalOpen } from "./dom.js";
 import { focusEditor, render, revealCaret, scheduleRender, setCaret } from "./editor.js";
 import { reloadViewport, setEditAnalysisService, settleEditQueue } from "./edits.js";
 import { serverMessage, t } from "./i18n.js";
+import type { MessageKey } from "./i18n.js";
 import {
   ANALYSIS_COLOR_TOKENS,
   ANALYSIS_MAX_PROFILES,
@@ -323,8 +324,17 @@ function addProfile() {
   });
 }
 
+const ANALYSIS_PHASE_KEYS = {
+  scanning: "analysis.phase.scanning",
+  updating: "analysis.phase.updating",
+  complete: "analysis.phase.complete",
+  canceled: "analysis.phase.canceled",
+  stale: "analysis.phase.stale",
+  error: "analysis.phase.error",
+} as const satisfies Record<string, MessageKey>;
+
 function phaseText(status: AnalysisStatus) {
-  const key = `analysis.phase.${status.phase}`;
+  const key = ANALYSIS_PHASE_KEYS[status.phase] || "analysis.phase.error";
   if (status.phase === "scanning" || status.phase === "updating") {
     return t(key, { percent: status.percent.toFixed(1) });
   }

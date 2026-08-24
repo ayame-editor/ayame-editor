@@ -14,14 +14,14 @@ import {
 } from "./state.js";
 import { api, apiPost } from "./api.js";
 import { normalizeAnalysisProfiles } from "./analysis-model.js";
-import type { AnalysisProfile } from "./types/api.js";
+import type { AnalysisProfile, StatResponse } from "./types/api.js";
 import type { UiState } from "./types/api.js";
 
 let sharedUiState: UiState | null = null;
 let sharedUiStateWrites: Promise<void> = Promise.resolve();
 
-function cleanList(list, max) {
-  const out = [];
+function cleanList(list: unknown, max: number): string[] {
+  const out: string[] = [];
   for (const value of Array.isArray(list) ? list : []) {
     const text = String(value || "").trim();
     if (!text || out.includes(text)) continue;
@@ -31,7 +31,7 @@ function cleanList(list, max) {
   return out;
 }
 
-function localList(key, max) {
+function localList(key: string, max: number): string[] {
   try {
     return cleanList(JSON.parse(localStorage.getItem(key) || "[]"), max);
   } catch {
@@ -39,7 +39,7 @@ function localList(key, max) {
   }
 }
 
-function saveLocalList(key, list, max) {
+function saveLocalList(key: string, list: unknown, max: number) {
   try {
     localStorage.setItem(key, JSON.stringify(cleanList(list, max)));
   } catch {
@@ -71,7 +71,7 @@ export async function hydrateSharedUiState() {
     const localRecent = localList(RECENT_KEY, RECENT_MAX);
     const localHistory = localList(SEARCH_HISTORY_KEY, 50);
     const localReplaceHistory = localList(REPLACE_HISTORY_KEY, 50);
-    let localProfiles = [];
+    let localProfiles: AnalysisProfile[] = [];
     try {
       localProfiles = normalizeAnalysisProfiles(
         JSON.parse(localStorage.getItem(ANALYSIS_PROFILES_KEY) || "[]"),
@@ -213,8 +213,8 @@ export function saveAnalysisProfilesShared(profiles, active) {
   );
 }
 
-export async function restoreSessionSnapshot(): Promise<{ open: boolean; [key: string]: unknown }> {
-  return apiPost("/api/session/restore", {});
+export async function restoreSessionSnapshot(): Promise<StatResponse> {
+  return apiPost<StatResponse>("/api/session/restore", {});
 }
 
 export async function saveSessionSnapshot() {

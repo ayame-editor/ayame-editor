@@ -21,6 +21,7 @@ pub(super) struct LinesQuery {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct LinesResponse {
     start: u64,
     total: u64,

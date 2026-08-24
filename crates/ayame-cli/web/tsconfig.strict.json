@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strictNullChecks": true
+  },
+  "files": [
+    "src/env.d.ts",
+    "src/api.ts",
+    "src/dom.ts",
+    "src/keys.ts",
+    "src/persistence.ts",
+    "src/syntax.ts"
+  ],
+  "include": []
+}

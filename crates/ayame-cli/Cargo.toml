@@ -29,7 +29,7 @@ self-update = ["dep:reqwest", "dep:sha2", "dep:zip"]
 gui = ["self-update", "dep:wry", "dep:tao", "dep:muda", "dep:rfd"]
 # Dev-only: `ayame typegen` emits web/types/api.d.ts from the serve API types
 # via the owner's typeship facade (never enabled in shipped builds).
-typegen = ["dep:ts-rs", "dep:typeship", "dep:typeship-ts-rs"]
+typegen = ["ayame-core/typegen", "dep:ts-rs", "dep:typeship", "dep:typeship-ts-rs"]
 
 [dependencies]
 ts-rs = { version = "12", optional = true }

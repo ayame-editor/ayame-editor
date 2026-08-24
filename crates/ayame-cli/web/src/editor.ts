@@ -311,7 +311,7 @@ function changeStateForLine(line) {
 
 function changeStateLabel(change) {
   if (!change) return "";
-  const status = t(`changeHistory.${change.status}`);
+  const status = t(change.status === "unsaved" ? "changeHistory.unsaved" : "changeHistory.saved");
   return change.deleted
     ? t("changeHistory.deletedState", { state: status, deleted: t("changeHistory.deleted") })
     : status;

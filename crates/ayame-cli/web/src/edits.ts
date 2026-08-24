@@ -34,7 +34,7 @@ import {
 import { selectedTextForRange } from "./selection-text.js";
 import { flashCount } from "./notifications.js";
 import { charLenOf } from "./text.js";
-import type { ReplaceRangeRequest, ReplaceRectRequest } from "./types/api.js";
+import type { ReplaceRangeRequest, ReplaceRectRequest, TailPollResponse } from "./types/api.js";
 
 type ReplaceEditResponse = {
   stats: { total_lines: number };
@@ -176,7 +176,7 @@ export async function pollTail() {
   if (savingCount() > 0) return; // never poll mid-save
   let resp;
   try {
-    resp = await apiPost("/api/tail/poll");
+    resp = await apiPost<TailPollResponse>("/api/tail/poll");
   } catch {
     return; // transient (e.g. a racing reload); try again next tick
   }

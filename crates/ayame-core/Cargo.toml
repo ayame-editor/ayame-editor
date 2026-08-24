@@ -6,7 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+[features]
+# Dev-only TypeScript wire declarations consumed by ayame-cli's typegen.
+typegen = ["dep:ts-rs"]
+
 [dependencies]
+ts-rs = { version = "12", optional = true }
 memmap2.workspace = true
 memchr.workspace = true
 encoding_rs.workspace = true

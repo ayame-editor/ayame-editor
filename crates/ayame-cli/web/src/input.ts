@@ -155,7 +155,7 @@ export function initEvents() {
     { passive: false },
   );
 
-  const find = $("find");
+  const find = $<HTMLInputElement>("find");
   find.addEventListener("input", setQueryFromInput);
   find.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

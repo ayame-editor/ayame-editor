@@ -44,6 +44,7 @@ impl Default for SearchOptions {
 
 /// One match: location in both byte and (line, column) space.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct SearchHit {
     pub line: u64,
     /// 0-based character column (decoded), not byte column.

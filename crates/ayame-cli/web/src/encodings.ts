@@ -13,14 +13,14 @@ export const ENCODINGS = [
   },
   {
     value: "utf-16le",
-    aliases: ["utf-16le"],
+    aliases: ["utf16-le", "utf-16le"],
     label: "UTF-16 LE",
     supportsBom: true,
     canConvert: true,
   },
   {
     value: "utf-16be",
-    aliases: ["utf-16be"],
+    aliases: ["utf16-be", "utf-16be"],
     label: "UTF-16 BE",
     supportsBom: true,
     canConvert: true,

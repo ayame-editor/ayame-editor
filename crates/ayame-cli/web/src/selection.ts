@@ -374,7 +374,7 @@ export async function saveSelectionToFile() {
   }
   const total = rr ? rr.l1 - rr.l0 + 1 : r.end.line - r.start.line + 1;
   const base = state.doc.stat?.path || "selection";
-  const f = await askForm(
+  const f = await askForm<{ path: string }>(
     t("dialog.saveSel.title"),
     [
       { id: "path", type: "text", label: t("dialog.saveSel.path"), value: `${base}.selection.txt` },

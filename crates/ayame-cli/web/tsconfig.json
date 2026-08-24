@@ -3,11 +3,10 @@
   //   npx -y typescript@5 tsc --noEmit -p crates/ayame-cli/web/tsconfig.json
   // The shipped build does NOT use tsc — build.rs (oxc) does the type-strip.
   //
-  // Strictness is deliberately pragmatic for this first port of a large JS
-  // monolith: strict/noImplicitAny/strictNullChecks are off (the code leans on
-  // structural JS patterns and a big mutable `state` object). The high-value
-  // flags that pass cleanly are on (noUnusedLocals, noFallthroughCasesInSwitch,
-  // isolatedModules). Tightening toward `strict: true` is tracked as follow-up.
+  // The broad compatibility gate remains pragmatic while tsconfig.strict.json
+  // enforces strictNullChecks on migrated leaf modules. Move files into that
+  // gate as their boundaries become explicit; noImplicitAny remains the next
+  // whole-frontend migration step.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

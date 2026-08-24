@@ -14,15 +14,14 @@ export function confirmVisible() {
 
 type Listener = [EventTarget, string, EventListener];
 
-function runModal(
-  modal,
+type ModalOn = (target: EventTarget, event: string, listener: EventListener) => void;
+
+function runModal<T>(
+  modal: HTMLElement,
   focus: () => void,
-  setup: (
-    finish: (value: any) => void,
-    on: (target: EventTarget, event: string, listener: EventListener) => void,
-  ) => void,
-  cancelValue: any = null,
-): Promise<any> {
+  setup: (finish: (value: T) => void, on: ModalOn) => void,
+  cancelValue: T,
+): Promise<T> {
   return new Promise((resolve) => {
     const listeners: Listener[] = [];
     const on = (target: EventTarget, event: string, listener: EventListener) => {
@@ -30,7 +29,7 @@ function runModal(
       listeners.push([target, event, listener]);
     };
     let unregister = () => {};
-    const finish = (value) => {
+    const finish = (value: T) => {
       setModalOpen(modal, false);
       unregister();
       for (const [target, event, listener] of listeners) {
@@ -61,13 +60,38 @@ function runModal(
 // Resolves `true` for OK, `false` for cancel, and — only when `opts.altLabel`
 // asked for the optional third button — the string `"alt"`. Callers that never
 // pass `altLabel` therefore keep their plain boolean contract.
-export const CONFIRM_ALT = "alt";
+export const CONFIRM_ALT = "alt" as const;
 
-export function askConfirm(title, message, opts: any = {}): Promise<any> {
-  const modal = $("confirm");
-  const okBtn = $("confirm-ok");
-  const cancelBtn = $("confirm-cancel");
-  const altBtn = $("confirm-alt");
+type ConfirmOptions = {
+  alert?: boolean;
+  altLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  okLabel?: string;
+};
+
+type ConfirmResult = boolean | typeof CONFIRM_ALT;
+
+export function askConfirm(
+  title: string,
+  message: string,
+  opts: ConfirmOptions & { altLabel: string },
+): Promise<ConfirmResult>;
+export function askConfirm(
+  title: string,
+  message: string,
+  opts?: ConfirmOptions & { altLabel?: undefined },
+): Promise<boolean>;
+
+export function askConfirm(
+  title: string,
+  message: string,
+  opts: ConfirmOptions = {},
+): Promise<ConfirmResult> {
+  const modal = $<HTMLElement>("confirm");
+  const okBtn = $<HTMLButtonElement>("confirm-ok");
+  const cancelBtn = $<HTMLButtonElement>("confirm-cancel");
+  const altBtn = $<HTMLButtonElement>("confirm-alt");
   $("confirm-title").textContent = title || t("common.confirm");
   $("confirm-message").textContent = message || "";
   okBtn.textContent = opts.okLabel || t("common.ok");
@@ -79,7 +103,7 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
   altBtn.classList.toggle("hidden", !opts.altLabel);
   // Focus order matches the visual order, so the arrow keys can walk it.
   const choices = [cancelBtn, altBtn, okBtn].filter((btn) => !btn.classList.contains("hidden"));
-  return runModal(
+  return runModal<ConfirmResult>(
     modal,
     () => queueMicrotask(() => okBtn.focus()),
     (finish, on) => {
@@ -116,7 +140,7 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
 }
 
 // OK-only variant for error details and notices (replaces window.alert).
-export function showMessage(title, message) {
+export function showMessage(title: string, message: string): Promise<boolean> {
   return askConfirm(title, message, { alert: true });
 }
 
@@ -125,13 +149,13 @@ export function promptVisible() {
   return !$("prompt").classList.contains("hidden");
 }
 
-export function askPrompt(title, label, value = ""): Promise<any> {
-  const modal = $("prompt");
+export function askPrompt(title: string, label: string, value = ""): Promise<string | null> {
+  const modal = $<HTMLElement>("prompt");
   $("prompt-title").textContent = title || t("common.input");
   $("prompt-label").textContent = label || "";
-  const input = $("prompt-input");
+  const input = $<HTMLInputElement>("prompt-input");
   input.value = value;
-  return runModal(
+  return runModal<string | null>(
     modal,
     () =>
       setTimeout(() => {
@@ -153,6 +177,7 @@ export function askPrompt(title, label, value = ""): Promise<any> {
       on($("prompt-cancel"), "click", onCancel);
       on($("prompt-close"), "click", onCancel);
     },
+    null,
   );
 }
 
@@ -161,16 +186,43 @@ export function formVisible() {
   return !$("form-modal").classList.contains("hidden");
 }
 
-// fields: {id, type: "text"|"check"|"select"|"hint", label, value, placeholder,
-// title, options}. All labels/placeholders/titles arrive already localized.
-// Resolves to {id: value} or null on cancel.
-export function askForm(title, fields, okLabel = null): Promise<any> {
-  const modal = $("form-modal");
-  const body = $("form-body");
+type FormFieldBase = {
+  id: string;
+  label: string;
+  title?: string;
+};
+
+export type FormField =
+  | (FormFieldBase & { type: "check"; value?: boolean })
+  | (FormFieldBase & {
+      type: "path";
+      browseLabel?: string;
+      onBrowse?: (current: string) => Promise<string | null> | string | null;
+      placeholder?: string;
+      value?: string;
+    })
+  | (FormFieldBase & {
+      type: "select";
+      options?: readonly (readonly [string, string])[];
+      value?: string;
+    })
+  | (FormFieldBase & { type: "text"; placeholder?: string; value?: string })
+  | { id?: string; type: "hint"; label: string };
+
+// All labels/placeholders/titles arrive localized. The caller supplies the
+// result shape once, while the discriminated field list constrains values to
+// the only two controls this dialog can emit: strings and booleans.
+export function askForm<T extends Record<string, string | boolean>>(
+  title: string,
+  fields: readonly FormField[],
+  okLabel: string | null = null,
+): Promise<T | null> {
+  const modal = $<HTMLElement>("form-modal");
+  const body = $<HTMLElement>("form-body");
   $("form-title").textContent = title || t("common.options");
   $("form-ok").textContent = okLabel || t("common.run");
   body.textContent = "";
-  const readers: Record<string, () => any> = {};
+  const readers: Record<string, () => string | boolean> = {};
   for (const f of fields) {
     if (f.type === "hint") {
       const hint = el("div", "form-hint", f.label);
@@ -235,7 +287,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
     }
     body.append(row);
   }
-  return runModal(
+  return runModal<T | null>(
     modal,
     () =>
       queueMicrotask(() =>
@@ -243,7 +295,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       ),
     (finish, on) => {
       const collect = () =>
-        Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
+        Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()])) as T;
       const onOk = () => finish(collect());
       const onCancel = () => finish(null);
       const onKey = (ev) => {
@@ -258,6 +310,7 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       on($("form-close"), "click", onCancel);
       on(modal, "keydown", onKey);
     },
+    null,
   );
 }
 

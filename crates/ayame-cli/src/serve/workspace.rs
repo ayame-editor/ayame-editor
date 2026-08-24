@@ -13,8 +13,8 @@ use tokio::io::AsyncWriteExt;
 use crate::temp_paths;
 
 use super::{
-    bad_request, internal, stat_response, ApiError, AppState, SharedState, StatResponse,
-    TabsResponse, UiState,
+    bad_request, internal, stat_response, ApiError, AppState, OpenResponse, SharedState,
+    StatResponse, TabsResponse, UiState,
 };
 
 // ---- workspace: open / browse / upload --------------------------------------
@@ -29,13 +29,13 @@ pub(super) struct OpenRequest {
 pub(super) async fn api_open(
     State(state): State<SharedState>,
     Json(req): Json<OpenRequest>,
-) -> Result<Json<StatResponse>, ApiError> {
+) -> Result<Json<OpenResponse>, ApiError> {
     let path = req.path.trim().to_string();
     if path.is_empty() {
         return Err(bad_request("path is empty"));
     }
     state.open_path(path).await?;
-    Ok(Json(stat_response(&state)))
+    Ok(Json(stat_response(&state).into()))
 }
 
 /// Start a fresh, empty "untitled" buffer so the editor opens to a blank page
