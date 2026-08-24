@@ -1,7 +1,10 @@
 // Ayame Editor — dom module. Type-stripped to JS at build time (build.rs, oxc).
 import { currentLocale } from "./i18n.js";
 
-type AyameElement = HTMLElement & {
+// Transitional default for unported call sites. New control lookups specify
+// their real DOM type (`$<HTMLInputElement>(...)`); shrink this surface as each
+// feature is touched until `$` can default to plain HTMLElement.
+type LegacyControlElement = HTMLElement & {
   checked: boolean;
   disabled: boolean;
   files: FileList | null;
@@ -12,7 +15,7 @@ type AyameElement = HTMLElement & {
   select(): void;
 };
 
-export function $<T extends HTMLElement = AyameElement>(id: string): T {
+export function $<T extends HTMLElement = LegacyControlElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing element #${id}`);
   return el as T;
@@ -192,7 +195,7 @@ export function modalVisible(id: string) {
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => {
-    if ((el as AyameElement).disabled) return false;
+    if ((el as LegacyControlElement).disabled) return false;
     if (el.getAttribute("tabindex") === "-1") return false;
     return !el.closest(".hidden") && !el.closest("[inert]");
   });

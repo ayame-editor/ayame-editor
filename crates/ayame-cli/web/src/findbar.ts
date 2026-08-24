@@ -25,7 +25,10 @@ export function showFind(withReplace = false) {
   state.search.findOpen = true;
   document.documentElement.classList.add("find-open");
   if (withReplace) setReplaceRow(true);
-  const f = withReplace && state.search.query ? $("replace-input") : $("find");
+  const f =
+    withReplace && state.search.query
+      ? $<HTMLInputElement>("replace-input")
+      : $<HTMLInputElement>("find");
   queueMicrotask(() => {
     f.focus();
     f.select();
@@ -90,7 +93,7 @@ export function updateInSelectionUI() {
 export function buildMatcher() {
   state.search.regexError = false;
   state.search.matcherWordFallback = false;
-  $("find").parentElement.classList.remove("error");
+  $<HTMLInputElement>("find").parentElement.classList.remove("error");
   if (!state.search.query) {
     state.search.matcher = null;
     return;
@@ -106,7 +109,7 @@ export function buildMatcher() {
   } catch {
     state.search.regexError = true;
     state.search.matcher = null; // invalid regex while typing — just don't highlight
-    $("find").parentElement.classList.add("error");
+    $<HTMLInputElement>("find").parentElement.classList.add("error");
     return;
   }
   if (!state.search.word) {
@@ -127,7 +130,7 @@ export function buildMatcher() {
 }
 
 export function setQueryFromInput() {
-  state.search.query = $("find").value;
+  state.search.query = $<HTMLInputElement>("find").value;
   state.search.lastMatch = null;
   setSearchHits(null);
   state.search.truncated = false;
@@ -283,7 +286,7 @@ export function showSearchHistory(delta) {
   const next = stepHistory(state.search.history, state.search.historyIndex, delta);
   if (next < 0) return false;
   state.search.historyIndex = next;
-  $("find").value = state.search.history[next];
+  $<HTMLInputElement>("find").value = state.search.history[next];
   setQueryFromInput();
   return true;
 }

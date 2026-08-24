@@ -1,4 +1,3 @@
-
 use ayame_core::{Encoding, OpenOptions};
 
 use super::*;

@@ -35,8 +35,10 @@ import type {
   EditSaveResponse,
   GrepSaveRequest,
   OpenRequest,
+  OpenResponse,
   RecoverRequest,
   ReopenRequest,
+  StatResponse,
   SortSaveRequest,
   SplitSaveRequest,
 } from "./types/api.js";
@@ -173,7 +175,7 @@ export function retryPendingNativeClose() {
 }
 
 export async function refreshStat() {
-  state.doc.stat = await api("/api/stat");
+  state.doc.stat = await api<StatResponse>("/api/stat");
   state.view.total = state.doc.stat.view_lines ?? state.doc.stat.lines;
   noteWalError(state.doc.stat);
   updateStatusMeta();
@@ -225,7 +227,7 @@ export async function finishSaveAs(res, { announce = true }: SaveOptions = {}) {
   } else {
     // The workspace changed while saving (rare): fall back to focusing the
     // saved file — the server dedupes, so this never duplicates a tab.
-    onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: res.path }));
+    onDocumentOpened(await apiPost<OpenResponse, OpenRequest>("/api/open", { path: res.path }));
   }
   rememberSaveDir(res.path);
   if (announce) flashCount(t("file.saved", { path: displayPath(res.path) }));
@@ -635,7 +637,7 @@ export async function convertSave(encoding, lineEnding, bom) {
     if (res.switched) {
       await reloadActiveDocument();
     } else {
-      onDocumentOpened(await apiPost<unknown, OpenRequest>("/api/open", { path: res.path }));
+      onDocumentOpened(await apiPost<OpenResponse, OpenRequest>("/api/open", { path: res.path }));
     }
     flashCount(t("dialog.convert.savedAs", { enc: enc(encoding), eol: eol(lineEnding) }));
   } catch (e) {
@@ -697,7 +699,13 @@ export function parseSortKeys(text): number[] {
 export async function sortSave() {
   if (!state.doc.stat?.open) return;
   const detectedFormat = sortFormatForPath(state.doc.stat.path);
-  const f = await askForm(
+  const f = await askForm<{
+    key: string;
+    format: string;
+    delim: string;
+    numeric: boolean;
+    order: string;
+  }>(
     t("menu.sort"),
     [
       {
@@ -801,7 +809,7 @@ export async function sortSave() {
 // multiple files of at most N lines each; the original file is untouched.
 export async function splitFile() {
   if (!state.doc.stat?.open) return;
-  const f = await askForm(
+  const f = await askForm<{ lines: string; dir: string }>(
     t("menu.split"),
     [
       { id: "lines", type: "text", label: t("dialog.split.linesPer"), value: "1000000" },
@@ -849,7 +857,7 @@ export async function splitFile() {
 // through an isolated worker, so multi-GB files complete in bounded memory.
 export async function grepToFile() {
   if (!state.doc.stat?.open) return;
-  const f = await askForm(
+  const f = await askForm<{ query: string; ci: boolean; word: boolean; regex: boolean }>(
     t("menu.grepSave"),
     [
       {

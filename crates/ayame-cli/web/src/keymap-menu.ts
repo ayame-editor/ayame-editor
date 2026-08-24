@@ -75,7 +75,7 @@ export function updateKeyHints() {
   $("undo-edit").setAttribute("aria-label", t("menu.undo"));
   $("redo-edit").title = hint("menu.redo", "redo");
   $("redo-edit").setAttribute("aria-label", t("menu.redo"));
-  $("find").placeholder = hint("menu.find", "find");
+  $<HTMLInputElement>("find").placeholder = hint("menu.find", "find");
   $("find-expand").title = hint("find.showReplace", "replace");
   $("find-expand").setAttribute("aria-label", t("find.showReplace"));
   $("find-prev").title = hint("find.prev", "findPrev");

@@ -1,5 +1,7 @@
 // Ayame Editor — state module. Type-stripped to JS at build time (build.rs, oxc).
-import type { ChangeHistoryResponse, LineRecord, SearchHit } from "./api.js";
+import type { ChangeHistoryResponse, LineRecord, SearchHit, StatResponse } from "./api.js";
+import type { MessageKey } from "./i18n.js";
+import { setLanguagePreferenceReader } from "./locale-preference.js";
 import type { AnalysisMatcher } from "./analysis-model.js";
 import type {
   AnalysisHit,
@@ -109,7 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 // [action id, i18n label key, default shortcut(s)]
-export const KEYMAP_ACTIONS: [string, string, string | string[]][] = [
+export const KEYMAP_ACTIONS: [string, MessageKey, string | string[]][] = [
   ["newFile", "menu.newFile", "Ctrl+N"],
   ["newWindow", "menu.newWindow", "Ctrl+Shift+N"],
   ["openFile", "menu.open", "Ctrl+O"],
@@ -366,7 +368,7 @@ export function createInitialState(): AppState {
       customThemes: { ...DEFAULT_SETTINGS.customThemes },
     },
     doc: {
-      stat: null,
+      stat: null as StatResponse | null,
       tabs: [], // open tabs from /api/tabs
       followTail: false, // 末尾に追従 (tail -f): poll for appended data and auto-scroll
       tailTimer: null, // setInterval handle while following; cleared when off
@@ -395,3 +397,4 @@ export function createInitialState(): AppState {
 }
 
 export const state: AppState = createInitialState();
+setLanguagePreferenceReader(() => state.settings.language);

@@ -14,6 +14,7 @@ use serde::Serialize;
 /// use aligned 16-bit LF code units and are indexed by the document layer with
 /// a wide-newline scanner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum Encoding {
     Utf8,
@@ -399,6 +400,7 @@ pub(crate) fn iso2022jp_col_offset(raw: &[u8], col: u64) -> Option<usize> {
 
 /// Line-ending styles, detected from a bounded prefix.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum Eol {
     Lf,

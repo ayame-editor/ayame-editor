@@ -26,6 +26,7 @@ pub const MAX_MARKERS_PER_KIND: usize = 1_000_000;
 
 /// Marker categories supported by the common sparse store.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum MarkerKind {
     Bookmark,
@@ -88,6 +89,7 @@ impl FromStr for MarkerKind {
 
 /// One marker in a [`MarkerSet`].
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct LineMarker {
     pub kind: MarkerKind,
     pub line: u64,

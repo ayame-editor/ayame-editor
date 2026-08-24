@@ -1,108 +1,30 @@
 // Ayame Editor — api module. Type-stripped to JS at build time (build.rs, oxc).
 // ---- tiny helpers -----------------------------------------------------------
 
-export type LineRecord = {
-  inserted?: boolean;
-  number?: number;
-  text?: string;
-};
-
-export type LinesResponse = {
-  lines: LineRecord[];
-  markers?: { kind: string; line: number }[];
-  total: number;
-};
-
-export type ChangeMarkerOverview = {
-  count: number;
-  histogram: number[];
-};
-
-export type ChangeHistoryResponse = {
-  revision: number;
-  total_lines: number;
-  saved: ChangeMarkerOverview;
-  unsaved: ChangeMarkerOverview;
-  deleted: ChangeMarkerOverview;
-  limit_reached: boolean;
-};
-
-export type LineByteResponse = {
-  byte?: number;
-};
-
-export type FindHit = {
-  byte: number;
-  byte_len: number;
-  column: number;
-  line: number;
-};
-
-export type FindResponse = {
-  hit: FindHit | null;
-};
-
-export type SearchHit = FindHit & {
-  text?: string;
-};
-
-export type SearchResponse = {
-  hits: SearchHit[];
-  truncated: boolean;
-};
+export type {
+  ChangeHistoryResponse,
+  FindResponse,
+  GrepResponse,
+  LineByteResponse,
+  LineRecord,
+  LinesResponse,
+  MarkerBulkResponse,
+  MarkerListResponse,
+  MarkerMutationResponse,
+  MarkerNavigateResponse,
+  MarkerPreviewResponse,
+  MarkerSaveRequest,
+  MarkerSaveResponse,
+  OpenResponse,
+  SearchHit,
+  SearchResponse,
+  StatResponse,
+  TailPollResponse,
+} from "./types/api.js";
 
 export type BatchEditResponse = {
   carets?: { line: number; col: number }[];
   stats: { total_lines: number };
-};
-
-export type MarkerMutationResponse = {
-  kind: string;
-  line: number;
-  marked: boolean;
-  count: number;
-  limit: number;
-};
-
-export type MarkerListResponse = {
-  kind: string;
-  total: number;
-  lines: number[];
-  truncated: boolean;
-};
-
-export type MarkerBulkResponse = {
-  kind: string;
-  added: number;
-  count: number;
-  limit: number;
-  limit_reached: boolean;
-};
-
-export type MarkerSaveRequest = {
-  kind: string;
-  path: string;
-  overwrite: boolean;
-};
-
-export type MarkerSaveResponse = {
-  path: string;
-  lines: number;
-  bytes: number;
-};
-
-export type MarkerNavigateResponse = {
-  kind: string;
-  line: number | null;
-  count: number;
-  wrapped: boolean;
-};
-
-export type MarkerPreviewResponse = {
-  kind: string;
-  total: number;
-  entries: { line: number; text: string; truncated: boolean }[];
-  truncated: boolean;
 };
 
 export type ApiError = Error & { code?: string };

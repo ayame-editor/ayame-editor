@@ -5,7 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "cycles": "node scripts/check-cycles.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.strict.json",
     "fmt": "oxfmt src",
     "fmt:check": "oxfmt --check src",
     "lint": "oxlint --max-warnings 0 src"

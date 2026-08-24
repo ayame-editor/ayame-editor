@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::serve::test_support::{scratch_dir, scratch_file_in, wal_opts};
 

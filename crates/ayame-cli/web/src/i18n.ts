@@ -1,5 +1,5 @@
 // Ayame Editor — i18n module. Type-stripped to JS at build time (build.rs, oxc).
-import { state } from "./state.js";
+import { languagePreference } from "./locale-preference.js";
 
 // clipboard cap: copy warns, cut refuses beyond this
 
@@ -12,12 +12,23 @@ import { state } from "./state.js";
 //
 // Adding a language `xx` is DATA-ONLY: add one `xx: { … }` block below — copy
 // `en` and translate every key, and include this block's own "language.name"
-// (its self-name for the picker), "language.auto", and a `weekday` table
-// (short/long arrays, indexed by Date.getDay()). normalizeLanguage(), the
+// (its self-name for the picker) and "language.auto". Add its weekday arrays
+// to WEEKDAYS below (short/long, indexed by Date.getDay()). normalizeLanguage(), the
 // Settings language picker (populateLanguageSelect), and browserLocale() all
 // derive from Object.keys(MESSAGES), so a new language is picked up with no code
 // change. Server-origin errors carry stable codes; serverMessage() localizes
 // those codes without matching translated message text.
+export const WEEKDAYS = {
+  ja: {
+    short: ["日", "月", "火", "水", "木", "金", "土"],
+    long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
+  },
+  en: {
+    short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  },
+} as const;
+
 export const MESSAGES = {
   ja: {
     // -- menu bar and menu items --
@@ -270,8 +281,6 @@ export const MESSAGES = {
     "find.replaceCanceled": "置換をキャンセルしました（{n} 件は置換済み・元に戻せます）",
     "find.wordRegexUnsupported":
       "この正規表現は単語単位と組み合わせられません — 単語単位をオフにしてください",
-    "find.replacedCountPartial":
-      "{n} 件置換しました — 一致が多いため一部です。もう一度実行してください",
     // -- status bar --
     "status.saving": "保存中…",
     "status.follow": "フォロー",
@@ -417,12 +426,6 @@ export const MESSAGES = {
     // adding an RTL language (ar/he) stays data-only; localeDir() reads it and
     // applyStaticI18n() mirrors it onto document.dir.
     "language.dir": "ltr",
-    // Weekday names for the 新規ファイル名 template, indexed by Date.getDay()
-    // (0 = Sunday). Part of this language block; en is the fallback.
-    weekday: {
-      short: ["日", "月", "火", "水", "木", "金", "土"],
-      long: ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"],
-    },
     "settings.illustration": "イラスト（あやめ/Iris）",
     "settings.font": "フォント",
     "settings.fontMono": "等幅 (Consolas / Menlo)",
@@ -478,7 +481,6 @@ export const MESSAGES = {
     "keymap.cannotOpen": "キー設定を開けません",
     "keymap.jsonError": "キー設定 JSON エラー",
     // -- sort dialog --
-    "dialog.sort.keyColumn": "キー列 (1始まり)",
     "dialog.sort.keyColumns": "キー列の優先順",
     "dialog.sort.keyPlaceholder": "例: 3,1,2 (空なら行全体)",
     "dialog.sort.keyTitle": "カンマ区切りの左から順に比較します。例: 3,1,2 は3列目→1列目→2列目",
@@ -854,7 +856,6 @@ export const MESSAGES = {
     "find.replaceCanceled": "Replace canceled. {n} matches were already replaced (undoable).",
     "find.wordRegexUnsupported":
       "This pattern cannot be combined with whole-word matching - turn whole word off.",
-    "find.replacedCountPartial": "Replaced {n} matches. There are more matches; run it again.",
     "status.saving": "Saving...",
     "status.follow": "Follow",
     "status.saved": "Saved",
@@ -990,10 +991,6 @@ export const MESSAGES = {
     "language.name": "English",
     "language.auto": "Auto",
     "language.dir": "ltr",
-    weekday: {
-      short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-      long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-    },
     "settings.illustration": "Illustration",
     "settings.font": "Font",
     "settings.fontMono": "Monospace (Consolas / Menlo)",
@@ -1046,7 +1043,6 @@ export const MESSAGES = {
     "keymap.prevTab": "Previous Tab",
     "keymap.cannotOpen": "Could not open key bindings.",
     "keymap.jsonError": "Key bindings JSON error",
-    "dialog.sort.keyColumn": "Key Column (1-based)",
     "dialog.sort.keyColumns": "Key Column Priority",
     "dialog.sort.keyPlaceholder": "Example: 3,1,2 (empty = whole line)",
     "dialog.sort.keyTitle":
@@ -1165,6 +1161,10 @@ export const MESSAGES = {
   },
 };
 
+export type Locale = keyof typeof MESSAGES;
+export type MessageKey = keyof typeof MESSAGES.en;
+export type MessageVars = Record<string, unknown>;
+
 // ---- server boundary ----------------------------------------------------
 // API failures are `{code, message}`. Stable codes map to ordinary MESSAGES
 // keys so adding a locale remains data-only; unknown codes keep the server
@@ -1188,11 +1188,13 @@ export const SERVER_CODE_KEYS = {
   canceled: "error.server.canceled",
   internal: "error.server.internal",
   error: "error.server.generic",
-};
+} as const satisfies Record<string, MessageKey>;
 
-export function serverMessage(error) {
-  const raw = String(error && typeof error === "object" ? error.message : (error ?? ""));
-  const code = error && typeof error === "object" ? error.code : undefined;
+export function serverMessage(error: unknown) {
+  const detail =
+    error && typeof error === "object" ? (error as { code?: unknown; message?: unknown }) : null;
+  const raw = String(detail ? (detail.message ?? "") : (error ?? ""));
+  const code = typeof detail?.code === "string" ? detail.code : undefined;
   const key = code && SERVER_CODE_KEYS[code];
   if (key) return t(key);
   if (code) return t("error.serverUnknown", { message: raw || String(code) });
@@ -1202,17 +1204,20 @@ export function serverMessage(error) {
 // Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not
 // a locale — it defers to the browser). normalizeLanguage, the language picker,
 // and browserLocale all derive from this, so adding a language is data-only.
-export function availableLocales() {
-  return Object.keys(MESSAGES);
+export function availableLocales(): Locale[] {
+  return Object.keys(MESSAGES) as Locale[];
 }
 
-export function normalizeLanguage(lang) {
-  return lang === "auto" || availableLocales().includes(lang) ? lang : "auto";
+export function normalizeLanguage(lang: unknown): Locale | "auto" {
+  if (lang === "auto") return lang;
+  return typeof lang === "string" && (availableLocales() as readonly string[]).includes(lang)
+    ? (lang as Locale)
+    : "auto";
 }
 
 // "auto": the first navigator.languages entry whose primary subtag has a
 // MESSAGES table (prefix match, so "zh-TW" resolves to "zh"); English if none.
-export function browserLocale() {
+export function browserLocale(): Locale {
   const locales = availableLocales();
   const prefs =
     navigator.languages && navigator.languages.length
@@ -1220,42 +1225,45 @@ export function browserLocale() {
       : [navigator.language || ""];
   for (const pref of prefs) {
     const code = String(pref).toLowerCase().split("-")[0];
-    if (locales.includes(code)) return code;
+    if ((locales as readonly string[]).includes(code)) return code as Locale;
   }
   return "en";
 }
 
-export function currentLocale() {
-  const lang = normalizeLanguage(state.settings?.language || "auto");
+export function currentLocale(): Locale {
+  const lang = normalizeLanguage(languagePreference());
   return lang === "auto" ? browserLocale() : lang;
 }
 
 // Display name for a language option: each table names itself in "language.name"
 // ("日本語", "English"); "auto" uses the active locale's "language.auto".
-export function localeLabel(code) {
+export function localeLabel(code: string) {
   if (code === "auto") return t("language.auto");
-  return (MESSAGES[code] && MESSAGES[code]["language.name"]) || code;
+  const locale = availableLocales().find((item) => item === code);
+  return (locale && MESSAGES[locale]["language.name"]) || code;
 }
 
 // Writing direction of a locale, read from its own "language.dir" block entry;
 // "ltr" is the default for any locale that omits it (or unknown codes). Kept
 // separate from t() so it never runs through placeholder substitution.
-export function localeDir(locale) {
-  return (MESSAGES[locale] && MESSAGES[locale]["language.dir"]) === "rtl" ? "rtl" : "ltr";
+export function localeDir(locale: string) {
+  const code = availableLocales().find((item) => item === locale);
+  return code && MESSAGES[code]["language.dir"] === "rtl" ? "rtl" : "ltr";
 }
 
 // Weekday names for the 新規ファイル名 template ({ddd} short / {dddd} long),
-// indexed by Date.getDay() (0 = Sunday). Lives in each MESSAGES block so it is
-// part of "adding a language"; a block without a weekday table falls back to en.
-export function weekdayNames(locale) {
-  return (MESSAGES[locale] && MESSAGES[locale].weekday) || MESSAGES.en.weekday;
+// indexed by Date.getDay() (0 = Sunday). Kept outside the string-only MESSAGES
+// tables so MessageKey cannot accidentally include the structured weekday data.
+export function weekdayNames(locale: string) {
+  const code = availableLocales().find((item) => item === locale);
+  return (code && WEEKDAYS[code]) || WEEKDAYS.en;
 }
 
 // Look up `key` in the active locale. Fallback chain: locale → en (the key
 // language, kept complete) → the key itself. Then substitute {var} placeholders.
-export function t(key, vars = null) {
+export function t(key: MessageKey, vars: MessageVars | null = null) {
   const table = MESSAGES[currentLocale()] || MESSAGES.en;
-  let out = table[key] ?? MESSAGES.en[key] ?? key;
+  let out: string = table[key] ?? MESSAGES.en[key] ?? key;
   if (vars) {
     out = out.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
   }
@@ -1274,16 +1282,22 @@ export const I18N_ATTR_MAP = [
   ["data-i18n-aria-label", "aria-label"],
 ];
 
+function messageKey(value: string | null): MessageKey | null {
+  return value && Object.hasOwn(MESSAGES.en, value) ? (value as MessageKey) : null;
+}
+
 export function applyStaticI18n() {
   const locale = currentLocale();
   document.documentElement.lang = locale;
   document.documentElement.dir = localeDir(locale);
   document.querySelectorAll("[data-i18n]").forEach((el) => {
-    el.textContent = t(el.getAttribute("data-i18n"));
+    const key = messageKey(el.getAttribute("data-i18n"));
+    if (key) el.textContent = t(key);
   });
   for (const [dataAttr, attr] of I18N_ATTR_MAP) {
     document.querySelectorAll(`[${dataAttr}]`).forEach((el) => {
-      el.setAttribute(attr, t(el.getAttribute(dataAttr)));
+      const key = messageKey(el.getAttribute(dataAttr));
+      if (key) el.setAttribute(attr, t(key));
     });
   }
 }

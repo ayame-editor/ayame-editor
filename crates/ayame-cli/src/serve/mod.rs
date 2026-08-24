@@ -24,7 +24,7 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use ayame_core::{Document, FileStat};
+use ayame_core::{Document, Encoding, Eol};
 use serde::Serialize;
 use tower_http::catch_panic::CatchPanicLayer;
 
@@ -375,12 +375,34 @@ pub(crate) fn spawn_background(state: SharedState) -> Result<SocketAddr> {
 // ---- API ----------------------------------------------------------------------
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(optional_fields))]
 pub(super) struct StatResponse {
-    /// Whether a file is currently open. When false, every `file` field is
+    /// Whether a file is currently open. When false, every file field is
     /// absent and the front-end shows its open/welcome screen.
     open: bool,
-    #[serde(flatten)]
-    file: Option<FileStat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lines: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    encoding: Option<Encoding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eol: Option<Eol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bom_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stride: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checkpoints: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    index_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    index_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from_cache: Option<bool>,
     view_lines: u64,
     dirty: bool,
     revision: u64,
@@ -413,7 +435,17 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
             file.path = workspace::strip_verbatim(&file.path);
             StatResponse {
                 open: true,
-                file: Some(file),
+                path: Some(file.path),
+                bytes: Some(file.bytes),
+                lines: Some(file.lines),
+                encoding: Some(file.encoding),
+                eol: Some(file.eol),
+                bom_bytes: Some(file.bom_bytes),
+                stride: Some(file.stride),
+                checkpoints: Some(file.checkpoints),
+                index_bytes: Some(file.index_bytes),
+                index_ms: Some(file.index_ms),
+                from_cache: Some(file.from_cache),
                 view_lines: edit.total_lines,
                 dirty: edit.dirty,
                 revision: edit.revision,
@@ -428,7 +460,17 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
         }
         Err(_) => StatResponse {
             open: false,
-            file: None,
+            path: None,
+            bytes: None,
+            lines: None,
+            encoding: None,
+            eol: None,
+            bom_bytes: None,
+            stride: None,
+            checkpoints: None,
+            index_bytes: None,
+            index_ms: None,
+            from_cache: None,
             view_lines: 0,
             dirty: false,
             revision: 0,
@@ -441,6 +483,21 @@ pub(super) fn stat_response(state: &AppState) -> StatResponse {
             wal_error,
         },
     })
+}
+
+/// The filesystem-open endpoint returns the same stat shape, but its distinct
+/// generated name lets callers type the endpoint without hand-written aliases.
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct OpenResponse {
+    #[serde(flatten)]
+    stat: StatResponse,
+}
+
+impl From<StatResponse> for OpenResponse {
+    fn from(stat: StatResponse) -> Self {
+        Self { stat }
+    }
 }
 
 async fn api_stat(State(state): State<SharedState>) -> Json<StatResponse> {

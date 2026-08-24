@@ -11,6 +11,7 @@ import {
   MESSAGES,
   SERVER_CODE_KEYS,
   serverMessage,
+  WEEKDAYS,
 } from "../src/i18n.js";
 import { state } from "../src/state.js";
 
@@ -54,17 +55,13 @@ function staticHtmlKeys(): string[] {
 
 describe("i18n completeness", () => {
   it("keeps every locale aligned with the English key set", () => {
-    const reference = Object.keys(MESSAGES.en)
-      .filter((key) => key !== "weekday")
-      .sort();
+    const reference = Object.keys(MESSAGES.en).sort();
 
     for (const [locale, table] of Object.entries(MESSAGES)) {
-      const keys = Object.keys(table)
-        .filter((key) => key !== "weekday")
-        .sort();
+      const keys = Object.keys(table).sort();
       expect(keys, `${locale} translation keys`).toEqual(reference);
-      expect(table.weekday?.short, `${locale} short weekdays`).toHaveLength(7);
-      expect(table.weekday?.long, `${locale} long weekdays`).toHaveLength(7);
+      expect(WEEKDAYS[locale].short, `${locale} short weekdays`).toHaveLength(7);
+      expect(WEEKDAYS[locale].long, `${locale} long weekdays`).toHaveLength(7);
     }
   });
 

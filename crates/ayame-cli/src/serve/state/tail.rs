@@ -121,6 +121,8 @@ impl AppState {
 /// current totals so the client can grow its scrollbar even when it decides not
 /// to auto-scroll.
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename = "TailPollResponse"))]
 pub(in crate::serve) struct TailStatus {
     /// Whether a file is open at all.
     open: bool,

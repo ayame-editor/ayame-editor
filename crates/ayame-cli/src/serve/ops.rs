@@ -865,10 +865,26 @@ fn default_max() -> usize {
     2000
 }
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct SearchResponse {
+    hits: Vec<ayame_core::SearchHit>,
+    truncated: bool,
+}
+
+impl From<ayame_core::SearchResult> for SearchResponse {
+    fn from(result: ayame_core::SearchResult) -> Self {
+        Self {
+            hits: result.hits,
+            truncated: result.truncated,
+        }
+    }
+}
+
 pub(super) async fn api_search(
     State(state): State<SharedState>,
     Query(q): Query<SearchQuery>,
-) -> Result<Json<ayame_core::SearchResult>, ApiError> {
+) -> Result<Json<SearchResponse>, ApiError> {
     // Search what the user sees: a dirty buffer runs against the cached
     // materialized snapshot so hits (line numbers, byte anchors) line up with
     // the edited view — and repeated searches reuse one materialization.
@@ -895,7 +911,7 @@ pub(super) async fn api_search(
     let out = wait_worker_output(&state, "search", &mut cmd, WORKER_TIMEOUT).await;
     drop(view); // the snapshot guard must outlive the worker child
     let res: ayame_core::SearchResult = parse_worker_json("search", &out?)?;
-    Ok(Json(res))
+    Ok(Json(res.into()))
 }
 
 // ---- grep (recursive directory search) -----------------------------------------
@@ -924,6 +940,26 @@ fn grep_default_max() -> usize {
     2000
 }
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub(super) struct GrepResponse {
+    hits: Vec<ayame_core::GrepHit>,
+    truncated: bool,
+    files_scanned: u64,
+    files_truncated: bool,
+}
+
+impl From<ayame_core::GrepResult> for GrepResponse {
+    fn from(result: ayame_core::GrepResult) -> Self {
+        Self {
+            hits: result.hits,
+            truncated: result.truncated,
+            files_scanned: result.files_scanned,
+            files_truncated: result.files_truncated,
+        }
+    }
+}
+
 /// `POST /api/grep` — recursive multi-file search. The heavy
 /// work (a directory walk + a search over each file) runs inside
 /// `spawn_blocking` and the structured hits are returned as JSON. This searches
@@ -931,7 +967,7 @@ fn grep_default_max() -> usize {
 pub(super) async fn api_grep(
     State(state): State<SharedState>,
     Json(req): Json<GrepRequest>,
-) -> Result<Json<ayame_core::GrepResult>, ApiError> {
+) -> Result<Json<GrepResponse>, ApiError> {
     let query = req.query.trim().to_string();
     if query.is_empty() {
         return Err(bad_request("query is empty"));
@@ -969,7 +1005,7 @@ pub(super) async fn api_grep(
     for hit in &mut result.hits {
         hit.path = workspace::strip_verbatim(&hit.path);
     }
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 /// The directory a grep with no explicit root searches: the open file's parent,
@@ -1001,6 +1037,7 @@ pub(super) struct FindQuery {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct FindResponse {
     hit: Option<ayame_core::SearchHit>,
 }
@@ -1039,6 +1076,7 @@ pub(super) struct LineByteQuery {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub(super) struct LineByteResponse {
     byte: Option<u64>,
 }
