@@ -616,9 +616,11 @@ async fn create_unique_upload_file(
         .map(|file| (fallback, file))
 }
 
-fn unique_upload_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(10_000);
-    out.push(dir.join(name));
+fn unique_upload_candidates<'a>(
+    dir: &'a Path,
+    name: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    let base = dir.join(name);
     let stem = Path::new(name)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -627,10 +629,7 @@ fn unique_upload_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
         .extension()
         .map(|s| format!(".{}", s.to_string_lossy()))
         .unwrap_or_default();
-    for n in 1..10_000 {
-        out.push(dir.join(format!("{stem}-{n}{ext}")));
-    }
-    out
+    std::iter::once(base).chain((1..10_000).map(move |n| dir.join(format!("{stem}-{n}{ext}"))))
 }
 
 #[cfg(test)]
