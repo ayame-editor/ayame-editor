@@ -25,7 +25,11 @@ import {
   showLoading,
   showMessage,
 } from "./dialogs.js";
-import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
+import {
+  beaconSessionSnapshot,
+  migrateSyntaxOverrideShared,
+  saveSessionSnapshot,
+} from "./persistence.js";
 import { withOverwriteRetry } from "./saveflow.js";
 import type {
   ArtifactResponse,
@@ -221,8 +225,10 @@ interface SaveOptions {
 }
 
 export async function finishSaveAs(res, { announce = true }: SaveOptions = {}) {
+  const previousPath = state.doc.stat?.path || "";
   if (res.switched) {
     // Same tab, new document identity: refresh in place, keep the caret.
+    migrateSyntaxOverrideShared(previousPath, res.path);
     await reloadActiveDocument();
   } else {
     // The workspace changed while saving (rare): fall back to focusing the

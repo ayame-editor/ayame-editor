@@ -9,6 +9,7 @@ import {
   loadAnalysisProfilesShared,
   loadRecentFilesShared,
   loadSearchHistoryShared,
+  migrateSyntaxOverrideShared,
   restoreSessionSnapshot,
   saveRecentFilesShared,
   saveSearchHistoryShared,
@@ -21,6 +22,7 @@ import {
   SEARCH_HISTORY_KEY,
   state,
 } from "../src/state.js";
+import { SYNTAX_PREFERENCES_KEY } from "../src/syntax-preference-model.js";
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {
   const values = new Map(Object.entries(initial));
@@ -42,6 +44,10 @@ const emptyUiState = () => ({
   session: { paths: [], active_path: null },
   analysis_profiles: [],
   active_analysis_profile: null,
+  syntax_configured: false,
+  syntax_favorites: [],
+  syntax_mappings: [],
+  syntax_overrides: [],
 });
 
 describe("shared UI persistence (#188)", () => {
@@ -126,6 +132,35 @@ describe("shared UI persistence (#188)", () => {
     expect(loadAnalysisProfilesShared()).toEqual({ profiles: [], active: null });
   });
 
+  it("restores configured local syntax preferences while the server is unavailable", async () => {
+    localStorage.setItem(
+      SYNTAX_PREFERENCES_KEY,
+      JSON.stringify({
+        configured: true,
+        favorites: ["shell"],
+        overrides: [{ path: "/tmp/script", scheme: "shell" }],
+      }),
+    );
+    vi.mocked(api).mockRejectedValue(new Error("offline"));
+
+    await hydrateSharedUiState();
+
+    expect(state.syntax.favorites).toEqual(["shell"]);
+    expect(state.syntax.overrides).toEqual({ "/tmp/script": "shell" });
+  });
+
+  it("uses registry defaults for an unconfigured local syntax object", async () => {
+    localStorage.setItem(SYNTAX_PREFERENCES_KEY, JSON.stringify({ configured: false }));
+    vi.mocked(api).mockRejectedValue(new Error("offline"));
+
+    await hydrateSharedUiState();
+
+    expect(state.syntax.configured).toBe(false);
+    expect(state.syntax.favorites).toEqual(
+      expect.arrayContaining(["json", "log", "markdown", "javascript", "rust"]),
+    );
+  });
+
   it("keeps the local write but skips a destructive partial server write when re-read fails", async () => {
     vi.mocked(api).mockRejectedValue(new Error("offline"));
 
@@ -134,6 +169,50 @@ describe("shared UI persistence (#188)", () => {
     expect(JSON.parse(localStorage.getItem(RECENT_KEY)!)).toEqual(["/offline.txt"]);
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/ui_state"));
     expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("does not let an empty local syntax value erase configured shared preferences", async () => {
+    localStorage.setItem(
+      SYNTAX_PREFERENCES_KEY,
+      JSON.stringify({ configured: true, favorites: ["rust"], mappings: [] }),
+    );
+    vi.mocked(api).mockResolvedValue({
+      ...emptyUiState(),
+      syntax_configured: true,
+      syntax_favorites: [],
+      syntax_mappings: [{ glob: "*.conf", scheme: "nginx" }],
+    });
+
+    await hydrateSharedUiState();
+
+    expect(state.syntax.configured).toBe(true);
+    expect(state.syntax.favorites).toEqual([]);
+    expect(state.syntax.mappings).toEqual([{ glob: "*.conf", scheme: "nginx" }]);
+  });
+
+  it("moves a manual tab scheme to its Save As path in local and shared state", async () => {
+    vi.mocked(api).mockResolvedValue({
+      ...emptyUiState(),
+      syntax_configured: true,
+      syntax_favorites: ["shell"],
+      syntax_overrides: [{ path: "/tmp/untitled", scheme: "shell" }],
+    });
+    vi.mocked(apiPost).mockImplementation(async (_path, body) => body);
+    await hydrateSharedUiState();
+    vi.clearAllMocks();
+
+    expect(migrateSyntaxOverrideShared("/tmp/untitled", "/tmp/script")).toBe(true);
+
+    expect(state.syntax.overrides).toEqual({ "/tmp/script": "shell" });
+    expect(JSON.parse(localStorage.getItem(SYNTAX_PREFERENCES_KEY)!)).toMatchObject({
+      configured: true,
+      overrides: [{ path: "/tmp/script", scheme: "shell" }],
+    });
+    await vi.waitFor(() => expect(apiPost).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiPost).mock.calls[0][1]).toMatchObject({
+      syntax_favorites: ["shell"],
+      syntax_overrides: [{ path: "/tmp/script", scheme: "shell" }],
+    });
   });
 
   it("uses the session endpoints and respects the restore-session preference", async () => {

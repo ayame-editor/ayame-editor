@@ -25,9 +25,9 @@ pub(super) use tabs::TabInfo;
 use tabs::{remove_aside_files, TabList};
 pub(super) use tabs::{TabsResponse, Workspace};
 pub(super) use tail::TailStatus;
-#[cfg(feature = "typegen")]
-pub(super) use ui_state::SessionState;
 pub(super) use ui_state::UiState;
+#[cfg(feature = "typegen")]
+pub(super) use ui_state::{SessionState, SyntaxMapping, SyntaxOverride};
 use wal_policy::{attach_live_wal, wal_setup_for_open, WalSetup};
 
 type Shared = Arc<Document>;

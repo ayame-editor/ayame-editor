@@ -324,6 +324,7 @@
         <span id="st-pos" class="seg">—</span>
         <button id="st-tail" class="seg seg-btn" title="末尾に追従 (tail -f)" data-i18n="status.follow" data-i18n-title="menu.followTail">追従</button>
         <span id="st-edit" class="seg">—</span>
+        <button id="st-syntax" class="seg seg-btn" title="シンタックススキームを選択" data-i18n-title="syntax.choose" aria-label="シンタックススキーム: —">—</button>
         <button id="st-enc" class="seg seg-btn" title="文字コードを変換して保存" data-i18n-title="status.encTitle" aria-label="文字コード: —">—</button>
         <button id="st-eol" class="seg seg-btn" title="改行コードを変換して保存" data-i18n-title="status.eolTitle" aria-label="改行コード: —">—</button>
         <span id="st-index" class="seg dim">—</span>
@@ -530,6 +531,10 @@
                 <span class="set-label" data-i18n="settings.themeJson">テーマJSON</span>
                 <button id="theme-json-edit" class="cmd" data-i18n="settings.editInTab">タブで編集</button>
               </div>
+              <div class="set-row">
+                <span class="set-label" data-i18n="syntax.settings">シンタックススキーム</span>
+                <button id="syntax-manage" class="cmd" type="button" data-i18n="syntax.manage">管理</button>
+              </div>
             </div>
           </section>
           <p id="settings-empty" class="settings-empty hidden"
@@ -717,6 +722,44 @@
         <div class="form-actions">
           <button id="form-cancel" class="cmd" data-i18n="common.cancel">キャンセル</button>
           <button id="form-ok" class="cmd primary" data-i18n="common.run">実行</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Syntax scheme selection and preference editor. Detection remains
+         line-local; this modal only edits the small declarative registry. -->
+    <div id="syntax-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-panel syntax-panel" role="dialog" aria-label="シンタックススキーム" data-i18n-aria-label="syntax.settings">
+        <div class="modal-head">
+          <div id="syntax-title" class="modal-title" data-i18n="syntax.settings">シンタックススキーム</div>
+          <button id="syntax-close" class="modal-x" title="閉じる (Esc)" aria-label="閉じる" data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close"><svg class="ay-icon" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>
+        </div>
+        <div class="syntax-body">
+          <label class="syntax-field">
+            <span data-i18n="syntax.current">現在のタブ</span>
+            <select id="syntax-current" class="input-control"></select>
+          </label>
+          <div class="syntax-catalog-head">
+            <label class="syntax-field syntax-search-field">
+              <span data-i18n="syntax.allSchemes">すべてのスキーム</span>
+              <input id="syntax-search" class="input-control" type="search" autocomplete="off" data-i18n-placeholder="syntax.searchPlaceholder" placeholder="スキームを検索" />
+            </label>
+            <button id="syntax-assign-extension" class="cmd" type="button" data-i18n="syntax.assignExtension">この拡張子へ割り当て</button>
+          </div>
+          <div id="syntax-scheme-list" class="syntax-scheme-list" role="list"></div>
+          <div class="syntax-mapping-head">
+            <span data-i18n="syntax.mappings">ファイル名・glob の割り当て</span>
+            <button id="syntax-mapping-add" class="cmd" type="button" data-i18n="common.add">追加</button>
+          </div>
+          <div id="syntax-mapping-list" class="syntax-mapping-list"></div>
+          <div id="syntax-import-status" class="syntax-import-status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="syntax-actions">
+          <button id="syntax-import" class="cmd" type="button" data-i18n="syntax.import">Import</button>
+          <button id="syntax-export" class="cmd" type="button" data-i18n="syntax.export">Export</button>
+          <div class="spacer"></div>
+          <button id="syntax-cancel" class="cmd" type="button" data-i18n="common.cancel">キャンセル</button>
+          <button id="syntax-save" class="cmd primary" type="button" data-i18n="common.save">保存</button>
         </div>
       </div>
     </div>
