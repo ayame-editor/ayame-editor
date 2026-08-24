@@ -804,9 +804,6 @@ export function initAnalysis() {
 
   $("analysis-manage").addEventListener("click", openAnalysis);
   $("analysis-close").addEventListener("click", closeAnalysis);
-  $("analysis-modal").addEventListener("mousedown", (event) => {
-    if (event.target === $("analysis-modal")) closeAnalysis();
-  });
   $("analysis-profile-select").addEventListener("change", () => {
     const profile = state.analysis.profiles.find(
       (item) => item.id === $("analysis-profile-select").value,

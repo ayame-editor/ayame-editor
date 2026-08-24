@@ -426,15 +426,6 @@ export function initBookmarks() {
   );
 
   $("bookmark-close").addEventListener("click", hideBookmarkList);
-  $("bookmark-modal").addEventListener("click", (event) => {
-    if (event.target === $("bookmark-modal")) hideBookmarkList();
-  });
-  $("bookmark-modal").addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      hideBookmarkList();
-    }
-  });
   $("bookmark-more").addEventListener("click", () => {
     const start = Number(($("bookmark-more") as HTMLElement).dataset.start);
     if (Number.isSafeInteger(start) && start >= 0) void loadBookmarkPreviews(start, true);

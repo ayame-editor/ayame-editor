@@ -132,19 +132,11 @@ export function executePaletteItem(item) {
 
 export function initCommandPalette() {
   $("palette-close").addEventListener("click", hideCommandPalette);
-  $("command-palette").addEventListener("click", (e) => {
-    if (e.target === $("command-palette")) hideCommandPalette();
-  });
   $("palette-input").addEventListener("input", () => {
     paletteIndex = 0;
     renderCommandPalette();
   });
   $("palette-input").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      hideCommandPalette();
-      return;
-    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       movePalette(1);

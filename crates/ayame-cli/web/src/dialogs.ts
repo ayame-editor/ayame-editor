@@ -1,6 +1,6 @@
 // Ayame Editor — dialogs module. Type-stripped to JS at build time (build.rs, oxc).
 import { api, apiPost } from "./api.js";
-import { $, commas, setModalOpen } from "./dom.js";
+import { $, commas, registerModal, setModalOpen } from "./dom.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
 import type { ArtifactOpStatus, OperationCancelRequest } from "./types/api.js";
@@ -21,6 +21,7 @@ function runModal(
     finish: (value: any) => void,
     on: (target: EventTarget, event: string, listener: EventListener) => void,
   ) => void,
+  cancelValue: any = null,
 ): Promise<any> {
   return new Promise((resolve) => {
     const listeners: Listener[] = [];
@@ -28,24 +29,30 @@ function runModal(
       target.addEventListener(event, listener);
       listeners.push([target, event, listener]);
     };
+    let unregister = () => {};
     const finish = (value) => {
       setModalOpen(modal, false);
+      unregister();
       for (const [target, event, listener] of listeners) {
         target.removeEventListener(event, listener);
       }
       focusEditor();
       resolve(value);
     };
+    unregister = registerModal(modal.id, {
+      closeOnBackdrop: true,
+      onClose: () => finish(cancelValue),
+    });
     setModalOpen(modal, true);
+    on(modal, "keydown", (event) => {
+      if ((event as KeyboardEvent).key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      finish(cancelValue);
+    });
     setup(finish, on);
     focus();
   });
-}
-
-function backdropCancel(modal, finish: (value: any) => void) {
-  return (ev) => {
-    if (ev.target === modal) finish(null);
-  };
 }
 
 // Titles, messages and button labels arrive already localized (t() results);
@@ -81,35 +88,30 @@ export function askConfirm(title, message, opts: any = {}): Promise<any> {
       const onAlt = () => finish(CONFIRM_ALT);
       const answerOf = (btn) => (btn === cancelBtn ? false : btn === altBtn ? CONFIRM_ALT : true);
       const onKey = (ev) => {
-        ev.stopPropagation();
         if (ev.key === "Enter") {
           ev.preventDefault();
+          ev.stopPropagation();
           // Respect the button selected with ArrowLeft/ArrowRight. Preventing
           // the native button event means we must mirror its focused action.
           finish(answerOf(document.activeElement));
-        } else if (ev.key === "Escape") {
-          ev.preventDefault();
-          finish(false);
         } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
           // Walk the visible buttons, like a native dialog.
           if (choices.length < 2) return; // OK-only: nothing to move between
           ev.preventDefault();
+          ev.stopPropagation();
           const at = choices.findIndex((btn) => btn === document.activeElement);
           const step = ev.key === "ArrowLeft" ? -1 : 1;
           const next = at < 0 ? 0 : (at + step + choices.length) % choices.length;
           choices[next].focus();
         }
       };
-      const onBackdrop = (ev) => {
-        if (ev.target === modal) finish(false);
-      };
       on(okBtn, "click", onOk);
       on(cancelBtn, "click", onCancel);
       on(altBtn, "click", onAlt);
       on($("confirm-close"), "click", onCancel);
-      on(modal, "mousedown", onBackdrop);
       on(modal, "keydown", onKey);
     },
+    false,
   );
 }
 
@@ -140,21 +142,16 @@ export function askPrompt(title, label, value = ""): Promise<any> {
       const onOk = () => finish(input.value);
       const onCancel = () => finish(null);
       const onKey = (ev) => {
-        ev.stopPropagation();
         if (ev.key === "Enter") {
           ev.preventDefault();
+          ev.stopPropagation();
           finish(input.value);
-        } else if (ev.key === "Escape") {
-          ev.preventDefault();
-          finish(null);
         }
       };
-      on(input, "keydown", onKey);
       on(modal, "keydown", onKey);
       on($("prompt-ok"), "click", onOk);
       on($("prompt-cancel"), "click", onCancel);
       on($("prompt-close"), "click", onCancel);
-      on(modal, "mousedown", backdropCancel(modal, finish));
     },
   );
 }
@@ -266,19 +263,15 @@ export function askForm(title, fields, okLabel = null): Promise<any> {
       const onOk = () => finish(collect());
       const onCancel = () => finish(null);
       const onKey = (ev) => {
-        ev.stopPropagation();
         if (ev.key === "Enter" && ev.target.tagName !== "SELECT") {
           ev.preventDefault();
+          ev.stopPropagation();
           finish(collect());
-        } else if (ev.key === "Escape") {
-          ev.preventDefault();
-          finish(null);
         }
       };
       on($("form-ok"), "click", onOk);
       on($("form-cancel"), "click", onCancel);
       on($("form-close"), "click", onCancel);
-      on(modal, "mousedown", backdropCancel(modal, finish));
       on(modal, "keydown", onKey);
     },
   );
@@ -462,7 +455,7 @@ export function showLoading(
   // Name the dialog after the running operation so a screen reader announces
   // "<operation>, dialog" when focus moves in (#184).
   o.setAttribute("aria-label", parts.text.textContent || t("dialog.operation.busy"));
-  o.classList.remove("hidden");
+  setModalOpen(o, true);
   // Move focus into the overlay so keyboard/SR users land on Cancel (and the
   // app-wide focus trap keeps them there); fall back to the overlay itself.
   const cancelable = !parts.cancel.classList.contains("hidden");
@@ -501,7 +494,7 @@ export function cancelLoading() {
 export function hideLoading() {
   stopLoadingPoll();
   loadingCanceling = false;
-  $("overlay").classList.add("hidden");
+  setModalOpen($("overlay"), false);
 }
 
 // True while the blocking loading overlay is up (open, sort, replace-all, …).

@@ -2,7 +2,7 @@
 import { $, commas, displayPath } from "./dom.js";
 import { LINE_HEIGHT, MAX_COPY_LINES, OVERSCAN, state } from "./state.js";
 import { serverMessage, t } from "./i18n.js";
-import { api, apiPost, isApiErrorCode, type FindResponse, type LinesResponse } from "./api.js";
+import { api, apiPost, type FindResponse, type LinesResponse } from "./api.js";
 import {
   caretX,
   charWidth,
@@ -23,7 +23,7 @@ import {
 } from "./editor.js";
 import { lineLensFor, pasteText, typeText } from "./edits.js";
 import { flashCount } from "./notifications.js";
-import { askConfirm, askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
+import { askForm, hideLoading, showLoading, showMessage } from "./dialogs.js";
 import {
   allCursors,
   clonePoint,
@@ -44,6 +44,7 @@ import {
 import { selectedTextForRange } from "./selection-text.js";
 import { updateInSelectionUI } from "./findbar.js";
 import { isWordChar } from "./text.js";
+import { withOverwriteRetry } from "./saveflow.js";
 import type { SelectionSaveRequest, SelectionSaveResponse } from "./types/api.js";
 
 export {
@@ -405,43 +406,23 @@ export async function saveSelectionToFile() {
         l1: r.end.line,
         c1: r.end.col,
       };
-  showLoading(t("dialog.saveSel.writing"));
   try {
-    const res = await apiPost<SelectionSaveResponse, SelectionSaveRequest>(
-      "/api/selection/save",
-      body,
-    );
+    const res = await withOverwriteRetry(f.path.trim(), async (overwrite) => {
+      showLoading(t("dialog.saveSel.writing"));
+      try {
+        return await apiPost<SelectionSaveResponse, SelectionSaveRequest>("/api/selection/save", {
+          ...body,
+          overwrite,
+        });
+      } finally {
+        hideLoading();
+      }
+    });
+    if (!res) return;
     flashCount(t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }));
   } catch (e) {
-    hideLoading();
-    // Detect an existing-target conflict by its structured code (issue #81.2),
-    if (isApiErrorCode(e, "exists")) {
-      const overwrite = await askConfirm(
-        t("dialog.overwrite.title"),
-        t("dialog.overwrite.ask", { name: displayPath(f.path.trim()) }),
-        { okLabel: t("dialog.overwrite.ok"), danger: true },
-      );
-      if (overwrite) {
-        showLoading(t("dialog.saveSel.writing"));
-        try {
-          const res = await apiPost<SelectionSaveResponse, SelectionSaveRequest>(
-            "/api/selection/save",
-            { ...body, overwrite: true },
-          );
-          flashCount(
-            t("dialog.saveSel.done", { lines: commas(res.lines), path: displayPath(res.path) }),
-          );
-        } catch (e2) {
-          flashCount(t("dialog.saveSel.error"), "error");
-          showMessage(t("dialog.saveSel.error"), serverMessage(e2));
-        }
-      }
-    } else {
-      flashCount(t("dialog.saveSel.error"), "error");
-      showMessage(t("dialog.saveSel.error"), serverMessage(e));
-    }
-  } finally {
-    hideLoading();
+    flashCount(t("dialog.saveSel.error"), "error");
+    showMessage(t("dialog.saveSel.error"), serverMessage(e));
   }
 }
 

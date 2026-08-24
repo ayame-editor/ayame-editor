@@ -56,9 +56,6 @@ export function onOpenerInputKeydown(event) {
   } else if (event.key === "Enter") {
     event.preventDefault();
     commitOpener();
-  } else if (event.key === "Escape") {
-    event.preventDefault();
-    hideOpener();
   }
 }
 
@@ -392,7 +389,4 @@ export function initOpener() {
     $(id).addEventListener("focus", onOpenerListFocus);
     $(id).addEventListener("keydown", onOpenerListKeydown);
   }
-  $("opener").addEventListener("click", (event) => {
-    if (event.target === $("opener")) hideOpener();
-  });
 }
