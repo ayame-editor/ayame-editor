@@ -54,6 +54,7 @@ vi.mock("../src/edits.js", () => ({
   pasteText: vi.fn(),
   redoEdit: vi.fn(),
   setFollowTail: vi.fn(),
+  typeAssistedText: vi.fn(),
   typeText: vi.fn(),
   undoEdit: vi.fn(),
 }));
@@ -90,11 +91,17 @@ vi.mock("../src/settings.js", () => ({
   hideSettings: vi.fn(),
   settingsVisible: vi.fn(() => false),
 }));
+vi.mock("../src/completion.js", () => ({
+  handleCompletionKey: vi.fn(() => false),
+  hideCompletion: vi.fn(),
+  showAutomaticCompletion: vi.fn(),
+}));
 
 import { focusEditor } from "../src/editor.js";
-import { insertNewline } from "../src/edits.js";
+import { insertNewline, typeAssistedText, typeText } from "../src/edits.js";
 import {
   anyModalOpen,
+  onBeforeInput,
   onCompEnd,
   onConvertModalKey,
   onEditKey,
@@ -207,6 +214,41 @@ describe("IME confirm-Enter (WebKit) handling", () => {
     onEditKey(enterEvent(1010)); // consumed
     onEditKey(enterEvent(1020)); // next Enter is a real newline
     expect(insertNewline).toHaveBeenCalledOnce();
+  });
+
+  it("keeps IME commits on the plain input path", () => {
+    onCompEnd({ data: "日本語", timeStamp: 1000 });
+
+    expect(typeText).toHaveBeenCalledWith("日本語");
+    expect(typeAssistedText).not.toHaveBeenCalled();
+  });
+
+  it("does not run pair assistance for composing beforeinput events", () => {
+    const composing = {
+      inputType: "insertText",
+      data: "(",
+      isComposing: true,
+      preventDefault: vi.fn(),
+    };
+
+    onBeforeInput(composing);
+
+    expect(composing.preventDefault).not.toHaveBeenCalled();
+    expect(typeAssistedText).not.toHaveBeenCalled();
+  });
+
+  it("routes ordinary and emoji text through the deterministic assist boundary", () => {
+    for (const data of ["(", "😀"]) {
+      onBeforeInput({
+        inputType: "insertText",
+        data,
+        isComposing: false,
+        preventDefault: vi.fn(),
+      });
+    }
+
+    expect(typeAssistedText).toHaveBeenNthCalledWith(1, "(");
+    expect(typeAssistedText).toHaveBeenNthCalledWith(2, "😀");
   });
 });
 

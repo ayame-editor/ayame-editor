@@ -684,6 +684,11 @@ const KEYWORDS: Record<string, Set<string>> = {
   yaml: new Set(["false", "null", "true"]),
 };
 
+export function completionWordsForScheme(id: SchemeId | null): string[] {
+  if (!id) return [];
+  return [...(KEYWORDS[id] || []), ...COMMON_LITERALS];
+}
+
 export function syntaxGlobMatches(pattern: string, path: string): boolean {
   const normalizedPattern = String(pattern || "")
     .trim()

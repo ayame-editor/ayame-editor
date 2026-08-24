@@ -37,6 +37,15 @@ import { selectedTextForRange } from "./selection-text.js";
 import { flashCount } from "./notifications.js";
 import { charLenOf } from "./text.js";
 import type { ReplaceRangeRequest, ReplaceRectRequest, TailPollResponse } from "./types/api.js";
+import {
+  emptyPairRange,
+  isPairCloser,
+  newlineIndent,
+  pairCloser,
+  shouldAutoClose,
+  shouldSkipCloser,
+} from "./input-assist.js";
+import { resolveSyntaxScheme, schemeDefinition } from "./syntax.js";
 
 type ReplaceEditResponse = {
   stats: { total_lines: number };
@@ -344,7 +353,12 @@ export async function applyRect(l0, l1, c0, c1, text) {
 // is the sorted allCursors() list; `editOf[i]` is the index of cursor i's edit
 // in `edits`, or -1 when the cursor contributed no edit (only possible at the
 // document origin, whose position an edit batch cannot move).
-export async function applyBatch(edits, cursors, editOf) {
+export async function applyBatch(
+  edits,
+  cursors,
+  editOf,
+  options: { caretBackByEdit?: number[] } = {},
+) {
   const ctx = editContext();
   const gen = state.caret.editGeneration;
   const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
@@ -358,7 +372,12 @@ export async function applyBatch(edits, cursors, editOf) {
         const editIndex = editOf[index];
         const position =
           editIndex >= 0 && response.carets?.[editIndex] ? response.carets[editIndex] : cursor;
-        return { line: clampLine(position.line), col: position.col, primary: cursor.primary };
+        const caretBack = editIndex >= 0 ? options.caretBackByEdit?.[editIndex] || 0 : 0;
+        return {
+          line: clampLine(position.line),
+          col: Math.max(0, position.col - caretBack),
+          primary: cursor.primary,
+        };
       });
       const primary = next.find((cursor) => cursor.primary) || next[0];
       setSelection(null);
@@ -381,9 +400,10 @@ export async function applyBatch(edits, cursors, editOf) {
         const editIndex = editOf[index];
         const position =
           editIndex >= 0 && response.carets?.[editIndex] ? response.carets[editIndex] : cursor;
+        const caretBack = editIndex >= 0 ? options.caretBackByEdit?.[editIndex] || 0 : 0;
         moved.set(`${cursor.line}:${cursor.col}`, {
           line: clampLine(position.line),
-          col: position.col,
+          col: Math.max(0, position.col - caretBack),
         });
       });
       const seen = new Set();
@@ -433,6 +453,172 @@ export function multiReplace(cursors, textFor) {
   );
 }
 
+function adoptCursorPositions(cursors, positions) {
+  const next = cursors.map((cursor, index) => ({
+    ...(positions[index] || cursor),
+    primary: cursor.primary,
+  }));
+  const primary = next.find((cursor) => cursor.primary) || next[0];
+  setSelection(null);
+  state.caret.position = { line: primary.line, col: primary.col };
+  setActiveLine(primary.line);
+  state.caret.goalCol = primary.col;
+  state.caret.extraCursors = next
+    .filter((cursor) => cursor !== primary)
+    .map((cursor) => ({ line: cursor.line, col: cursor.col }));
+  state.caret.editGeneration++;
+  revealCaret();
+  render();
+}
+
+async function cursorLineTexts(cursors) {
+  const lines = [...new Set(cursors.map((cursor) => cursor.line))];
+  const entries = await Promise.all(
+    lines.map(async (line) => [line, await oneLineText(line)] as const),
+  );
+  return new Map(entries);
+}
+
+function activeStructureProvider() {
+  const path = state.doc.stat?.path || "";
+  const selection = state.syntax.overrides[path] || "auto";
+  const scheme = resolveSyntaxScheme(path, selection, state.syntax.mappings);
+  return scheme ? schemeDefinition(scheme).structure || null : null;
+}
+
+async function encloseRectSelection(opener: string, closer: string) {
+  const rect = rectRange();
+  if (!rect) return null;
+  const texts = await lineTextsFor(rect.l0, rect.l1 - rect.l0 + 1);
+  const edits = [];
+  const cursors = [];
+  const editOf = [];
+  const caretBackByEdit = [];
+  for (let offset = 0; offset < texts.length; offset++) {
+    const line = rect.l0 + offset;
+    const length = Array.from(texts[offset]).length;
+    const start = Math.min(rect.c0, length);
+    const end = Math.min(rect.c1, length);
+    cursors.push({ line, col: end, primary: line === state.caret.position.line });
+    if (start === end) {
+      edits.push({ l0: line, c0: start, l1: line, c1: start, text: opener + closer });
+      editOf.push(edits.length - 1);
+      caretBackByEdit.push(1);
+    } else {
+      edits.push({ l0: line, c0: start, l1: line, c1: start, text: opener });
+      caretBackByEdit.push(0);
+      edits.push({ l0: line, c0: end, l1: line, c1: end, text: closer });
+      editOf.push(edits.length - 1);
+      caretBackByEdit.push(1);
+    }
+  }
+  if (!cursors.some((cursor) => cursor.primary) && cursors.length) {
+    cursors[cursors.length - 1].primary = true;
+  }
+  return edits.length ? applyBatch(edits, cursors, editOf, { caretBackByEdit }) : null;
+}
+
+async function assistedTypeStep(text: string) {
+  const openerCloser = pairCloser(text);
+  if (!openerCloser && !isPairCloser(text)) return plainTypeStep(text);
+  const rect = rectRange();
+  if (
+    rect &&
+    openerCloser &&
+    state.settings.selectionEnclosure !== false &&
+    (rect.c0 !== rect.c1 || state.settings.closePairs !== false)
+  ) {
+    return encloseRectSelection(text, openerCloser);
+  }
+  const cursors = allCursors();
+  const hasEnclosure =
+    !!openerCloser &&
+    state.settings.selectionEnclosure !== false &&
+    cursors.some((cursor) => cursorSelectionRange(cursor));
+  if (hasEnclosure) {
+    const edits = [];
+    const editOf = [];
+    const caretBackByEdit = [];
+    for (const cursor of cursors) {
+      const range = cursorSelectionRange(cursor);
+      if (range) {
+        edits.push({
+          l0: range.start.line,
+          c0: range.start.col,
+          l1: range.start.line,
+          c1: range.start.col,
+          text,
+        });
+        caretBackByEdit.push(0);
+        edits.push({
+          l0: range.end.line,
+          c0: range.end.col,
+          l1: range.end.line,
+          c1: range.end.col,
+          text: openerCloser,
+        });
+        editOf.push(edits.length - 1);
+        caretBackByEdit.push(1);
+      } else {
+        const autoClose = state.settings.closePairs !== false;
+        edits.push({
+          ...cursorReplaceRange(cursor),
+          text: autoClose ? text + openerCloser : text,
+        });
+        editOf.push(edits.length - 1);
+        caretBackByEdit.push(autoClose ? 1 : 0);
+      }
+    }
+    return applyBatch(edits, cursors, editOf, { caretBackByEdit });
+  }
+  if (state.settings.closePairs === false) return plainTypeStep(text);
+
+  const lines = await cursorLineTexts(cursors);
+  const edits = [];
+  const editOf = [];
+  const caretBackByEdit = [];
+  const fallbackPositions = cursors.map((cursor) => ({ line: cursor.line, col: cursor.col }));
+  let skipped = 0;
+  for (let index = 0; index < cursors.length; index++) {
+    const cursor = cursors[index];
+    const line = lines.get(cursor.line) || "";
+    if (!cursorSelectionRange(cursor) && shouldSkipCloser(line, cursor.col, text)) {
+      // When every caret skips we can move locally. In a mixed batch, this
+      // no-op replacement lets the backend map the skipped caret through edits
+      // above it without recording another undo generation.
+      edits.push({ l0: cursor.line, c0: cursor.col, l1: cursor.line, c1: cursor.col + 1, text });
+      editOf.push(edits.length - 1);
+      caretBackByEdit.push(0);
+      fallbackPositions[index] = { line: cursor.line, col: cursor.col + 1 };
+      skipped++;
+      continue;
+    }
+    const autoClose =
+      !!openerCloser && !cursorSelectionRange(cursor) && shouldAutoClose(line, cursor.col, text);
+    edits.push({ ...cursorReplaceRange(cursor), text: autoClose ? text + openerCloser : text });
+    editOf.push(edits.length - 1);
+    caretBackByEdit.push(autoClose ? 1 : 0);
+  }
+  if (skipped === cursors.length) {
+    adoptCursorPositions(cursors, fallbackPositions);
+    return null;
+  }
+  return applyBatch(edits, cursors, editOf, { caretBackByEdit });
+}
+
+function plainTypeStep(text: string) {
+  if (state.caret.extraCursors.length) {
+    const cursors = allCursors();
+    return hasCursorSelections()
+      ? multiReplace(cursors, () => text)
+      : multiInsert(cursors, () => text);
+  }
+  const rr = rectRange();
+  if (rr) return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, text);
+  const target = replaceTarget();
+  return applyRange(target.l0, target.c0, target.l1, target.c1, text);
+}
+
 // Insert (or replace the selection with) `text`, which may contain newlines.
 // The target range is resolved *inside* the queued step, so a burst of
 // keystrokes each sees the caret left by the previous edit (never a stale one).
@@ -440,26 +626,36 @@ export function multiReplace(cursors, textFor) {
 // (0,0)..(0,0) origin range, which the backend accepts to seed the first line.
 export function typeText(text) {
   if (!state.doc.stat?.open) return;
-  enqueueEdit(() => {
-    if (state.caret.extraCursors.length) {
-      // Multi-cursor: the same text goes in at every caret, or replaces each
-      // cursor's selection, as one undo step.
-      const cursors = allCursors();
-      return hasCursorSelections()
-        ? multiReplace(cursors, () => text)
-        : multiInsert(cursors, () => text);
-    }
-    const rr = rectRange();
-    if (rr) {
-      return applyRect(rr.l0, rr.l1, rr.c0, rr.c1, text);
-    }
-    const t = replaceTarget();
-    return applyRange(t.l0, t.c0, t.l1, t.c1, text);
-  });
+  return enqueueEdit(() => plainTypeStep(text));
+}
+
+export function typeAssistedText(text: string) {
+  if (!state.doc.stat?.open) return Promise.resolve(null);
+  if (Array.from(text).length !== 1) return typeText(text);
+  return enqueueEdit(() => assistedTypeStep(text));
 }
 
 export function insertNewline() {
-  typeText("\n");
+  if (!state.doc.stat?.open) return Promise.resolve(null);
+  if (state.settings.autoIndent === false) return typeText("\n");
+  return enqueueEdit(async () => {
+    if (rectRange()) return plainTypeStep("\n");
+    const cursors = allCursors();
+    const lines = await cursorLineTexts(cursors);
+    const provider = activeStructureProvider();
+    const edits = cursors.map((cursor) => {
+      const range = cursorReplaceRange(cursor);
+      return {
+        ...range,
+        text: `\n${newlineIndent(lines.get(range.l0) || "", range.c0, provider)}`,
+      };
+    });
+    return applyBatch(
+      edits,
+      cursors,
+      cursors.map((_, index) => index),
+    );
+  });
 }
 
 // Decoded length (in Unicode scalars) of each requested line, as a Map. Lines
@@ -516,6 +712,10 @@ async function deleteZeroWidthRect(rr, forward) {
   const lines = [];
   for (let l = rr.l0; l <= rr.l1; l++) lines.push(l);
   const lens = await lineLensFor(lines);
+  const pairTexts =
+    !forward && state.settings.closePairs !== false
+      ? await cursorLineTexts(lines.map((line) => ({ line })))
+      : null;
   const edits = [];
   for (const l of lines) {
     if (!lens.has(l)) continue;
@@ -523,7 +723,14 @@ async function deleteZeroWidthRect(rr, forward) {
     if (forward) {
       if (c < len) edits.push({ l0: l, c0: c, l1: l, c1: c + 1, text: "" });
     } else if (c > 0 && c <= len) {
-      edits.push({ l0: l, c0: c - 1, l1: l, c1: c, text: "" });
+      const pair = emptyPairRange(pairTexts?.get(l) || "", c);
+      edits.push({
+        l0: l,
+        c0: pair?.start ?? c - 1,
+        l1: l,
+        c1: pair?.end ?? c,
+        text: "",
+      });
     }
   }
   if (!edits.length) return null; // nothing to delete on any line — no request
@@ -563,13 +770,22 @@ export function backspace() {
       // a cursor at the document origin contributes no edit. Join edges need
       // the previous line's REAL length, which may live outside the cache.
       const cursors = allCursors();
+      const lines =
+        state.settings.closePairs !== false ? await cursorLineTexts(cursors) : new Map();
       const lens = await lineLensFor(
         cursors.filter((c) => c.col === 0 && c.line > 0).map((c) => c.line - 1),
       );
       const edits = [];
       const editOf = cursors.map((c) => {
         if (c.col > 0) {
-          edits.push({ l0: c.line, c0: c.col - 1, l1: c.line, c1: c.col, text: "" });
+          const pair = emptyPairRange(lines.get(c.line) || "", c.col);
+          edits.push({
+            l0: c.line,
+            c0: pair?.start ?? c.col - 1,
+            l1: c.line,
+            c1: pair?.end ?? c.col,
+            text: "",
+          });
         } else if (c.line > 0 && lens.has(c.line - 1)) {
           edits.push({ l0: c.line - 1, c0: lens.get(c.line - 1), l1: c.line, c1: 0, text: "" });
         } else {
@@ -581,7 +797,11 @@ export function backspace() {
       return applyBatch(edits, cursors, editOf);
     }
     const { line, col } = state.caret.position;
-    if (col > 0) return applyRange(line, col - 1, line, col, "");
+    if (col > 0) {
+      const pair =
+        state.settings.closePairs !== false ? emptyPairRange(await oneLineText(line), col) : null;
+      return applyRange(line, pair?.start ?? col - 1, line, pair?.end ?? col, "");
+    }
     if (line > 0) {
       const lens = await lineLensFor([line - 1]);
       if (!lens.has(line - 1)) return null;

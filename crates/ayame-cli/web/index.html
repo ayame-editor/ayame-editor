@@ -322,6 +322,8 @@
             </div>
           </div>
           <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="処理中" data-i18n-aria-label="dialog.operation.busy"></div>
+          <div id="completion-popup" class="completion-popup hidden" role="listbox"
+               aria-label="単語補完候補" data-i18n-aria-label="completion.label"></div>
         </main>
       </div>
 
@@ -488,6 +490,26 @@
               <label class="set-row">
                 <span class="set-label" data-i18n="menu.wordWrap">折り返し</span>
                 <input id="set-word-wrap" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="inputAssist.autoIndent">自動インデント</span>
+                <input id="set-auto-indent" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="inputAssist.closePairs">括弧・引用符を自動で閉じる</span>
+                <input id="set-close-pairs" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="inputAssist.selectionEnclosure">選択範囲を括弧・引用符で囲む</span>
+                <input id="set-selection-enclosure" type="checkbox" />
+                <span class="set-val"></span>
+              </label>
+              <label class="set-row">
+                <span class="set-label" data-i18n="inputAssist.wordCompletion">単語補完</span>
+                <input id="set-word-completion" type="checkbox" />
                 <span class="set-val"></span>
               </label>
             </div>

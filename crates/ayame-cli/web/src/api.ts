@@ -3,6 +3,8 @@
 
 export type {
   ChangeHistoryResponse,
+  CompletionRequest,
+  CompletionResponse,
   FindResponse,
   GrepResponse,
   LineByteResponse,

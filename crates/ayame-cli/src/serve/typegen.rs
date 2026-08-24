@@ -23,6 +23,7 @@ use super::analysis::{
     AnalysisCancelRequest, AnalysisHit, AnalysisHitsResponse, AnalysisNavigateResponse,
     AnalysisProfile, AnalysisRuleConfig, AnalysisRuleStatus, AnalysisStartRequest, AnalysisStatus,
 };
+use super::completion::{CompletionRequest, CompletionResponse};
 use super::edit::{
     CaretPosition, EditSaveRequest, EditSaveResponse, LinesResponse, RecoverRequest, ReopenRequest,
     ReplaceRangeRequest, ReplaceRectRequest, SelectionSaveRequest, SelectionSaveResponse,
@@ -70,6 +71,8 @@ fn bridge() -> Bridge {
         .decl(&decl::<BrowseEntry>())
         .decl(&decl::<BrowseResponse>())
         .decl(&decl::<LinesResponse>())
+        .decl(&decl::<CompletionRequest>())
+        .decl(&decl::<CompletionResponse>())
         .decl(&decl::<FindResponse>())
         .decl(&decl::<SearchResponse>())
         .decl(&decl::<GrepResponse>())

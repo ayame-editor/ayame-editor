@@ -856,6 +856,69 @@ async fn replace_batch_applies_all_carets_as_one_undo_step() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completion_returns_only_bounded_words_from_the_edited_view() {
+    let f = scratch_file("completion.txt", b"alpha alpine\nbeta\n");
+    let addr = start_server(&f).await;
+    let host = format!("127.0.0.1:{}", addr.port());
+    let origin = format!("http://{host}");
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/edit/replace_range",
+            &host,
+            Some(&origin),
+            r#"{"l0":1,"c0":4,"l1":1,"c1":4,"text":" albatross"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+
+    let (status, body) = send(
+        addr,
+        post_json(
+            "/api/completion",
+            &host,
+            Some(&origin),
+            r#"{"prefix":"al","deadline_ms":250}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "body: {body}");
+    let json = response_json(&body);
+    let words = json["candidates"].as_array().unwrap();
+    assert!(words.contains(&serde_json::json!("alpha")), "body: {body}");
+    assert!(words.contains(&serde_json::json!("alpine")), "body: {body}");
+    assert!(
+        words.contains(&serde_json::json!("albatross")),
+        "body: {body}"
+    );
+    assert!(
+        json["scanned_bytes"].as_u64().unwrap() <= completion::MAX_SCAN_BYTES as u64,
+        "body: {body}"
+    );
+    assert!(words.len() <= completion::MAX_CANDIDATES);
+    assert!(
+        !body.contains("beta albatross"),
+        "source lines leaked: {body}"
+    );
+
+    let (status, _) = send(
+        addr,
+        post_json(
+            "/api/completion",
+            &host,
+            Some(&origin),
+            r#"{"prefix":"","deadline_ms":250}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, 400);
+
+    let _ = std::fs::remove_file(&f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn find_sees_unsaved_edits_through_a_cached_snapshot() {
     let f = scratch_file("find.txt", b"alpha\nbeta\ngamma\n");
     let (addr, state) = start_server_with_state(&f).await;

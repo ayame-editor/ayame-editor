@@ -188,6 +188,7 @@ Shortcuts`.
 | Delete line | `Ctrl+Shift+K` |
 | Copy / cut / paste | `Ctrl+C`, `Ctrl+X`, `Ctrl+V` |
 | Search options: case / word / regex | `Alt+C`, `Alt+W`, `Alt+R` |
+| Explicitly open document-word completion | `Ctrl+Space` |
 | Increase / decrease / reset font size | `Ctrl++`, `Ctrl+-`, `Ctrl+0` |
 | Sort into a new temporary tab | Unassigned |
 | Split current file | Unassigned |
@@ -234,6 +235,14 @@ The syntax-scheme manager edits favorites and their order, plus ordered
 `file name/glob -> scheme` mappings. Preferences are stored in shared UI state
 and can be imported or exported as JSON. Invalid JSON entries are skipped
 individually without discarding valid entries.
+
+Auto indent, bracket/quote closing, selection enclosure, and word completion
+can each be toggled under `Edit` -> `Settings`. Input assistance stays off
+during IME composition and commit; committed text remains one plain edit.
+Automatic word suggestions consult only syntax vocabulary and visible/recent
+caches. A document scan runs only after explicit `Ctrl+Space`, with fixed time,
+scan-size, candidate-count, and memory budgets. If its deadline expires, the
+popup keeps the partial suggestions found so far.
 
 Folding stores only collapsed line intervals and fetches only visible line
 ranges. A folded header reports hidden lines and any known bookmark, change,
