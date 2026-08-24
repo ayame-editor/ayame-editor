@@ -902,14 +902,7 @@ export function initSettings() {
     }
   });
   $("keymap-json-edit").addEventListener("click", openKeymapJsonDoc);
-  $("keymap-modal").addEventListener("click", (e) => {
-    if (e.target === $("keymap-modal")) hideKeymap();
-  });
-
   $("settings-close").addEventListener("click", hideSettings);
-  $("settings").addEventListener("click", (e) => {
-    if (e.target === $("settings")) hideSettings();
-  });
   $("settings-search").addEventListener("input", () => filterSettings());
   $("settings-reset").addEventListener("click", async () => {
     if (await askConfirm(t("settings.reset"), t("settings.resetConfirm"))) {

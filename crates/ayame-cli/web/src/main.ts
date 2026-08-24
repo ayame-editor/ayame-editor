@@ -7,7 +7,7 @@
 // position to a thumb, side-stepping the browser's ~33M-pixel element-height
 // ceiling entirely.
 
-import { $, displayName } from "./dom.js";
+import { $, displayName, setModalOpen } from "./dom.js";
 import { state } from "./state.js";
 import { t } from "./i18n.js";
 import { apiPost } from "./api.js";
@@ -83,7 +83,7 @@ export async function boot() {
   try {
     await refreshStat();
   } catch (e) {
-    $("overlay").classList.remove("hidden");
+    setModalOpen($("overlay"), true);
     $("overlay").textContent = `${t("error.serverUnreachable")}: ${e.message}`;
     postNativeMessage({ type: "ready" }); // still show the window so the error is visible
     return;

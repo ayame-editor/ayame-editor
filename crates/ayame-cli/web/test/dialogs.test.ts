@@ -89,4 +89,16 @@ describe("confirmation dialog keyboard actions", () => {
     keydownEnter();
     await expect(result).resolves.toBe(CONFIRM_ALT);
   });
+
+  it("uses the shared modal close registration for Escape and backdrop dismissal", async () => {
+    const escaped = askConfirm("title", "message");
+    keydown("Escape");
+    await expect(escaped).resolves.toBe(false);
+
+    const backdrop = askConfirm("title", "message");
+    document
+      .getElementById("confirm")!
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await expect(backdrop).resolves.toBe(false);
+  });
 });

@@ -25,6 +25,7 @@ import {
   showMessage,
 } from "./dialogs.js";
 import { beaconSessionSnapshot, saveSessionSnapshot } from "./persistence.js";
+import { withOverwriteRetry } from "./saveflow.js";
 import type {
   ArtifactResponse,
   BrowseResponse,
@@ -250,44 +251,21 @@ export async function saveCopy(options: SaveOptions = {}) {
   savingCount++;
   setSavingUI();
   try {
-    const res = await apiPost<EditSaveResponse, EditSaveRequest>(
-      "/api/edit/save",
-      editSaveRequest({ ...target, switch_to_saved: true }),
+    const res = await withOverwriteRetry(
+      target.path,
+      (overwrite) =>
+        apiPost<EditSaveResponse, EditSaveRequest>(
+          "/api/edit/save",
+          editSaveRequest({ ...target, overwrite, switch_to_saved: true }),
+        ),
+      !!target.overwrite,
     );
+    if (!res) return false;
     await finishSaveAs(res, { announce });
     return true;
   } catch (e) {
-    let finalError = e;
-    if (!target.overwrite && isExistsError(e)) {
-      const ok = await askConfirm(
-        t("dialog.overwrite.title"),
-        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
-        {
-          okLabel: t("dialog.overwrite.ok"),
-          danger: true,
-        },
-      );
-      if (ok) {
-        try {
-          const res = await apiPost<EditSaveResponse, EditSaveRequest>(
-            "/api/edit/save",
-            editSaveRequest({
-              ...target,
-              overwrite: true,
-              switch_to_saved: true,
-            }),
-          );
-          await finishSaveAs(res, { announce });
-          return true;
-        } catch (retryError) {
-          finalError = retryError;
-        }
-      } else {
-        return false;
-      }
-    }
     flashCount(t("error.saveError"), "error");
-    showMessage(t("error.saveError"), serverMessage(finalError));
+    showMessage(t("error.saveError"), serverMessage(e));
     return false;
   } finally {
     savingCount--;
@@ -296,9 +274,7 @@ export async function saveCopy(options: SaveOptions = {}) {
   }
 }
 
-export function isExistsError(e) {
-  return isApiErrorCode(e, "exists");
-}
+export { isExistsError } from "./saveflow.js";
 
 // 名前を付けて保存 opens on the current file's own folder and name (Windows
 // standard); untitled buffers suggest the expanded 新規ファイル名 template
@@ -947,39 +923,37 @@ function suggestedGrepPath() {
 }
 
 async function runGrepSave(query, opts, target) {
-  const opId = newOperationId("grep");
-  showLoading(t("dialog.grepSave.running"), { opId, cancel: true });
   let res;
   try {
-    res = await apiPost<ArtifactResponse, GrepSaveRequest>("/api/grep/save", {
-      op_id: opId,
-      path: target.path,
-      query,
-      regex: opts.regex,
-      ci: opts.ci,
-      word: opts.word,
-      overwrite: !!target.overwrite,
-      jobs: null,
-      chunk_lines: null,
-    });
+    res = await withOverwriteRetry(
+      target.path,
+      async (overwrite) => {
+        const opId = newOperationId("grep");
+        showLoading(t("dialog.grepSave.running"), { opId, cancel: true });
+        try {
+          return await apiPost<ArtifactResponse, GrepSaveRequest>("/api/grep/save", {
+            op_id: opId,
+            path: target.path,
+            query,
+            regex: opts.regex,
+            ci: opts.ci,
+            word: opts.word,
+            overwrite,
+            jobs: null,
+            chunk_lines: null,
+          });
+        } finally {
+          hideLoading();
+        }
+      },
+      !!target.overwrite,
+    );
   } catch (e) {
-    hideLoading();
-    // The in-app picker doesn't confirm overwrites itself (the OS dialog
-    // does): same conflict-confirm-retry flow as save-as.
-    if (!target.overwrite && isExistsError(e)) {
-      const ok = await askConfirm(
-        t("dialog.overwrite.title"),
-        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
-        { okLabel: t("dialog.overwrite.ok"), danger: true },
-      );
-      if (ok) await runGrepSave(query, opts, { ...target, overwrite: true });
-      return;
-    }
     flashCount(t("dialog.grepSave.error"), "error");
     showMessage(t("dialog.grepSave.error"), serverMessage(e));
     return;
   }
-  hideLoading();
+  if (!res) return;
   flashCount(t("file.saved", { path: displayPath(res.path) }));
   // Open the extracted lines so the result is immediately inspectable.
   await openPath(res.path);
@@ -1012,30 +986,30 @@ export async function bookmarksToFile() {
 }
 
 async function runBookmarkSave(target) {
-  showLoading(t("bookmark.saving"));
   let result;
   try {
-    result = await apiPost<MarkerSaveResponse, MarkerSaveRequest>("/api/markers/save", {
-      kind: "bookmark",
-      path: target.path,
-      overwrite: !!target.overwrite,
-    });
+    result = await withOverwriteRetry(
+      target.path,
+      async (overwrite) => {
+        showLoading(t("bookmark.saving"));
+        try {
+          return await apiPost<MarkerSaveResponse, MarkerSaveRequest>("/api/markers/save", {
+            kind: "bookmark",
+            path: target.path,
+            overwrite,
+          });
+        } finally {
+          hideLoading();
+        }
+      },
+      !!target.overwrite,
+    );
   } catch (error) {
-    hideLoading();
-    if (!target.overwrite && isExistsError(error)) {
-      const overwrite = await askConfirm(
-        t("dialog.overwrite.title"),
-        t("dialog.overwrite.ask", { name: displayPath(target.path) }),
-        { okLabel: t("dialog.overwrite.ok"), danger: true },
-      );
-      if (overwrite) await runBookmarkSave({ ...target, overwrite: true });
-      return;
-    }
     flashCount(t("bookmark.saveError"), "error");
     showMessage(t("bookmark.saveError"), serverMessage(error));
     return;
   }
-  hideLoading();
+  if (!result) return;
   flashCount(
     t("bookmark.saved", {
       count: commas(result.lines),

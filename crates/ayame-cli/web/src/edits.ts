@@ -224,6 +224,61 @@ export function replaceTarget() {
   };
 }
 
+type EditCommitResponse = {
+  stats?: { total_lines: number };
+};
+
+type EditCommitOptions<T> = {
+  editGeneration: number;
+  applyCurrent?: (response: T) => void;
+  applyStale?: (response: T) => void;
+  afterRefresh?: (response: T) => void;
+};
+
+// Commit the common tail of every edit response. The document-generation
+// check, authoritative line count, caret-generation guard, refresh error
+// handling, reveal, and render order live here so a new edit path cannot omit
+// one of them (#124).
+async function commitEdit<T extends EditCommitResponse>(
+  ctx,
+  response: T,
+  opts: EditCommitOptions<T>,
+) {
+  if (!sameEditContext(ctx)) return false;
+  if (response.stats) state.view.total = response.stats.total_lines;
+
+  const current = state.caret.editGeneration === opts.editGeneration;
+  if (current) {
+    opts.applyCurrent?.(response);
+  } else if (opts.applyStale) {
+    opts.applyStale(response);
+  } else {
+    // User navigation won the race: preserve it, only clamping the line to the
+    // authoritative document length returned by the edit.
+    const line = Math.min(state.caret.position.line, Math.max(0, state.view.total - 1));
+    state.caret.position = { line, col: state.caret.position.col };
+    setActiveLine(line);
+  }
+
+  revealCaret(); // ensure the reload below covers the chosen caret line
+  try {
+    await reloadViewport();
+    await refreshStat();
+  } catch (error) {
+    console.error("post-edit refresh failed", error);
+    flashCount(t("editor.reloadError"));
+  }
+  if (!sameEditContext(ctx)) return false;
+  // A navigation that happened during refresh must also win over the edit's
+  // deferred caret/selection placement.
+  if (state.caret.editGeneration === opts.editGeneration) {
+    opts.afterRefresh?.(response);
+  }
+  revealCaret();
+  render();
+  return true;
+}
+
 // The one primitive every edit funnels through. The backend returns the
 // authoritative post-edit caret (already column-clamped against the real
 // document), so we commit it — and the new line count — to local state
@@ -238,33 +293,17 @@ export async function applyRange(l0, c0, l1, c1, text) {
     "/api/edit/replace_range",
     body,
   );
-  if (!sameEditContext(ctx)) return;
-  state.view.total = res.stats.total_lines;
-  if (state.caret.editGeneration === gen) {
-    // No user navigation happened during the round-trip: honor the edit caret.
-    const line = Math.min(res.caret_line, Math.max(0, state.view.total - 1));
-    setSelection(null);
-    state.caret.position = { line, col: res.caret_col };
-    setActiveLine(line);
-    state.caret.goalCol = res.caret_col;
-  } else {
-    // The user moved the caret mid-edit — keep their position, re-clamped to
-    // the new line count (don't clobber it with the edit's caret).
-    const line = Math.min(state.caret.position.line, Math.max(0, state.view.total - 1));
-    state.caret.position = { line, col: state.caret.position.col };
-    setActiveLine(line);
-  }
-  revealCaret(); // scroll so the caret line is covered by the reload below
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-edit refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  revealCaret();
-  render();
+  await commitEdit(ctx, res, {
+    editGeneration: gen,
+    applyCurrent(response) {
+      // No user navigation happened during the round-trip: honor the edit caret.
+      const line = Math.min(response.caret_line, Math.max(0, state.view.total - 1));
+      setSelection(null);
+      state.caret.position = { line, col: response.caret_col };
+      setActiveLine(line);
+      state.caret.goalCol = response.caret_col;
+    },
+  });
 }
 
 export async function applyRect(l0, l1, c0, c1, text) {
@@ -275,26 +314,16 @@ export async function applyRect(l0, l1, c0, c1, text) {
     "/api/edit/replace_rect",
     body,
   );
-  if (!sameEditContext(ctx)) return;
-  state.view.total = res.stats.total_lines;
-  if (state.caret.editGeneration === gen) {
-    const line = Math.min(res.caret_line, Math.max(0, state.view.total - 1));
-    setSelection(null);
-    state.caret.position = { line, col: res.caret_col };
-    setActiveLine(line);
-    state.caret.goalCol = res.caret_col;
-  }
-  revealCaret();
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-rect-edit refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  revealCaret();
-  render();
+  await commitEdit(ctx, res, {
+    editGeneration: gen,
+    applyCurrent(response) {
+      const line = Math.min(response.caret_line, Math.max(0, state.view.total - 1));
+      setSelection(null);
+      state.caret.position = { line, col: response.caret_col };
+      setActiveLine(line);
+      state.caret.goalCol = response.caret_col;
+    },
+  });
 }
 
 // Multi-cursor edits: send every cursor's replacement as ONE batch (the server
@@ -308,62 +337,55 @@ export async function applyBatch(edits, cursors, editOf) {
   const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
     edits,
   });
-  if (!sameEditContext(ctx)) return;
-  state.view.total = res.stats.total_lines;
-  if (state.caret.editGeneration === gen) {
-    const clampLine = (l) => Math.min(l, Math.max(0, state.view.total - 1));
-    const next = cursors.map((c, i) => {
-      const k = editOf[i];
-      const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
-      return { line: clampLine(p.line), col: p.col, primary: c.primary };
-    });
-    const primary = next.find((c) => c.primary) || next[0];
-    setSelection(null);
-    state.caret.position = { line: primary.line, col: primary.col };
-    setActiveLine(primary.line);
-    state.caret.goalCol = primary.col;
-    state.caret.extraCursors = next
-      .filter((c) => c !== primary)
-      .map((c) => ({ line: c.line, col: c.col }));
-  } else {
-    // The user moved the caret mid-edit: keep their position, re-clamped to
-    // the new line count (don't clobber it with the edit's caret).
-    const line = Math.min(state.caret.position.line, Math.max(0, state.view.total - 1));
-    state.caret.position = { line, col: state.caret.position.col };
-    setActiveLine(line);
-    if (state.caret.extraCursors.length) {
-      // Plain caret motion / cursor-adds keep the extras alive mid-flight.
-      // Remap ONLY the cursors this batch owned (matched by their batch-start
-      // position) onto their post-edit positions; cursors the user added or
-      // removed while the batch was in flight are left exactly as they are.
-      const clampLine = (l) => Math.min(l, Math.max(0, state.view.total - 1));
+  await commitEdit(ctx, res, {
+    editGeneration: gen,
+    applyCurrent(response) {
+      const clampLine = (line) => Math.min(line, Math.max(0, state.view.total - 1));
+      const next = cursors.map((cursor, index) => {
+        const editIndex = editOf[index];
+        const position =
+          editIndex >= 0 && response.carets?.[editIndex] ? response.carets[editIndex] : cursor;
+        return { line: clampLine(position.line), col: position.col, primary: cursor.primary };
+      });
+      const primary = next.find((cursor) => cursor.primary) || next[0];
+      setSelection(null);
+      state.caret.position = { line: primary.line, col: primary.col };
+      setActiveLine(primary.line);
+      state.caret.goalCol = primary.col;
+      state.caret.extraCursors = next
+        .filter((cursor) => cursor !== primary)
+        .map((cursor) => ({ line: cursor.line, col: cursor.col }));
+    },
+    applyStale(response) {
+      // Remap only cursors owned by this batch; user-added/removed cursors win.
+      const clampLine = (line) => Math.min(line, Math.max(0, state.view.total - 1));
+      const line = clampLine(state.caret.position.line);
+      state.caret.position = { line, col: state.caret.position.col };
+      setActiveLine(line);
+      if (!state.caret.extraCursors.length) return;
       const moved = new Map();
-      cursors.forEach((c, i) => {
-        const k = editOf[i];
-        const p = k >= 0 && res.carets?.[k] ? res.carets[k] : c;
-        moved.set(`${c.line}:${c.col}`, { line: clampLine(p.line), col: p.col });
+      cursors.forEach((cursor, index) => {
+        const editIndex = editOf[index];
+        const position =
+          editIndex >= 0 && response.carets?.[editIndex] ? response.carets[editIndex] : cursor;
+        moved.set(`${cursor.line}:${cursor.col}`, {
+          line: clampLine(position.line),
+          col: position.col,
+        });
       });
       const seen = new Set();
-      state.caret.extraCursors = state.caret.extraCursors.flatMap((c) => {
-        const next = moved.get(`${c.line}:${c.col}`) || { line: clampLine(c.line), col: c.col };
+      state.caret.extraCursors = state.caret.extraCursors.flatMap((cursor) => {
+        const next = moved.get(`${cursor.line}:${cursor.col}`) || {
+          line: clampLine(cursor.line),
+          col: cursor.col,
+        };
         const key = `${next.line}:${next.col}`;
-        if (seen.has(key)) return []; // two cursors landing together collapse
+        if (seen.has(key)) return [];
         seen.add(key);
         return [next];
       });
-    }
-  }
-  revealCaret();
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-batch-edit refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  revealCaret();
-  render();
+    },
+  });
 }
 
 // One same-shaped insertion per cursor. `textFor(i)` is the string inserted at
@@ -493,31 +515,27 @@ async function deleteZeroWidthRect(rr, forward) {
   }
   if (!edits.length) return null; // nothing to delete on any line — no request
   const ctx = editContext();
-  await apiPost("/api/edit/replace_batch", { edits });
-  if (!sameEditContext(ctx)) return;
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-rect-delete refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  if (state.caret.editGeneration !== gen) return;
-  // Keep the column caret alive at the new column so a held Backspace/Delete
-  // keeps acting on every line.
-  const newCol = forward ? c : Math.max(0, c - 1);
-  const l0 = Math.min(rr.l0, Math.max(0, state.view.total - 1));
-  const l1 = Math.min(rr.l1, Math.max(0, state.view.total - 1));
-  setSelection({
-    anchor: { line: l0, col: newCol },
-    head: { line: l1, col: newCol },
-    rect: true,
+  const response = await apiPost<BatchEditResponse, { edits: unknown[] }>(
+    "/api/edit/replace_batch",
+    { edits },
+  );
+  await commitEdit(ctx, response, {
+    editGeneration: gen,
+    afterRefresh() {
+      // Keep the column caret alive at the new column so a held
+      // Backspace/Delete keeps acting on every line.
+      const newCol = forward ? c : Math.max(0, c - 1);
+      const l0 = Math.min(rr.l0, Math.max(0, state.view.total - 1));
+      const l1 = Math.min(rr.l1, Math.max(0, state.view.total - 1));
+      setSelection({
+        anchor: { line: l0, col: newCol },
+        head: { line: l1, col: newCol },
+        rect: true,
+      });
+      state.caret.extraCursors = [];
+      setCaret(l1, newCol);
+    },
   });
-  state.caret.extraCursors = [];
-  setCaret(l1, newCol);
-  revealCaret();
-  render();
 }
 
 export function backspace() {
@@ -735,24 +753,23 @@ export async function transformSelection(mode) {
 // transform, replace-all) and refresh the view around the existing caret.
 export async function applyBatchPlain(edits) {
   const ctx = editContext();
-  await apiPost("/api/edit/replace_batch", { edits });
-  if (!sameEditContext(ctx)) return;
-  setSelection(null);
-  state.caret.extraCursors = [];
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-batch refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  setCaret(
-    Math.min(state.caret.position.line, Math.max(0, state.view.total - 1)),
-    state.caret.position.col,
-  );
-  revealCaret();
-  render();
+  const gen = state.caret.editGeneration;
+  const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
+    edits,
+  });
+  await commitEdit(ctx, res, {
+    editGeneration: gen,
+    applyCurrent() {
+      setSelection(null);
+      state.caret.extraCursors = [];
+    },
+    afterRefresh() {
+      setCaret(
+        Math.min(state.caret.position.line, Math.max(0, state.view.total - 1)),
+        state.caret.position.col,
+      );
+    },
+  });
 }
 
 // ---- whole-line operations (行を複製 / 移動 / 削除) -------------------------
@@ -810,31 +827,32 @@ export function shiftLineSelection(sel, delta) {
 // caret/selection deliberately instead of collapsing to the pre-edit caret.
 export async function applyLineEdit(edits, caret, sel) {
   const ctx = editContext();
-  await apiPost("/api/edit/replace_batch", { edits });
-  if (!sameEditContext(ctx)) return;
-  state.caret.extraCursors = []; // line ops are single-caret
-  try {
-    await reloadViewport();
-    await refreshStat();
-  } catch (e) {
-    console.error("post-line-edit refresh failed", e);
-    flashCount(t("editor.reloadError"));
-  }
-  if (!sameEditContext(ctx)) return;
-  const last = Math.max(0, state.view.total - 1);
-  const place = (p) => {
-    const line = Math.min(Math.max(0, p.line), last);
-    const cached = cachedLine(line);
-    const col = cached ? Math.min(p.col, charLenOf(cached.text ?? "")) : Math.max(0, p.col);
-    return { line, col };
-  };
-  const c = place(caret);
-  state.caret.position = c;
-  setActiveLine(c.line);
-  state.caret.goalCol = c.col;
-  setSelection(sel ? { anchor: place(sel.anchor), head: place(sel.head) } : null);
-  revealCaret();
-  render();
+  const gen = state.caret.editGeneration;
+  const res = await apiPost<BatchEditResponse, { edits: unknown[] }>("/api/edit/replace_batch", {
+    edits,
+  });
+  await commitEdit(ctx, res, {
+    editGeneration: gen,
+    applyCurrent() {
+      state.caret.extraCursors = []; // line ops are single-caret
+    },
+    afterRefresh() {
+      const last = Math.max(0, state.view.total - 1);
+      const place = (position) => {
+        const line = Math.min(Math.max(0, position.line), last);
+        const cached = cachedLine(line);
+        const col = cached
+          ? Math.min(position.col, charLenOf(cached.text ?? ""))
+          : Math.max(0, position.col);
+        return { line, col };
+      };
+      const nextCaret = place(caret);
+      state.caret.position = nextCaret;
+      setActiveLine(nextCaret.line);
+      state.caret.goalCol = nextCaret.col;
+      setSelection(sel ? { anchor: place(sel.anchor), head: place(sel.head) } : null);
+    },
+  });
 }
 
 // 行を複製: duplicate the covered line block just below itself.

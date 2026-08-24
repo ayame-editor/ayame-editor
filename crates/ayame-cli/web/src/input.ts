@@ -1,10 +1,9 @@
 // Ayame Editor — input module. Type-stripped to JS at build time (build.rs, oxc).
-import { $, initModalFocusTrap, modalVisible } from "./dom.js";
+import { $, initModalFocusTrap } from "./dom.js";
 import { DEFAULT_SETTINGS, LINE_HEIGHT, state } from "./state.js";
 import { t } from "./i18n.js";
 import {
   convertSave,
-  convertVisible,
   hideConvert,
   reopenWithEncoding,
   saveCopy,
@@ -27,14 +26,12 @@ import {
 } from "./editor.js";
 import { addCursorAbove, addCursorBelow, clearExtraCursors, caretToDocEnd } from "./selection.js";
 import {
-  commandPaletteVisible,
   ctxMenuVisible,
   fileMenuVisible,
   hideCommandPalette,
   hideCtxMenu,
   hideFileMenu,
   hideKeymap,
-  keymapVisible,
   matchesShortcut,
   refreshFindOptButtons,
   runAction,
@@ -60,7 +57,6 @@ import {
 } from "./edits.js";
 import {
   findStep,
-  grepVisible,
   hideFind,
   hideGrep,
   replaceAll,
@@ -74,14 +70,8 @@ import {
   updateCount,
 } from "./search.js";
 import { flashCount } from "./notifications.js";
-import {
-  cancelLoading,
-  confirmVisible,
-  formVisible,
-  loadingCancelable,
-  promptVisible,
-} from "./dialogs.js";
-import { hideOpener, openerVisible } from "./workspace.js";
+import { cancelLoading, loadingCancelable } from "./dialogs.js";
+import { hideOpener } from "./workspace.js";
 import {
   adjustFontSize,
   applyKeymapFromBuffer,
@@ -89,28 +79,36 @@ import {
   clampFontSize,
   FONT_SIZE_STEP,
   hideSettings,
-  settingsVisible,
   setFontSize,
 } from "./settings.js";
 import { isWordChar } from "./text.js";
-import { anyModalOpen } from "./modal-state.js";
+import { anyModalOpen, closeTopModal, initModalRegistry, registerModal } from "./modal-state.js";
 
 export { anyModalOpen };
 
-const ESCAPE_CLOSE_HANDLERS: [() => boolean, () => void][] = [
-  // A cancelable long operation: Esc requests cancel instead of being swallowed
-  // by the loadingVisible() modal guard below (#184).
-  [loadingCancelable, cancelLoading],
+registerModal("settings", { onClose: hideSettings, closeOnBackdrop: true });
+registerModal("keymap-modal", { onClose: hideKeymap, closeOnBackdrop: true });
+registerModal("command-palette", { onClose: hideCommandPalette, closeOnBackdrop: true });
+registerModal("grep-modal", { onClose: hideGrep, closeOnBackdrop: true });
+registerModal("bookmark-modal", {
+  onClose: () => $("bookmark-close").click(),
+  closeOnBackdrop: true,
+});
+registerModal("analysis-modal", {
+  onClose: () => $("analysis-close").click(),
+  closeOnBackdrop: true,
+});
+registerModal("opener", { onClose: hideOpener, closeOnBackdrop: true });
+registerModal("convert-modal", { onClose: hideConvert, closeOnBackdrop: true });
+registerModal("overlay", {
+  onClose: () => {
+    if (loadingCancelable()) cancelLoading();
+  },
+});
+
+const ESCAPE_SURFACES: [() => boolean, () => void][] = [
   [ctxMenuVisible, hideCtxMenu],
   [fileMenuVisible, () => hideFileMenu(true)],
-  [keymapVisible, hideKeymap],
-  [commandPaletteVisible, hideCommandPalette],
-  [() => modalVisible("bookmark-modal"), () => $("bookmark-close").click()],
-  [() => modalVisible("analysis-modal"), () => $("analysis-close").click()],
-  [grepVisible, hideGrep],
-  [settingsVisible, hideSettings],
-  [convertVisible, hideConvert],
-  [openerVisible, hideOpener],
   [
     () => state.search.findOpen,
     () => {
@@ -228,9 +226,6 @@ export function initEvents() {
     reopenWithEncoding(encoding);
   });
   $("convert-modal").addEventListener("keydown", onConvertModalKey);
-  $("convert-modal").addEventListener("click", (e) => {
-    if (e.target === $("convert-modal")) hideConvert();
-  });
   $("st-enc").addEventListener("click", showConvert);
   $("st-eol").addEventListener("click", showConvert);
   $("st-fontsize").addEventListener("click", () => setFontSize(DEFAULT_SETTINGS.fontSize));
@@ -255,9 +250,6 @@ export function initEvents() {
   $("undo-edit").addEventListener("click", undoEdit);
   $("redo-edit").addEventListener("click", redoEdit);
   $("grep-close").addEventListener("click", hideGrep);
-  $("grep-modal").addEventListener("click", (e) => {
-    if (e.target === $("grep-modal")) hideGrep();
-  });
 
   // Keep the column ruler aligned as the text scrolls horizontally.
   $("content").addEventListener("scroll", () => {
@@ -267,6 +259,7 @@ export function initEvents() {
   });
 
   document.addEventListener("keydown", onGlobalKey);
+  initModalRegistry();
   initModalFocusTrap();
   window.addEventListener("resize", scheduleRender);
 }
@@ -277,9 +270,12 @@ export function initEvents() {
 // opener / prompt / settings), never the editor's hidden textarea.
 export function onGlobalKey(e) {
   const inField = e.target.tagName === "INPUT";
-  if (promptVisible() || formVisible() || confirmVisible()) return;
   if (e.key === "Escape") {
-    const handler = ESCAPE_CLOSE_HANDLERS.find(([visible]) => visible());
+    if (closeTopModal()) {
+      e.preventDefault();
+      return;
+    }
+    const handler = ESCAPE_SURFACES.find(([visible]) => visible());
     if (handler) {
       e.preventDefault();
       handler[1]();

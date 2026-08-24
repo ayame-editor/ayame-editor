@@ -10,7 +10,15 @@ vi.mock("../src/api.js", () => ({
   apiPost: vi.fn(() => Promise.resolve({})),
 }));
 
-import { activeTrapRoot, initModalFocusTrap, setModalOpen } from "../src/dom.js";
+import {
+  activeTrapRoot,
+  anyModalOpen,
+  closeTopModal,
+  initModalFocusTrap,
+  initModalRegistry,
+  registerModal,
+  setModalOpen,
+} from "../src/dom.js";
 import { cancelLoading, loadingCancelable, showLoading } from "../src/dialogs.js";
 
 // The focus trap installs one document-level listener for the whole app; do the
@@ -62,6 +70,44 @@ describe("modal inert backdrop (#160)", () => {
     setModalOpen(confirm, false);
     expect(opener.hasAttribute("inert")).toBe(false);
     expect(opener.getAttribute("aria-hidden")).toBe("false");
+  });
+
+  it("derives LIFO Escape, backdrop close, and ARIA from one registration", () => {
+    document.body.innerHTML = `
+      <div id="app"></div>
+      <div id="lower-test-modal" class="modal hidden"></div>
+      <div id="upper-test-modal" class="modal hidden"></div>`;
+    const lower = document.getElementById("lower-test-modal")!;
+    const upper = document.getElementById("upper-test-modal")!;
+    const closed: string[] = [];
+    const close = (name: string, modal: HTMLElement) => () => {
+      closed.push(name);
+      setModalOpen(modal, false);
+    };
+    const unregisterLower = registerModal(lower.id, {
+      onClose: close("lower", lower),
+      closeOnBackdrop: true,
+    });
+    const unregisterUpper = registerModal(upper.id, {
+      onClose: close("upper", upper),
+      closeOnBackdrop: true,
+    });
+    initModalRegistry();
+
+    expect(lower.getAttribute("aria-hidden")).toBe("true");
+    setModalOpen(lower, true);
+    setModalOpen(upper, true);
+    expect(anyModalOpen()).toBe(true);
+    expect(closeTopModal()).toBe(true);
+    expect(closed).toEqual(["upper"]);
+    expect(upper.getAttribute("aria-hidden")).toBe("true");
+
+    lower.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(closed).toEqual(["upper", "lower"]);
+    expect(anyModalOpen()).toBe(false);
+
+    unregisterUpper();
+    unregisterLower();
   });
 });
 

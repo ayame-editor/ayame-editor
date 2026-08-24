@@ -55,12 +55,71 @@ export function displayPath(path) {
 // made inert so Tab and the screen-reader cursor can't escape behind it (#160).
 const modalStack: HTMLElement[] = [];
 
+type ModalRegistration = {
+  closeOnBackdrop?: boolean;
+  onClose?: () => void;
+};
+
+const modalRegistry = new Map<string, ModalRegistration>();
+const backdropBound = new WeakSet<HTMLElement>();
+
+function bindRegisteredModal(id: string) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.setAttribute("aria-hidden", modal.classList.contains("hidden") ? "true" : "false");
+  if (backdropBound.has(modal)) return;
+  modal.addEventListener("mousedown", (event) => {
+    const registration = modalRegistry.get(id);
+    if (event.target === modal && registration?.closeOnBackdrop) registration.onClose?.();
+  });
+  backdropBound.add(modal);
+}
+
+// One registration owns a modal's close behavior. Visibility, Escape order,
+// backdrop dismissal, and aria-hidden are derived from this registry and the
+// same LIFO stack maintained by setModalOpen.
+export function registerModal(id: string, registration: ModalRegistration = {}) {
+  modalRegistry.set(id, registration);
+  bindRegisteredModal(id);
+  return () => {
+    if (modalRegistry.get(id) === registration) modalRegistry.delete(id);
+  };
+}
+
+export function initModalRegistry() {
+  for (const id of modalRegistry.keys()) bindRegisteredModal(id);
+}
+
 // Drop any modals that left the DOM without a proper close, so a stray removal
 // can never strand the backdrop in the inert state.
 function pruneStack() {
   for (let i = modalStack.length - 1; i >= 0; i--) {
     if (!modalStack[i].isConnected) modalStack.splice(i, 1);
   }
+}
+
+export function anyModalOpen() {
+  pruneStack();
+  if (modalStack.length > 0) return true;
+  for (const id of modalRegistry.keys()) {
+    if (modalVisible(id)) return true;
+  }
+  return false;
+}
+
+export function closeTopModal() {
+  pruneStack();
+  // The operation overlay lives inside #app instead of in modalStack, but is
+  // visually above every dialog and therefore owns Escape while visible.
+  const overlay = modalRegistry.has("overlay") && modalVisible("overlay") ? "overlay" : null;
+  const stacked = modalStack[modalStack.length - 1];
+  const fallback = [...modalRegistry.keys()].reverse().find((id) => modalVisible(id));
+  const id = overlay || stacked?.id || fallback;
+  if (!id) return false;
+  const onClose = modalRegistry.get(id)?.onClose;
+  if (!onClose) return false;
+  onClose();
+  return true;
 }
 
 // Re-derive inert / aria-hidden for the whole document from the modal stack:
@@ -91,6 +150,10 @@ function refreshInert() {
 export function setModalOpen(modal, open) {
   modal.classList.toggle("hidden", !open);
   modal.setAttribute("aria-hidden", open ? "false" : "true");
+  // The loading overlay is a registered dialog inside #app, not a top-level
+  // .modal. It shares visibility/ARIA handling without making its own parent
+  // inert or participating in the top-level modal stack.
+  if (!modal.classList.contains("modal")) return;
   const i = modalStack.indexOf(modal);
   if (open) {
     if (i === -1) modalStack.push(modal);
