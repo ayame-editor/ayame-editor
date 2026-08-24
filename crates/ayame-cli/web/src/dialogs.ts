@@ -3,6 +3,7 @@ import { api, apiPost } from "./api.js";
 import { $, button, commas, el, registerModal, setModalOpen } from "./dom.js";
 import { t } from "./i18n.js";
 import { focusEditor } from "./editor.js";
+import { createDirectoryBrowser } from "./directory-browser.js";
 import type { ArtifactOpStatus, OperationCancelRequest } from "./types/api.js";
 
 // ---- generic confirm / message dialog (replaces window.confirm/alert) -----
@@ -196,8 +197,8 @@ export type FormField =
   | (FormFieldBase & { type: "check"; value?: boolean })
   | (FormFieldBase & {
       type: "path";
+      browseDirectories?: boolean;
       browseLabel?: string;
-      onBrowse?: (current: string) => Promise<string | null> | string | null;
       placeholder?: string;
       value?: string;
     })
@@ -241,24 +242,29 @@ export function askForm<T extends Record<string, string | boolean>>(
       continue;
     }
     if (f.type === "path") {
-      // A text field with a "Choose Folder" button that runs the caller's
-      // picker (`onBrowse`) and writes the chosen path back (issue #79.1).
+      // Directory-aware path fields expand the server browser inside this
+      // form. Keeping one modal active avoids the nested picker flow that made
+      // folder grep difficult to follow (#172).
       const prow = el("div", "form-row");
-      const plabel = el("span", "", f.label);
+      const plabel = el("label", "", f.label);
       const wrap = el("div", "form-path");
       const input = el("input", "input-control input-control--mono");
+      input.id = `form-field-${f.id}`;
+      plabel.htmlFor = input.id;
       input.type = "text";
       input.value = f.value ?? "";
       input.placeholder = f.placeholder ?? "";
       if (f.title) input.title = f.title;
-      const browseBtn = button("cmd", f.browseLabel || t("dialog.open.chooseFolder"), async () => {
-        if (!f.onBrowse) return;
-        const picked = await f.onBrowse(input.value);
-        if (picked != null && picked !== "") input.value = picked;
-        input.focus();
-      });
-      wrap.append(input, browseBtn);
+      wrap.append(input);
       prow.append(plabel, wrap);
+      if (f.browseDirectories) {
+        const { browser, browseButton } = createDirectoryBrowser(input, {
+          fieldId: f.id,
+          label: f.browseLabel,
+        });
+        wrap.append(browseButton);
+        prow.append(browser);
+      }
       body.append(prow);
       readers[f.id] = () => input.value;
       continue;
@@ -299,7 +305,13 @@ export function askForm<T extends Record<string, string | boolean>>(
       const onOk = () => finish(collect());
       const onCancel = () => finish(null);
       const onKey = (ev) => {
-        if (ev.key === "Enter" && ev.target.tagName !== "SELECT") {
+        // Text fields submit on Enter. Buttons retain their native keyboard
+        // activation so directory navigation and Cancel cannot submit.
+        if (
+          ev.key === "Enter" &&
+          ev.target instanceof HTMLInputElement &&
+          ev.target.type !== "checkbox"
+        ) {
           ev.preventDefault();
           ev.stopPropagation();
           finish(collect());

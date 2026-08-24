@@ -118,8 +118,7 @@ function installMenuDom(actions: string[] = []) {
     grouped.get(DROPDOWN_MENUS[index % DROPDOWN_MENUS.length])!.push(action),
   );
   document.body.innerHTML = `
-    <nav id="menubar">${APP_MENUS.map((id) => menuShell(id, grouped.get(id))).join("")}</nav>
-    ${menuShell("tools", grouped.get("tools"))}`;
+    <nav id="menubar">${APP_MENUS.map((id) => menuShell(id, grouped.get(id))).join("")}</nav>`;
 }
 
 describe("menu action dispatch (#188)", () => {

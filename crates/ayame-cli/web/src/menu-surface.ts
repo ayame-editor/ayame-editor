@@ -1,8 +1,8 @@
 // Ayame Editor — DOM-only state for the application dropdown menus.
 import { $ } from "./dom.js";
 
-export const APP_MENUS = ["file", "edit", "selection", "view", "help"];
-export const DROPDOWN_MENUS = [...APP_MENUS, "tools"];
+export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"];
+export const DROPDOWN_MENUS = APP_MENUS;
 
 export function fileMenuVisible() {
   return DROPDOWN_MENUS.some((id) => !$(`${id}-menu`).classList.contains("hidden"));

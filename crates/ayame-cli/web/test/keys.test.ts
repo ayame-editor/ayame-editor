@@ -8,7 +8,16 @@ import {
   normalizeShortcut,
   sanitizeKeymap,
 } from "../src/keys.js";
-import { state } from "../src/state.js";
+import { DEFAULT_KEYMAP, state } from "../src/state.js";
+
+it("assigns distinct defaults to the major tools (#172)", () => {
+  expect([
+    DEFAULT_KEYMAP.sortSave,
+    DEFAULT_KEYMAP.splitFile,
+    DEFAULT_KEYMAP.grepFolder,
+    DEFAULT_KEYMAP.grepSave,
+  ]).toEqual(["Ctrl+Alt+S", "Ctrl+Alt+P", "Ctrl+Shift+F", "Ctrl+Alt+G"]);
+});
 
 describe("shortcut normalization", () => {
   it("keeps known multi-character key casing compatible with KeyboardEvent.key", () => {
@@ -129,19 +138,19 @@ describe("KeyboardEvent shortcut conversion", () => {
       "../src/menus.js"
     );
     const previous = state.settings;
-    const oldEvent = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, altKey: true });
+    const oldEvent = new KeyboardEvent("keydown", { key: "j", ctrlKey: true, altKey: true });
     const newEvent = new KeyboardEvent("keydown", {
-      key: "s",
+      key: "j",
       ctrlKey: true,
       altKey: true,
       shiftKey: true,
     });
     try {
-      state.settings = { ...previous, keymap: { saveFile: "Ctrl+Alt+S" } };
+      state.settings = { ...previous, keymap: { saveFile: "Ctrl+Alt+J" } };
       rebuildGlobalShortcutActions();
       expect(shortcutActionFromEvent(oldEvent)).toBe("saveFile");
 
-      state.settings = { ...previous, keymap: { saveFile: "Ctrl+Alt+Shift+S" } };
+      state.settings = { ...previous, keymap: { saveFile: "Ctrl+Alt+Shift+J" } };
       expect(shortcutActionFromEvent(oldEvent)).toBe("saveFile");
       expect(shortcutActionFromEvent(newEvent)).toBeNull();
 

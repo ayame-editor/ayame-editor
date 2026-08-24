@@ -74,8 +74,9 @@ describe("application chrome", () => {
     // Paste is a rebindable action now (#175), but on its own chord the
     // browser's clipboard event still does the work — see `nativeChords`.
     expect(actionsSource).toMatch(/paste:\s*\{[^}]*nativeChords:\s*\["Ctrl\+V"/);
-    expect(doc.querySelector('#edit-menu [data-menu-action="paste"] [data-key-action="paste"]'))
-      .not.toBeNull();
+    expect(
+      doc.querySelector('#edit-menu [data-menu-action="paste"] [data-key-action="paste"]'),
+    ).not.toBeNull();
   });
 
   it("exposes tab close, Save All, and recent files from the File menu (#167)", () => {
@@ -143,22 +144,23 @@ describe("application chrome", () => {
     expect(tabs).toContain("export function ensureActiveTabVisible(");
   });
 
-  it("keeps menubar dropdowns aligned with APP_MENUS and tools in the toolbar (#168)", () => {
+  it("makes Tools a keyboard-navigable top-level menu (#172)", () => {
     const doc = new DOMParser().parseFromString(read("index.html"), "text/html");
     const topLevelIds = [...doc.querySelectorAll("#menubar > .menu-shell > .menubar-button")].map(
       (button) => button.id.replace(/-menu-button$/, ""),
     );
 
-    expect(topLevelIds).toEqual(["file", "edit", "selection", "view", "help"]);
+    expect(topLevelIds).toEqual(["file", "edit", "selection", "view", "tools", "help"]);
     expect(doc.querySelector("#menubar > #settings-menu-button")).toBeNull();
     expect(doc.querySelector('#edit-menu [data-menu-action="settings"]')).not.toBeNull();
-    expect(doc.querySelector("#toolbar #tools-menu-button")).not.toBeNull();
+    expect(doc.querySelector("#menubar #tools-menu-button")).not.toBeNull();
+    expect(doc.querySelector("#toolbar #tools-menu-button")).toBeNull();
 
     const menuSurface = read("src/menu-surface.ts");
     expect(menuSurface).toContain(
-      'export const APP_MENUS = ["file", "edit", "selection", "view", "help"]',
+      'export const APP_MENUS = ["file", "edit", "selection", "view", "tools", "help"]',
     );
-    expect(menuSurface).toContain('export const DROPDOWN_MENUS = [...APP_MENUS, "tools"]');
+    expect(menuSurface).toContain("export const DROPDOWN_MENUS = APP_MENUS");
   });
 
   it("places the menubar and compact toolbar in one fixed-height chrome row (#148)", () => {
@@ -267,7 +269,7 @@ describe("application chrome", () => {
       expect(icon.getAttribute("aria-hidden")).toBe("true");
       expect(icon.getAttribute("focusable")).toBe("false");
     }
-    expect(doc.querySelector("#tools-menu-button")?.hasAttribute("role")).toBe(false);
+    expect(doc.querySelector("#tools-menu-button")?.getAttribute("role")).toBe("menuitem");
   });
 
   it("removes the editor-owned diff UI while keeping folder search standalone (#104)", () => {
@@ -350,7 +352,7 @@ describe("application chrome", () => {
     expect(widths).toEqual([840]);
   });
 
-  it("keeps component styles canonical and targets the real mobile menu class (#158)", () => {
+  it("keeps component styles canonical without obsolete toolbar labels (#158, #172)", () => {
     const css = read("style.css");
 
     for (const selector of ["button", ".field", ".field:focus-within", ".modal-panel"]) {
@@ -359,7 +361,7 @@ describe("application chrome", () => {
       expect(declarations, selector).toHaveLength(1);
     }
     expect(css).not.toContain(".menu-button");
-    expect(css).toContain(".menubar-button .btn-label");
+    expect(css).not.toContain(".btn-label");
   });
 
   it("uses one size definition for command buttons in every container (#151)", () => {
