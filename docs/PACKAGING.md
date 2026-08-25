@@ -118,3 +118,42 @@ cargo build --release --locked -p ayame-cli --no-default-features
 In that build, `ayame update` and `ayame remove` remain recognizable commands
 but explain that package-manager management or a rebuild with
 `--features self-update` is required.
+
+## Release Signing
+
+`ayame update` walks a chain of three: an Ed25519 signature vouches for the
+`.sha256` checksum file, the checksum vouches for the artifact, and only then
+is anything installed. Without the signature the checksum proves nothing —
+whoever can replace a release asset can replace its checksum too.
+
+The key pair is generated once and lives in two places:
+
+```sh
+cargo xtask keygen
+```
+
+- the **private** half becomes the `AYAME_UPDATE_SIGNING_KEY` repository
+  secret, used only by the release workflow's signing step
+- the **public** half becomes the `AYAME_UPDATE_PUBKEY` repository variable,
+  which is baked into release builds at compile time
+
+Both must be set together, and the release workflow refuses either half alone:
+a public key without the secret ships builds that refuse every update, and a
+secret without the public key ships signatures no build verifies. The second
+case prints the value to configure, since a public key is safe to log — or run
+it locally:
+
+```sh
+AYAME_UPDATE_SIGNING_KEY=... cargo xtask pubkey
+```
+
+Beyond that, `cargo xtask sign` refuses if the two halves do not match, and a
+malformed `AYAME_UPDATE_PUBKEY` fails the build rather than the update.
+
+A build with no `AYAME_UPDATE_PUBKEY` — a local build, or a fork's — keeps the
+previous checksum-only behaviour and says so when it updates. A build *with*
+the key installs signed releases only: a missing or unmatched `.sha256.sig` is
+a hard failure, never a fallback.
+
+To rotate, run `cargo xtask keygen` again and update both settings. Keep the
+old key working until every shipped build that trusts it has been superseded.

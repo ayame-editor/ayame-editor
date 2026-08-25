@@ -64,10 +64,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+      # AYAME_UPDATE_PUBKEY is the Ed25519 key `ayame update` checks release
+      # signatures against (#191). Set it as a repository variable to ship
+      # builds that only install signed releases; leave it unset and the build
+      # keeps the previous checksum-only behaviour.
       - name: Build
         shell: bash
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
+          AYAME_UPDATE_PUBKEY: ${{ vars.AYAME_UPDATE_PUBKEY }}
         run: cargo build --release --locked --features gui --target "${{ matrix.target }}"
       - name: Verify Windows version metadata
         if: runner.os == 'Windows'
@@ -243,10 +248,53 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
+      # Signing happens here, not per-lane: the Windows lane rewrites its own
+      # .sha256 after code signing, so this is the first point where every
+      # checksum is final. One signature per checksum file gives the chain
+      # signature -> checksum -> artifact that `ayame update` walks (#191).
+      - name: Sign checksums
+        shell: bash
+        env:
+          AYAME_UPDATE_SIGNING_KEY: ${{ secrets.AYAME_UPDATE_SIGNING_KEY }}
+          AYAME_UPDATE_PUBKEY: ${{ vars.AYAME_UPDATE_PUBKEY }}
+        run: |
+          set -euo pipefail
+          have_key=${AYAME_UPDATE_SIGNING_KEY:+yes}
+          have_var=${AYAME_UPDATE_PUBKEY:+yes}
+
+          if [ -z "${have_key:-}" ] && [ -z "${have_var:-}" ]; then
+            echo "::warning::Update signing is not configured — publishing unsigned checksums (#191)."
+            exit 0
+          fi
+
+          if [ -z "${have_key:-}" ]; then
+            echo "::error::AYAME_UPDATE_PUBKEY is set but the AYAME_UPDATE_SIGNING_KEY secret is not."
+            echo "::error::Those builds verify signatures, so every update would be refused."
+            exit 1
+          fi
+
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+          # A signing secret with no matching public key is the quiet failure:
+          # the release would carry signatures, and every client would ignore
+          # them because no key was compiled in. Refuse, and print the exact
+          # value to configure (a public key is safe to log).
+          if [ -z "${have_var:-}" ]; then
+            echo "::error::The AYAME_UPDATE_SIGNING_KEY secret is set but the AYAME_UPDATE_PUBKEY variable is not."
+            echo "::error::Signatures would ship that no build verifies. Set the variable to:"
+            echo "::error::  $(cargo run --quiet -p xtask -- pubkey)"
+            exit 1
+          fi
+
+          # `sign` refuses outright if the private key does not match the
+          # public key the binaries were built with.
+          cargo run --quiet -p xtask -- sign dist/*.sha256
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
