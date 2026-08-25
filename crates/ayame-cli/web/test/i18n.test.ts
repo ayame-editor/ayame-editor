@@ -65,6 +65,9 @@ describe("i18n completeness", () => {
     }
   });
 
+  // Parsing every frontend source with the TypeScript compiler is the slow part
+  // here, and it competes with the rest of the suite for cores, so this test
+  // gets a budget of its own rather than the 5s default.
   it("has translations for static t() calls and data-i18n attributes", () => {
     const referenced = new Set([
       ...sourceFiles(path.join(webRoot, "src")).flatMap(staticTKeys),
@@ -73,12 +76,17 @@ describe("i18n completeness", () => {
     ]);
     referenced.delete("");
 
+    // Collect every gap before asserting, so a missing key reports the whole
+    // list to translate instead of only the first one found.
+    const missing: string[] = [];
     for (const key of referenced) {
       for (const [locale, table] of Object.entries(MESSAGES)) {
-        expect(table, `${locale} missing ${key}`).toHaveProperty(key);
+        if (!Object.hasOwn(table, key)) missing.push(`${locale}: ${key}`);
       }
     }
-  });
+
+    expect(missing.sort()).toEqual([]);
+  }, 30_000);
 });
 
 describe("localized server errors (#176)", () => {
