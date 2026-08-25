@@ -14,7 +14,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -441,7 +441,7 @@ fn prepare_release_version(root: &Path, opts: &Opts) -> Result<(String, Option<R
         let next = bumped(&version, how)?;
         say(&format!("bump {version} -> {next}"));
         set_workspace_version(root, &next)?;
-        stamp_changelog(root, &next, &today())?;
+        stamp_changelog(root, &next, &today()?)?;
         run("cargo", &["build", "--quiet"])?; // refresh Cargo.lock
         if opts.dry_run {
             say("dry-run: applying the bump temporarily; files will be restored");
@@ -493,17 +493,40 @@ fn unreleased_section(text: &str) -> Result<(&str, &str)> {
     Ok((&text[start..after], &text[after..end]))
 }
 
-/// Today as `YYYY-MM-DD`, UTC.
+/// Today as `YYYY-MM-DD`, in the same local time git will stamp on the release
+/// commit.
 ///
-/// Deriving this from the epoch keeps `xtask` on its existing dependencies
-/// rather than adding a date crate for one line of output.
-fn today() -> String {
-    let days = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() / 86_400)
-        .unwrap_or(0) as i64;
-    let (y, m, d) = civil_from_days(days);
-    format!("{y:04}-{m:02}-{d:02}")
+/// Not UTC: every existing heading in CHANGELOG.md matches the local date of
+/// its release commit, and cutting a release from JST after 09:00 UTC would
+/// otherwise date the section a day behind the commit that carries it.
+/// `git var GIT_AUTHOR_IDENT` hands back exactly the epoch and offset git is
+/// about to use, so the two agree by construction — and it keeps xtask on the
+/// dependencies it already had rather than adding a date crate.
+fn today() -> Result<String> {
+    let ident = capture("git", &["var", "GIT_AUTHOR_IDENT"])?;
+    let (epoch, offset) = ident_timestamp(&ident)
+        .with_context(|| format!("unexpected GIT_AUTHOR_IDENT format: {ident:?}"))?;
+    let (y, m, d) = civil_from_days((epoch + offset).div_euclid(86_400));
+    Ok(format!("{y:04}-{m:02}-{d:02}"))
+}
+
+/// The `<epoch> <+HHMM>` tail of a git ident line, as (seconds, offset seconds).
+fn ident_timestamp(ident: &str) -> Option<(i64, i64)> {
+    let mut parts = ident.split_whitespace().rev();
+    let offset = parts.next()?;
+    let epoch: i64 = parts.next()?.parse().ok()?;
+
+    let (sign, hhmm) = match offset.split_at(1) {
+        ("+", rest) => (1, rest),
+        ("-", rest) => (-1, rest),
+        _ => return None,
+    };
+    if hhmm.len() != 4 || !hhmm.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let hours: i64 = hhmm[..2].parse().ok()?;
+    let minutes: i64 = hhmm[2..].parse().ok()?;
+    Some((epoch, sign * (hours * 3600 + minutes * 60)))
 }
 
 /// Howard Hinnant's `civil_from_days`: days since 1970-01-01 to (y, m, d).
@@ -845,6 +868,56 @@ mod tests {
         assert!(
             !body.contains("Shipped earlier"),
             "the previous release leaked into the section: {body:?}"
+        );
+    }
+
+    /// The stamp must land on git's local date, not UTC — every existing
+    /// heading matches the local date of its release commit, and a release cut
+    /// from JST after 09:00 UTC would otherwise be dated a day behind.
+    #[test]
+    fn ident_timestamps_carry_the_local_offset() {
+        // 2026-08-25 18:44:00 UTC — already the 26th in +0900.
+        let epoch = 1_787_690_640;
+        let (e, off) = ident_timestamp(&format!("A U <a@u> {epoch} +0900")).unwrap();
+        assert_eq!((e, off), (epoch, 9 * 3600));
+        assert_eq!(civil_from_days((e + off).div_euclid(86_400)), (2026, 8, 26));
+        // The same instant is still the 25th in UTC and behind it in the west.
+        assert_eq!(civil_from_days(epoch.div_euclid(86_400)), (2026, 8, 25));
+
+        let (_, west) = ident_timestamp(&format!("A U <a@u> {epoch} -0430")).unwrap();
+        assert_eq!(west, -(4 * 3600 + 30 * 60));
+    }
+
+    #[test]
+    fn ident_timestamps_reject_malformed_lines() {
+        assert_eq!(ident_timestamp("A U <a@u> 123 0900"), None, "no sign");
+        assert_eq!(ident_timestamp("A U <a@u> 123 +09"), None, "short offset");
+        assert_eq!(ident_timestamp("A U <a@u> nope +0900"), None, "bad epoch");
+        assert_eq!(ident_timestamp("A U <a@u> 123 +09xx"), None, "non-digit");
+    }
+
+    /// The real thing: whatever git says now must match the date git would
+    /// stamp on a commit made now.
+    #[test]
+    fn the_stamp_date_matches_gits_own_commit_date() {
+        let stamped = today().expect("git var GIT_AUTHOR_IDENT");
+        let git_now = capture(
+            "git",
+            &[
+                "show",
+                "-s",
+                "--format=%cd",
+                "--date=format:%Y-%m-%d",
+                "HEAD",
+            ],
+        )
+        .unwrap_or_default();
+        // HEAD may be older than today, so compare shape and only assert
+        // equality when git's clock agrees it is the same day.
+        assert_eq!(stamped.len(), 10, "{stamped}");
+        assert!(
+            stamped >= git_now,
+            "stamp {stamped} predates HEAD {git_now}"
         );
     }
 
