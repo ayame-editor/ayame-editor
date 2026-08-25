@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.10.0 - 2026-08-26
 
 - Restored a green build on the current stable toolchain. Rust 1.98 added
   `clippy::chunks_exact_to_as_chunks` and started flagging a test import that
