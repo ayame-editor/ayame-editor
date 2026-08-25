@@ -231,8 +231,6 @@ fn part_file_name(stem: &str, ext: &str, part: u64, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
     use tempfile::TempDir;
 
     use super::*;
