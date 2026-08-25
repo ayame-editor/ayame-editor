@@ -51,6 +51,10 @@ unicode-script = "0.5"
 unicode-bidi = "0.3"
 east-asian-width = "0.1"
 sha2 = "0.10"
+# Release-signature verification for `ayame update`, and the keygen/sign side in
+# xtask. Verification only needs the `std` build — no RNG, PEM, or PKCS#8.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+getrandom = "0.3"
 
 # Release builds favor raw throughput for the indexing/scan hot paths.
 # Keep ayame-core at one codegen unit so ThinLTO sees the whole engine at once.

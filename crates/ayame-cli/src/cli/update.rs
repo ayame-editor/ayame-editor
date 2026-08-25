@@ -3,7 +3,6 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -13,6 +12,7 @@ use sha2::{Digest, Sha256};
 use std::process::{Command, Stdio};
 
 use super::{first_opt, has_flag, parse_for};
+use crate::temp_paths::create_private_dir;
 
 const REPO: &str = "ayame-editor/ayame-editor";
 const API_BASE: &str = "https://api.github.com/repos/ayame-editor/ayame-editor";
@@ -98,6 +98,10 @@ struct PreparedUpdate {
     checksum_name: String,
     asset_url: String,
     checksum_url: String,
+    /// `{asset}.sha256.sig`, resolved only when this build carries a signing
+    /// key. `None` means an unsigned build, never "signature optional" — a
+    /// keyed build that cannot find this asset fails in `prepare_update`.
+    signature_url: Option<String>,
 }
 
 struct StageDir {
@@ -311,6 +315,28 @@ fn prepare_update(version_req: &str, install_dir: Option<&Path>) -> Result<Prepa
             )
         })?
         .to_string();
+    // A build with a signing key refuses a release that has no signature: an
+    // attacker who can replace the artifact can also delete the `.sig`, so
+    // "missing signature" has to be a hard failure rather than a downgrade to
+    // checksum-only (#191).
+    let signature_url = match update_signing_key()? {
+        None => None,
+        Some(_) => {
+            let name = signature_name(&asset_name);
+            Some(
+                release
+                    .asset_url(&name)
+                    .with_context(|| {
+                        format!(
+                            "release {} is not signed: it does not contain {name}. \
+                             This build only installs signed releases.",
+                            release.tag_name
+                        )
+                    })?
+                    .to_string(),
+            )
+        }
+    };
 
     Ok(PreparedUpdate {
         target,
@@ -323,6 +349,7 @@ fn prepare_update(version_req: &str, install_dir: Option<&Path>) -> Result<Prepa
         checksum_name,
         asset_url,
         checksum_url,
+        signature_url,
     })
 }
 
@@ -338,6 +365,20 @@ fn download_and_install(prepared: &PreparedUpdate, print_progress: bool) -> Resu
         println!("verify: {}", prepared.checksum_name);
     }
     let checksum_text = download_text(&client, &prepared.checksum_url)?;
+    // Order matters: the checksum is only trustworthy once its signature
+    // checks out, and the artifact is only trustworthy once the checksum does.
+    if let Some(url) = &prepared.signature_url {
+        let key = update_signing_key()?
+            .context("this build resolved a signature but carries no signing key")?;
+        let signature_text = download_text(&client, url)?;
+        verify_release_signature(&key, checksum_text.as_bytes(), &signature_text)
+            .with_context(|| format!("verifying {}", signature_name(&prepared.asset_name)))?;
+        if print_progress {
+            println!("signature: OK");
+        }
+    } else if print_progress {
+        println!("signature: SKIPPED (this build carries no update signing key)");
+    }
     verify_sha256(&asset_path, &checksum_text)?;
 
     let artifact = prepare_artifact(&prepared.target, &prepared.plan, &asset_path, &stage)?;
@@ -535,16 +576,53 @@ impl ManagedInstall {
 }
 
 impl StageDir {
+    /// Create the staging directory an update is downloaded, verified, and
+    /// installed from.
+    ///
+    /// Everything between "the checksum matched" and "the bytes are installed"
+    /// happens inside this directory, so another process able to reach into it
+    /// would reopen the very gap the checksum closes. Two properties keep it
+    /// shut, and both are load-bearing (#191):
+    ///
+    /// - **Unpredictable name.** The suffix is 128 bits straight from the OS
+    ///   CSPRNG, so the path cannot be guessed and pre-created ahead of us.
+    ///   The old `ayame-update-{pid}-{millis}` name could be.
+    /// - **Exclusive creation.** [`create_private_dir`] is `create_dir`, not
+    ///   `create_dir_all`: it fails with `AlreadyExists` rather than adopting a
+    ///   directory somebody else made, and on Unix the `0o700` mode is applied
+    ///   by the same syscall, so the directory is never briefly world-writable.
     fn create() -> Result<Self> {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let path =
-            std::env::temp_dir().join(format!("ayame-update-{}-{stamp}", std::process::id()));
-        fs::create_dir_all(&path).with_context(|| format!("creating {}", path.display()))?;
-        Ok(Self { path, keep: false })
+        let base = std::env::temp_dir();
+        // A 128-bit name collides with probability ~0, so `AlreadyExists` here
+        // means we raced something we do not control. A bounded retry survives
+        // that without spinning.
+        let mut last_err = None;
+        for _ in 0..8 {
+            let path = base.join(format!("ayame-update-{}", random_stage_suffix()?));
+            match create_private_dir(&path) {
+                Ok(()) => return Ok(Self { path, keep: false }),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last_err = Some(e),
+                Err(e) => return Err(e).with_context(|| format!("creating {}", path.display())),
+            }
+        }
+        Err(last_err.expect("the loop only exits early on success or a hard error")).with_context(
+            || {
+                format!(
+                    "creating a private update staging directory under {}",
+                    base.display()
+                )
+            },
+        )
     }
+}
+
+/// 128 bits of OS entropy, hex-encoded, for the staging directory name.
+fn random_stage_suffix() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    if let Err(e) = getrandom::fill(&mut bytes) {
+        bail!("reading OS randomness for the update staging directory: {e}");
+    }
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn default_exe_name() -> &'static str {
@@ -677,6 +755,80 @@ fn prepare_macos_app(zip_path: &Path, stage: &StageDir) -> Result<PathBuf> {
     })?;
     make_executable(&app.join("Contents").join("MacOS").join("ayame"))?;
     Ok(app)
+}
+
+/// The Ed25519 public key releases of this build are signed with, as 64 hex
+/// characters, baked in at compile time from `AYAME_UPDATE_PUBKEY`.
+///
+/// It is `option_env!` rather than a checked-in constant so the key can be
+/// rotated without a source change, and so builds from a fork do not claim to
+/// verify against a key their releases were never signed with. `build.rs`
+/// declares `rerun-if-env-changed` for it, so changing the value rebuilds.
+const UPDATE_PUBKEY_HEX: Option<&str> = option_env!("AYAME_UPDATE_PUBKEY");
+
+/// The detached-signature asset that accompanies `{asset}.sha256`.
+fn signature_name(asset_name: &str) -> String {
+    format!("{asset_name}.sha256.sig")
+}
+
+/// This build's release-signing key, or `None` when it was built without one.
+///
+/// `None` is the pre-#191 world: the update still runs, but only the checksum
+/// stands behind it, and `ayame update` says so. A *malformed* key is not
+/// `None` — it is a hard error, because silently degrading a build that meant
+/// to verify signatures is exactly the failure this is meant to prevent.
+fn update_signing_key() -> Result<Option<ed25519_dalek::VerifyingKey>> {
+    let Some(hex) = UPDATE_PUBKEY_HEX.map(str::trim).filter(|h| !h.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes: [u8; 32] = decode_hex(hex)
+        .and_then(|b| b.try_into().ok())
+        .with_context(|| {
+            format!(
+                "AYAME_UPDATE_PUBKEY must be 64 hex characters (32 bytes), got {} characters",
+                hex.len()
+            )
+        })?;
+    let key = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+        .context("AYAME_UPDATE_PUBKEY is not a valid Ed25519 public key")?;
+    Ok(Some(key))
+}
+
+/// Check a detached Ed25519 signature over `message` (the `.sha256` file's
+/// exact bytes).
+///
+/// `verify_strict` rather than `verify`: it rejects small-order and
+/// non-canonical public keys, so a signature cannot be made to verify under a
+/// key the signer did not control.
+fn verify_release_signature(
+    key: &ed25519_dalek::VerifyingKey,
+    message: &[u8],
+    signature_text: &str,
+) -> Result<()> {
+    let bytes: [u8; 64] = decode_hex(signature_text.trim())
+        .and_then(|b| b.try_into().ok())
+        .context("signature file is not 128 hex characters (64 bytes)")?;
+    key.verify_strict(message, &ed25519_dalek::Signature::from_bytes(&bytes))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "signature does not match this build's release signing key — \
+                 refusing to install"
+            )
+        })
+}
+
+/// Decode an even-length ASCII hex string. `None` on any non-hex input.
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    text.as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            let s = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(s, 16).ok()
+        })
+        .collect()
 }
 
 fn verify_sha256(path: &Path, checksum_text: &str) -> Result<()> {
@@ -1232,7 +1384,7 @@ mod tests {
                 "ayame-update-{label}-{}-{:?}",
                 std::process::id(),
                 std::time::SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
             ));
@@ -1387,6 +1539,211 @@ mod tests {
             vec!["Ayame.app"],
             "staging/backup siblings left behind"
         );
+    }
+
+    /// A deterministic signer for the signature tests. Seeded from a constant
+    /// so the fixtures never depend on an RNG.
+    fn test_signer(seed: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+    }
+
+    fn sign_hex(key: &ed25519_dalek::SigningKey, message: &[u8]) -> String {
+        use ed25519_dalek::Signer as _;
+        key.sign(message)
+            .to_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    const CHECKSUM_FILE: &str =
+        "1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014  ayame-linux\n";
+
+    /// The chain the update trusts is signature -> checksum -> artifact. A
+    /// genuine signature over the checksum file must verify (#191).
+    #[test]
+    fn a_signed_checksum_verifies() {
+        let key = test_signer(1);
+        let sig = sign_hex(&key, CHECKSUM_FILE.as_bytes());
+
+        verify_release_signature(&key.verifying_key(), CHECKSUM_FILE.as_bytes(), &sig)
+            .expect("a genuine signature must verify");
+        // Signature files land on disk with a trailing newline.
+        verify_release_signature(
+            &key.verifying_key(),
+            CHECKSUM_FILE.as_bytes(),
+            &format!("{sig}\n"),
+        )
+        .expect("a trailing newline must not break verification");
+    }
+
+    /// The attack #191 is actually about: whoever can replace the artifact can
+    /// also replace its `.sha256`, so a checksum that matches the swapped file
+    /// proves nothing. Without the private key the signature cannot follow.
+    #[test]
+    fn a_checksum_swapped_with_the_artifact_is_rejected() {
+        let key = test_signer(1);
+        let sig = sign_hex(&key, CHECKSUM_FILE.as_bytes());
+        let forged = CHECKSUM_FILE.replace("1b4f", "dead");
+
+        let err = verify_release_signature(&key.verifying_key(), forged.as_bytes(), &sig)
+            .expect_err("a re-written checksum must not verify");
+        assert!(err.to_string().contains("refusing to install"), "{err}");
+    }
+
+    /// A signature made with some other key — including an attacker's own,
+    /// published alongside a forged release — must not verify.
+    #[test]
+    fn a_signature_from_another_key_is_rejected() {
+        let attacker = sign_hex(&test_signer(2), CHECKSUM_FILE.as_bytes());
+
+        assert!(verify_release_signature(
+            &test_signer(1).verifying_key(),
+            CHECKSUM_FILE.as_bytes(),
+            &attacker,
+        )
+        .is_err());
+    }
+
+    /// Malformed signature files are refused rather than skipped.
+    #[test]
+    fn a_malformed_signature_file_is_rejected() {
+        let key = test_signer(1).verifying_key();
+        for bad in ["", "not hex at all", "abcd", &"zz".repeat(64)] {
+            let err = verify_release_signature(&key, CHECKSUM_FILE.as_bytes(), bad)
+                .expect_err("{bad:?} must be refused");
+            assert!(err.to_string().contains("128 hex characters"), "{err}");
+        }
+    }
+
+    /// Cross-crate wire format: this signature was produced by the real
+    /// `cargo xtask sign` over `CHECKSUM_FILE` with the seed below, then pasted
+    /// here verbatim. It pins the two halves of #191 together — if either side
+    /// changes its hex encoding, trailing newline handling, or what exactly
+    /// gets signed, this fails instead of shipping releases nothing can verify.
+    #[test]
+    fn a_signature_from_xtask_sign_verifies_here() {
+        const XTASK_SIGNATURE: &str = "a0eba3711b8d37af60502a7cb23b619adc2ebaa91f5062056bc2a967cf316040\
+                                       73aacf4062acb4a46909a5f191e92744a7b101294cf905ed4c20989435822e06";
+
+        let key = test_signer(7).verifying_key();
+        verify_release_signature(&key, CHECKSUM_FILE.as_bytes(), XTASK_SIGNATURE)
+            .expect("xtask sign and ayame update must agree on the signature format");
+    }
+
+    #[test]
+    fn hex_decoding_refuses_odd_and_non_hex_input() {
+        assert_eq!(decode_hex("00ff10"), Some(vec![0x00, 0xff, 0x10]));
+        assert_eq!(decode_hex(""), Some(vec![]));
+        assert_eq!(decode_hex("abc"), None, "odd length");
+        assert_eq!(decode_hex("gg"), None, "not hex");
+        assert_eq!(decode_hex("0x"), None, "not hex");
+    }
+
+    #[test]
+    fn the_signature_asset_sits_beside_the_checksum() {
+        assert_eq!(
+            signature_name("ayame-v1.0.0-linux-x86_64"),
+            "ayame-v1.0.0-linux-x86_64.sha256.sig"
+        );
+    }
+
+    /// An unkeyed build reports "no key" rather than a broken one; that is what
+    /// keeps `prepare_update` from demanding a `.sig` it cannot check.
+    #[test]
+    fn an_absent_signing_key_is_not_an_error() {
+        // This test binary is built without AYAME_UPDATE_PUBKEY unless someone
+        // sets it, so assert the property that holds either way: resolving the
+        // key never fails, and a configured key is well-formed.
+        let key = update_signing_key().expect("resolving the signing key must not fail");
+        assert_eq!(
+            key.is_some(),
+            UPDATE_PUBKEY_HEX.is_some_and(|h| !h.trim().is_empty())
+        );
+    }
+
+    /// #191: the staging directory is where a verified artifact sits between
+    /// `verify_sha256` and the install copy. If its path were guessable, a
+    /// same-uid process could pre-create it (or swap the file inside it) and
+    /// defeat the checksum. The name must therefore come from the CSPRNG, not
+    /// from the pid and clock the old implementation used.
+    #[test]
+    fn staging_directories_are_unpredictable() {
+        let first = StageDir::create().expect("first staging directory");
+        let second = StageDir::create().expect("second staging directory");
+
+        let name = |s: &StageDir| s.path.file_name().unwrap().to_str().unwrap().to_string();
+        let (a, b) = (name(&first), name(&second));
+
+        assert_ne!(a, b, "two staging directories must not share a name");
+        for n in [&a, &b] {
+            let suffix = n.strip_prefix("ayame-update-").expect("stage dir prefix");
+            assert_eq!(suffix.len(), 32, "expected 128 bits of hex, got {suffix:?}");
+            assert!(
+                suffix.chars().all(|c| c.is_ascii_hexdigit()),
+                "{suffix:?} is not hex"
+            );
+            assert!(
+                !n.contains(&std::process::id().to_string()),
+                "{n:?} still leaks the pid the old name was built from"
+            );
+        }
+        assert!(first.path.is_dir() && second.path.is_dir());
+    }
+
+    /// The directory must be ours alone: created empty, and on Unix owner-only
+    /// from the creating syscall, so there is no window where another user can
+    /// write into the verify/install path (#191).
+    #[test]
+    fn a_staging_directory_is_private_and_empty() {
+        let stage = StageDir::create().expect("staging directory");
+
+        assert_eq!(
+            fs::read_dir(&stage.path).unwrap().count(),
+            0,
+            "a fresh staging directory must not adopt anyone else's contents"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&stage.path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700, "staging must be owner-only");
+        }
+    }
+
+    /// Creation is exclusive: an existing path is an error, never an adoption.
+    /// The real name is random, so this drives the primitive `create` relies on
+    /// with a name we control.
+    #[test]
+    fn staging_creation_refuses_an_existing_directory() {
+        let dir = TempDir::new("stage-exclusive");
+        let path = dir.path().join("ayame-update-collision");
+        create_private_dir(&path).expect("first create");
+
+        let err = create_private_dir(&path).expect_err("second create must fail");
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    /// The staged copy is temporary unless an install deliberately keeps it
+    /// (Windows defers the replace to a helper), so a dropped stage must not
+    /// leave a downloaded artifact behind.
+    #[test]
+    fn dropping_a_staging_directory_removes_it() {
+        let path = {
+            let stage = StageDir::create().expect("staging directory");
+            fs::write(stage.path.join("artifact"), b"payload").unwrap();
+            stage.path.clone()
+        };
+        assert!(!path.exists(), "{path:?} outlived its StageDir");
+
+        let kept = {
+            let mut stage = StageDir::create().expect("staging directory");
+            stage.keep = true;
+            stage.path.clone()
+        };
+        assert!(kept.is_dir(), "a kept stage must survive for the installer");
+        let _ = fs::remove_dir_all(&kept);
     }
 
     #[test]

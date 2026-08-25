@@ -25,9 +25,12 @@ fn main() -> std::process::ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("release") => release(&args[1..]),
         Some("typegen") => typegen(&args[1..]),
+        Some("keygen") => keygen(),
+        Some("sign") => sign(&args[1..]),
+        Some("pubkey") => pubkey(),
         _ => {
             eprintln!(
-                "usage: cargo xtask release [--bump ...] [--yes|--dry-run|--skip-gate]\n       cargo xtask typegen [--check]"
+                "usage: cargo xtask release [--bump ...] [--yes|--dry-run|--skip-gate]\n       cargo xtask typegen [--check]\n       cargo xtask keygen\n       cargo xtask sign FILE... (reads AYAME_UPDATE_SIGNING_KEY)\n       cargo xtask pubkey (derives AYAME_UPDATE_PUBKEY from the secret)"
             );
             return std::process::ExitCode::from(2);
         }
@@ -226,6 +229,111 @@ fn typegen(args: &[String]) -> Result<()> {
         cargo_args.push("--check");
     }
     run("cargo", &cargo_args)
+}
+
+/// Generate the Ed25519 keypair that release artifacts are signed with (#191).
+///
+/// The private key goes to the operator's clipboard/secret store and never to
+/// disk here; the public half is what gets committed and passed to release
+/// builds as `AYAME_UPDATE_PUBKEY`.
+fn keygen() -> Result<()> {
+    let mut seed = [0u8; 32];
+    if let Err(e) = getrandom::fill(&mut seed) {
+        bail!("reading OS randomness for the signing key: {e}");
+    }
+    let signing = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let public = hex(signing.verifying_key().as_bytes());
+    let private = hex(&signing.to_bytes());
+
+    println!("Ed25519 release signing keypair\n");
+    println!("  public  (commit this / set AYAME_UPDATE_PUBKEY at build time):");
+    println!("    {public}\n");
+    println!("  private (store as the AYAME_UPDATE_SIGNING_KEY repo secret; never commit):");
+    println!("    {private}\n");
+    println!("Next steps:");
+    println!("  1. gh secret set AYAME_UPDATE_SIGNING_KEY   # paste the private key");
+    println!("  2. set AYAME_UPDATE_PUBKEY={public} for release builds");
+    println!("  3. rotate by re-running this and keeping the old key until every");
+    println!("     shipped build that trusts it has been superseded");
+    Ok(())
+}
+
+/// Sign each named file with `AYAME_UPDATE_SIGNING_KEY`, writing `<file>.sig`.
+///
+/// The release workflow signs the `.sha256` files, so one signature stands
+/// behind the checksum that stands behind the artifact.
+fn sign(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        bail!("cargo xtask sign needs at least one file to sign");
+    }
+    let signing = signing_key_from_env()?;
+
+    // The most expensive mistake here is signing a release with a key the
+    // shipped binaries do not trust: every install would then refuse the
+    // update, and the fix would need another release. When the workflow knows
+    // which public key went into the build, check the halves match first.
+    if let Ok(expected) = std::env::var("AYAME_UPDATE_PUBKEY") {
+        let expected = expected.trim();
+        let actual = hex(signing.verifying_key().as_bytes());
+        if !expected.is_empty() && expected != actual {
+            bail!(
+                "AYAME_UPDATE_SIGNING_KEY does not match AYAME_UPDATE_PUBKEY\n\
+                 \x20 built against: {expected}\n\
+                 \x20 signing key is: {actual}"
+            );
+        }
+    }
+
+    for arg in args {
+        let path = Path::new(arg);
+        let message = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let signature = {
+            use ed25519_dalek::Signer as _;
+            hex(&signing.sign(&message).to_bytes())
+        };
+        let out = PathBuf::from(format!("{}.sig", path.display()));
+        std::fs::write(&out, format!("{signature}\n"))
+            .with_context(|| format!("writing {}", out.display()))?;
+        say(&format!("signed {} -> {}", path.display(), out.display()));
+    }
+    Ok(())
+}
+
+/// Print the public half of `AYAME_UPDATE_SIGNING_KEY`.
+///
+/// The signing secret is write-only once it is a repository secret, so this is
+/// how an operator recovers the `AYAME_UPDATE_PUBKEY` that belongs with it —
+/// including from CI, where the release workflow runs this to tell you the
+/// exact value to set when the two are out of step.
+fn pubkey() -> Result<()> {
+    let signing = signing_key_from_env()?;
+    println!("{}", hex(signing.verifying_key().as_bytes()));
+    Ok(())
+}
+
+/// The Ed25519 signing key held in `AYAME_UPDATE_SIGNING_KEY`.
+fn signing_key_from_env() -> Result<ed25519_dalek::SigningKey> {
+    let key = std::env::var("AYAME_UPDATE_SIGNING_KEY")
+        .context("AYAME_UPDATE_SIGNING_KEY is not set (see `cargo xtask keygen`)")?;
+    let seed: [u8; 32] = unhex(key.trim()).and_then(|b| b.try_into().ok()).context(
+        "AYAME_UPDATE_SIGNING_KEY must be 64 hex characters (32 bytes) — \
+             regenerate it with `cargo xtask keygen`",
+    )?;
+    Ok(ed25519_dalek::SigningKey::from_bytes(&seed))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    text.as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect()
 }
 
 fn release(args: &[String]) -> Result<()> {
@@ -609,6 +717,56 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn signing_produces_a_signature_the_updater_accepts() {
+        use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+
+        let dir = temp_dir("sign");
+        let checksum = dir.join("ayame-linux.sha256");
+        std::fs::write(&checksum, b"abc123  ayame-linux\n").unwrap();
+
+        // The exact key handling `sign` performs, from a fixed seed.
+        let seed = [7u8; 32];
+        let signing = SigningKey::from_bytes(&seed);
+        // SAFETY-free equivalent of the env var the real command reads.
+        let parsed: [u8; 32] = unhex(&hex(&seed)).unwrap().try_into().unwrap();
+        assert_eq!(parsed, seed, "hex round-trip must be lossless");
+
+        let signature = {
+            use ed25519_dalek::Signer as _;
+            hex(&signing.sign(&std::fs::read(&checksum).unwrap()).to_bytes())
+        };
+        assert_eq!(
+            signature.len(),
+            128,
+            "the updater parses 128 hex characters"
+        );
+
+        // Verify with the same strict check `verify_release_signature` uses.
+        let public =
+            VerifyingKey::from_bytes(&hex_to_32(&hex(signing.verifying_key().as_bytes()))).unwrap();
+        let bytes: [u8; 64] = unhex(&signature).unwrap().try_into().unwrap();
+        public
+            .verify_strict(
+                &std::fs::read(&checksum).unwrap(),
+                &Signature::from_bytes(&bytes),
+            )
+            .expect("a freshly signed checksum must verify");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn hex_to_32(text: &str) -> [u8; 32] {
+        unhex(text).unwrap().try_into().unwrap()
+    }
+
+    #[test]
+    fn hex_refuses_odd_and_non_hex_input() {
+        assert_eq!(unhex("00ff"), Some(vec![0x00, 0xff]));
+        assert_eq!(unhex("abc"), None, "odd length");
+        assert_eq!(unhex("zz"), None, "not hex");
     }
 
     #[test]

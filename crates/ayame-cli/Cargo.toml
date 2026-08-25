@@ -23,7 +23,7 @@ OriginalFilename = "ayame.exe"
 # self-update support but no webview dependency. Server-only deployments can
 # use --no-default-features to omit the TLS/checksum/archive stack.
 default = ["self-update"]
-self-update = ["dep:reqwest", "dep:sha2", "dep:zip"]
+self-update = ["dep:reqwest", "dep:sha2", "dep:zip", "dep:ed25519-dalek"]
 # The native app checks and installs updates, so gui always carries self-update
 # even when a caller combines it with --no-default-features.
 gui = ["self-update", "dep:wry", "dep:tao", "dep:muda", "dep:rfd"]
@@ -41,11 +41,12 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde.workspace = true
 serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "io-util"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["catch-panic"] }
 futures-util = { version = "0.3", default-features = false }
-getrandom = "0.3"
+getrandom.workspace = true
 regex.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

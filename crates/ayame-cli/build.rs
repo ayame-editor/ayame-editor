@@ -37,6 +37,12 @@ fn main() {
     // Rebuild whenever a source module (or this script) changes. The directory
     // watch catches added/removed files; per-file watches catch edits.
     println!("cargo:rerun-if-changed=build.rs");
+    // `cli::update` reads this with `option_env!` to embed the Ed25519 key that
+    // release signatures are checked against (#191). Cargo does not track
+    // `option_env!` inputs on its own, so rotating the key would otherwise
+    // reuse a stale build.
+    println!("cargo:rerun-if-env-changed=AYAME_UPDATE_PUBKEY");
+    check_update_pubkey();
     println!("cargo:rerun-if-changed=web/src");
     println!("cargo:rerun-if-changed=web/styles");
     println!("cargo:rerun-if-changed={}", themes_path.display());
@@ -410,4 +416,27 @@ fn transform_ts(path: &Path, source: &str) -> String {
     let options = TransformOptions::default();
     Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
     Codegen::new().build(&program).code
+}
+
+/// Reject a malformed `AYAME_UPDATE_PUBKEY` while the build is still running.
+///
+/// `cli::update` parses this key the first time an update is checked, so a typo
+/// in a release variable would otherwise ship a binary that fails at the moment
+/// a user tries to update. Failing here turns that into a failed build (#191).
+fn check_update_pubkey() {
+    let Some(key) = std::env::var_os("AYAME_UPDATE_PUBKEY") else {
+        return; // unset: an unsigned build, which is a supported configuration
+    };
+    let key = key.to_string_lossy();
+    let key = key.trim();
+    if key.is_empty() {
+        return;
+    }
+    let looks_like_a_key = key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit());
+    assert!(
+        looks_like_a_key,
+        "AYAME_UPDATE_PUBKEY must be 64 hex characters (a 32-byte Ed25519 public \
+         key), got {} characters. Generate one with `cargo xtask keygen`.",
+        key.len()
+    );
 }
