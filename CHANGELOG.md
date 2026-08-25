@@ -4,6 +4,85 @@ All notable changes to Ayame Editor are tracked here.
 
 ## Unreleased
 
+- Restored a green build on the current stable toolchain. Rust 1.98 added
+  `clippy::chunks_exact_to_as_chunks` and started flagging a test import that
+  `use super::*` already provided, which turned the `-D warnings` gate red on
+  code that had not changed; the UTF-16 line decoder and EOL sniffer now take
+  fixed-size `[u8; 2]` chunks from `as_chunks`, dropping the per-byte indexing
+  and its bounds checks.
+- Put a signature behind self-update. `ayame update` verified only a SHA-256
+  checksum fetched from the same release as the artifact, so anyone able to
+  replace one could replace the other; it now walks signature -> checksum ->
+  artifact, checking a detached Ed25519 signature over the `.sha256` file
+  against a public key baked into the build. A build carrying that key installs
+  signed releases only — a missing or unmatched `.sha256.sig` is a hard
+  failure, never a fallback — while a build without one keeps the previous
+  behaviour and says so. `cargo xtask keygen` and `cargo xtask sign` produce
+  and use the key pair, a mismatched pair is refused before anything is
+  published, and a malformed public key fails the build rather than the update
+  (#191).
+- Closed the local race in self-update staging. The staging directory an
+  update is downloaded, verified, and installed from was named
+  `ayame-update-{pid}-{millis}` and created with `create_dir_all`, so another
+  process running as the same user could predict the path, pre-create it, and
+  swap the artifact between `verify_sha256` and the install copy. It is now
+  named from 128 bits of OS entropy and created exclusively — owner-only in
+  the same syscall on Unix — so an existing path is an error instead of an
+  adoption (#191).
+- Split `serve/state.rs` (2,127 lines) into focused `tabs`, `wal_policy`,
+  `ui_state`, and `tail` modules, leaving `AppState`, `Workspace`, the
+  documented lock ordering, and the save/reload commit points in a 607-line
+  core. Installing a tab, removing one and picking its neighbor, and the three
+  reopen variants each have a single implementation now, so adding a per-tab
+  field changes one field list rather than four (#107).
+- Moved the serve endpoint tests out of the production modules into
+  `serve/tests` plus per-module `tests.rs` files, behind one shared
+  `test_support` harness for the raw HTTP client, ephemeral server startup,
+  WAL options, and scratch fixtures. The router module drops from 2,297 lines
+  to 583 and four independently maintained fixture implementations become one;
+  every test name is unchanged, so existing filters still work (#118).
+- Unified the web editor's three copied flows: the four-way duplicated tail of
+  an edit commit, the three overwrite-confirmation retries, and the two
+  parallel modal registries. Saving and modal handling now each run through
+  one path, which is what makes the focus-restore and Escape behaviour
+  consistent across every dialog (#124).
+- Gave the web UI one source of truth for its shared definitions. The
+  2,909-line `style.css` became six ordered layers under `styles/`, the theme
+  palette moved into `themes.json` so the CSS and TypeScript copies can no
+  longer drift, the three duplicated encoding tables collapsed into one, and
+  the dead rules left behind by earlier work are gone (#126).
+- Tightened the web type boundary: the read-path API responses `/api/stat`
+  included are generated from the Rust types rather than hand-written, and a
+  `tsconfig.strict.json` gate now type-checks the modules that are ready for
+  it, so `strict` can be adopted module by module instead of in one sweep
+  (#127).
+- Made the macOS native menu follow the keymap. The menu was defined three
+  times — in Rust, in the web menu bar, and in the keymap — so rebinding a key
+  left the native menu showing the old shortcut. It is now built from the same
+  keymap the rest of the app uses, and rebinding updates it (#141).
+- Put sort, diff, split, and grep in the menus with real shortcuts instead of
+  leaving them toolbar-only, and gave grep its own directory browser rather
+  than a modal nested inside a modal (#172).
+- Added a syntax scheme registry. Schemes can be chosen by hand for the
+  current file, bound to an extension, and marked favourite, with the choices
+  persisted; the scheme list is data now, so adding one no longer means
+  touching the highlighter (#244).
+- Added code folding that does not require holding the whole file. Fold ranges
+  are discovered lazily around the viewport from the sparse marker index, and
+  the current block and its siblings can be moved between directly (#245).
+- Added IME-safe input assistance: automatic indent, bracket completion, and
+  in-document word completion. Each is bounded and none of them commit while a
+  composition is active, so Japanese input is unaffected (#246).
+- Added a character and byte inspector showing the Unicode name, category,
+  Bidi class, the bytes in the file's own encoding, and a colour preview for
+  values that name one (#247).
+- Added external tool integration. Files can be opened at a position through a
+  `--line`/`--column` deep link, and recognized values in a log line — paths,
+  URLs, timestamps — offer the analysis actions that fit them. The link
+  surface is typed and validated rather than a general command channel (#248).
+
+## v0.9.0 - 2026-08-08
+
 - Stopped a self-update landing under a running editor from breaking its op
   workers. The server now spawns workers from an executable it fingerprints at
   startup and refuses — with a dedicated `restart_required` error instead of a
