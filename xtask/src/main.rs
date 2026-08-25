@@ -14,7 +14,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -428,6 +428,9 @@ fn prepare_release_version(root: &Path, opts: &Opts) -> Result<(String, Option<R
         Some(RestoreFiles::capture(&[
             root.join("Cargo.toml"),
             root.join("Cargo.lock"),
+            // Stamped by `stamp_changelog` below, so a dry run must put it
+            // back too — the task promises to leave no version metadata behind.
+            root.join("CHANGELOG.md"),
         ])?)
     } else {
         None
@@ -438,16 +441,83 @@ fn prepare_release_version(root: &Path, opts: &Opts) -> Result<(String, Option<R
         let next = bumped(&version, how)?;
         say(&format!("bump {version} -> {next}"));
         set_workspace_version(root, &next)?;
+        stamp_changelog(root, &next, &today())?;
         run("cargo", &["build", "--quiet"])?; // refresh Cargo.lock
         if opts.dry_run {
             say("dry-run: applying the bump temporarily; files will be restored");
         } else {
-            run("git", &["add", "Cargo.toml", "Cargo.lock"])?;
+            run("git", &["add", "Cargo.toml", "Cargo.lock", "CHANGELOG.md"])?;
             run("git", &["commit", "-m", &format!("release: v{next}")])?;
         }
         version = next;
     }
     Ok((version, restore))
+}
+
+/// Turn the CHANGELOG's `## Unreleased` heading into `## vX.Y.Z - YYYY-MM-DD`
+/// as part of the release commit.
+///
+/// v0.9.0 shipped with its entries still sitting under `## Unreleased`, because
+/// nothing in this task ever looked at the file. Stamping it here — and
+/// refusing to tag an empty section — makes both halves of that drift
+/// impossible: a release cannot be cut without notes, and notes cannot be left
+/// unattributed to the version that shipped them.
+fn stamp_changelog(root: &Path, version: &str, date: &str) -> Result<()> {
+    let path = root.join("CHANGELOG.md");
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let (heading, body) = unreleased_section(&text)?;
+    if !body.lines().any(|l| l.trim_start().starts_with("- ")) {
+        bail!(
+            "CHANGELOG.md has no entries under `## Unreleased` — write the release \
+             notes before tagging v{version}"
+        );
+    }
+    let stamped = format!("## v{version} - {date}");
+    say(&format!("changelog: {heading} -> {stamped}"));
+    std::fs::write(&path, text.replacen(heading, &stamped, 1))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+/// The `## Unreleased` heading and the body between it and the next `## `.
+fn unreleased_section(text: &str) -> Result<(&str, &str)> {
+    const HEADING: &str = "## Unreleased";
+    let start = text
+        .find(HEADING)
+        .context("CHANGELOG.md has no `## Unreleased` section to stamp")?;
+    let after = start + HEADING.len();
+    let end = text[after..]
+        .find("\n## ")
+        .map_or(text.len(), |i| after + i);
+    Ok((&text[start..after], &text[after..end]))
+}
+
+/// Today as `YYYY-MM-DD`, UTC.
+///
+/// Deriving this from the epoch keeps `xtask` on its existing dependencies
+/// rather than adding a date crate for one line of output.
+fn today() -> String {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0) as i64;
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Howard Hinnant's `civil_from_days`: days since 1970-01-01 to (y, m, d).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 fn run_release_gate(root: &Path) -> Result<()> {
@@ -717,6 +787,73 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    const CHANGELOG: &str = "\
+# Changelog
+
+## Unreleased
+
+- Did a thing (#1).
+- Did another thing (#2).
+
+## v0.9.0 - 2026-08-08
+
+- Shipped earlier (#0).
+";
+
+    #[test]
+    fn stamping_moves_unreleased_entries_under_the_new_version() {
+        let dir = temp_dir("changelog-stamp");
+        std::fs::write(dir.join("CHANGELOG.md"), CHANGELOG).unwrap();
+
+        stamp_changelog(&dir, "0.10.0", "2026-08-25").unwrap();
+
+        let out = std::fs::read_to_string(dir.join("CHANGELOG.md")).unwrap();
+        assert!(out.contains("## v0.10.0 - 2026-08-25"), "{out}");
+        assert!(
+            !out.contains("## Unreleased"),
+            "the heading must be consumed"
+        );
+        // The entries stay put and the older sections are untouched.
+        assert!(out.contains("- Did a thing (#1)."));
+        assert!(out.contains("## v0.9.0 - 2026-08-08"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The v0.9.0 drift in reverse: releasing with nothing written down must
+    /// fail loudly instead of tagging a version with no notes.
+    #[test]
+    fn stamping_refuses_an_empty_unreleased_section() {
+        let dir = temp_dir("changelog-empty");
+        std::fs::write(
+            dir.join("CHANGELOG.md"),
+            "# Changelog\n\n## Unreleased\n\n## v0.9.0 - 2026-08-08\n\n- Old (#0).\n",
+        )
+        .unwrap();
+
+        let err = stamp_changelog(&dir, "0.10.0", "2026-08-25").unwrap_err();
+        assert!(err.to_string().contains("no entries"), "{err}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_unreleased_section_stops_at_the_next_heading() {
+        let (heading, body) = unreleased_section(CHANGELOG).unwrap();
+        assert_eq!(heading, "## Unreleased");
+        assert!(body.contains("- Did another thing (#2)."));
+        assert!(
+            !body.contains("Shipped earlier"),
+            "the previous release leaked into the section: {body:?}"
+        );
+    }
+
+    #[test]
+    fn civil_dates_round_trip_known_days() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // a leap year
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29)); // its leap day
+        assert_eq!(civil_from_days(20_690), (2026, 8, 25));
     }
 
     #[test]
