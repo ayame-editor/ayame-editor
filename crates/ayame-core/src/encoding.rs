@@ -185,11 +185,11 @@ impl Encoding {
 
 fn decode_utf16_line(bytes: &[u8], le: bool) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for chunk in bytes.chunks_exact(2) {
+    for chunk in bytes.as_chunks::<2>().0 {
         units.push(if le {
-            u16::from_le_bytes([chunk[0], chunk[1]])
+            u16::from_le_bytes(*chunk)
         } else {
-            u16::from_be_bytes([chunk[0], chunk[1]])
+            u16::from_be_bytes(*chunk)
         });
     }
     String::from_utf16_lossy(&units)
@@ -502,11 +502,11 @@ fn detect_utf16_eol(content: &[u8], le: bool) -> Eol {
     let mut lf = 0u32;
     let mut cr = 0u32;
     let mut prev_cr = false;
-    for chunk in p.chunks_exact(2) {
+    for chunk in p.as_chunks::<2>().0 {
         let unit = if le {
-            u16::from_le_bytes([chunk[0], chunk[1]])
+            u16::from_le_bytes(*chunk)
         } else {
-            u16::from_be_bytes([chunk[0], chunk[1]])
+            u16::from_be_bytes(*chunk)
         };
         match unit {
             0x000D => {
