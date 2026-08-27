@@ -157,3 +157,11 @@ a hard failure, never a fallback.
 
 To rotate, run `cargo xtask keygen` again and update both settings. Keep the
 old key working until every shipped build that trusts it has been superseded.
+
+Releases published before signing existed carry no `.sha256.sig`, so a signed
+build refuses them. That includes `--version`: rolling a v0.10.0 or later build
+back to v0.9.0 or earlier with `ayame update --version v0.9.0` exits non-zero
+with "release v0.9.0 is not signed" and installs nothing. This is the policy
+working, not a bug — there is deliberately no flag to bypass it, because a flag
+that installs unverified artifacts is the thing the signature is there to
+prevent. Roll back by downloading that release's artifact by hand.
