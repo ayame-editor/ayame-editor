@@ -240,6 +240,39 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
       - run: cargo clippy --all-targets --locked --features gui -- -D warnings
 
+  # Every other `--features gui` job here runs on Linux, so the two platforms
+  # that ship a GUI build were only ever compiled at tag time by the release
+  # workflow. That let v0.10.0 tag, fail its Windows and macOS builds, and need
+  # a moved tag: `reuse.rs` put `getrandom::Error` through `anyhow::Context`,
+  # which needs a trait impl that only exists under getrandom's `std` feature —
+  # enabled transitively by the Linux webview stack and by nothing on Windows or
+  # macOS. `check` rather than `build`: the failure was trait resolution, which
+  # type-checking catches, and skipping codegen and linking keeps this cheap
+  # enough to run on every push.
+  gui-cross-platform:
+    name: GUI check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
+      - run: cargo check --locked -p ayame-cli --all-targets --features gui
+
   windows-metadata:
     name: Windows executable metadata
     runs-on: windows-latest
