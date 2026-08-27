@@ -54,12 +54,7 @@ sha2 = "0.10"
 # Release-signature verification for `ayame update`, and the keygen/sign side in
 # xtask. Verification only needs the `std` build — no RNG, PEM, or PKCS#8.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-# `std` is not optional for us: `reuse.rs` puts `getrandom::Error` through
-# `anyhow::Context`, which needs `std::error::Error`, and getrandom only
-# implements it under this feature. On Linux the GUI stack happened to enable it
-# transitively through `rand`, so leaving it implicit built fine here and broke
-# the Windows and macOS release builds.
-getrandom = { version = "0.3", features = ["std"] }
+getrandom = "0.3"
 
 # Release builds favor raw throughput for the indexing/scan hot paths.
 # Keep ayame-core at one codegen unit so ThinLTO sees the whole engine at once.
