@@ -9,10 +9,6 @@ A fast desktop text editor for huge files.
 
 Runs on macOS, Windows, and Linux.
 
-> **Comparing files?** Comparison moved to the sister project
-> **[ayame-diff](https://github.com/ayame-editor/ayame-diff)**. Ayame Editor v0.7.0
-> removes its `diff` / `sortdiff` implementations and two-file comparison UI.
-
 ## Features
 
 - View, search, and edit huge files without loading the whole file into memory.

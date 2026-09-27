@@ -233,18 +233,6 @@ pub(crate) fn run(args: Vec<String>) -> Result<u8> {
     }
 }
 
-/// Keep an actionable error for one release after removing the implementation.
-/// The names stay in the command table so GUI builds do not mistake them for
-/// file paths, and so their arguments are still checked.
-fn removed_comparison_command(old_cmd: &str, new_cmd: &str) -> Result<u8> {
-    bail!(
-        "`ayame {old_cmd}` was removed in Ayame Editor v0.7.0; use \
-         `ayame-diff {new_cmd} OLD NEW` instead. Install ayame-diff from \
-         https://github.com/ayame-editor/ayame-diff/releases/latest or run \
-         `go install github.com/ayame-editor/ayame-diff/cmd/ayame-diff@latest`"
-    )
-}
-
 #[cfg(feature = "gui")]
 fn direct_path_gui_args(args: &[String]) -> Option<Vec<String>> {
     let cmd = args.first()?;
@@ -417,11 +405,6 @@ mod tests {
                 command.name
             );
         }
-        // The removed comparison commands stay dispatchable but unadvertised.
-        assert!(
-            !text.contains("\n    diff "),
-            "removed commands are advertised"
-        );
     }
 
     /// The user-facing reference is a separate document, so it drifts from the
@@ -451,23 +434,6 @@ mod tests {
                     command.name
                 );
             }
-        }
-    }
-
-    #[test]
-    fn removed_diff_commands_point_to_their_replacements() {
-        for (command, replacement) in [
-            ("diff", "text"),
-            ("sortdiff", "sorted"),
-            ("sort-diff", "sorted"),
-        ] {
-            let error = run(vec![command.to_string()]).unwrap_err().to_string();
-            assert!(error.contains("removed in Ayame Editor v0.7.0"), "{error}");
-            assert!(
-                error.contains(&format!("ayame-diff {replacement}")),
-                "{error}"
-            );
-            assert!(error.contains("go install"), "{error}");
         }
     }
 

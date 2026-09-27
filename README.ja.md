@@ -9,11 +9,6 @@
 
 macOS、Windows、Linux で動作します。
 
-> **ファイル比較は？** 比較機能は姉妹プロジェクト
-> **[ayame-diff](https://github.com/ayame-editor/ayame-diff)** へ移管しました。
-> Ayame Editor v0.7.0 では `diff` / `sortdiff` の実装と 2 ファイル比較 UI を
-> 削除します。
-
 ## 主な機能
 
 - 巨大ファイルを全体読み込みせずに表示・検索・編集できます。

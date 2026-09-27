@@ -145,16 +145,6 @@ pub(crate) static SUBCOMMANDS: &[Subcommand] = &[
         run: inspect::cmd_search,
     },
     Subcommand {
-        name: "diff",
-        aliases: &[],
-        valued: &[],
-        flags: &[],
-        document: false,
-        usage: "",
-        summary: "",
-        run: |_| super::removed_comparison_command("diff", "text"),
-    },
-    Subcommand {
         name: "sort",
         aliases: &[],
         valued: &[
@@ -173,16 +163,6 @@ pub(crate) static SUBCOMMANDS: &[Subcommand] = &[
         usage: "<FILE>",
         summary: "External merge sort (memory-bounded, spills to disk)",
         run: ok!(sort::cmd_sort),
-    },
-    Subcommand {
-        name: "sortdiff",
-        aliases: &["sort-diff"],
-        valued: &[],
-        flags: &[],
-        document: false,
-        usage: "",
-        summary: "",
-        run: |_| super::removed_comparison_command("sortdiff", "sorted"),
     },
     Subcommand {
         name: "replace",
@@ -416,10 +396,8 @@ pub(crate) fn is_known(name: &str) -> bool {
     find(name).is_some()
 }
 
-/// Commands that appear in the `COMMANDS:` block. The removed comparison
-/// commands and the dev-only `typegen` stay dispatchable — so their arguments
-/// are still validated and `ayame diff` still explains where diff went — but
-/// are not advertised.
+/// Commands that appear in the `COMMANDS:` block. The dev-only `typegen` stays
+/// dispatchable but is not advertised.
 fn documented() -> impl Iterator<Item = &'static Subcommand> {
     SUBCOMMANDS.iter().filter(|cmd| !cmd.summary.is_empty())
 }
