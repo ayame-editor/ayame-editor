@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.10.1 - 2026-09-27
 
 - Bumped the transitive dependencies that carried known advisories:
   `quick-xml` 0.39.4 → 0.41.0 (via `wayland-scanner` 0.31.11), `rustls`
