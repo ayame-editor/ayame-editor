@@ -2,6 +2,29 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Bumped the transitive dependencies that carried known advisories:
+  `quick-xml` 0.39.4 → 0.41.0 (via `wayland-scanner` 0.31.11), `rustls`
+  0.23.41 → 0.23.45, `crossbeam-epoch` 0.9.18 → 0.9.21, and `time` 0.3.36 →
+  0.3.55 (via `cookie` 0.18.2). `cargo audit` reports no remaining
+  vulnerability; the web dev dependency `vitest` moved to 4.1.11 for the
+  `@vitest/mocker` path-traversal fix, clearing `npm audit` as well.
+- Split `crates/ayame-core/src/edit.rs` (3,254 lines) into focused modules so
+  no file carries the whole overlay. `edit/mod.rs` keeps the session, overlay
+  types, line accessors, and the logical-to-original mapping; `edit/mutate.rs`
+  the single-line, range, batch, and rectangle mutators; `edit/history.rs` the
+  undo/redo generations; `edit/change.rs` the change-history derivation;
+  `edit/wal.rs` the crash-log integration; `edit/overlay.rs` the snapshots and
+  save-time rebase sources; `edit/save.rs` the byte-exact and re-encoded
+  writers; and `edit/tests.rs` the tests. Behaviour is unchanged — the commit
+  tail every mutator repeated is now one monomorphized `commit_record` helper,
+  so the no-crash-log hot path keeps its allocation-free shape.
+- Removed the leftover redirect stubs for the `diff` / `sortdiff` commands that
+  moved to ayame-diff in v0.7.0: they are unknown commands again, the stale
+  "Comparing files?" README announcement is gone, and the CLI reference no
+  longer claims they return a redirect error.
+
 ## v0.10.0 - 2026-08-26
 
 - Restored a green build on the current stable toolchain. Rust 1.98 added
