@@ -2,6 +2,10 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## v0.10.2 - 2026-10-24
+
+- Update the reviewed dependencies and retain the recorded security compatibility fixes.
+
 ## v0.10.1 - 2026-09-27
 
 - Bumped the transitive dependencies that carried known advisories:
