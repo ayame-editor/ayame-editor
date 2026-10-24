@@ -78,7 +78,7 @@ fn try_for_each_csv_record(
                         *lines >= MAX_RECORD_LINES || raw_end - *start >= MAX_RECORD_BYTES;
                     if closes || runaway {
                         let s = *start;
-                        let bytes = doc.raw_byte_range(s, text_end).ok_or_else(&changed)?;
+                        let bytes = doc.raw_byte_range(s, text_end).ok_or_else(changed)?;
                         f(record_no, bytes, s, raw_end)?;
                         record_no += 1;
                         open = None;
