@@ -77,3 +77,7 @@ strip = "symbols"  # ~15% smaller binaries; release scripts no longer rely on a 
 [profile.release.package.ayame-cli]
 codegen-units = 16
 strip = "symbols"
+
+[patch.crates-io]
+# GTK3 GLib soundness fix; retain the upstream version and complete provenance.
+glib = { path = "vendor/glib-0.18.5-patched" }

@@ -56,7 +56,7 @@ unicode-script.workspace = true
 unicode-bidi.workspace = true
 east-asian-width.workspace = true
 url = "2"
-zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "9", default-features = false, features = ["deflate"], optional = true }
 
 # Native window (feature = "gui"): the OS webview (WKWebView / WebView2 /
 # WebKitGTK), not a bundled browser. Optional so it never touches CLI builds.

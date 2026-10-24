@@ -1031,6 +1031,10 @@ fn unzip_safe(zip_path: &Path, dest: &Path) -> Result<()> {
         let mut entry = archive
             .by_index(i)
             .with_context(|| format!("reading zip entry {i} from {}", zip_path.display()))?;
+        let name = entry.name()?;
+        if name.starts_with(['/', '\\']) || name.as_bytes().get(1) == Some(&b':') {
+            continue;
+        }
         let Some(enclosed) = entry.enclosed_name() else {
             continue;
         };
@@ -1048,7 +1052,7 @@ fn unzip_safe(zip_path: &Path, dest: &Path) -> Result<()> {
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&out, fs::Permissions::from_mode(mode))
+            fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o777))
                 .with_context(|| format!("setting permissions on {}", out.display()))?;
         }
     }
@@ -1408,13 +1412,38 @@ mod tests {
     fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let file = File::create(path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
-        let options: zip::write::FileOptions<'_, ()> =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         for (name, contents) in entries {
             zip.start_file(*name, options).unwrap();
             zip.write_all(contents).unwrap();
         }
         zip.finish().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unzip_strips_special_permission_bits_from_executables() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("zip-permissions");
+        let archive = dir.path().join("release.zip");
+        write_zip(&archive, &[("ayame", b"executable payload")]);
+        let mut bytes = fs::read(&archive).unwrap();
+        // An attacker can set attributes the ZIP writer refuses to emit.
+        let central = bytes.windows(4).position(|x| x == b"PK\x01\x02").unwrap();
+        bytes[central + 38..central + 42].copy_from_slice(&((0o106755_u32) << 16).to_le_bytes());
+        fs::write(&archive, bytes).unwrap();
+        let dest = dir.path().join("extract");
+        fs::create_dir_all(&dest).unwrap();
+        unzip_safe(&archive, &dest).unwrap();
+
+        let output = dest.join("ayame");
+        assert_eq!(fs::read(&output).unwrap(), b"executable payload");
+        assert_eq!(
+            fs::metadata(output).unwrap().permissions().mode() & 0o7777,
+            0o755
+        );
     }
 
     /// Sorted file/directory names directly inside `dir`.
