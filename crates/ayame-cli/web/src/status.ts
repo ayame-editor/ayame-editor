@@ -5,6 +5,12 @@ import { currentLocale, t } from "./i18n.js";
 import { setAppTitle } from "./app.js";
 import { isKeymapDoc, isThemeDoc } from "./document-kind.js";
 import { encodingLabel } from "./encodings.js";
+import {
+  hasTextSelection,
+  rectRange,
+  selectionLineCount,
+  selectionRanges,
+} from "./selection-model.js";
 import { resolveSyntaxScheme, schemeDefinition } from "./syntax.js";
 
 export function enc(encoding) {
@@ -104,5 +110,66 @@ export function updateStatusPos() {
     col: commas(state.caret.position.col + 1),
   });
   const count = state.caret.extraCursors.length;
-  $("st-pos").textContent = count ? t("status.posCursors", { pos, n: count + 1 }) : pos;
+  const text = count ? t("status.posCursors", { pos, n: count + 1 }) : pos;
+  if (!hasTextSelection()) {
+    $("st-pos").textContent = text;
+    return;
+  }
+  // Selection size next to the caret: how much a copy would carry. Character
+  // counts need the selected lines' text, which is resident for anything on
+  // screen; a selection reaching into un-fetched lines keeps the line count
+  // rather than triggering a fetch on every caret move.
+  const lines = commas(selectionLineCount());
+  const chars = selectionCharCount();
+  $("st-pos").textContent =
+    chars == null
+      ? t("status.selectionPosLines", { pos: text, lines })
+      : t("status.selectionPos", { pos: text, lines, chars: commas(chars) });
+}
+
+/// Text of one line from the viewport caches, or `null` when it is not loaded.
+function cachedLineText(line) {
+  const cache = state.view.cache;
+  const index = line - cache.start;
+  if (index >= 0 && index < cache.lines.length) return cache.lines[index].text ?? "";
+  const record = state.view.sparseCache.get(line);
+  return record ? (record.text ?? "") : null;
+}
+
+// Selected scalars across every range, counting the newline between lines so
+// the number matches the text a copy would produce. `null` if any selected
+// line is outside the cache.
+function selectionCharCount() {
+  let total = 0;
+  const rect = rectRange();
+  if (rect) {
+    for (let line = rect.l0; line <= rect.l1; line++) {
+      const text = cachedLineText(line);
+      if (text == null) return null;
+      total += Array.from(text).slice(rect.c0, rect.c1).length;
+    }
+    return total;
+  }
+  for (const range of selectionRanges()) {
+    const count = rangeCharCount(range);
+    if (count == null) return null;
+    total += count;
+  }
+  return total;
+}
+
+function rangeCharCount(range) {
+  const first = cachedLineText(range.start.line);
+  if (first == null) return null;
+  if (range.start.line === range.end.line) {
+    return Array.from(first).slice(range.start.col, range.end.col).length;
+  }
+  let total = Array.from(first).slice(range.start.col).length;
+  for (let line = range.start.line + 1; line <= range.end.line; line++) {
+    const text = cachedLineText(line);
+    if (text == null) return null;
+    const chars = Array.from(text);
+    total += 1 + (line === range.end.line ? chars.slice(0, range.end.col).length : chars.length);
+  }
+  return total;
 }

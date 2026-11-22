@@ -26,7 +26,7 @@ import {
 import {
   deleteLines,
   duplicateLines,
-  gotoLine,
+  gotoTarget,
   moveLines,
   redoEdit,
   setFollowTail,
@@ -87,7 +87,7 @@ const closeActiveTab = () => {
 
 const promptGotoLine = () => {
   askPrompt(t("menu.gotoLine"), t("dialog.gotoLine.label")).then((value) => {
-    if (value != null) gotoLine(value);
+    if (value != null) void gotoTarget(value);
   });
 };
 

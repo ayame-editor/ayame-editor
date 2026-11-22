@@ -83,4 +83,22 @@ mod tests {
             assert_eq!(THEMES_CSS.matches(variable).count(), themes.len());
         }
     }
+
+    /// Native widgets follow `color-scheme`, not the theme's variables, so each
+    /// theme block has to declare the scheme its `type` names — a dark theme
+    /// without it draws light checkboxes and dropdown lists on dark panels.
+    #[test]
+    fn build_declares_each_themes_color_scheme_from_its_type() {
+        let themes: serde_json::Value =
+            serde_json::from_str(include_str!("../../web/themes.json")).unwrap();
+        for (id, theme) in themes.as_object().unwrap() {
+            let scheme = theme["type"].as_str().unwrap();
+            assert!(
+                THEMES_CSS.contains(&format!(
+                    "html[data-theme={id:?}] {{\n  color-scheme: {scheme};\n"
+                )),
+                "theme {id} must declare color-scheme: {scheme}"
+            );
+        }
+    }
 }

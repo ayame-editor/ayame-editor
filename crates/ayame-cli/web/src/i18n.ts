@@ -428,6 +428,8 @@ export const MESSAGES = {
     "status.line0": "行 0",
     "status.pos": "行 {line}, 列 {col}",
     "status.posCursors": "{pos} · {n} カーソル",
+    "status.selectionPos": "{pos} · 選択 {lines} 行 ({chars} 文字)",
+    "status.selectionPosLines": "{pos} · 選択 {lines} 行",
     "status.unsavedDetail": "未保存の編集: +{added} 行追加 / ~{changed} 行変更 / -{deleted} 行削除",
     "status.indexDetail":
       "{lines} 行 / {bytes} / インデックス {checkpoints} 点 ({indexBytes}, {indexMs} ms)",
@@ -492,7 +494,6 @@ export const MESSAGES = {
     "common.confirm": "確認",
     "common.input": "入力",
     "common.options": "オプション",
-    "common.error": "エラー",
     "common.add": "追加",
     "common.save": "保存",
     "common.remove": "削除",
@@ -758,7 +759,9 @@ export const MESSAGES = {
       "{name} の未保存の編集があります。保存せずに Ayame Editor を終了しますか?",
     "dialog.exit.moreFiles": "ほか {n} 件",
     // -- goto-line prompt --
-    "dialog.gotoLine.label": "行番号",
+    "dialog.gotoLine.label": "行番号（120:8、50%、+20 も指定可）",
+    "dialog.gotoLine.invalid":
+      "移動先を読み取れません。120、120:8、50%、+20 のように入力してください。",
     // -- crash recovery --
     "recover.title": "クラッシュ復元",
     "recover.found": "クラッシュ前の未保存の編集が見つかりました（{n}件）。復元しますか？",
@@ -778,6 +781,7 @@ export const MESSAGES = {
     "error.saveError": "保存エラー",
     "error.serverUnreachable": "サーバに接続できません",
     "error.serverUnknown": "サーバエラー: {message}",
+    "error.operationDetail": "{label}: {msg}",
     "error.server.badRequest": "リクエストが正しくありません。",
     "error.server.invalidInput": "入力が正しくありません。",
     "error.server.exists": "対象はすでに存在します。",
@@ -1204,6 +1208,8 @@ export const MESSAGES = {
     "status.line0": "Line 0",
     "status.pos": "Line {line}, Column {col}",
     "status.posCursors": "{pos} · {n} cursors",
+    "status.selectionPos": "{pos} · {lines} lines selected ({chars} chars)",
+    "status.selectionPosLines": "{pos} · {lines} lines selected",
     "status.unsavedDetail":
       "Unsaved edits: +{added} lines added / ~{changed} lines changed / -{deleted} lines deleted",
     "status.indexDetail":
@@ -1266,7 +1272,6 @@ export const MESSAGES = {
     "common.confirm": "Confirm",
     "common.input": "Input",
     "common.options": "Options",
-    "common.error": "Error",
     "common.add": "Add",
     "common.save": "Save",
     "common.remove": "Remove",
@@ -1516,7 +1521,9 @@ export const MESSAGES = {
     "dialog.exit.lastTabAsk": "Closing the last tab exits Ayame Editor. Exit?",
     "dialog.exit.unsavedNamed": "{name} has unsaved edits. Exit Ayame Editor without saving?",
     "dialog.exit.moreFiles": "{n} more",
-    "dialog.gotoLine.label": "Line Number",
+    "dialog.gotoLine.label": "Line (also 120:8, 50%, +20)",
+    "dialog.gotoLine.invalid":
+      "That is not a position. Enter a line such as 120, 120:8, 50%, or +20.",
     "recover.title": "Crash Recovery",
     "recover.found": "Found {n} unsaved edit(s) from before a crash. Restore them?",
     "recover.restore": "Restore",
@@ -1534,6 +1541,7 @@ export const MESSAGES = {
     "error.saveError": "Save error",
     "error.serverUnreachable": "Cannot connect to the server",
     "error.serverUnknown": "Server error: {message}",
+    "error.operationDetail": "{label}: {msg}",
     "error.server.badRequest": "The request is invalid.",
     "error.server.invalidInput": "The input is invalid.",
     "error.server.exists": "The target already exists.",
@@ -1601,6 +1609,26 @@ export function serverMessage(error: unknown) {
   if (key) return t(key);
   if (code) return t("error.serverUnknown", { message: raw || String(code) });
   return raw;
+}
+
+/// A failed operation as one line: the operation's own label, then why the
+/// request failed. The find bar used to report every failure as a bare
+/// "Search error", including the one the server words most carefully — that
+/// Ayame was updated and has to be restarted.
+///
+/// A rejected search pattern additionally keeps the engine's own wording. The
+/// browser validates a pattern with its own regex dialect first, so what
+/// reaches the server and fails is by construction something the two dialects
+/// disagree on (look-around, backreferences); only the engine's message names
+/// the construct, and no fixed translation can.
+export function operationError(label: string, error: unknown) {
+  const reason = serverMessage(error);
+  if (!reason) return label;
+  const detail =
+    error && typeof error === "object" ? (error as { code?: unknown; message?: unknown }) : null;
+  const engine =
+    detail?.code === "search" && typeof detail.message === "string" ? detail.message.trim() : "";
+  return t("error.operationDetail", { label, msg: engine ? `${reason} ${engine}` : reason });
 }
 
 // Available UI locales are exactly the top-level keys of MESSAGES ("auto" is not

@@ -164,6 +164,12 @@ html, body {
   font-family: var(--ui);
   overflow: hidden;
 }
+/* Native controls (checkbox, radio, range, progress) take the theme accent
+   from one inherited declaration. It used to be repeated on the handful of
+   controls someone had noticed, which left the rest — every Settings
+   checkbox — in the browser's default blue. A control whose colour means
+   something else (an analysis rule's own colour) overrides it locally. */
+html { accent-color: var(--accent); }
 
 #app {
   display: grid;

@@ -9,6 +9,7 @@ import {
   I18N_ATTR_MAP,
   localeDir,
   MESSAGES,
+  operationError,
   SERVER_CODE_KEYS,
   serverMessage,
   WEEKDAYS,
@@ -121,6 +122,60 @@ describe("localized server errors (#176)", () => {
     } finally {
       state.settings.language = originalLanguage;
     }
+  });
+});
+
+describe("operation errors carry their reason", () => {
+  const inEnglish = (run: () => void) => {
+    const originalLanguage = state.settings.language;
+    try {
+      state.settings.language = "en";
+      run();
+    } finally {
+      state.settings.language = originalLanguage;
+    }
+  };
+
+  // The server words this one carefully; the find bar used to throw it away
+  // and say only "Search error".
+  it("names a pending restart instead of a bare failure", () => {
+    inEnglish(() => {
+      expect(
+        operationError("Search error", { code: "restart_required", message: "raw server text" }),
+      ).toBe(
+        "Search error: Ayame was updated while running. Restart it to run this operation — the open file and any unsaved edits are unaffected.",
+      );
+    });
+  });
+
+  it("keeps the engine's wording for a pattern it rejects", () => {
+    inEnglish(() => {
+      expect(
+        operationError("Search error", {
+          code: "search",
+          message: "look-around, including look-ahead and look-behind, is not supported",
+        }),
+      ).toBe(
+        "Search error: The search request is invalid. look-around, including look-ahead and look-behind, is not supported",
+      );
+      // Other codes stay behind their localized text only.
+      expect(operationError("Search error", { code: "timeout", message: "raw" })).toBe(
+        "Search error: The operation timed out.",
+      );
+    });
+  });
+
+  it("reports a failure that never reached the server by its own message", () => {
+    inEnglish(() => {
+      expect(operationError("Replace error", new TypeError("Failed to fetch"))).toBe(
+        "Replace error: Failed to fetch",
+      );
+    });
+  });
+
+  it("falls back to the bare label when there is nothing to add", () => {
+    expect(operationError("Search error", { message: "" })).toBe("Search error");
+    expect(operationError("Search error", null)).toBe("Search error");
   });
 });
 

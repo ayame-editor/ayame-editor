@@ -311,7 +311,7 @@
   margin-top: calc(-1 * var(--space-2));
 }
 .set-row.set-hint-row .set-hint { font-size: var(--fs-hint); color: var(--fg-faint); }
-.set-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.set-row input[type="range"] { flex: 1; }
 .set-row .set-number {
   flex: 0 0 68px;
   width: 68px;

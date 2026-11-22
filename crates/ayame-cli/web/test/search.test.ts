@@ -371,6 +371,84 @@ describe("search count request generation (#123)", () => {
   });
 });
 
+describe("search failures say why", () => {
+  function errorResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  it("keeps the count label short and puts the server's reason in the notification", async () => {
+    document.body.innerHTML = '<span id="find-count"></span>';
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        errorResponse(503, { code: "restart_required", message: "raw server text" }),
+      ),
+    );
+    const language = state.settings.language;
+    state.settings.language = "en";
+    try {
+      state.search.query = "needle";
+      await updateCount();
+    } finally {
+      state.settings.language = language;
+    }
+
+    expect(document.getElementById("find-count")?.textContent).toBe("Search error");
+    expect(flashCount).toHaveBeenCalledOnce();
+    const [message, kind] = vi.mocked(flashCount).mock.calls[0];
+    expect(message).toMatch(/^Search error: Ayame was updated while running\. Restart it/);
+    expect(kind).toBe("error");
+  });
+
+  it("reports a failed find step as an error with its reason, not a bare 'Error'", async () => {
+    document.body.innerHTML = '<span id="find-count"></span><input id="find" />';
+    Object.assign(state.view, {
+      first: 0,
+      total: 20,
+      cache: { start: 0, lines: [{ number: 0, text: "needle" }] },
+    });
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input) => {
+        if (String(input).startsWith("/api/linebyte")) return jsonResponse({ byte: 0 });
+        return errorResponse(400, {
+          code: "search",
+          message: "look-around, including look-ahead and look-behind, is not supported",
+        });
+      }),
+    );
+    const language = state.settings.language;
+    state.settings.language = "en";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      state.search.query = "needle";
+      state.search.lastMatch = null;
+      await findStep("next");
+    } finally {
+      state.settings.language = language;
+      consoleError.mockRestore();
+    }
+
+    expect(flashCount).toHaveBeenCalledOnce();
+    const [message, kind] = vi.mocked(flashCount).mock.calls[0];
+    expect(message).toBe(
+      "Search error: The search request is invalid. look-around, including look-ahead and look-behind, is not supported",
+    );
+    expect(kind).toBe("error");
+  });
+});
+
 describe("live incremental count while typing (#162)", () => {
   it("debounces a burst of keystrokes into a single count request", async () => {
     vi.useFakeTimers();

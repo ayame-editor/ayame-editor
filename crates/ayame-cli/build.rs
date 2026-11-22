@@ -223,6 +223,7 @@ fn validate_themes(themes: &Value) {
         theme_number(theme, id, &["radius"]);
         theme_number(theme, id, &["acrylic", "blur"]);
         theme_number(theme, id, &["illustration"]);
+        theme_color_scheme(theme, id);
         order.push(
             theme
                 .get("ui")
@@ -237,6 +238,21 @@ fn validate_themes(themes: &Value) {
         (0..object.len() as u64).collect::<Vec<_>>(),
         "theme ui.order values must be unique and contiguous from zero"
     );
+}
+
+/// The CSS `color-scheme` a theme renders under, from its `type`.
+///
+/// Native widgets — checkboxes, `<select>` popups, number spinners, the
+/// scrollbars inside dialogs — are drawn by the browser, not by the theme's
+/// variables, and follow `color-scheme` alone. Without it every theme got the
+/// light set, so the dark themes showed white checkboxes and white dropdown
+/// lists on dark panels.
+fn theme_color_scheme(theme: &Map<String, Value>, id: &str) -> &'static str {
+    match theme_string(theme, id, &["type"]) {
+        "light" => "light",
+        "dark" => "dark",
+        other => panic!("theme {id:?} type must be \"light\" or \"dark\", found {other:?}"),
+    }
 }
 
 fn generate_theme_module(themes: &Value) -> String {
@@ -302,6 +318,10 @@ fn generate_themes_css(themes: &Value) -> String {
             css.push_str(":root,\n");
         }
         css.push_str(&format!("html[data-theme={id:?}] {{\n"));
+        css.push_str(&format!(
+            "  color-scheme: {};\n",
+            theme_color_scheme(theme, id)
+        ));
         let variables = [
             ("--bg", &["color", "paper"][..]),
             ("--bg-elevated", &["color", "paper2"]),

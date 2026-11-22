@@ -79,3 +79,55 @@ describe("operation notification queue (#177)", () => {
     expect(document.querySelector(`[data-notification-id="${id}"]`)).toBeNull();
   });
 });
+
+describe("repeated notifications", () => {
+  const cards = () => document.querySelectorAll(".notification");
+
+  // The match count is re-requested on every keystroke; against a server that
+  // keeps refusing, each attempt used to leave its own card that never expired.
+  it("shows a repeated error once instead of stacking a card per attempt", () => {
+    const first = flashCount("Search error", "error");
+    const second = flashCount("Search error", "error");
+    const third = flashCount("Search error", "error");
+
+    expect(cards()).toHaveLength(1);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it("gives a repeated informational message a fresh lifetime", async () => {
+    const id = flashCount("Wrapped to top");
+    await vi.advanceTimersByTimeAsync(NOTIFICATION_DURATION_MS - 1000);
+    expect(flashCount("Wrapped to top")).toBe(id);
+    expect(cards()).toHaveLength(1);
+
+    // The first timer would have fired here; the repeat postponed it.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(document.querySelector(`[data-notification-id="${id}"]`)?.classList).not.toContain(
+      "closing",
+    );
+    // …to one full lifetime after the repeat, not after the first showing.
+    await vi.advanceTimersByTimeAsync(NOTIFICATION_DURATION_MS - 1500);
+    expect(document.querySelector(`[data-notification-id="${id}"]`)?.classList).toContain(
+      "closing",
+    );
+  });
+
+  it("keeps messages that differ in text or severity apart", () => {
+    flashCount("Search error", "error");
+    flashCount("Search error");
+    flashCount("Replace error", "error");
+    expect(cards()).toHaveLength(3);
+  });
+
+  it("starts a new card once the earlier one is on its way out", async () => {
+    const first = flashCount("Search error", "error");
+    document.querySelector<HTMLButtonElement>(".notification-dismiss")?.click();
+    const second = flashCount("Search error", "error");
+
+    expect(second).not.toBe(first);
+    await vi.advanceTimersByTimeAsync(NOTIFICATION_EXIT_MS);
+    expect(cards()).toHaveLength(1);
+    expect(document.querySelector(`[data-notification-id="${second}"]`)).not.toBeNull();
+  });
+});

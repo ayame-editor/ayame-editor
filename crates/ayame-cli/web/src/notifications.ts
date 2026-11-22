@@ -53,6 +53,24 @@ export function clearNotifications() {
   notificationHost()?.replaceChildren();
 }
 
+/// The card already showing exactly this message, if one is still on screen.
+function liveNotification(host: HTMLElement, message: string, isError: boolean) {
+  for (const card of host.children) {
+    if (!(card instanceof HTMLElement) || card.classList.contains("closing")) continue;
+    if (card.classList.contains("error") !== isError) continue;
+    if (card.querySelector(".notification-message")?.textContent === message) return card;
+  }
+  return null;
+}
+
+function scheduleAutoDismiss(id: number) {
+  clearTimer(autoDismissTimers, id);
+  autoDismissTimers.set(
+    id,
+    window.setTimeout(() => dismissNotification(id), NOTIFICATION_DURATION_MS),
+  );
+}
+
 // `flashCount` is kept as the public name for compatibility with existing
 // callers. The message is already localized by the caller.
 export function flashCount(msg, kind = "") {
@@ -60,8 +78,21 @@ export function flashCount(msg, kind = "") {
   const host = notificationHost();
   if (!message || !host) return null;
 
-  const id = nextNotificationId++;
   const isError = kind === "error";
+  // A message that is already on screen is the same news, not more of it. An
+  // operation that keeps failing — the match count re-requested on every
+  // keystroke while the server needs a restart — used to stack one identical
+  // card per attempt, and error cards never expire on their own. The existing
+  // card stands for all of them; an informational one gets a fresh lifetime so
+  // the latest occurrence is still read.
+  const live = liveNotification(host, message, isError);
+  if (live) {
+    const liveId = Number(live.dataset.notificationId);
+    if (!isError) scheduleAutoDismiss(liveId);
+    return liveId;
+  }
+
+  const id = nextNotificationId++;
   const notification = el("div", `notification ${isError ? "error" : "info"}`);
   notification.dataset.notificationId = String(id);
 
@@ -78,11 +109,6 @@ export function flashCount(msg, kind = "") {
   notification.append(text, dismiss);
   host.append(notification);
 
-  if (!isError) {
-    autoDismissTimers.set(
-      id,
-      window.setTimeout(() => dismissNotification(id), NOTIFICATION_DURATION_MS),
-    );
-  }
+  if (!isError) scheduleAutoDismiss(id);
   return id;
 }

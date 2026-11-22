@@ -53,6 +53,16 @@ describe("Ayame design tokens", () => {
     expect(css).not.toContain("html[data-theme=");
   });
 
+  // Settings checkboxes rendered in the browser's default blue because the
+  // accent was declared per control and nobody had declared it for them.
+  it("themes every native control from one inherited accent", () => {
+    expect(css).toMatch(/html\s*\{\s*accent-color:\s*var\(--accent\);\s*\}/);
+    const declarations = [...css.matchAll(/accent-color:\s*([^;]+);/g)].map((m) => m[1].trim());
+    // The single other declaration is a deliberate override: an analysis
+    // rule's enable box carries that rule's own colour.
+    expect(declarations.sort()).toEqual(["var(--accent)", "var(--analysis-color)"]);
+  });
+
   it("uses one CJK-capable mono stack in CSS and runtime settings", () => {
     const cssMono = css.match(/--mono:\s*([^;]+);/s)?.[1];
     expect(cssMono).toBeTruthy();

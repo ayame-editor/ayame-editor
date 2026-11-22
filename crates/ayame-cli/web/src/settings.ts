@@ -218,6 +218,23 @@ export const THEME_VARS = [
 export function clearCustomVars() {
   const r = document.documentElement.style;
   THEME_VARS.forEach((v) => r.removeProperty(v));
+  // Not a variable, but driven by a custom theme the same way: once it is
+  // gone, the built-in theme block's own `color-scheme` applies again.
+  r.removeProperty("color-scheme");
+}
+
+/// The `color-scheme` a custom theme renders native widgets under — its
+/// `type`, the same field the built-in themes generate theirs from. A
+/// hand-written theme may leave `type` out, so the paper colour decides then:
+/// a dark page with light checkboxes and dropdown lists is the failure this
+/// exists to prevent.
+export function themeColorScheme(theme): "light" | "dark" {
+  if (theme?.type === "light" || theme?.type === "dark") return theme.type;
+  const hex = /^#([\da-f]{6})$/i.exec(String(theme?.color?.paper ?? "").trim());
+  if (!hex) return "light";
+  const rgb = parseInt(hex[1], 16);
+  const luma = 0.2126 * ((rgb >> 16) & 255) + 0.7152 * ((rgb >> 8) & 255) + 0.0722 * (rgb & 255);
+  return luma < 128 ? "dark" : "light";
 }
 
 export function deskFrom(t) {
@@ -260,6 +277,7 @@ export function applyCustomVars(t) {
   S("--acrylic-blur", ((t.acrylic && t.acrylic.blur) ?? 20) + "px");
   S("--desk", deskFrom(t));
   S("--illus", String(t.illustration ?? 0.2));
+  r.setProperty("color-scheme", themeColorScheme(t));
 }
 
 // True when the OS asks for a dark UI (guarded for non-browser test/build env).

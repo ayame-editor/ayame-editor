@@ -34,6 +34,7 @@ import {
   deleteLines,
   duplicateLines,
   enqueueEdit,
+  gotoTarget,
   insertNewline,
   moveLines,
   reloadViewport,
@@ -41,7 +42,8 @@ import {
   typeAssistedText,
 } from "../src/edits.js";
 import { state } from "../src/state.js";
-import { refreshChangeHistoryOverview, setCaret } from "../src/editor.js";
+import { refreshChangeHistoryOverview, revealLine, setCaret } from "../src/editor.js";
+import { flashCount } from "../src/notifications.js";
 import { activeFoldMap, collapseBlock } from "../src/fold-state.js";
 
 function jsonResponse(body: unknown): Response {
@@ -417,6 +419,86 @@ describe("whole-line edit construction (#129)", () => {
     const batches = await captureLineEdits(["alpha", "bravo", "charlie"], deleteLines);
 
     expect(batches).toEqual([[{ l0: 1, c0: 0, l1: 2, c1: 0, text: "" }]]);
+  });
+});
+
+describe("Go to Line entry", () => {
+  let language: typeof state.settings.language;
+
+  beforeEach(() => {
+    language = state.settings.language;
+    state.settings.language = "en";
+    state.doc.stat = { open: true };
+    state.view.total = 200_000;
+    state.view.cache = { start: 0, lines: [] };
+    state.caret.position = { line: 499, col: 3 };
+    state.caret.selection = null;
+    vi.mocked(setCaret).mockClear();
+    vi.mocked(revealLine).mockClear();
+    vi.mocked(flashCount).mockClear();
+  });
+
+  afterEach(() => {
+    state.settings.language = language;
+    vi.unstubAllGlobals();
+  });
+
+  it("goes to a percentage through the file and a hop from the caret", async () => {
+    expect(await gotoTarget("50%")).toBe(true);
+    expect(setCaret).toHaveBeenLastCalledWith(100_000, 0);
+    expect(revealLine).toHaveBeenLastCalledWith(100_000);
+
+    expect(await gotoTarget("+20")).toBe(true);
+    expect(setCaret).toHaveBeenLastCalledWith(519, 0);
+    expect(flashCount).not.toHaveBeenCalled();
+  });
+
+  it("resolves line:column through the server, which knows the line's length", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/position/resolve") {
+        expect(JSON.parse(String(init?.body))).toEqual({ line: 120, column: 8 });
+        // 0-based, and clamped: the line is only five characters long.
+        return jsonResponse({ line: 119, column: 5, truncated: false });
+      }
+      expect(String(input)).toBe("/api/lines?start=119&count=1");
+      return jsonResponse({ lines: [{ number: 119, text: "short" }], total: 200_000 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await gotoTarget("120:8")).toBe(true);
+    expect(setCaret).toHaveBeenLastCalledWith(119, 5, 5);
+    expect(revealLine).toHaveBeenLastCalledWith(119);
+  });
+
+  // `parseInt("12,5".replace(/[^0-9]/g, ""))` used to send this to line 125.
+  it("reports an entry it cannot read and leaves the caret alone", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await gotoTarget("12,5")).toBe(false);
+    expect(setCaret).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(flashCount).toHaveBeenCalledWith(
+      "That is not a position. Enter a line such as 120, 120:8, 50%, or +20.",
+      "error",
+    );
+  });
+
+  it("says why when the server cannot resolve the position", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ code: "bad_request", message: "raw detail" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+
+    expect(await gotoTarget("120:8")).toBe(false);
+    expect(setCaret).not.toHaveBeenCalled();
+    expect(flashCount).toHaveBeenCalledWith("Go to Line: The request is invalid.", "error");
   });
 });
 

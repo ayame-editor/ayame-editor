@@ -11,6 +11,7 @@ import {
 import { t } from "./i18n.js";
 import { highlightSpans, resolveSyntaxScheme, schemeDefinition } from "./syntax.js";
 import { analysisRanges } from "./analysis-model.js";
+import { composeRowSegments, searchRanges } from "./row-layers.js";
 import { flashCount } from "./notifications.js";
 import {
   activeFoldMap,
@@ -493,17 +494,8 @@ export function fillRow(row, line, rec) {
   if (rec == null) {
     tx.classList.add("pending");
     tx.textContent = "⋯";
-  } else if (state.search.matcher || state.analysis.matchers.length) {
-    appendLayeredHighlighted(tx, rec.text);
-  } else if (
-    state.settings.syntaxHighlight !== false &&
-    appendSyntaxHighlighted(tx, rec.text, line)
-  ) {
-    // rendered by appendSyntaxHighlighted
-  } else if (state.settings.showWhitespace) {
-    appendText(tx, rec.text, true);
   } else {
-    tx.textContent = rec.text;
+    appendRowText(tx, rec.text, line);
   }
   if (rec != null && state.settings.showWhitespace) appendEol(tx);
   if (collapsed) {
@@ -814,99 +806,84 @@ export function appendEol(container) {
   container.appendChild(el);
 }
 
-export function appendHighlighted(container, text) {
-  const re = state.search.matcher;
-  re.lastIndex = 0;
-  let last = 0;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) {
-      appendText(container, text.slice(last, m.index));
-    }
-    const mk = document.createElement("mark");
-    appendText(mk, m[0]);
-    container.appendChild(mk);
-    last = m.index + m[0].length;
-    if (m[0].length === 0) re.lastIndex++; // never stall on empty matches
-  }
-  if (last < text.length) {
-    appendText(container, text.slice(last), true);
-  }
-}
-
-/// Compose normal Find highlighting above analysis backgrounds. Rule priority
-/// is resolved by `analysisRanges`; the ordinary `<mark>` stays innermost so
-/// the active Find query remains the strongest visual signal.
-export function appendLayeredHighlighted(container, text) {
-  const analysis = analysisRanges(text, state.analysis.matchers, state.analysis.visibleRuleIds);
-  const search = [];
-  if (state.search.matcher) {
-    state.search.matcher.lastIndex = 0;
-    let match;
-    while ((match = state.search.matcher.exec(text)) !== null) {
-      if (match[0].length === 0) {
-        state.search.matcher.lastIndex++;
-        continue;
-      }
-      search.push({ start: match.index, end: match.index + match[0].length });
-    }
-  }
-  if (!analysis.length && !search.length) {
-    appendText(container, text, true);
-    return;
-  }
-  const boundaries = [
-    ...new Set([
-      0,
-      text.length,
-      ...analysis.flatMap((range) => [range.start, range.end]),
-      ...search.flatMap((range) => [range.start, range.end]),
-    ]),
-  ].sort((a, b) => a - b);
-  for (let index = 0; index + 1 < boundaries.length; index++) {
-    const start = boundaries[index];
-    const end = boundaries[index + 1];
-    if (end <= start) continue;
-    const analysisRange = analysis.find((range) => range.start < end && range.end > start);
-    const searchRange = search.find((range) => range.start < end && range.end > start);
-    let target = container;
-    if (analysisRange) {
-      const span = document.createElement("span");
-      span.className = `analysis-mark${analysisRange.overlap ? " overlap" : ""}`;
-      span.dataset.analysisColor = analysisRange.color;
-      span.dataset.analysisRules = analysisRange.ruleIds.join(" ");
-      target.append(span);
-      target = span;
-    }
-    if (searchRange) {
-      const mark = document.createElement("mark");
-      target.append(mark);
-      target = mark;
-    }
-    appendText(target, text.slice(start, end), end === text.length);
-  }
-}
-
-export function appendSyntaxHighlighted(container, text, line = -1) {
+/// Line-local syntax tokens for one row, or `null` when highlighting is off or
+/// the active scheme has nothing to say about this line.
+function rowSyntaxSpans(text: string, line: number) {
+  if (state.settings.syntaxHighlight === false) return null;
   const path = state.doc.stat?.path || "";
   const selection = state.syntax.overrides[path] || "auto";
-  const spans = highlightSpans(text, path, {
+  return highlightSpans(text, path, {
     line,
     scheme: resolveSyntaxScheme(path, selection, state.syntax.mappings),
   });
-  if (!spans) return false;
-  for (let i = 0; i < spans.length; i++) {
-    const span = spans[i];
-    if (span.kind === "plain") {
-      appendText(container, span.text, i === spans.length - 1);
-      continue;
-    }
-    const el = document.createElement("span");
-    el.className = `syn syn-${span.kind}`;
-    appendText(el, span.text, i === spans.length - 1);
-    container.appendChild(el);
+}
+
+/// Render one line's text with every layer that applies to it: syntax tokens,
+/// analysis-rule marks, and Find marks.
+///
+/// The layers are composed rather than chosen between. An analysis rule or a
+/// Find query used to replace the syntax pass for the whole viewport, and the
+/// built-in analysis profile meant a rule was always present, so syntax colours
+/// never rendered. Nesting is fixed, outermost first:
+///
+///   analysis mark  >  Find `<mark>`  >  syntax token
+///
+/// A range that spans several tokens therefore stays one element — no seams in
+/// its background — and the Find mark, as the innermost background, remains
+/// the strongest signal. `mark .syn` drops the token colour so a match keeps
+/// the contrast its theme chose.
+export function appendRowText(container, text: string, line = -1) {
+  const syntax = rowSyntaxSpans(text, line);
+  const analysis = state.analysis.matchers.length
+    ? analysisRanges(text, state.analysis.matchers, state.analysis.visibleRuleIds)
+    : [];
+  const search = searchRanges(text, state.search.matcher);
+  if (!syntax && !analysis.length && !search.length) {
+    // Nothing to layer: a single text node, or the whitespace overlays alone.
+    if (state.settings.showWhitespace) appendText(container, text, true);
+    else container.textContent = text;
+    return;
   }
-  return true;
+  const segments = composeRowSegments(text.length, syntax, analysis, search);
+  let rule = null;
+  let ruleEl = null;
+  let match = null;
+  let matchEl = null;
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    if (segment.analysis !== rule) {
+      rule = segment.analysis;
+      ruleEl = null;
+      // A Find mark lives inside the analysis element it started in; a match
+      // that continues past the rule's edge opens a new mark outside it.
+      match = null;
+      matchEl = null;
+      if (rule) {
+        ruleEl = document.createElement("span");
+        ruleEl.className = `analysis-mark${rule.overlap ? " overlap" : ""}`;
+        ruleEl.dataset.analysisColor = rule.color;
+        ruleEl.dataset.analysisRules = rule.ruleIds.join(" ");
+        container.append(ruleEl);
+      }
+    }
+    const parent = ruleEl ?? container;
+    if (segment.search !== match) {
+      match = segment.search;
+      matchEl = null;
+      if (match) {
+        matchEl = document.createElement("mark");
+        parent.append(matchEl);
+      }
+    }
+    let target = matchEl ?? parent;
+    if (segment.syntax) {
+      const token = document.createElement("span");
+      token.className = `syn syn-${segment.syntax}`;
+      target.append(token);
+      target = token;
+    }
+    appendText(target, text.slice(segment.start, segment.end), index === segments.length - 1);
+  }
 }
 
 export function render() {

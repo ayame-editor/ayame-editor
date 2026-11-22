@@ -18,6 +18,7 @@ import {
   resetSettingsToDefaults,
   saveSettings,
   SETTINGS_SAVE_DELAY_MS,
+  themeColorScheme,
 } from "../src/settings.js";
 import {
   DEFAULT_SETTINGS,
@@ -83,6 +84,41 @@ afterEach(() => {
   document.documentElement.removeAttribute("style");
   document.head.innerHTML = "";
   document.body.innerHTML = "";
+});
+
+// Native widgets follow `color-scheme`, not the theme variables. Built-in
+// themes get theirs generated from `type` (see build.rs); a custom theme sets
+// the same property inline and has to give it back when it is switched off.
+describe("custom theme color scheme", () => {
+  const plum = {
+    name: "Plum",
+    type: "dark",
+    color: { paper: "#1E1A24", ink: "#EDE6F5", accent: "#B79BEA" },
+  };
+
+  it("reads the scheme from the theme type, else from the paper colour", () => {
+    expect(themeColorScheme({ type: "dark", color: { paper: "#FFFFFF" } })).toBe("dark");
+    expect(themeColorScheme({ type: "light", color: { paper: "#000000" } })).toBe("light");
+    expect(themeColorScheme({ color: { paper: "#1E1A24" } })).toBe("dark");
+    expect(themeColorScheme({ color: { paper: "#FBF8F1" } })).toBe("light");
+    // Nothing to go on: the default scheme, never a guess.
+    expect(themeColorScheme({ color: { paper: "rebeccapurple" } })).toBe("light");
+    expect(themeColorScheme({})).toBe("light");
+  });
+
+  it("applies a dark custom theme's scheme and clears it for a built-in theme", () => {
+    stubBrowserSettingsEnvironment();
+    installApplicationDom();
+    const root = document.documentElement;
+
+    applySettings({ ...DEFAULT_SETTINGS, theme: "custom:Plum", customThemes: { Plum: plum } });
+    expect(root.dataset.theme).toBe("custom");
+    expect(root.style.getPropertyValue("color-scheme")).toBe("dark");
+
+    applySettings({ ...DEFAULT_SETTINGS, theme: "iris-light", customThemes: { Plum: plum } });
+    expect(root.dataset.theme).toBe("iris-light");
+    expect(root.style.getPropertyValue("color-scheme")).toBe("");
+  });
 });
 
 describe("editor font size (#170)", () => {

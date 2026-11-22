@@ -51,8 +51,14 @@ describe("Ayame spacing tokens (#149)", () => {
     expect(css).toContain(
       "/* Optical-only nudge for inline glyph ink; never use this for layout. */",
     );
-    expect(css.match(/var\(--space-optical\)/g)).toHaveLength(2);
+    expect(css.match(/var\(--space-optical\)/g)).toHaveLength(3);
     expect(css).toMatch(/mark\s*\{[^}]*Optical exception:[^}]*var\(--space-optical\)/s);
+    // The mark's padding is paid back as an equal negative margin. Without it
+    // every match shifted the rest of its line by two pixels while the caret
+    // and selection, measured on the plain text, stayed put.
+    expect(css).toMatch(
+      /mark\s*\{[^}]*padding:\s*var\(--space-0\)\s+var\(--space-optical\);\s*margin:\s*var\(--space-0\)\s+calc\(-1 \* var\(--space-optical\)\);/s,
+    );
     expect(css).toMatch(
       /\.opener-cwd::before\s*\{[^}]*Optical exception:[^}]*var\(--space-optical\)/s,
     );

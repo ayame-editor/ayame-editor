@@ -1,7 +1,7 @@
 // Ayame Editor — selection module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas, displayPath } from "./dom.js";
 import { LINE_HEIGHT, MAX_COPY_LINES, OVERSCAN, state } from "./state.js";
-import { serverMessage, t } from "./i18n.js";
+import { operationError, serverMessage, t } from "./i18n.js";
 import { api, apiPost, type FindResponse, type LinesResponse } from "./api.js";
 import {
   caretX,
@@ -189,7 +189,7 @@ export async function selectNextOccurrence() {
     }
     promoteSelectionRange(next);
   } catch (e) {
-    flashCount(t("find.searchError"), "error");
+    flashCount(operationError(t("find.searchError"), e), "error");
     console.error(e);
   }
 }

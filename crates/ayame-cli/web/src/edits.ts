@@ -1,7 +1,7 @@
 // Ayame Editor — edits module. Type-stripped to JS at build time (build.rs, oxc).
 import { $, commas } from "./dom.js";
 import { MAX_COPY_LINES, OVERSCAN, PAD, state } from "./state.js";
-import { t } from "./i18n.js";
+import { operationError, t } from "./i18n.js";
 import { api, apiPost, type BatchEditResponse, type LinesResponse } from "./api.js";
 import {
   cacheLineResponse,
@@ -36,6 +36,7 @@ import {
 import { selectedTextForRange } from "./selection-text.js";
 import { flashCount } from "./notifications.js";
 import { charLenOf } from "./text.js";
+import { parseGotoTarget } from "./goto-target.js";
 import type { ReplaceRangeRequest, ReplaceRectRequest, TailPollResponse } from "./types/api.js";
 import {
   emptyPairRange,
@@ -1177,14 +1178,47 @@ export function deleteLines() {
 }
 
 // Jump the caret to a 1-based line number.
+/// Put the caret at the start of a 1-based line. For callers that already
+/// hold a line number (grep results, bookmarks), given as a number or as the
+/// digit-grouped text the gutter prints; what a person types into Go to Line
+/// goes through `gotoTarget`.
 export function gotoLine(n) {
-  const v = parseInt(String(n).replace(/[^0-9]/g, ""), 10);
+  const v = Math.floor(Number(typeof n === "string" ? n.replace(/,/g, "") : n));
   if (!Number.isFinite(v) || v < 1) return;
   const line = Math.min(v - 1, Math.max(0, state.view.total - 1));
   setSelection(null);
   setCaret(line, 0);
   revealLine(line);
   focusEditor();
+}
+
+/// Go to what the user typed into Go to Line: a line, `line:column`, a
+/// percentage through the file, or a signed offset from the caret (see
+/// `parseGotoTarget`). An entry that names no position is reported and leaves
+/// the caret where it was — the old handler stripped every non-digit and went
+/// to whatever number remained. Resolves to whether the caret moved.
+export async function gotoTarget(input) {
+  const target = parseGotoTarget(String(input ?? ""), {
+    currentLine: state.caret.position.line + 1,
+    totalLines: state.view.total,
+  });
+  if (!target) {
+    flashCount(t("dialog.gotoLine.invalid"), "error");
+    return false;
+  }
+  if (target.column === 1) {
+    gotoLine(target.line);
+    return true;
+  }
+  try {
+    // A column needs the line's real length, which only the server knows for
+    // a line that is not in the viewport cache: same path as a deep link.
+    await gotoLaunchPosition(target);
+    return true;
+  } catch (error) {
+    flashCount(operationError(t("menu.gotoLine"), error), "error");
+    return false;
+  }
 }
 
 // Native/CLI deep link. Coordinate validation, EOF resolution and clamping

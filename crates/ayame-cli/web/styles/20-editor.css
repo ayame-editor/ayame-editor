@@ -482,14 +482,23 @@
   box-shadow: var(--match-ring);
 }
 mark {
-  /* Optical exception: preserve match ink without changing text geometry. */
+  /* Optical exception: preserve match ink without changing text geometry.
+     Inline padding does take up space, so the same amount comes back off as
+     a negative margin: the fill grows one pixel each way, the text after the
+     match stays exactly where the caret and selection geometry — measured on
+     the plain line — expect it. */
   padding: var(--space-0) var(--space-optical);
+  margin: var(--space-0) calc(-1 * var(--space-optical));
 }
 mark.current {
   background: var(--mark-active-bg);
   color: var(--mark-active-fg);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--mark-active-bg) 52%, transparent);
 }
+/* Syntax tokens nest inside a Find mark. Token colors are tuned against the
+   editor surface, not the mark fill, so inside a match the mark's own
+   foreground wins; weight and slant still carry the token kind. */
+mark .syn { color: inherit; }
 
 /* Semantic analysis colors. Profiles persist only these names; themes remain
    free to redefine their actual colors without migrating saved rules. */

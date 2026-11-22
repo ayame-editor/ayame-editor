@@ -1,7 +1,7 @@
 // Ayame Editor — find bar UI, matcher, navigation, count, and history.
 import { $, commas, escapeRegExp } from "./dom.js";
 import { state } from "./state.js";
-import { t } from "./i18n.js";
+import { operationError, t } from "./i18n.js";
 import { api, type FindResponse, type SearchResponse } from "./api.js";
 import {
   lineByte,
@@ -185,7 +185,7 @@ export async function findStep(dir) {
     if (wrapped) flashCount(dir === "next" ? t("find.wrapTop") : t("find.wrapBottom"));
     updateCount();
   } catch (e) {
-    flashCount(t("common.error"));
+    flashCount(operationError(t("find.searchError"), e), "error");
     console.error(e);
   }
 }
@@ -244,10 +244,12 @@ export async function updateCount() {
     state.search.truncated = res.truncated;
     updateFindCountLabel();
     scheduleRender();
-  } catch {
+  } catch (error) {
     if (token !== countRequestToken || controller.signal.aborted) return;
+    // The count label has room for the fact; the notification carries the
+    // reason — a pattern the engine rejects, a timeout, a restart that is due.
     $("find-count").textContent = t("find.searchError");
-    flashCount(t("find.searchError"), "error");
+    flashCount(operationError(t("find.searchError"), error), "error");
     scheduleRender();
   } finally {
     if (token === countRequestToken) countRequestController = null;

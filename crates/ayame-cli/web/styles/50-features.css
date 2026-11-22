@@ -431,7 +431,6 @@
 #analysis-progress {
   width: 100%;
   height: var(--space-0-5);
-  accent-color: var(--accent);
 }
 .analysis-progress-label {
   overflow: hidden;
@@ -808,7 +807,7 @@
   font-size: var(--fs-ui);
   cursor: pointer;
 }
-.form-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+.form-check input { width: 15px; height: 15px; }
 .form-path { display: flex; gap: var(--space-1-5); align-items: center; }
 .form-path input[type="text"] { flex: 1 1 auto; min-width: 0; }
 .form-path button { flex: 0 0 auto; white-space: nowrap; }

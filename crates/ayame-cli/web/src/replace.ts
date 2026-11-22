@@ -1,7 +1,7 @@
 // Ayame Editor — in-editor replacement and replace-all batching.
 import { $, commas } from "./dom.js";
 import { state } from "./state.js";
-import { t } from "./i18n.js";
+import { operationError, t } from "./i18n.js";
 import { api, type FindResponse, type LinesResponse, type SearchResponse } from "./api.js";
 import { applyBatchPlain, applyRange, enqueueEdit } from "./edits.js";
 import { hideLoading, setLoadingDetail, showLoading } from "./dialogs.js";
@@ -86,7 +86,7 @@ export async function replaceCurrent() {
     await updateCount();
     await findStep("next");
   } catch (e) {
-    flashCount(t("find.replaceError"), "error");
+    flashCount(operationError(t("find.replaceError"), e), "error");
     console.error(e);
   }
 }
@@ -179,7 +179,7 @@ export async function replaceAll() {
     }
     flashCount(replaced ? t("find.replacedCount", { n: commas(replaced) }) : t("find.noMatch"));
   } catch (e) {
-    flashCount(t("find.replaceError"), "error");
+    flashCount(operationError(t("find.replaceError"), e), "error");
     console.error(e);
   } finally {
     hideLoading();
