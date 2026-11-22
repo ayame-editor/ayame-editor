@@ -2,6 +2,43 @@
 
 All notable changes to Ayame Editor are tracked here.
 
+## Unreleased
+
+- Restored syntax highlighting. An active analysis rule or Find query used to
+  replace the syntax pass for the whole viewport, and the built-in analysis
+  profile meant a rule was always active, so syntax colours never rendered.
+  Each row now composes its syntax tokens, analysis marks, and Find marks in
+  one nested pass (`row-layers.ts`, `editor.ts`), outermost to innermost, so a
+  range spanning several tokens stays one background and the active Find match
+  remains the strongest signal.
+- Stopped Find marks from shifting the text after them. Every match pushed the
+  remainder of the line right by the mark's border, so a row with five matches
+  drifted by more than a character; the mark no longer changes the glyph
+  advance.
+- Search and replace failures now carry the server's reason, including the
+  restart-required answer after an update, instead of a bare "search error".
+  Repeated failures of the same operation collapse into one notification.
+- A pattern the browser accepts but the engine's regex dialect rejects
+  (look-around, backreferences) is now compiled on the server before the worker
+  starts (`validate_search`), and before a folder grep walks its tree. The
+  notification names the construct instead of reporting "worker process
+  failed", and folder grep no longer treats the pattern as a silent empty
+  result.
+- Theme `type` now drives the native `color-scheme`, so dark themes get dark
+  checkboxes, scrollbars, and form controls; custom themes get the same
+  treatment from their settings, and the accent colour is declared once.
+- Go to Line accepts `line:column`, a percentage (`50%`), and signed offsets
+  from the caret (`+20` / `-20`), and folds full-width digits and punctuation
+  typed with a Japanese IME left on. An entry that names no position is
+  reported instead of jumping to whatever digits it contains.
+- The status bar reports the selected line and character counts beside the
+  caret position. A selection that reaches past the loaded viewport reports the
+  line count only, without fetching on every caret move.
+- Split `serve/ops.rs` (1,551 lines) into `registry`, `worker`, `artifact`, and
+  `query` modules behind a small module root. Behaviour is unchanged; the
+  worker supervision, endpoint bodies, and their tests now live with the part
+  they cover.
+
 ## v0.10.2 - 2026-10-24
 
 - Update the reviewed dependencies and retain the recorded security compatibility fixes.

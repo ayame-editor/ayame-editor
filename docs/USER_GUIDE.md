@@ -111,7 +111,7 @@ option list. File comparison is provided by the sister project
 - Detects LF, CRLF, and classic-Mac CR-only line endings. CR-only UTF-16 files
   are not supported.
 - Supports literal search, regex search, whole-word search, and case-insensitive search.
-- Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file.
+- Provides editing, undo / redo, rectangular selection, multi-cursor editing, and saving a selection to a file. The status bar shows the caret position and, while text is selected, the selected line and character counts.
 - Inspects a caret grapheme or bounded selection as Unicode scalars and original
   file bytes, including suspicious invisible/Bidi characters and color literals.
 - Runs sort, replace, folder grep, grep-to-file (write only the matching lines to a new file), split, and case conversion from the GUI.
@@ -156,6 +156,23 @@ length, cannot be told apart from an untouched file by any check of this kind.
 Whole-word matching cannot be combined with every regular expression. When it
 cannot, the replace is refused rather than run against a wider set of matches
 than whole-word means — turn `Whole Word` off to run it.
+
+A pattern the browser accepts but the Rust regex engine does not — look-around,
+backreferences — is rejected with the engine's own explanation naming the
+construct, rather than a generic worker failure or an empty folder-grep result.
+
+## Go to Line and Status Bar
+
+`Ctrl+G` accepts more than a line number. `120:8` goes to line 120, column 8;
+`50%` goes to the middle of the file; `+20` / `-20` moves that many lines from
+the caret. Full-width digits and punctuation are accepted too, for a Japanese
+IME left on. An entry that names no position is reported and leaves the caret
+where it was.
+
+While text is selected, the status bar adds the number of selected lines and
+characters to the caret position. A selection that reaches past the loaded
+viewport reports the line count only, so moving the caret never waits on a
+fetch.
 
 ## Character and Raw-byte Inspector
 
