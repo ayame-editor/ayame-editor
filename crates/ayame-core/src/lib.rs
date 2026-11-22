@@ -63,9 +63,9 @@ pub use ops::{
     DEFAULT_BUDGET_BYTES,
 };
 pub use search::{
-    analysis_histogram_bin_width, AnalysisOptions, AnalysisProgress, AnalysisResult, AnalysisRule,
-    AnalysisRuleResult, SearchHit, SearchOptions, SearchResult, ANALYSIS_DEFAULT_MAX_HITS,
-    ANALYSIS_HISTOGRAM_BINS, ANALYSIS_MAX_RULES,
+    analysis_histogram_bin_width, validate_search, AnalysisOptions, AnalysisProgress,
+    AnalysisResult, AnalysisRule, AnalysisRuleResult, SearchHit, SearchOptions, SearchResult,
+    ANALYSIS_DEFAULT_MAX_HITS, ANALYSIS_HISTOGRAM_BINS, ANALYSIS_MAX_RULES,
 };
 pub use split::{
     split_by_lines, split_by_lines_with_progress, SplitOptions, SplitResult, SPLIT_RESULT_MAX_FILES,

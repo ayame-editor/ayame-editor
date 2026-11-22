@@ -124,8 +124,8 @@ impl ExactSum {
     }
 
     fn combine(&mut self, other: &ExactSum) {
-        for j in 0..other.len as usize {
-            self.add(other.partials[j]);
+        for &partial in &other.partials[..other.len as usize] {
+            self.add(partial);
         }
     }
 

@@ -277,6 +277,17 @@ impl MatchPlan {
     }
 }
 
+/// Compile a query exactly as [`search`] would, without scanning.
+///
+/// A caller that delegates the scan to another process uses this to reject a
+/// pattern the engine cannot compile before it spends a worker on it. The
+/// server does this so an unsupported construct (look-around, a backreference —
+/// valid in the browser's regex dialect, invalid here) surfaces as the engine's
+/// own explanation instead of an opaque worker failure.
+pub fn validate_search(opts: &SearchOptions, enc: Encoding) -> Result<()> {
+    MatchPlan::for_search(opts, enc).map(|_| ())
+}
+
 /// Scan forward from `opts.start_byte`, returning up to `max_hits` matches.
 pub fn search(
     buf: &[u8],
@@ -1243,6 +1254,29 @@ mod tests {
         // "row 0: value " is 13 chars, so column 13 on line 0.
         assert_eq!(res.hits[0].line, 0);
         assert_eq!(res.hits[0].column, 13);
+    }
+
+    #[test]
+    fn validate_search_reports_unsupported_constructs() {
+        let ok = SearchOptions {
+            query: r"row \d+:".into(),
+            regex: true,
+            ..Default::default()
+        };
+        validate_search(&ok, Encoding::Utf8).unwrap();
+
+        // Look-around is valid in the browser's dialect but not the engine's;
+        // the server validates up front so this never becomes a worker failure.
+        let lookahead = SearchOptions {
+            query: "foo(?=bar)".into(),
+            regex: true,
+            ..Default::default()
+        };
+        let err = validate_search(&lookahead, Encoding::Utf8).unwrap_err();
+        match err {
+            Error::Search(message) => assert!(message.contains("invalid regex"), "{message}"),
+            other => panic!("expected a search error, got {other:?}"),
+        }
     }
 
     #[test]
