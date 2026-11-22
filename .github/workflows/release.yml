@@ -46,7 +46,7 @@ jobs:
             suffix: macos-x86_64
             bin: ayame
             rustflags: ""
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             suffix: macos-aarch64
             bin: ayame
