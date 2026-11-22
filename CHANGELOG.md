@@ -2,7 +2,7 @@
 
 All notable changes to Ayame Editor are tracked here.
 
-## Unreleased
+## v0.10.3 - 2026-11-22
 
 - Restored syntax highlighting. An active analysis rule or Find query used to
   replace the syntax pass for the whole viewport, and the built-in analysis
