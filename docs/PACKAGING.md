@@ -89,7 +89,7 @@ wingetcreate update AyameEditor.Ayame --version <version> `
   --submit
 ```
 
-The manifest passes the official JSON schemas (1.10.0) but has not been run
+The manifest passes the official JSON schemas (1.28.0) but has not been run
 through `winget validate` yet. Once published, users run `winget install
 AyameEditor.Ayame` and `winget upgrade AyameEditor.Ayame`.
 

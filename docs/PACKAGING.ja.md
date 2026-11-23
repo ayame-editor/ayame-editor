@@ -84,7 +84,7 @@ wingetcreate update AyameEditor.Ayame --version <version> `
   --submit
 ```
 
-このマニフェストは公式の JSON スキーマ（1.10.0）の検証は通っていますが、`winget validate` はまだ通していません。
+このマニフェストは公式の JSON スキーマ（1.28.0）の検証は通っていますが、`winget validate` はまだ通していません。
 公開後は `winget install AyameEditor.Ayame` と `winget upgrade AyameEditor.Ayame` で使えます。
 
 ## ビルドの検証

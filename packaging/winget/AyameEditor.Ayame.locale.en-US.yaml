@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 PackageIdentifier: AyameEditor.Ayame
 PackageVersion: 0.10.3
 PackageLocale: en-US
@@ -19,4 +19,4 @@ Tags:
 - csv
 ReleaseNotesUrl: https://github.com/ayame-editor/ayame-editor/releases/tag/v0.10.3
 ManifestType: defaultLocale
-ManifestVersion: 1.10.0
+ManifestVersion: 1.28.0
