@@ -62,8 +62,21 @@ WebView2 ランタイムに依存します）。`cargo xtask release` が、Scoo
 最新のリリースへ更新します。
 
 公開は、自分のフォークから `winget-pkgs` へプルリクエストを送る形なので、ここでは自動化していません。
-バージョンごとに、3 ファイルを `manifests/a/AyameEditor/Ayame/<version>/` にコピーして PR を出すか、
-[`wingetcreate`](https://github.com/microsoft/winget-create) に両方を任せます。
+`winget` と `wingetcreate` は Windows 専用です。
+
+初回の提出（`winget-pkgs` にまだパッケージがない場合）は、Windows のシェルでリポジトリの直下から次のようにします。
+
+```powershell
+winget validate --manifest packaging\winget
+wingetcreate submit packaging\winget
+```
+
+`wingetcreate submit` は GitHub へのサインインを求め、`winget-pkgs` をフォークして PR を作ります。
+Windows がない場合は、自分のフォークの `manifests/a/AyameEditor/Ayame/<version>/` に 3 ファイルを
+コピーして、手で PR を出します。最初の提出はモデレーターが手動で確認し、パイプラインがサンドボックスで
+インストールも試すので、数日かかる見込みです。
+
+2 回目以降は `wingetcreate update` を使います。新しいリリースからマニフェストを書き換えます。
 
 ```powershell
 wingetcreate update AyameEditor.Ayame --version <version> `
@@ -71,9 +84,8 @@ wingetcreate update AyameEditor.Ayame --version <version> `
   --submit
 ```
 
-初回の提出の前に `winget validate --manifest packaging/winget` を実行してください。このマニフェストは、
-まだ winget の検証を通していません。最初の提出はモデレーターが手動で確認します。公開後は
-`winget install AyameEditor.Ayame` と `winget upgrade AyameEditor.Ayame` で使えます。
+このマニフェストは公式の JSON スキーマ（1.10.0）の検証は通っていますが、`winget validate` はまだ通していません。
+公開後は `winget install AyameEditor.Ayame` と `winget upgrade AyameEditor.Ayame` で使えます。
 
 ## ビルドの検証
 

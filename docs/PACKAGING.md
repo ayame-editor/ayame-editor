@@ -64,9 +64,24 @@ the WebView2 runtime). `cargo xtask release` keeps it on the latest release
 together with the Scoop and Homebrew manifests.
 
 Publishing is a pull request to `winget-pkgs` from your own fork, so it is not
-automated here. For each version, copy the three files to
-`manifests/a/AyameEditor/Ayame/<version>/` and open the PR, or let
-[`wingetcreate`](https://github.com/microsoft/winget-create) do both:
+automated here. `winget` and `wingetcreate` run on Windows only.
+
+First submission (the package does not exist in `winget-pkgs` yet), from a
+Windows shell at the repository root:
+
+```powershell
+winget validate --manifest packaging\winget
+wingetcreate submit packaging\winget
+```
+
+`wingetcreate submit` asks you to sign in to GitHub, forks `winget-pkgs`, and
+opens the pull request. Without Windows, copy the three files to
+`manifests/a/AyameEditor/Ayame/<version>/` in your own fork and open the PR by
+hand. Moderators review the first submission manually, and the pipeline
+installs the package in a sandbox, so expect a few days.
+
+Later versions use `wingetcreate update`, which rewrites the manifest from the
+new release:
 
 ```powershell
 wingetcreate update AyameEditor.Ayame --version <version> `
@@ -74,9 +89,8 @@ wingetcreate update AyameEditor.Ayame --version <version> `
   --submit
 ```
 
-Run `winget validate --manifest packaging/winget` before the first submission:
-the manifest has not been through winget's validation yet. Moderators review
-the first submission by hand. Afterwards users run `winget install
+The manifest passes the official JSON schemas (1.10.0) but has not been run
+through `winget validate` yet. Once published, users run `winget install
 AyameEditor.Ayame` and `winget upgrade AyameEditor.Ayame`.
 
 ## Verifying a build
