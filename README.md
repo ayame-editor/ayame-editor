@@ -84,8 +84,11 @@ verify each one.
 
 ## Code signing policy
 
-Status: pending SignPath Foundation approval and production configuration.
-Until then, Windows releases remain unsigned.
+Status: releases are not code-signed. The SignPath Foundation application was
+not accepted yet because its free tier asks for an established usage record.
+We plan to reapply once the project has one; until then, Windows and macOS
+releases remain unsigned. Verify downloads with the `.sha256` files or
+`SHA256SUMS` published with each release.
 
 > Free code signing provided by [SignPath.io](https://signpath.io/), certificate
 > by [SignPath Foundation](https://signpath.org/).
