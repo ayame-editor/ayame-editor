@@ -14,7 +14,7 @@ scoop update ayame
 ```
 
 manifest は [bucket/ayame.json](https://github.com/ayame-editor/ayame-editor/blob/main/bucket/ayame.json)
-です。後で専用 bucket を作る場合は、`hjosugi/scoop-bucket` へコピーします。
+です。後で専用 bucket を作る場合は、`ayame-editor/scoop-bucket` へコピーします。
 
 ## Homebrew
 
@@ -23,7 +23,7 @@ Homebrew tap 用ファイルは `packaging/homebrew/` に置いています。
 - `Casks/ayame.rb`: macOS の `Ayame.app` をインストール。
 - `Formula/ayame.rb`: macOS / Linux の `ayame` CLI をインストール。
 
-`hjosugi/homebrew-tap` のような tap repository へ配置します。
+`ayame-editor/homebrew-tap` のような tap repository へ配置します。
 
 ```sh
 mkdir -p Casks Formula
@@ -34,8 +34,8 @@ cp /path/to/ayame-editor/packaging/homebrew/Formula/ayame.rb Formula/
 公開後の想定コマンド:
 
 ```sh
-brew install --cask hjosugi/tap/ayame
-brew install hjosugi/tap/ayame
+brew install --cask ayame-editor/tap/ayame
+brew install ayame-editor/tap/ayame
 brew upgrade ayame
 ```
 

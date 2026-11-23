@@ -1,13 +1,13 @@
 # ADR 0001: diff 機能の ayame-diff への移管方針と非推奨化スケジュール
 
 - ステータス: Accepted（2026-07-10）
-- 関連 Issue: hjosugi/ayame-editor#93
-- 切り出し Epic: hjosugi/ayame-editor#104
-- 移管先ロードマップ: hjosugi/ayame-diff#26
+- 関連 Issue: ayame-editor/ayame-editor#93
+- 切り出し Epic: ayame-editor/ayame-editor#104
+- 移管先ロードマップ: ayame-editor/ayame-diff#26
 
 ## 背景
 
-姉妹プロジェクト化に伴い、diff 関連機能を hjosugi/ayame-diff へ切り出す。
+姉妹プロジェクト化に伴い、diff 関連機能を ayame-editor/ayame-diff へ切り出す。
 ayame-editor は **「巨大ファイルを開く・編集する」** に集中し、本格的な比較は
 ayame-diff が担う（Sindre Sorhus 流の製品境界の明確化：一つの摩擦を深く解く）。
 

@@ -42,19 +42,19 @@ scoop install ayame
 macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.ps1 | iex"
 ```
 
 Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.sh | sh
 ```
 
 Update later with `ayame update`. Remove a standalone install with
@@ -62,7 +62,7 @@ Update later with `ayame update`. Remove a standalone install with
 Nix instead of self-modifying `/nix/store`.
 
 Homebrew tap templates are in `packaging/homebrew/` for publishing
-`brew install --cask hjosugi/tap/ayame` and `brew install hjosugi/tap/ayame`.
+`brew install --cask ayame-editor/tap/ayame` and `brew install ayame-editor/tap/ayame`.
 
 ## Sister Project
 

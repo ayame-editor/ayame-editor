@@ -13,13 +13,13 @@ Ayame Editor は巨大ファイル向けのデスクトップ・テキストエ�
 ターミナルからインストールする場合:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.ps1 | iex"
 ```
 
 standalone install の更新:

@@ -6,4 +6,4 @@
 | --- | --- | --- | --- |
 | [0001](0001-diff-extraction-and-deprecation.md) | diff 機能の ayame-diff への移管方針と非推奨化スケジュール | Accepted | #93 |
 
-移管先ロードマップ: hjosugi/ayame-diff#26
+移管先ロードマップ: ayame-editor/ayame-diff#26

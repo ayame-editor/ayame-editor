@@ -13,13 +13,13 @@ Download the build for your OS from the [latest release](https://github.com/ayam
 Terminal install:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/hjosugi/ayame-editor/main/scripts/install.ps1 | iex"
+pwsh -NoProfile -Command "irm https://raw.githubusercontent.com/ayame-editor/ayame-editor/main/scripts/install.ps1 | iex"
 ```
 
 Update a standalone install:

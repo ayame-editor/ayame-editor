@@ -1,13 +1,13 @@
 # ADR 0001: Policy for Transferring diff Functionality to ayame-diff and Deprecation Schedule
 
 - Status: Accepted (2026-07-10)
-- Related Issue: hjosugi/ayame-editor#93
-- Epic for Extraction: hjosugi/ayame-editor#104
-- Transfer Roadmap: hjosugi/ayame-diff#26
+- Related Issue: ayame-editor/ayame-editor#93
+- Epic for Extraction: ayame-editor/ayame-editor#104
+- Transfer Roadmap: ayame-editor/ayame-diff#26
 
 ## Background
 
-With the formation of a sister project, the diff-related features will be extracted to hjosugi/ayame-diff.
+With the formation of a sister project, the diff-related features will be extracted to ayame-editor/ayame-diff.
 ayame-editor will focus on **"Opening and editing large files"**, while comprehensive comparison features will be handled by
 ayame-diff (clarifying product boundaries following Sindre Sorhus's approach: deeply resolving a single friction point).
 

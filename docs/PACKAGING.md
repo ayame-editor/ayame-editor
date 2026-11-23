@@ -14,7 +14,7 @@ scoop update ayame
 ```
 
 The manifest is [bucket/ayame.json](https://github.com/ayame-editor/ayame-editor/blob/main/bucket/ayame.json).
-For a dedicated bucket later, copy it into `hjosugi/scoop-bucket`.
+For a dedicated bucket later, copy it into `ayame-editor/scoop-bucket`.
 
 ## Homebrew
 
@@ -23,7 +23,7 @@ Homebrew tap files are staged under `packaging/homebrew/`:
 - `Casks/ayame.rb` installs the macOS `Ayame.app`.
 - `Formula/ayame.rb` installs the `ayame` CLI on macOS and Linux.
 
-Publish them from a tap repository such as `hjosugi/homebrew-tap`:
+Publish them from a tap repository such as `ayame-editor/homebrew-tap`:
 
 ```sh
 mkdir -p Casks Formula
@@ -34,8 +34,8 @@ cp /path/to/ayame-editor/packaging/homebrew/Formula/ayame.rb Formula/
 Expected user commands after publishing:
 
 ```sh
-brew install --cask hjosugi/tap/ayame
-brew install hjosugi/tap/ayame
+brew install --cask ayame-editor/tap/ayame
+brew install ayame-editor/tap/ayame
 brew upgrade ayame
 ```
 

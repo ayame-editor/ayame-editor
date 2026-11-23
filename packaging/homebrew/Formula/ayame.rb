@@ -1,18 +1,18 @@
 class Ayame < Formula
   desc "Desktop text editor and CLI tools for huge files"
   homepage "https://github.com/ayame-editor/ayame-editor"
-  version "0.7.5"
+  version "0.10.3"
   license "0BSD"
 
   if OS.mac? && Hardware::CPU.arm?
-    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.7.5/ayame-v0.7.5-macos-aarch64.zip"
-    sha256 "08e682ed0a89dd3345f143fdc1a3552ab197713f8a6640e3a54b87b69668416c"
+    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.10.3/ayame-v0.10.3-macos-aarch64.zip"
+    sha256 "598754650042c655217c7992f902f3713bf8f10a106272ce05d0905c8564c584"
   elsif OS.mac?
-    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.7.5/ayame-v0.7.5-macos-x86_64.zip"
-    sha256 "d505b3130ce2621198bbfb8eb030ffcf73873d5e6b7faee1a9e26e720e4dc18b"
+    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.10.3/ayame-v0.10.3-macos-x86_64.zip"
+    sha256 "2810c315f0f07bfd7a833954cafbf6445736d775a14defc6c74f68e7abb9b109"
   elsif OS.linux? && Hardware::CPU.intel?
-    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.7.5/ayame-v0.7.5-linux-x86_64"
-    sha256 "402f16a584f6117a6cabf4a3aa96bfecef17a8a8906837b747374ed2a6d4b119"
+    url "https://github.com/ayame-editor/ayame-editor/releases/download/v0.10.3/ayame-v0.10.3-linux-x86_64"
+    sha256 "7fc749f3b217c39cfc218b5acf7f53d8707275568dd731d1b78dc01eed7f797e"
   else
     odie "Ayame prebuilt Homebrew formula currently supports macOS and Linux x86_64"
   end
