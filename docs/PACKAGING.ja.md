@@ -39,6 +39,32 @@ brew install ayame-editor/tap/ayame
 brew upgrade ayame
 ```
 
+
+## Soar（Linux）
+
+[Soar](https://soar.qaidvoid.dev/) は、Linux 向けのリリースバイナリを GitHub
+Releases から直接インストールできるため、このリポジトリにレシピはありません。
+`<version>` は `0.10.3` のようなリリース番号に置き換えます。
+
+```sh
+soar add https://github.com/ayame-editor/ayame-editor/releases/download/v<version>/ayame-v<version>-linux-x86_64 --name ayame
+soar update ayame
+```
+
+Soar はリリース URL を記録し、このプロジェクトの GitHub の最新リリースを更新元として扱います。
+認証なしの API 制限（1 時間あたり 60 リクエスト）に当たる場合は `GITHUB_TOKEN` を設定してください。
+
+## マニフェストを最新に保つ
+
+Scoop のマニフェストと Homebrew の formula / cask には、リリースのバージョンと成果物のチェックサムが入っています。
+そのため、Release ワークフローが公開してからでないと書けません。`cargo xtask release` は、
+ワークフローの成功後にこの更新も自分で行います。リリースの `SHA256SUMS` から 3 ファイルを書き換え、
+`chore(packaging): install vX.Y.Z` としてコミットし、push します。手で実行し直すときは次のとおりです。
+
+```sh
+cargo xtask packaging --tag vX.Y.Z   # 省略するとワークスペースのバージョン
+```
+
 ## Windows コード署名
 
 審査を通過した OSS project は

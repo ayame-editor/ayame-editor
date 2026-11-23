@@ -3,6 +3,7 @@
 //!
 //! Commands:
 //!   cargo xtask release [--bump patch|minor|major|X.Y.Z] [--yes] [--dry-run] [--skip-gate]
+//!   cargo xtask packaging [--tag vX.Y.Z]   (re-point the Scoop/Homebrew manifests at a release)
 //!
 //! `release` implements the release flow end to end: gate (fmt / clippy / test /
 //! typegen drift / frontend tsc+vitest+oxfmt+oxlint / release builds) → local
@@ -25,12 +26,13 @@ fn main() -> std::process::ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("release") => release(&args[1..]),
         Some("typegen") => typegen(&args[1..]),
+        Some("packaging") => packaging(&args[1..]),
         Some("keygen") => keygen(),
         Some("sign") => sign(&args[1..]),
         Some("pubkey") => pubkey(),
         _ => {
             eprintln!(
-                "usage: cargo xtask release [--bump ...] [--yes|--dry-run|--skip-gate]\n       cargo xtask typegen [--check]\n       cargo xtask keygen\n       cargo xtask sign FILE... (reads AYAME_UPDATE_SIGNING_KEY)\n       cargo xtask pubkey (derives AYAME_UPDATE_PUBKEY from the secret)"
+                "usage: cargo xtask release [--bump ...] [--yes|--dry-run|--skip-gate]\n       cargo xtask packaging [--tag vX.Y.Z]\n       cargo xtask typegen [--check]\n       cargo xtask keygen\n       cargo xtask sign FILE... (reads AYAME_UPDATE_SIGNING_KEY)\n       cargo xtask pubkey (derives AYAME_UPDATE_PUBKEY from the secret)"
             );
             return std::process::ExitCode::from(2);
         }
@@ -396,6 +398,9 @@ fn release(args: &[String]) -> Result<()> {
     }
 
     publish_release(&branch, &tag)?;
+    if command_exists("gh") {
+        sync_packaging_after_release(&root, &branch, &tag)?;
+    }
 
     say("reminder: manual platform checks");
     println!("  - ayame            -> native window opens without a file");
@@ -421,6 +426,154 @@ fn publish_release(branch: &str, tag: &str) -> Result<()> {
         say("gh not found — watch the Actions page manually");
     }
     Ok(())
+}
+
+/// `cargo xtask packaging [--tag vX.Y.Z]`: rewrite the Scoop manifest and the
+/// Homebrew formula/cask so they install the given release (default: the
+/// workspace version). The checksums come from the release's own `SHA256SUMS`,
+/// so this only works once the Release workflow has published it.
+fn packaging(args: &[String]) -> Result<()> {
+    let root = repo_root()?;
+    let tag = match args {
+        [] => format!("v{}", workspace_version(&root)?),
+        [flag, tag] if flag == "--tag" => tag.clone(),
+        _ => bail!("usage: cargo xtask packaging [--tag vX.Y.Z]"),
+    };
+    if sync_packaging(&root, &tag)? {
+        say(&format!("packaging: manifests now install {tag}"));
+    } else {
+        say(&format!("packaging: manifests already install {tag}"));
+    }
+    Ok(())
+}
+
+/// After a release is published, re-point the manifests at it and push the
+/// result. The tag stays where it is: the manifests describe the artifacts, so
+/// they can only be written once those artifacts (and their checksums) exist.
+fn sync_packaging_after_release(root: &Path, branch: &str, tag: &str) -> Result<()> {
+    if !sync_packaging(root, tag)? {
+        return Ok(());
+    }
+    run("git", &["add", "bucket/ayame.json", "packaging/homebrew"])?;
+    run(
+        "git",
+        &["commit", "-m", &format!("chore(packaging): install {tag}")],
+    )?;
+    run("git", &["push", "origin", branch])
+}
+
+const PACKAGING_FILES: [&str; 3] = [
+    "bucket/ayame.json",
+    "packaging/homebrew/Formula/ayame.rb",
+    "packaging/homebrew/Casks/ayame.rb",
+];
+
+/// Returns whether any file changed.
+fn sync_packaging(root: &Path, tag: &str) -> Result<bool> {
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    let sums = capture(
+        "gh",
+        &["release", "download", tag, "-p", "SHA256SUMS", "-O", "-"],
+    )
+    .with_context(|| format!("downloading SHA256SUMS for {tag}"))?;
+    let sums = parse_sha256sums(&sums);
+    let mut changed = false;
+    for rel in PACKAGING_FILES {
+        let path = root.join(rel);
+        let old = std::fs::read_to_string(&path).with_context(|| format!("reading {rel}"))?;
+        let new =
+            rewrite_manifest(&old, version, &sums).with_context(|| format!("updating {rel}"))?;
+        if new != old {
+            std::fs::write(&path, new).with_context(|| format!("writing {rel}"))?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+fn parse_sha256sums(text: &str) -> std::collections::HashMap<String, String> {
+    text.lines()
+        .filter_map(|line| {
+            let (hash, name) = line.split_once(char::is_whitespace)?;
+            let name = name.trim().trim_start_matches('*');
+            (hash.len() == 64).then(|| (name.to_string(), hash.to_string()))
+        })
+        .collect()
+}
+
+/// Replace the first quoted 64-hex digest on `line`.
+fn swap_quoted_digest(line: &str, digest: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    (0..bytes.len().saturating_sub(65)).find_map(|i| {
+        let body = line.get(i + 1..i + 65)?;
+        let quoted = bytes[i] == b'"' && bytes[i + 65] == b'"';
+        (quoted && body.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| format!("{}{digest}{}", &line[..i + 1], &line[i + 65..]))
+    })
+}
+
+/// Rewrite one manifest (Scoop JSON, Homebrew formula or cask) to `version`.
+///
+/// Line-based on purpose: the files are hand-formatted, so this keeps their
+/// layout and only touches the version, the `ayame-v<version>-*` URLs and the
+/// digests that follow them. Idempotent.
+fn rewrite_manifest(
+    text: &str,
+    version: &str,
+    sums: &std::collections::HashMap<String, String>,
+) -> Result<String> {
+    let old = text
+        .lines()
+        .find_map(|l| {
+            let t = l.trim();
+            let rest = t
+                .strip_prefix("\"version\": \"")
+                .or_else(|| t.strip_prefix("version \""))?;
+            rest.split('"').next().map(str::to_string)
+        })
+        .context("no version line")?;
+    let digest = |asset: &str| {
+        sums.get(asset)
+            .with_context(|| format!("SHA256SUMS has no entry for {asset}"))
+    };
+    let mut asset: Option<String> = None;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut line = line.replace(
+            &format!("/v{old}/ayame-v{old}-"),
+            &format!("/v{version}/ayame-v{version}-"),
+        );
+        let t = line.trim_start();
+        if t.starts_with("\"version\": \"") || t.starts_with("version \"") {
+            line = line.replacen(&format!("\"{old}\""), &format!("\"{version}\""), 1);
+        }
+        // Remember which asset a following digest belongs to.
+        if let Some(i) = line.find(&format!("/ayame-v{version}-")) {
+            let name = line[i + 1..].split(['"', '#']).next().unwrap_or_default();
+            asset = Some(name.to_string());
+        }
+        let t = line.trim_start();
+        let wanted = if t.starts_with("sha256 arm:") {
+            Some(format!("ayame-v{version}-macos-aarch64.zip"))
+        } else if t.starts_with("intel:") {
+            Some(format!("ayame-v{version}-macos-x86_64.zip"))
+        } else if t.starts_with("sha256 \"") || t.starts_with("\"hash\": \"") {
+            asset.clone()
+        } else {
+            None
+        };
+        if let Some(name) = wanted {
+            let swapped = swap_quoted_digest(&line, digest(&name)?)
+                .with_context(|| format!("no digest to replace on `{}`", line.trim()))?;
+            line = swapped;
+        }
+        out.push(line);
+    }
+    let mut joined = out.join("\n");
+    if text.ends_with('\n') {
+        joined.push('\n');
+    }
+    Ok(joined)
 }
 
 fn prepare_release_version(root: &Path, opts: &Opts) -> Result<(String, Option<RestoreFiles>)> {
@@ -1053,5 +1206,66 @@ decoy = { version = "1.2.3" }
         ]"#;
         assert_eq!(release_run_id(json, "abc123").unwrap(), Some(22));
         assert_eq!(release_run_id(json, "missing").unwrap(), None);
+    }
+
+    fn sums(version: &str) -> std::collections::HashMap<String, String> {
+        parse_sha256sums(&format!(
+            "{a}  ayame-v{version}-linux-x86_64\n{b}  ayame-v{version}-macos-aarch64.zip\n{c}  ayame-v{version}-macos-x86_64.zip\n{d} *ayame-v{version}-windows-x86_64.exe\n",
+            a = "a".repeat(64),
+            b = "b".repeat(64),
+            c = "c".repeat(64),
+            d = "d".repeat(64),
+        ))
+    }
+
+    const FORMULA: &str = "\
+  version \"0.7.5\"
+  if OS.mac? && Hardware::CPU.arm?
+    url \"https://x/releases/download/v0.7.5/ayame-v0.7.5-macos-aarch64.zip\"
+    sha256 \"0000000000000000000000000000000000000000000000000000000000000000\"
+  elsif OS.linux?
+    url \"https://x/releases/download/v0.7.5/ayame-v0.7.5-linux-x86_64\"
+    sha256 \"1111111111111111111111111111111111111111111111111111111111111111\"
+  end
+";
+
+    #[test]
+    fn the_formula_follows_each_url_with_its_own_digest() {
+        let out = rewrite_manifest(FORMULA, "0.10.3", &sums("0.10.3")).unwrap();
+        assert!(out.contains("version \"0.10.3\""));
+        assert!(out.contains("v0.10.3/ayame-v0.10.3-macos-aarch64.zip"));
+        assert!(out.contains(&format!("sha256 \"{}\"", "b".repeat(64))));
+        assert!(out.contains(&format!("sha256 \"{}\"", "a".repeat(64))));
+        assert!(!out.contains("0.7.5"));
+        // Running it again changes nothing.
+        assert_eq!(
+            rewrite_manifest(&out, "0.10.3", &sums("0.10.3")).unwrap(),
+            out
+        );
+    }
+
+    #[test]
+    fn the_cask_pairs_each_arch_with_its_zip() {
+        let cask = "  version \"0.7.5\"\n  sha256 arm:   \"0000000000000000000000000000000000000000000000000000000000000000\",\n         intel: \"1111111111111111111111111111111111111111111111111111111111111111\"\n  url \"https://x/download/v#{version}/ayame-v#{version}-macos-#{arch}.zip\"\n";
+        let out = rewrite_manifest(cask, "0.10.3", &sums("0.10.3")).unwrap();
+        assert!(out.contains(&format!("arm:   \"{}\"", "b".repeat(64))));
+        assert!(out.contains(&format!("intel: \"{}\"", "c".repeat(64))));
+        assert!(out.contains("v#{version}/ayame-v#{version}-macos"));
+    }
+
+    #[test]
+    fn the_scoop_manifest_keeps_its_autoupdate_block() {
+        let json = "{\n  \"version\": \"0.7.5\",\n      \"url\": \"https://x/download/v0.7.5/ayame-v0.7.5-windows-x86_64.exe#/ayame.exe\",\n      \"hash\": \"0000000000000000000000000000000000000000000000000000000000000000\"\n    ,\n        \"hash\": {\n          \"url\": \"https://x/download/v$version/ayame-v$version-windows-x86_64.exe.sha256\"\n        }\n}\n";
+        let out = rewrite_manifest(json, "0.10.3", &sums("0.10.3")).unwrap();
+        assert!(out.contains("\"version\": \"0.10.3\""));
+        assert!(out.contains(&format!("\"hash\": \"{}\"", "d".repeat(64))));
+        assert!(out.contains("v$version/ayame-v$version-windows"));
+    }
+
+    #[test]
+    fn a_release_without_the_expected_asset_is_an_error() {
+        let mut s = sums("0.10.3");
+        s.remove("ayame-v0.10.3-linux-x86_64");
+        assert!(rewrite_manifest(FORMULA, "0.10.3", &s).is_err());
     }
 }
