@@ -55,6 +55,43 @@ Soar remembers the release URL and treats the project's newest GitHub release
 as the update source. Set `GITHUB_TOKEN` if the unauthenticated rate limit
 (60 requests an hour) gets in the way.
 
+## Winget (Windows)
+
+`packaging/winget/` holds the three-file manifest for
+[`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs) (identifier
+`AyameEditor.Ayame`, a `portable` install of the release `.exe` that depends on
+the WebView2 runtime). `cargo xtask release` keeps it on the latest release
+together with the Scoop and Homebrew manifests.
+
+Publishing is a pull request to `winget-pkgs` from your own fork, so it is not
+automated here. For each version, copy the three files to
+`manifests/a/AyameEditor/Ayame/<version>/` and open the PR, or let
+[`wingetcreate`](https://github.com/microsoft/winget-create) do both:
+
+```powershell
+wingetcreate update AyameEditor.Ayame --version <version> `
+  --urls https://github.com/ayame-editor/ayame-editor/releases/download/v<version>/ayame-v<version>-windows-x86_64.exe `
+  --submit
+```
+
+Run `winget validate --manifest packaging/winget` before the first submission:
+the manifest has not been through winget's validation yet. Moderators review
+the first submission by hand. Afterwards users run `winget install
+AyameEditor.Ayame` and `winget upgrade AyameEditor.Ayame`.
+
+## Verifying a build
+
+Releases are not code-signed, but the release workflow attaches a GitHub build
+provenance attestation to each binary (the Linux executable and the macOS and
+Windows archives). It proves the file was built by this repository's release
+workflow from the tagged commit. With the GitHub CLI:
+
+```sh
+gh attestation verify ayame-v<version>-linux-x86_64 --repo ayame-editor/ayame-editor
+```
+
+Attestations start with the first release made after v0.10.3.
+
 ## Keeping the manifests current
 
 The Scoop manifest, Homebrew formula and cask pin a version and the checksums

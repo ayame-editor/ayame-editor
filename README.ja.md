@@ -87,7 +87,9 @@ Project への参加には[行動規範](CODE_OF_CONDUCT.ja.md)が適用され�
 Status: release にコード署名はありません。SignPath Foundation への申請は、無料枠が一定の利用実績を
 求めるため、現時点では承認されませんでした。利用実績がついた段階で再申請する予定です。それまでは
 Windows / macOS の release は未署名です。ダウンロードしたファイルは、各 release の `.sha256` または
-`SHA256SUMS` で検証してください。
+`SHA256SUMS` で検証してください。v0.10.3 より後の release には GitHub のビルド
+アテステーションも付きます（`gh attestation verify`、
+[docs/PACKAGING.ja.md](docs/PACKAGING.ja.md#ビルドの検証) を参照）。
 
 > Free code signing provided by [SignPath.io](https://signpath.io/), certificate
 > by [SignPath Foundation](https://signpath.org/).

@@ -247,6 +247,13 @@ jobs:
     name: publish GitHub Release
     needs: [build]
     runs-on: ubuntu-latest
+    # Job-level permissions replace the workflow's, so repeat those. The last
+    # two let actions/attest-build-provenance sign the provenance statement.
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
@@ -295,6 +302,17 @@ jobs:
           # `sign` refuses outright if the private key does not match the
           # public key the binaries were built with.
           cargo run --quiet -p xtask -- sign dist/*.sha256
+      # Releases are not OS code-signed, so give users another way to tell an
+      # official build from a tampered one: a GitHub-signed provenance
+      # statement bound to each binary's digest. Verify with
+      # `gh attestation verify <file> --repo ayame-editor/ayame-editor`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/ayame-*-linux-x86_64
+            dist/*.zip
+            dist/*.exe
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

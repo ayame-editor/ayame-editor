@@ -54,6 +54,40 @@ soar update ayame
 Soar はリリース URL を記録し、このプロジェクトの GitHub の最新リリースを更新元として扱います。
 認証なしの API 制限（1 時間あたり 60 リクエスト）に当たる場合は `GITHUB_TOKEN` を設定してください。
 
+## Winget（Windows）
+
+`packaging/winget/` に、[`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs) 向けの
+3 ファイルのマニフェストがあります（識別子は `AyameEditor.Ayame`。リリースの `.exe` を `portable` で入れ、
+WebView2 ランタイムに依存します）。`cargo xtask release` が、Scoop や Homebrew のマニフェストと一緒に
+最新のリリースへ更新します。
+
+公開は、自分のフォークから `winget-pkgs` へプルリクエストを送る形なので、ここでは自動化していません。
+バージョンごとに、3 ファイルを `manifests/a/AyameEditor/Ayame/<version>/` にコピーして PR を出すか、
+[`wingetcreate`](https://github.com/microsoft/winget-create) に両方を任せます。
+
+```powershell
+wingetcreate update AyameEditor.Ayame --version <version> `
+  --urls https://github.com/ayame-editor/ayame-editor/releases/download/v<version>/ayame-v<version>-windows-x86_64.exe `
+  --submit
+```
+
+初回の提出の前に `winget validate --manifest packaging/winget` を実行してください。このマニフェストは、
+まだ winget の検証を通していません。最初の提出はモデレーターが手動で確認します。公開後は
+`winget install AyameEditor.Ayame` と `winget upgrade AyameEditor.Ayame` で使えます。
+
+## ビルドの検証
+
+リリースにコード署名はありませんが、リリースのワークフローが、各バイナリ（Linux の実行ファイルと、
+macOS / Windows のアーカイブ）に GitHub のビルド来歴のアテステーションを付けます。このリポジトリの
+リリースワークフローが、タグ付けされたコミットからビルドしたファイルであることを証明します。
+GitHub CLI で検証できます。
+
+```sh
+gh attestation verify ayame-v<version>-linux-x86_64 --repo ayame-editor/ayame-editor
+```
+
+アテステーションは、v0.10.3 より後に作るリリースから付きます。
+
 ## マニフェストを最新に保つ
 
 Scoop のマニフェストと Homebrew の formula / cask には、リリースのバージョンと成果物のチェックサムが入っています。

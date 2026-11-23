@@ -88,7 +88,9 @@ Status: releases are not code-signed. The SignPath Foundation application was
 not accepted yet because its free tier asks for an established usage record.
 We plan to reapply once the project has one; until then, Windows and macOS
 releases remain unsigned. Verify downloads with the `.sha256` files or
-`SHA256SUMS` published with each release.
+`SHA256SUMS` published with each release; releases made after v0.10.3 also carry
+a GitHub build attestation (`gh attestation verify`, see
+[docs/PACKAGING.md](docs/PACKAGING.md#verifying-a-build)).
 
 > Free code signing provided by [SignPath.io](https://signpath.io/), certificate
 > by [SignPath Foundation](https://signpath.org/).

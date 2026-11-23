@@ -454,7 +454,7 @@ fn sync_packaging_after_release(root: &Path, branch: &str, tag: &str) -> Result<
     if !sync_packaging(root, tag)? {
         return Ok(());
     }
-    run("git", &["add", "bucket/ayame.json", "packaging/homebrew"])?;
+    run("git", &["add", "bucket/ayame.json", "packaging"])?;
     run(
         "git",
         &["commit", "-m", &format!("chore(packaging): install {tag}")],
@@ -462,10 +462,13 @@ fn sync_packaging_after_release(root: &Path, branch: &str, tag: &str) -> Result<
     run("git", &["push", "origin", branch])
 }
 
-const PACKAGING_FILES: [&str; 3] = [
+const PACKAGING_FILES: [&str; 6] = [
     "bucket/ayame.json",
     "packaging/homebrew/Formula/ayame.rb",
     "packaging/homebrew/Casks/ayame.rb",
+    "packaging/winget/AyameEditor.Ayame.yaml",
+    "packaging/winget/AyameEditor.Ayame.installer.yaml",
+    "packaging/winget/AyameEditor.Ayame.locale.en-US.yaml",
 ];
 
 /// Returns whether any file changed.
@@ -526,6 +529,9 @@ fn rewrite_manifest(
         .lines()
         .find_map(|l| {
             let t = l.trim();
+            if let Some(v) = t.strip_prefix("PackageVersion: ") {
+                return Some(v.trim().to_string());
+            }
             let rest = t
                 .strip_prefix("\"version\": \"")
                 .or_else(|| t.strip_prefix("version \""))?;
@@ -543,9 +549,12 @@ fn rewrite_manifest(
             &format!("/v{old}/ayame-v{old}-"),
             &format!("/v{version}/ayame-v{version}-"),
         );
+        line = line.replace(&format!("/tag/v{old}"), &format!("/tag/v{version}"));
         let t = line.trim_start();
         if t.starts_with("\"version\": \"") || t.starts_with("version \"") {
             line = line.replacen(&format!("\"{old}\""), &format!("\"{version}\""), 1);
+        } else if t.starts_with("PackageVersion: ") {
+            line = line.replacen(&old, version, 1);
         }
         // Remember which asset a following digest belongs to.
         if let Some(i) = line.find(&format!("/ayame-v{version}-")) {
@@ -553,6 +562,16 @@ fn rewrite_manifest(
             asset = Some(name.to_string());
         }
         let t = line.trim_start();
+        // winget wants the digest bare and upper-case.
+        if t.starts_with("InstallerSha256: ") {
+            let name = asset
+                .clone()
+                .context("InstallerSha256 before any InstallerUrl")?;
+            let indent = &line[..line.len() - t.len()];
+            line = format!("{indent}InstallerSha256: {}", digest(&name)?.to_uppercase());
+            out.push(line);
+            continue;
+        }
         let wanted = if t.starts_with("sha256 arm:") {
             Some(format!("ayame-v{version}-macos-aarch64.zip"))
         } else if t.starts_with("intel:") {
@@ -1267,5 +1286,15 @@ decoy = { version = "1.2.3" }
         let mut s = sums("0.10.3");
         s.remove("ayame-v0.10.3-linux-x86_64");
         assert!(rewrite_manifest(FORMULA, "0.10.3", &s).is_err());
+    }
+
+    #[test]
+    fn the_winget_installer_gets_a_bare_uppercase_digest() {
+        let yaml = "PackageVersion: 0.7.5\nInstallers:\n- Architecture: x64\n  InstallerUrl: https://x/download/v0.7.5/ayame-v0.7.5-windows-x86_64.exe\n  InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000\nReleaseNotesUrl: https://x/releases/tag/v0.7.5\n";
+        let out = rewrite_manifest(yaml, "0.10.3", &sums("0.10.3")).unwrap();
+        assert!(out.contains("PackageVersion: 0.10.3"));
+        assert!(out.contains("/tag/v0.10.3"));
+        assert!(out.contains(&format!("  InstallerSha256: {}\n", "D".repeat(64))));
+        assert!(!out.contains("0.7.5"));
     }
 }
